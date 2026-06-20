@@ -12,118 +12,56 @@
   <pre id="output">Waiting for login...</pre>
 
 <script>
-const CLIENT_ID = "33BoT5hHIzs1muGu7qhww";
-const REDIRECT_URI = window.location.origin + window.location.pathname;
 const BACKEND = "https://mambafx-backend.kenkin1122.workers.dev";
 
 /* ---------------------------
-   PKCE HELPERS
+   LOGIN FLOW
 ----------------------------*/
-
-// base64url encoder
-function base64url(buffer) {
-  return btoa(String.fromCharCode(...new Uint8Array(buffer)))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-}
-
-// generate random string
-function generateRandom(length = 64) {
-  const array = new Uint8Array(length);
-  crypto.getRandomValues(array);
-  return Array.from(array, b => ('0' + b.toString(16)).slice(-2)).join('');
-}
-
-// SHA256
-async function sha256(plain) {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(plain);
-  const hash = await crypto.subtle.digest('SHA-256', data);
-  return hash;
-}
-
-/* ---------------------------
-   LOGIN
-----------------------------*/
-
 async function login() {
-  const res = await fetch(BACKEND + "/auth/start", {
-    method: "POST"
-  });
-
-  const data = await res.json();
-
-  window.location.href = data.auth_url;
-}
-  sessionStorage.setItem("code_verifier", code_verifier);
-  sessionStorage.setItem("state", state);
-
-  const url =
-    `https://auth.deriv.com/oauth2/auth` +
-    `?response_type=code` +
-    `&client_id=${CLIENT_ID}` +
-    `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
-    `&scope=trade` +
-    `&state=${state}` +
-    `&code_challenge=${code_challenge}` +
-    `&code_challenge_method=S256`;
-
-  window.location.href = url;
-}
-
-/* ---------------------------
-   CALLBACK HANDLER
-----------------------------*/
-
-window.onload = async function () {
-  const params = new URLSearchParams(window.location.search);
-  const code = params.get("code");
-  const state = params.get("state");
-
-  if (!code) return;
-
-  const savedState = sessionStorage.getItem("state");
-  const code_verifier = sessionStorage.getItem("code_verifier");
-
-  if (state !== savedState) {
-    document.getElementById("output").innerText = "Invalid state";
-    return;
-  }
-
-  document.getElementById("output").innerText =
-    "Exchanging code for token...";
-
   try {
-    const res = await fetch("https://auth.deriv.com/oauth2/token", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        client_id: CLIENT_ID,
-        code: code,
-        code_verifier: code_verifier,
-        redirect_uri: REDIRECT_URI
-      })
+    document.getElementById("output").innerText =
+      "Requesting login URL...";
+
+    const res = await fetch(BACKEND + "/auth/start", {
+      method: "POST"
     });
 
+    const data = await res.json();
+
+    if (!data.auth_url) {
+      document.getElementById("output").innerText =
+        "Error: No auth URL returned";
+      return;
+    }
+
+    document.getElementById("output").innerText =
+      "Redirecting to Deriv...";
+
+    window.location.href = data.auth_url;
+
+  } catch (err) {
+    document.getElementById("output").innerText =
+      "Login error: " + err.message;
+  }
+}
+
+/* ---------------------------
+   AFTER REDIRECT BACK
+----------------------------*/
+window.onload = async function () {
+  try {
+    document.getElementById("output").innerText =
+      "Checking session...";
+
+    const res = await fetch(BACKEND + "/me/session");
     const data = await res.json();
 
     document.getElementById("output").innerText =
       JSON.stringify(data, null, 2);
 
-    // OPTIONAL: send to backend
-    await fetch(BACKEND + "/auth", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data)
-    });
-
   } catch (err) {
     document.getElementById("output").innerText =
-      "Error: " + err.message;
+      "Session error: " + err.message;
   }
 };
 </script>
