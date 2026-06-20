@@ -1,5 +1,5 @@
 {
-  "name": "mamba-fx-deriv-backend",
+  "name": "mambafx",
   "main": "src/index.js",
   "compatibility_date": "2026-06-17",
   "vars": {
