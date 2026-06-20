@@ -1,23 +1,38 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<title>Callback</title>
+<meta charset="UTF-8">
+<title>Mamba FX — (unused) callback page</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body{background:#080b12;color:#e6ebf5;font-family:'IBM Plex Mono',monospace;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:24px;box-sizing:border-box}
+  .card{max-width:520px;width:100%;background:#0e131e;border:1px solid #1c2334;border-radius:16px;padding:28px}
+  h1{font-size:14px;letter-spacing:.04em;margin:0 0 14px}
+  p{font-size:13px;line-height:1.7;color:#9aa6bd;margin:0 0 10px}
+  code{background:#0a0e17;border:1px solid #1c2334;border-radius:4px;padding:1px 5px;font-size:11px;color:#56b6ff;word-break:break-all}
+  a{color:#56b6ff}
+</style>
 </head>
 <body>
-Authentication successful...
-
-<script>
-const params = new URLSearchParams(window.location.search);
-
-const code = params.get('code');
-const token = params.get('token');
-
-console.log('Code:', code);
-console.log('Token:', token);
-
-// Redirect back to your main app if desired
-window.location.href = "./";
-</script>
-
+  <div class="card">
+    <h1>⚠️ This page is no longer used</h1>
+    <p>
+      Mamba FX moved to a single-page OAuth flow: <code>v100-tracker.html</code>
+      now handles its own Deriv redirect directly, instead of using a separate
+      popup + callback page.
+    </p>
+    <p>
+      If you're seeing this page after clicking "Login with Deriv," your
+      Deriv app's registered <b>redirect_uri</b> still points here. Update it
+      in the Deriv developer dashboard to point at wherever
+      <code>v100-tracker.html</code> is hosted instead (the same URL set as
+      <code>DERIV_REDIRECT_URI</code> inside that file).
+    </p>
+    <p>
+      This file is kept only so old links don't 404; it performs no login
+      logic and is safe to delete once your Deriv app's redirect_uri is
+      updated.
+    </p>
+  </div>
 </body>
 </html>

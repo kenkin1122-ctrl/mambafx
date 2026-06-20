@@ -1,0 +1,8 @@
+{
+  "name": "mamba-fx-deriv-backend",
+  "main": "src/index.js",
+  "compatibility_date": "2026-06-17",
+  "vars": {
+    "ALLOWED_ORIGIN": "*"
+  }
+}
