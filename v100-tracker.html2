@@ -16,7 +16,7 @@ const BACKEND = "https://mambafx-backend.kenkin1122.workers.dev";
 
 // STEP 1: Redirect to Deriv login
 function login() {
-  const appId = "YOUR_DERIV_APP_ID"; // replace this
+  const appId = "33BoT5hHIzs1muGu7qhww";
   const redirect = window.location.href;
 
   window.location.href =
