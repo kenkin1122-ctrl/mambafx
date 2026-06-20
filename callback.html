@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Connecting to Deriv...</title>
+<style>
+body{margin:0;background:#111827;color:#f9fafb;font-family:Arial,sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center}
+.card{background:#1f2937;border-radius:18px;padding:32px;max-width:760px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+h1{margin:0 0 18px;font-size:30px}.msg{font-size:18px;color:#93c5fd}.error{color:#ef4444}.ok{color:#22c55e}
+button{margin-top:18px;padding:10px 14px;border:0;border-radius:8px;background:#374151;color:#fff;font-weight:bold;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Connecting to Deriv...</h1>
+  <div id="message" class="msg">Verifying OAuth response...</div>
+  <button id="backBtn" style="display:none">Back to dashboard</button>
+</div>
+
+<script>
+const CLIENT_ID = "33b2RFVasBqO0OXrEOJnN";
+const REDIRECT_URI = "https://njanjaholdings.netlify.app/callback.html";
+const TOKEN_ENDPOINT = "/.netlify/functions/exchange-token";
+const TOKEN_KEYS = ["deriv_access_token", "access_token", "deriv_token"];
+
+const backBtn = document.getElementById("backBtn");
+backBtn.addEventListener("click", function () {
+  window.location.href = "/";
+});
+
+function setMessage(text, type, showBack) {
+  const el = document.getElementById("message");
+  el.className = type || "msg";
+  el.textContent = text;
+  backBtn.style.display = showBack ? "inline-block" : "none";
+}
+
+function getCookie(name) {
+  const item = document.cookie.split("; ").find(function (row) {
+    return row.startsWith(name + "=");
+  });
+  return item ? item.split("=").slice(1).join("=") : "";
+}
+
+function getStored(key) {
+  const raw = localStorage.getItem(key) || sessionStorage.getItem(key) || getCookie(key) || "";
+  try {
+    return decodeURIComponent(raw);
+  } catch (_) {
+    return raw;
+  }
+}
+
+function setBoth(key, value) {
+  localStorage.setItem(key, value);
+  sessionStorage.setItem(key, value);
+}
+
+function removeBoth(key) {
+  localStorage.removeItem(key);
+  sessionStorage.removeItem(key);
+  document.cookie = key + "=; Max-Age=0; path=/; SameSite=Lax; Secure";
+}
+
+function saveAccessToken(token) {
+  const clean = String(token || "").trim();
+
+  if (!clean || clean === "undefined" || clean === "null") {
+    throw new Error("No access_token returned from Deriv token endpoint.");
+  }
+
+  // Important: do NOT reject dotted OAuth access tokens.
+  // Deriv's auth.deriv.com OAuth access_token may contain dots.
+  TOKEN_KEYS.forEach(function (key) {
+    setBoth(key, clean);
+  });
+}
+
+function clearTemporaryOAuthValues() {
+  removeBoth("oauth_state");
+  removeBoth("oauth_code_verifier");
+}
+
+async function finishOAuth() {
+  const params = new URLSearchParams(window.location.search);
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+
+  const error = params.get("error") || hashParams.get("error");
+  const errorDescription = params.get("error_description") || hashParams.get("error_description");
+  const code = params.get("code");
+  const returnedState = params.get("state") || hashParams.get("state");
+
+  if (error) {
+    setMessage("Deriv returned an error: " + error + (errorDescription ? " - " + errorDescription : ""), "error", true);
+    return;
+  }
+
+  if (!code) {
+    setMessage("No authorization code received. Return to the dashboard and click Connect Deriv again.", "error", true);
+    return;
+  }
+
+  const storedState = getStored("oauth_state");
+  const codeVerifier = getStored("oauth_code_verifier");
+
+  if (!storedState || !returnedState || storedState !== returnedState) {
+    setMessage("Security check failed: OAuth state mismatch. Return to the dashboard, click Logout, press Ctrl+F5, then Connect Deriv again.", "error", true);
+    return;
+  }
+
+  if (!codeVerifier) {
+    setMessage("Missing PKCE verifier. Return to the dashboard, click Logout, press Ctrl+F5, then Connect Deriv again.", "error", true);
+    return;
+  }
+
+  setMessage("Security check passed. Exchanging code for access token...", "msg", false);
+
+  try {
+    const response = await fetch(TOKEN_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        code: code,
+        code_verifier: codeVerifier,
+        redirect_uri: REDIRECT_URI,
+        client_id: CLIENT_ID
+      })
+    });
+
+    const data = await response.json();
+
+    console.log("Token exchange response:", {
+      status: response.status,
+      has_access_token: Boolean(data.access_token),
+      token_type: data.token_type || null,
+      error: data.error || null
+    });
+
+    if (!response.ok || data.error) {
+      const msg = data.error_description || data.error || JSON.stringify(data);
+      setMessage("Token exchange failed: " + msg, "error", true);
+      return;
+    }
+
+    saveAccessToken(data.access_token);
+
+    if (data.token_type) setBoth("deriv_token_type", data.token_type);
+    if (data.expires_in) setBoth("deriv_expires_in", String(data.expires_in));
+
+    clearTemporaryOAuthValues();
+
+    setMessage("Connected successfully. Returning to dashboard...", "ok", false);
+    setTimeout(function () {
+      window.location.href = "/";
+    }, 800);
+  } catch (err) {
+    setMessage("Token exchange/network error: " + err.message, "error", true);
+  }
+}
+
+finishOAuth();
+</script>
+</body>
+</html>
