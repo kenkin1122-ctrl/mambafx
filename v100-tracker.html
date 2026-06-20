@@ -9,28 +9,29 @@
 
   <button onclick="login()">Login with Deriv</button>
 
-  <pre id="output"></pre>
+  <pre id="output">Waiting for login...</pre>
 
 <script>
 const BACKEND = "https://mambafx-backend.kenkin1122.workers.dev";
 
-// STEP 1: Redirect to Deriv login
+// STEP 1: Redirect to Deriv login (FIXED)
 function login() {
   const appId = "33BoT5hHIzs1muGu7qhww";
-  const redirect = window.location.href;
+
+  // IMPORTANT: use stable redirect path (not full href)
+  const redirect = window.location.origin + window.location.pathname;
 
   window.location.href =
     `https://oauth.deriv.com/oauth2/authorize?app_id=${appId}&redirect_uri=${encodeURIComponent(redirect)}`;
 }
 
-// STEP 2: Capture token after redirect (FIXED FOR DERIV)
+// STEP 2: Capture token after redirect (DERIV FIXED FLOW)
 window.onload = async function () {
+
+  // Deriv returns token in URL HASH (#access_token=...)
   const hash = window.location.hash;
 
-  const params = new URLSearchParams(
-    hash.replace("#", "")
-  );
-
+  const params = new URLSearchParams(hash.replace("#", ""));
   const token = params.get("access_token");
 
   if (token) {
@@ -53,8 +54,9 @@ window.onload = async function () {
 
     } catch (err) {
       document.getElementById("output").innerText =
-        "Error connecting to backend: " + err.message;
+        "Backend error: " + err.message;
     }
+
   } else {
     document.getElementById("output").innerText =
       "Waiting for login...";
