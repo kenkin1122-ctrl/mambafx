@@ -12,54 +12,115 @@
   <pre id="output">Waiting for login...</pre>
 
 <script>
+const CLIENT_ID = "33BoT5hHIzs1muGu7qhww";
+const REDIRECT_URI = window.location.origin + window.location.pathname;
 const BACKEND = "https://mambafx-backend.kenkin1122.workers.dev";
 
-// STEP 1: Redirect to Deriv login (FIXED)
-function login() {
-  const appId = "33BoT5hHIzs1muGu7qhww";
+/* ---------------------------
+   PKCE HELPERS
+----------------------------*/
 
-  // IMPORTANT: use stable redirect path (not full href)
-  const redirect = window.location.origin + window.location.pathname;
-
-  window.location.href =
-    `https://oauth.deriv.com/oauth2/authorize?app_id=${appId}&redirect_uri=${encodeURIComponent(redirect)}`;
+// base64url encoder
+function base64url(buffer) {
+  return btoa(String.fromCharCode(...new Uint8Array(buffer)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
 }
 
-// STEP 2: Capture token after redirect (DERIV FIXED FLOW)
+// generate random string
+function generateRandom(length = 64) {
+  const array = new Uint8Array(length);
+  crypto.getRandomValues(array);
+  return Array.from(array, b => ('0' + b.toString(16)).slice(-2)).join('');
+}
+
+// SHA256
+async function sha256(plain) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(plain);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  return hash;
+}
+
+/* ---------------------------
+   LOGIN
+----------------------------*/
+
+async function login() {
+  const code_verifier = generateRandom(64);
+  const state = generateRandom(16);
+
+  const code_challenge = base64url(await sha256(code_verifier));
+
+  sessionStorage.setItem("code_verifier", code_verifier);
+  sessionStorage.setItem("state", state);
+
+  const url =
+    `https://auth.deriv.com/oauth2/auth` +
+    `?response_type=code` +
+    `&client_id=${CLIENT_ID}` +
+    `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
+    `&scope=trade` +
+    `&state=${state}` +
+    `&code_challenge=${code_challenge}` +
+    `&code_challenge_method=S256`;
+
+  window.location.href = url;
+}
+
+/* ---------------------------
+   CALLBACK HANDLER
+----------------------------*/
+
 window.onload = async function () {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get("code");
+  const state = params.get("state");
 
-  // Deriv returns token in URL HASH (#access_token=...)
-  const hash = window.location.hash;
+  if (!code) return;
 
-  const params = new URLSearchParams(hash.replace("#", ""));
-  const token = params.get("access_token");
+  const savedState = sessionStorage.getItem("state");
+  const code_verifier = sessionStorage.getItem("code_verifier");
 
-  if (token) {
+  if (state !== savedState) {
+    document.getElementById("output").innerText = "Invalid state";
+    return;
+  }
+
+  document.getElementById("output").innerText =
+    "Exchanging code for token...";
+
+  try {
+    const res = await fetch("https://auth.deriv.com/oauth2/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        client_id: CLIENT_ID,
+        code: code,
+        code_verifier: code_verifier,
+        redirect_uri: REDIRECT_URI
+      })
+    });
+
+    const data = await res.json();
+
     document.getElementById("output").innerText =
-      "Token received... sending to backend";
+      JSON.stringify(data, null, 2);
 
-    try {
-      const res = await fetch(BACKEND + "/auth", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ token })
-      });
+    // OPTIONAL: send to backend
+    await fetch(BACKEND + "/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data)
+    });
 
-      const data = await res.json();
-
-      document.getElementById("output").innerText =
-        JSON.stringify(data, null, 2);
-
-    } catch (err) {
-      document.getElementById("output").innerText =
-        "Backend error: " + err.message;
-    }
-
-  } else {
+  } catch (err) {
     document.getElementById("output").innerText =
-      "Waiting for login...";
+      "Error: " + err.message;
   }
 };
 </script>
