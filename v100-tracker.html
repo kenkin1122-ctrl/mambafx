@@ -14,16 +14,17 @@
 <script>
 const BACKEND = "https://mambafx-backend.kenkin1122.workers.dev";
 
-/* ---------------------------
-   LOGIN FLOW
-----------------------------*/
+/* =========================
+   LOGIN
+========================= */
 async function login() {
   try {
     document.getElementById("output").innerText =
       "Requesting login URL...";
 
     const res = await fetch(BACKEND + "/auth/start", {
-      method: "POST"
+      method: "POST",
+      credentials: "include"
     });
 
     const data = await res.json();
@@ -45,15 +46,41 @@ async function login() {
   }
 }
 
-/* ---------------------------
-   AFTER REDIRECT BACK
-----------------------------*/
-window.onload = async function () {
-  try {
-    document.getElementById("output").innerText =
-      "Checking session...";
+/* =========================
+   CALLBACK HANDLER (IMPORTANT FIX)
+========================= */
+async function handleCallback() {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get("code");
+  const state = params.get("state");
 
-    const res = await fetch(BACKEND + "/me/session");
+  if (!code) return;
+
+  document.getElementById("output").innerText =
+    "Returning from Deriv... completing login";
+
+  try {
+    const res = await fetch(BACKEND + "/auth/callback?code=" + code + "&state=" + state);
+    const data = await res.json();
+
+    document.getElementById("output").innerText =
+      "Callback complete:\n\n" + JSON.stringify(data, null, 2);
+
+  } catch (err) {
+    document.getElementById("output").innerText =
+      "Callback error: " + err.message;
+  }
+}
+
+/* =========================
+   SESSION CHECK
+========================= */
+async function checkSession() {
+  try {
+    const res = await fetch(BACKEND + "/me/session", {
+      credentials: "include"
+    });
+
     const data = await res.json();
 
     document.getElementById("output").innerText =
@@ -63,6 +90,14 @@ window.onload = async function () {
     document.getElementById("output").innerText =
       "Session error: " + err.message;
   }
+}
+
+/* =========================
+   ON LOAD
+========================= */
+window.onload = async function () {
+  await handleCallback();
+  await checkSession();
 };
 </script>
 
