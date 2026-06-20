@@ -1,8 +1,10 @@
 {
-  "name": "mamba-fx-deriv-backend",
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mambafx-backend",
+  "compatibility_date": "2026-06-20",
   "main": "src/index.js",
-  "compatibility_date": "2026-06-17",
-  "vars": {
-    "ALLOWED_ORIGIN": "*"
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
   }
 }
