@@ -48,11 +48,14 @@ async function sha256(plain) {
 ----------------------------*/
 
 async function login() {
-  const code_verifier = generateRandom(64);
-  const state = generateRandom(16);
+  const res = await fetch(BACKEND + "/auth/start", {
+    method: "POST"
+  });
 
-  const code_challenge = base64url(await sha256(code_verifier));
+  const data = await res.json();
 
+  window.location.href = data.auth_url;
+}
   sessionStorage.setItem("code_verifier", code_verifier);
   sessionStorage.setItem("state", state);
 
