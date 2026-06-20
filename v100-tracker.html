@@ -23,24 +23,41 @@ function login() {
     `https://oauth.deriv.com/oauth2/authorize?app_id=${appId}&redirect_uri=${encodeURIComponent(redirect)}`;
 }
 
-// STEP 2: Capture token after redirect
+// STEP 2: Capture token after redirect (FIXED FOR DERIV)
 window.onload = async function () {
-  const params = new URLSearchParams(window.location.search);
-  const token = params.get("token");
+  const hash = window.location.hash;
+
+  const params = new URLSearchParams(
+    hash.replace("#", "")
+  );
+
+  const token = params.get("access_token");
 
   if (token) {
-    document.getElementById("output").innerText = "Token received... sending to backend";
-
-    const res = await fetch(BACKEND + "/auth", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token })
-    });
-
-    const data = await res.json();
-
     document.getElementById("output").innerText =
-      JSON.stringify(data, null, 2);
+      "Token received... sending to backend";
+
+    try {
+      const res = await fetch(BACKEND + "/auth", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ token })
+      });
+
+      const data = await res.json();
+
+      document.getElementById("output").innerText =
+        JSON.stringify(data, null, 2);
+
+    } catch (err) {
+      document.getElementById("output").innerText =
+        "Error connecting to backend: " + err.message;
+    }
+  } else {
+    document.getElementById("output").innerText =
+      "Waiting for login...";
   }
 };
 </script>
