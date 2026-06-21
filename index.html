@@ -1,105 +1,368 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <title>MambaFX Tracker</title>
-</head>
+/**
+ * Mamba FX — Deriv OAuth backend (Cloudflare Worker)
+ * =====================================================================
+ * Single-file backend doing every server-side step Deriv requires:
+ *
+ *   GET  /auth/start      → redirects the browser to Deriv's login page
+ *                           (generates + stores the PKCE verifier server-side,
+ *                           keyed by a short-lived "pkce_id" the browser holds)
+ *   GET  /auth/callback    → Deriv redirects here with ?code&state. This is a
+ *                           BROWSER NAVIGATION, never a fetch() from the SPA.
+ *                           Exchanges the code for an access_token, stores a
+ *                           session in KV, sets an HttpOnly session cookie,
+ *                           then 302-redirects the browser to SPA_URL.
+ *   GET  /me/session       → { logged_in: true|false } based on the session
+ *                           cookie. Called with credentials:'include'.
+ *   GET  /me/accounts      → proxies Deriv's accounts list using the
+ *                           session's access_token. Called with
+ *                           credentials:'include'.
+ *   POST /ws/otp           → { account_id } → proxies Deriv's OTP endpoint,
+ *                           returns { url } for the browser to open a
+ *                           WebSocket directly. Called with credentials:'include'.
+ *   POST /logout            → clears the session (KV + cookie).
+ *
+ * Every one of these (including OPTIONS preflight) returns the same CORS
+ * headers. /auth/* is matched BEFORE any static-asset fallback, so nothing
+ * else can intercept it.
+ *
+ * Required bindings (see wrangler.jsonc):
+ *   KV namespace `SESSION`  — stores both short-lived PKCE state and the
+ *                              logged-in session (access_token + accounts).
+ * Required secrets (wrangler secret put NAME):
+ *   CLIENT_ID        = 33BoT5hHIzs1muGu7qhww
+ *   REDIRECT_URI      = https://kenkin1122-ctrl.github.io/mambafx/v100-tracker.html
+ *   CLIENT_SECRET     = OPTIONAL — only if Deriv issued one for this app.
+ * Configured as a var (not secret, fine to keep in wrangler.jsonc):
+ *   SPA_URL           = https://kenkin1122-ctrl.github.io/mambafx/
+ *   ALLOWED_ORIGIN     = https://kenkin1122-ctrl.github.io
+ *
+ * NOTE ON REDIRECT_URI vs SPA_URL: Deriv's OAuth redirect_uri must point at
+ * THIS WORKER's /auth/callback (a server endpoint), not at the SPA page —
+ * the callback has to run server-side to exchange the code. SPA_URL is
+ * where we send the browser AFTER the session is established. If your
+ * Deriv app's registered redirect_uri is still the SPA page itself, update
+ * it in Deriv's dashboard to `<this-worker-url>/auth/callback`.
+ * =====================================================================
+ */
 
-<body>
-  <h2>MambaFX Login Tracker</h2>
+const DERIV_AUTH_URL = "https://auth.deriv.com/oauth2/auth";
+const DERIV_TOKEN_URL = "https://auth.deriv.com/oauth2/token";
+const OPTIONS_REST_BASE = "https://api.derivws.com/trading/v1/options";
 
-  <button onclick="login()">Login with Deriv</button>
+const SESSION_COOKIE = "mfx_session";
+const SESSION_TTL_SECONDS = 60 * 60 * 8;   // 8 hours
+const PKCE_TTL_SECONDS = 60 * 10;          // 10 minutes to complete login
 
-  <pre id="output">Waiting for login...</pre>
+// ── CORS ────────────────────────────────────────────────────────────
+// Applied to EVERY response from this Worker, including OPTIONS preflight
+// and error responses — a CORS-less error response is exactly what causes
+// the browser to swallow the real error and just say "Failed to fetch".
+function corsHeaders(env){
+  return {
+    "Access-Control-Allow-Origin": env.ALLOWED_ORIGIN || "https://kenkin1122-ctrl.github.io",
+    "Access-Control-Allow-Credentials": "true",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Vary": "Origin",
+  };
+}
 
-<script>
-const BACKEND = "https://mambafx-backend.kenkin1122.workers.dev";
+function json(data, env, status, extraHeaders){
+  return new Response(JSON.stringify(data), {
+    status: status || 200,
+    headers: { ...corsHeaders(env), "Content-Type": "application/json", ...(extraHeaders || {}) },
+  });
+}
 
-/* =========================
-   LOGIN
-========================= */
-async function login() {
+// ── cookie helpers ──────────────────────────────────────────────────
+// SameSite=None; Secure is REQUIRED here, not optional — the Worker and the
+// GitHub Pages SPA are different sites, and browsers silently drop
+// cross-site cookies that aren't marked SameSite=None; Secure, even with
+// every CORS header correct. HttpOnly keeps the session id out of reach of
+// any JS running on the SPA (defence in depth).
+function setSessionCookie(sessionId, maxAgeSeconds){
+  return `${SESSION_COOKIE}=${sessionId}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=${maxAgeSeconds}`;
+}
+function clearSessionCookie(){
+  return `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=0`;
+}
+function readCookie(request, name){
+  const header = request.headers.get("Cookie") || "";
+  const parts = header.split(/;\s*/);
+  for (const part of parts){
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    if (part.slice(0, eq) === name) return part.slice(eq + 1);
+  }
+  return null;
+}
+
+// ── small random-id helper (Web Crypto, available in Workers) ─────────
+function randomId(bytes){
+  const arr = new Uint8Array(bytes || 24);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// ── PKCE (S256) ─────────────────────────────────────────────────────
+function base64url(buf){
+  let str = "";
+  const bytes = new Uint8Array(buf);
+  for (let i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
+  return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+async function pkceChallenge(verifier){
+  const data = new TextEncoder().encode(verifier);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return base64url(digest);
+}
+
+// ── session lookup ──────────────────────────────────────────────────
+async function getSession(request, env){
+  const sid = readCookie(request, SESSION_COOKIE);
+  if (!sid) return null;
+  const raw = await env.SESSION.get(`session:${sid}`);
+  if (!raw) return null;
+  try { return { id: sid, ...JSON.parse(raw) }; } catch(_) { return null; }
+}
+
+// =====================================================================
+// Route handlers
+// =====================================================================
+
+// GET /auth/start — begin login: generate PKCE pair + state, stash the
+// verifier server-side under a short-lived id, send the browser to Deriv.
+async function handleAuthStart(request, env){
+  const verifier = randomId(48);
+  const state = randomId(16);
+  const challenge = await pkceChallenge(verifier);
+
+  // Store the verifier keyed by state — when Deriv redirects back to
+  // /auth/callback with this same state, we look the verifier up server-side.
+  // No client-held secret is needed for this step at all.
+  await env.SESSION.put(`pkce:${state}`, JSON.stringify({ verifier }), {
+    expirationTtl: PKCE_TTL_SECONDS,
+  });
+
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: env.CLIENT_ID,
+    redirect_uri: env.REDIRECT_URI,
+    scope: "trade",
+    state,
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+  });
+
+  return Response.redirect(DERIV_AUTH_URL + "?" + params.toString(), 302);
+}
+
+// GET /auth/callback — Deriv lands the browser here via a real navigation
+// (NOT a fetch from the SPA). Exchange the code server-side, create a
+// session, set the cookie, then redirect the browser on to the SPA.
+async function handleAuthCallback(request, env){
+  const url = new URL(request.url);
+  const code = url.searchParams.get("code");
+  const state = url.searchParams.get("state");
+  const errParam = url.searchParams.get("error");
+  const errDesc = url.searchParams.get("error_description");
+  const spa = env.SPA_URL || "https://kenkin1122-ctrl.github.io/mambafx/";
+
+  if (errParam){
+    return Response.redirect(spa + "?login_error=" + encodeURIComponent(errDesc || errParam), 302);
+  }
+  if (!code || !state){
+    return Response.redirect(spa + "?login_error=" + encodeURIComponent("Missing code or state from Deriv."), 302);
+  }
+
+  const pkceRaw = await env.SESSION.get(`pkce:${state}`);
+  if (!pkceRaw){
+    return Response.redirect(spa + "?login_error=" + encodeURIComponent("Login expired or state not recognised — please try again."), 302);
+  }
+  await env.SESSION.delete(`pkce:${state}`); // one-time use
+  let verifier;
+  try { verifier = JSON.parse(pkceRaw).verifier; } catch(_){}
+  if (!verifier){
+    return Response.redirect(spa + "?login_error=" + encodeURIComponent("Could not recover PKCE verifier."), 302);
+  }
+
+  const form = new URLSearchParams({
+    grant_type: "authorization_code",
+    client_id: env.CLIENT_ID,
+    code,
+    code_verifier: verifier,
+    redirect_uri: env.REDIRECT_URI,
+  });
+  if (env.CLIENT_SECRET) form.set("client_secret", env.CLIENT_SECRET);
+
+  let tokenResp, tokenBody;
   try {
-    document.getElementById("output").innerText =
-      "Requesting login URL...";
-
-    const res = await fetch(BACKEND + "/auth/start", {
+    tokenResp = await fetch(DERIV_TOKEN_URL, {
       method: "POST",
-      credentials: "include"
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: form.toString(),
     });
+    tokenBody = await tokenResp.json().catch(() => null);
+  } catch (e) {
+    return Response.redirect(spa + "?login_error=" + encodeURIComponent("Could not reach Deriv's token endpoint."), 302);
+  }
+  if (!tokenResp.ok || !tokenBody || !tokenBody.access_token){
+    const msg = (tokenBody && (tokenBody.error_description || tokenBody.error)) || `HTTP ${tokenResp.status}`;
+    return Response.redirect(spa + "?login_error=" + encodeURIComponent("Token exchange failed: " + msg), 302);
+  }
 
-    const data = await res.json();
+  const sessionId = randomId(32);
+  await env.SESSION.put(`session:${sessionId}`, JSON.stringify({
+    access_token: tokenBody.access_token,
+    created_at: Date.now(),
+  }), { expirationTtl: SESSION_TTL_SECONDS });
 
-    if (!data.auth_url) {
-      document.getElementById("output").innerText =
-        "Error: No auth URL returned";
-      return;
+  return new Response(null, {
+    status: 302,
+    headers: {
+      "Location": spa,
+      "Set-Cookie": setSessionCookie(sessionId, SESSION_TTL_SECONDS),
+    },
+  });
+}
+
+// GET /me/session — does this browser have a valid session?
+async function handleMeSession(request, env){
+  const session = await getSession(request, env);
+  if (!session) return json({ logged_in: false }, env, 200); // 200, not 401: "not logged in" is a normal state, not an error
+  return json({ logged_in: true }, env, 200);
+}
+
+// GET /me/accounts — list Deriv accounts for the session's token.
+async function handleMeAccounts(request, env){
+  const session = await getSession(request, env);
+  if (!session) return json({ error: "not_logged_in" }, env, 401);
+
+  let resp, body;
+  try {
+    resp = await fetch(`${OPTIONS_REST_BASE}/accounts`, {
+      headers: { "Authorization": "Bearer " + session.access_token, "Deriv-App-ID": env.CLIENT_ID },
+    });
+    body = await resp.json().catch(() => null);
+  } catch (e) {
+    return json({ error: "upstream_unreachable", message: "Could not reach Deriv's accounts endpoint." }, env, 502);
+  }
+  if (!resp.ok){
+    const msg = (body && body.errors && body.errors[0] && body.errors[0].message) || `HTTP ${resp.status}`;
+    return json({ error: "accounts_http_error", status: resp.status, message: msg }, env, resp.status);
+  }
+  return json({ data: (body && body.data) || [] }, env, 200);
+}
+
+// POST /ws/otp — { account_id } → { url }
+async function handleWsOtp(request, env){
+  const session = await getSession(request, env);
+  if (!session) return json({ error: "not_logged_in" }, env, 401);
+
+  const payload = await request.json().catch(() => ({}));
+  const accountId = payload.account_id;
+  if (!accountId) return json({ error: "missing_account_id" }, env, 400);
+
+  let resp, body;
+  try {
+    resp = await fetch(`${OPTIONS_REST_BASE}/accounts/${encodeURIComponent(accountId)}/otp`, {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + session.access_token, "Deriv-App-ID": env.CLIENT_ID },
+    });
+    body = await resp.json().catch(() => null);
+  } catch (e) {
+    return json({ error: "upstream_unreachable", message: "Could not reach Deriv's OTP endpoint." }, env, 502);
+  }
+  if (!resp.ok){
+    const msg = (body && body.errors && body.errors[0] && body.errors[0].message) || `HTTP ${resp.status}`;
+    return json({ error: "otp_http_error", status: resp.status, message: msg }, env, resp.status);
+  }
+  const wsUrl = body && body.data && body.data.url;
+  if (!wsUrl) return json({ error: "otp_failed", message: "Deriv response did not include a WebSocket URL." }, env, 502);
+  return json({ url: wsUrl }, env, 200);
+}
+
+// POST /logout — clear the session.
+async function handleLogout(request, env){
+  const session = await getSession(request, env);
+  if (session) await env.SESSION.delete(`session:${session.id}`);
+  return json({ ok: true }, env, 200, { "Set-Cookie": clearSessionCookie() });
+}
+
+// =====================================================================
+// Router — /auth/*, /me/*, /ws/* are matched FIRST, before anything else.
+// A static-assets catch-all (if this Worker is ever paired with one) must
+// come after these or it will swallow these routes and break both the
+// OAuth callback and CORS.
+// =====================================================================
+export default {
+  async fetch(request, env, ctx){
+    const url = new URL(request.url);
+    const path = url.pathname;
+
+    // CORS preflight — every route below answers OPTIONS the same way.
+    if (request.method === "OPTIONS"){
+      return new Response(null, { status: 204, headers: corsHeaders(env) });
     }
 
-    document.getElementById("output").innerText =
-      "Redirecting to Deriv...";
+    // Explicit, named config check BEFORE anything else runs. A missing KV
+    // binding or secret is the #1 cause of a raw Cloudflare "Error 1101"
+    // page instead of a clean JSON error — that page means the exception
+    // happened in a way the platform itself intercepted, which is exactly
+    // what an undefined `env.SESSION.put(...)` (TypeError: Cannot read
+    // properties of undefined) can trigger. Checking explicitly here turns
+    // that into a readable diagnostic on every route, every time.
+    const missing = [];
+    if (!env.SESSION || typeof env.SESSION.get !== "function") missing.push("SESSION (KV namespace binding)");
+    if (!env.CLIENT_ID) missing.push("CLIENT_ID (secret)");
+    if (!env.REDIRECT_URI) missing.push("REDIRECT_URI (secret)");
+    if (missing.length && path !== "/" && path !== "/health"){
+      return json({
+        error: "server_misconfigured",
+        message: "This Worker is missing required configuration: " + missing.join(", ") + ". See the README — you likely need `wrangler kv namespace create SESSION`, paste the id into wrangler.jsonc, then `wrangler secret put CLIENT_ID` and `wrangler secret put REDIRECT_URI`, then redeploy.",
+      }, env, 500);
+    }
 
-    window.location.href = data.auth_url;
-
-  } catch (err) {
-    document.getElementById("output").innerText =
-      "Login error: " + err.message;
-  }
-}
-
-/* =========================
-   CALLBACK HANDLER (IMPORTANT FIX)
-========================= */
-async function handleCallback() {
-  const params = new URLSearchParams(window.location.search);
-  const code = params.get("code");
-  const state = params.get("state");
-
-  if (!code) return;
-
-  document.getElementById("output").innerText =
-    "Returning from Deriv... completing login";
-
-  try {
-    const res = await fetch(BACKEND + "/auth/callback?code=" + code + "&state=" + state);
-    const data = await res.json();
-
-    document.getElementById("output").innerText =
-      "Callback complete:\n\n" + JSON.stringify(data, null, 2);
-
-  } catch (err) {
-    document.getElementById("output").innerText =
-      "Callback error: " + err.message;
-  }
-}
-
-/* =========================
-   SESSION CHECK
-========================= */
-async function checkSession() {
-  try {
-    const res = await fetch(BACKEND + "/me/session", {
-      credentials: "include"
-    });
-
-    const data = await res.json();
-
-    document.getElementById("output").innerText =
-      JSON.stringify(data, null, 2);
-
-  } catch (err) {
-    document.getElementById("output").innerText =
-      "Session error: " + err.message;
-  }
-}
-
-/* =========================
-   ON LOAD
-========================= */
-window.onload = async function () {
-  await handleCallback();
-  await checkSession();
+    try {
+      if (path === "/auth/start" && request.method === "GET"){
+        return await handleAuthStart(request, env);
+      }
+      if (path === "/auth/callback" && request.method === "GET"){
+        // Browser navigation only — Deriv redirects here directly. This
+        // intentionally does NOT set CORS headers as its primary concern;
+        // it's not meant to be fetch()ed, it's a 302 the browser follows.
+        return await handleAuthCallback(request, env);
+      }
+      if (path === "/me/session" && request.method === "GET"){
+        return await handleMeSession(request, env);
+      }
+      if (path === "/me/accounts" && request.method === "GET"){
+        return await handleMeAccounts(request, env);
+      }
+      if (path === "/ws/otp" && request.method === "POST"){
+        return await handleWsOtp(request, env);
+      }
+      if (path === "/logout" && request.method === "POST"){
+        return await handleLogout(request, env);
+      }
+      if (path === "/" || path === "/health"){
+        return json({
+          ok: true,
+          service: "mambafx-backend",
+          config: {
+            session_kv_bound: !!(env.SESSION && typeof env.SESSION.get === "function"),
+            client_id_set: !!env.CLIENT_ID,
+            redirect_uri_set: !!env.REDIRECT_URI,
+            redirect_uri: env.REDIRECT_URI || null,
+            client_secret_set: !!env.CLIENT_SECRET,
+            spa_url: env.SPA_URL || null,
+            allowed_origin: env.ALLOWED_ORIGIN || null,
+          },
+        }, env, 200);
+      }
+      return json({ error: "not_found", message: `No route for ${request.method} ${path}` }, env, 404);
+    } catch (e) {
+      return json({ error: "internal_error", message: String((e && e.message) || e), stack: String((e && e.stack) || "") }, env, 500);
+    }
+  },
 };
-</script>
-
-</body>
-</html>
