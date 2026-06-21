@@ -3,7 +3,7 @@
   "name": "mambafx",
   "compatibility_date": "2026-06-20",
   "main": "src/index.js",
-  "kv_namespaces": [
+  ": [
     {
       "binding": "SESSION",
       "id": "17e093b1eeb844069a1ee1a8e98837eb"
