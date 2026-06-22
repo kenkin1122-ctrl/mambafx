@@ -447,103 +447,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <div class="stat"><div class="label">Ticks Seen</div><div id="tickCount" class="val neutral">0</div><div class="sub">this session</div></div>
   </div>
 
-  <div class="chart-card">
-    <div id="banner" class="banner"></div>
-    <div class="chart-head">
-      <h2>Continuous price line — segments recolor on a run of 5</h2>
-      <div class="legend">
-        <span><i class="swatch up"></i>5 rises</span>
-        <span><i class="swatch down"></i>5 falls</span>
-        <span><i class="swatch neutral"></i>normal</span>
-        <label class="toggle-chip"><input type="checkbox" id="bbToggle" checked>Bollinger Bands</label>
-      </div>
-    </div>
-    <div class="chart-row">
-      <svg id="chart" viewBox="0 0 1000 360" preserveAspectRatio="none" role="img" aria-label="Live price line for Volatility 100 Index"></svg>
-      <div class="candle-panel">
-        <div class="cp-head">
-          <span class="cp-title">🕯️ Candlestick</span>
-          <span class="cp-tf">1 min</span>
-        </div>
-        <div class="cp-sub">2 previous + current forming candle · live</div>
-        <svg id="candleSvg" viewBox="0 0 300 220" preserveAspectRatio="xMidYMid meet" role="img" aria-label="One minute candlesticks"></svg>
-        <div class="cp-readout">
-          <div class="cp-col">
-            <div class="cp-label"><span>Prev-2</span><span id="prev2Tag" class="cp-tag b-neutral">—</span></div>
-            <div class="row"><span>O</span><span id="prev2O">—</span></div>
-            <div class="row"><span>H</span><span id="prev2H">—</span></div>
-            <div class="row"><span>L</span><span id="prev2L">—</span></div>
-            <div class="row"><span>C</span><span id="prev2C">—</span></div>
-          </div>
-          <div class="cp-col">
-            <div class="cp-label"><span>Previous</span><span id="prevTag" class="cp-tag b-neutral">—</span></div>
-            <div class="row"><span>O</span><span id="prevO">—</span></div>
-            <div class="row"><span>H</span><span id="prevH">—</span></div>
-            <div class="row"><span>L</span><span id="prevL">—</span></div>
-            <div class="row"><span>C</span><span id="prevC">—</span></div>
-          </div>
-          <div class="cp-col">
-            <div class="cp-label"><span>Current</span><span id="curTag" class="cp-tag b-neutral">—</span></div>
-            <div class="row"><span>O</span><span id="curO">—</span></div>
-            <div class="row"><span>H</span><span id="curH">—</span></div>
-            <div class="row"><span>L</span><span id="curL">—</span></div>
-            <div class="row"><span>C</span><span id="curC">—</span></div>
-            <div class="row"><span>⏳</span><span id="curTimer" class="cp-timer">—</span></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="chart-card">
-    <div class="chart-head">
-      <h2>🕯️ Live 1-min candles — order flow &amp; volume profile</h2>
-      <div class="legend">
-        <label class="toggle-chip"><input type="checkbox" id="lcVP" checked>Volume Profile</label>
-        <label class="toggle-chip"><input type="checkbox" id="lcVol" checked>Tick Volume</label>
-        <label class="toggle-chip"><input type="checkbox" id="lcOF" checked>Order Flow</label>
-      </div>
-    </div>
-    <svg id="liveCandleChart" viewBox="0 0 1000 320" preserveAspectRatio="none" role="img" aria-label="Live one-minute candlestick chart with volume profile"></svg>
-    <div class="tf-of" id="live-of" style="grid-template-columns:repeat(5,1fr)">
-      <div class="of-cell"><div class="of-label">Tick &Delta; (last)</div><div id="lof-delta" class="of-val of-neutral">&mdash;</div></div>
-      <div class="of-cell"><div class="of-label">CVD (tick)</div><div id="lof-cvd" class="of-val of-neutral">&mdash;</div></div>
-      <div class="of-cell"><div class="of-label">Imbalance</div><div id="lof-imb" class="of-val of-neutral">&mdash;</div></div>
-      <div class="of-cell"><div class="of-label">Tick Vol (last)</div><div id="lof-vol" class="of-val of-neutral">&mdash;</div></div>
-      <div class="of-cell"><div class="of-label">Absorption</div><div id="lof-abs" class="of-val of-neutral">&mdash;</div></div>
-    </div>
-    <div class="sub-note">Candles are built live from the tick stream. <b>Tick &Delta;</b> = up-ticks &minus; down-ticks (real tick-rule delta), <b>tick volume</b> = ticks per candle, <b>volume profile</b> = tick-weighted time-at-price (POC in amber). These are genuine tick-based measures &mdash; more honest than the OHLC estimates on the candle page &mdash; though still not exchange order-book flow.</div>
-  </div>
-
-  <div class="ind-card">
-    <h2>Technical indicators</h2>
-    <div class="sub-note">Computed live on the tick price series. MACD(12,26,9) · Choppiness(14) · CCI(20) · Bollinger(20, 2σ). Need ~30 ticks to populate.</div>
-    <div class="ind-grid">
-      <div class="ind">
-        <div class="ind-name"><span>MACD <span style="opacity:.6">(12,26,9)</span></span><span id="macdBadge" class="badge b-neutral">—</span></div>
-        <div id="macdVal" class="ind-val tval-neutral">—</div>
-        <div id="macdDetail" class="ind-detail">waiting for data</div>
-        <div id="macdBars" class="macd-bars"></div>
-      </div>
-      <div class="ind">
-        <div class="ind-name"><span>Choppiness Index <span style="opacity:.6">(14)</span></span><span id="chopBadge" class="badge b-neutral">—</span></div>
-        <div id="chopVal" class="ind-val tval-neutral">—</div>
-        <div id="chopDetail" class="ind-detail">waiting for data</div>
-        <div class="arrow-row"><span class="arr-label">trend</span><span id="chopArrows"></span></div>
-      </div>
-      <div class="ind">
-        <div class="ind-name"><span>CCI <span style="opacity:.6">(20)</span></span><span id="cciBadge" class="badge b-neutral">—</span></div>
-        <div id="cciVal" class="ind-val tval-neutral">—</div>
-        <div id="cciDetail" class="ind-detail">waiting for data</div>
-        <div class="arrow-row"><span class="arr-label">trend</span><span id="cciArrows"></span></div>
-      </div>
-      <div class="ind">
-        <div class="ind-name"><span>Bollinger Bands <span style="opacity:.6">(20, 2σ)</span></span><span id="bbBadge" class="badge b-neutral">—</span></div>
-        <div id="bbVal" class="ind-val tval-neutral">—</div>
-        <div id="bbDetail" class="ind-detail">waiting for data</div>
-      </div>
-    </div>
-  </div>
+  <div id="banner" class="banner"></div>
 
   <div class="log-card">
     <h2>Signal log</h2>
@@ -552,7 +456,8 @@ table.an-table tbody tr:last-child td{border-bottom:none}
 
   <footer>
     Streams live from Deriv's public WebSocket — pick any of the 10 Volatility indices above (no login needed).<br>
-    A signal fires when price moves the same direction 5 ticks in a row. Synthetic indices are random — this marks momentum runs, it does not predict the next tick.
+    A signal fires when price moves the same direction 5 ticks in a row. Synthetic indices are random — this marks momentum runs, it does not predict the next tick.<br>
+    <b>Charts moved to <a onclick="showPage('charts')" href="#" style="color:var(--accent);text-decoration:none">📈 Indicator Charts</a></b> — price line, 1-min candles, order flow, and all indicators are now on that page.
   </footer>
 
   </div><!-- /page-live -->
@@ -809,6 +714,23 @@ table.an-table tbody tr:last-child td{border-bottom:none}
             <tr><td colspan="10" class="sig-empty">No trades yet.</td></tr>
           </tbody>
         </table>
+      </div>
+      <!-- Split balance sheet: Demo vs Real -->
+      <div class="grid-pl-split" id="gridPlSplit" style="display:none">
+        <div class="grid-pl-card">
+          <h3>🟢 Demo account</h3>
+          <div class="grid-pl-row"><span class="lab">Won</span><span id="gridDemoWon" class="grid-pl-val pos">0</span></div>
+          <div class="grid-pl-row"><span class="lab">Lost</span><span id="gridDemoLost" class="grid-pl-val neg">0</span></div>
+          <div class="grid-pl-row"><span class="lab">Win rate</span><span id="gridDemoRate" class="grid-pl-val" style="color:var(--accent)">—</span></div>
+          <div class="grid-pl-row"><span class="lab">P/L</span><span id="gridDemoPnL" class="grid-pl-val">—</span></div>
+        </div>
+        <div class="grid-pl-card">
+          <h3>🔴 Real account</h3>
+          <div class="grid-pl-row"><span class="lab">Won</span><span id="gridRealWon" class="grid-pl-val pos">0</span></div>
+          <div class="grid-pl-row"><span class="lab">Lost</span><span id="gridRealLost" class="grid-pl-val neg">0</span></div>
+          <div class="grid-pl-row"><span class="lab">Win rate</span><span id="gridRealRate" class="grid-pl-val" style="color:var(--accent)">—</span></div>
+          <div class="grid-pl-row"><span class="lab">P/L</span><span id="gridRealPnL" class="grid-pl-val">—</span></div>
+        </div>
       </div>
     </div>
 
@@ -1113,7 +1035,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   <div id="page-charts" class="page">
     <div class="grid-card" style="margin-bottom:14px">
       <h2>📈 Indicator charts — live line graphs</h2>
-      <div class="gc-sub">Real-time line graphs of all four indicators computed on the live tick series. Each chart scrolls with the last <b id="chartWindowLabel">200</b> ticks. DMI/ADX shows three lines: +DI (green), −DI (red), ADX (black). <button class="gc-btn" style="margin-left:auto" onclick="chartClearHistory()">Clear history</button></div>
+      <div class="gc-sub">Real-time price chart, 1-min candles with order flow, and all four indicator line graphs — all on one page. Each chart scrolls with the last <b id="chartWindowLabel">200</b> ticks. <button class="gc-btn" style="margin-left:auto" onclick="chartClearHistory()">Clear history</button></div>
       <div class="gc-row" style="gap:12px;align-items:center;flex-wrap:wrap">
         <div class="gc-field" style="margin:0;flex:0 0 auto">
           <label for="chartWindow">Window (ticks)</label>
@@ -1123,6 +1045,107 @@ table.an-table tbody tr:last-child td{border-bottom:none}
             <option value="200" selected>200</option>
             <option value="500">500</option>
           </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Continuous price line -->
+    <div class="chart-card" style="margin-bottom:14px">
+      <div id="banner" class="banner"></div>
+      <div class="chart-head">
+        <h2>Continuous price line — segments recolor on a run of 5</h2>
+        <div class="legend">
+          <span><i class="swatch up"></i>5 rises</span>
+          <span><i class="swatch down"></i>5 falls</span>
+          <span><i class="swatch neutral"></i>normal</span>
+          <label class="toggle-chip"><input type="checkbox" id="bbToggle" checked>Bollinger Bands</label>
+        </div>
+      </div>
+      <div class="chart-row">
+        <svg id="chart" viewBox="0 0 1000 360" preserveAspectRatio="none" role="img" aria-label="Live price line"></svg>
+        <div class="candle-panel">
+          <div class="cp-head">
+            <span class="cp-title">🕯️ Candlestick</span>
+            <span class="cp-tf">1 min</span>
+          </div>
+          <div class="cp-sub">2 previous + current forming candle · live</div>
+          <svg id="candleSvg" viewBox="0 0 300 220" preserveAspectRatio="xMidYMid meet" role="img" aria-label="One minute candlesticks"></svg>
+          <div class="cp-readout">
+            <div class="cp-col">
+              <div class="cp-label"><span>Prev-2</span><span id="prev2Tag" class="cp-tag b-neutral">—</span></div>
+              <div class="row"><span>O</span><span id="prev2O">—</span></div>
+              <div class="row"><span>H</span><span id="prev2H">—</span></div>
+              <div class="row"><span>L</span><span id="prev2L">—</span></div>
+              <div class="row"><span>C</span><span id="prev2C">—</span></div>
+            </div>
+            <div class="cp-col">
+              <div class="cp-label"><span>Previous</span><span id="prevTag" class="cp-tag b-neutral">—</span></div>
+              <div class="row"><span>O</span><span id="prevO">—</span></div>
+              <div class="row"><span>H</span><span id="prevH">—</span></div>
+              <div class="row"><span>L</span><span id="prevL">—</span></div>
+              <div class="row"><span>C</span><span id="prevC">—</span></div>
+            </div>
+            <div class="cp-col">
+              <div class="cp-label"><span>Current</span><span id="curTag" class="cp-tag b-neutral">—</span></div>
+              <div class="row"><span>O</span><span id="curO">—</span></div>
+              <div class="row"><span>H</span><span id="curH">—</span></div>
+              <div class="row"><span>L</span><span id="curL">—</span></div>
+              <div class="row"><span>C</span><span id="curC">—</span></div>
+              <div class="row"><span>⏳</span><span id="curTimer" class="cp-timer">—</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live 1-min candles + order flow -->
+    <div class="chart-card" style="margin-bottom:14px">
+      <div class="chart-head">
+        <h2>🕯️ Live 1-min candles — order flow &amp; volume profile</h2>
+        <div class="legend">
+          <label class="toggle-chip"><input type="checkbox" id="lcVP" checked>Volume Profile</label>
+          <label class="toggle-chip"><input type="checkbox" id="lcVol" checked>Tick Volume</label>
+          <label class="toggle-chip"><input type="checkbox" id="lcOF" checked>Order Flow</label>
+        </div>
+      </div>
+      <svg id="liveCandleChart" viewBox="0 0 1000 320" preserveAspectRatio="none" role="img" aria-label="Live one-minute candlestick chart with volume profile"></svg>
+      <div class="tf-of" id="live-of" style="grid-template-columns:repeat(5,1fr)">
+        <div class="of-cell"><div class="of-label">Tick &Delta; (last)</div><div id="lof-delta" class="of-val of-neutral">&mdash;</div></div>
+        <div class="of-cell"><div class="of-label">CVD (tick)</div><div id="lof-cvd" class="of-val of-neutral">&mdash;</div></div>
+        <div class="of-cell"><div class="of-label">Imbalance</div><div id="lof-imb" class="of-val of-neutral">&mdash;</div></div>
+        <div class="of-cell"><div class="of-label">Tick Vol (last)</div><div id="lof-vol" class="of-val of-neutral">&mdash;</div></div>
+        <div class="of-cell"><div class="of-label">Absorption</div><div id="lof-abs" class="of-val of-neutral">&mdash;</div></div>
+      </div>
+      <div class="sub-note">Candles are built live from the tick stream. <b>Tick &Delta;</b> = up-ticks minus down-ticks (real tick-rule delta), <b>tick volume</b> = ticks per candle, <b>volume profile</b> = tick-weighted time-at-price (POC in amber). <b style="color:#ffc44d">⚠ Note:</b> synthetic indices have no real order book — these are tick-rule proxies, not institutional footprint.</div>
+    </div>
+
+    <!-- Technical indicators panel -->
+    <div class="ind-card" style="margin-bottom:14px">
+      <h2>Technical indicators</h2>
+      <div class="sub-note">Computed live on the tick price series. MACD(12,26,9) · Choppiness(14) · CCI(20) · Bollinger(20, 2σ). Need ~30 ticks to populate.</div>
+      <div class="ind-grid">
+        <div class="ind">
+          <div class="ind-name"><span>MACD <span style="opacity:.6">(12,26,9)</span></span><span id="macdBadge" class="badge b-neutral">—</span></div>
+          <div id="macdVal" class="ind-val tval-neutral">—</div>
+          <div id="macdDetail" class="ind-detail">waiting for data</div>
+          <div id="macdBars" class="macd-bars"></div>
+        </div>
+        <div class="ind">
+          <div class="ind-name"><span>Choppiness Index <span style="opacity:.6">(14)</span></span><span id="chopBadge" class="badge b-neutral">—</span></div>
+          <div id="chopVal" class="ind-val tval-neutral">—</div>
+          <div id="chopDetail" class="ind-detail">waiting for data</div>
+          <div class="arrow-row"><span class="arr-label">trend</span><span id="chopArrows"></span></div>
+        </div>
+        <div class="ind">
+          <div class="ind-name"><span>CCI <span style="opacity:.6">(20)</span></span><span id="cciBadge" class="badge b-neutral">—</span></div>
+          <div id="cciVal" class="ind-val tval-neutral">—</div>
+          <div id="cciDetail" class="ind-detail">waiting for data</div>
+          <div class="arrow-row"><span class="arr-label">trend</span><span id="cciArrows"></span></div>
+        </div>
+        <div class="ind">
+          <div class="ind-name"><span>Bollinger Bands <span style="opacity:.6">(20, 2σ)</span></span><span id="bbBadge" class="badge b-neutral">—</span></div>
+          <div id="bbVal" class="ind-val tval-neutral">—</div>
+          <div id="bbDetail" class="ind-detail">waiting for data</div>
         </div>
       </div>
     </div>
@@ -1137,7 +1160,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       <div class="chart-axis-y" id="chartDMIAxis"></div>
     </div>
 
-    <!-- MACD -->
+    <!-- MACD line chart -->
     <div class="grid-card" style="margin-bottom:14px">
       <h2>📊 MACD (12,26,9) <span style="font-size:10px;font-weight:400;color:var(--muted);margin-left:8px"><span style="color:#56b6ff">■ MACD</span> &nbsp; <span style="color:#fbbf24">■ Signal</span> &nbsp; <span style="color:#475569">▮ Hist</span></span>
         <span id="chartMacdVal" style="font-size:11px;font-weight:700;color:var(--accent);margin-left:auto">—</span>
@@ -1146,14 +1169,14 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       <svg id="chartMACD" class="ind-chart" viewBox="0 0 1000 160" preserveAspectRatio="none"></svg>
     </div>
 
-    <!-- CCI -->
+    <!-- CCI line chart -->
     <div class="grid-card" style="margin-bottom:14px">
       <h2>🎯 CCI (20) <span id="chartCciVal" style="font-size:11px;font-weight:700;margin-left:auto">—</span></h2>
       <div class="gc-sub">Commodity Channel Index. Above +100 = overbought (look for reversal). Below −100 = oversold. Between = neutral.</div>
       <svg id="chartCCI" class="ind-chart" viewBox="0 0 1000 160" preserveAspectRatio="none"></svg>
     </div>
 
-    <!-- Choppiness -->
+    <!-- Choppiness line chart -->
     <div class="grid-card" style="margin-bottom:14px">
       <h2>〰️ Choppiness Index (14) <span id="chartChopVal" style="font-size:11px;font-weight:700;margin-left:auto">—</span></h2>
       <div class="gc-sub">≥ 61.8 = choppy/range-bound (avoid trend trades). ≤ 38.2 = strongly trending. Dashed lines mark the two thresholds.</div>
@@ -3985,7 +4008,7 @@ function gridPlaceTrade(dir, source){
 
   // pre-insert a pending row so the user sees something immediately
   const row = {
-    id: "pending-" + proposalReqId, dir, source, contractType,
+    id: "pending-" + proposalReqId, dir, source, contractType, isVirtual: !!gridIsVirtual,
     stake, currency: gridCurrency, time: Math.floor(Date.now()/1000),
     entry: null, exit: null, payout: null, pnl: null, status: "pricing…",
   };
@@ -4184,10 +4207,27 @@ function renderGridTrades(){
   if (!gridTrades.length){
     body.innerHTML = '<tr><td colspan="10" class="sig-empty">No trades yet.</td></tr>';
     gridSet("gridPnL", "—");
+    const sp = $("gridPlSplit"); if(sp) sp.style.display = "none";
     return;
   }
   let net = 0, anyResolved = false;
-  gridTrades.forEach(t => { if (t.pnl != null && (t.status==="won"||t.status==="lost")){ net += t.pnl; anyResolved = true; } });
+  let demoWon=0, demoLost=0, demoNet=0, demoAny=false;
+  let realWon=0, realLost=0, realNet=0, realAny=false;
+  gridTrades.forEach(t => {
+    if (t.pnl != null && (t.status==="won"||t.status==="lost")){
+      net += t.pnl; anyResolved = true;
+      const isDemo = t.isVirtual !== false ? (gridIsVirtual !== false) : false;
+      // tag on row: inherit account type at time of trade
+      const demo = t.isVirtual != null ? t.isVirtual : (gridIsVirtual !== false);
+      if(demo){
+        if(t.status==="won"){ demoWon++; demoNet+=t.pnl; demoAny=true; }
+        else { demoLost++; demoNet+=t.pnl; demoAny=true; }
+      } else {
+        if(t.status==="won"){ realWon++; realNet+=t.pnl; realAny=true; }
+        else { realLost++; realNet+=t.pnl; realAny=true; }
+      }
+    }
+  });
   const dec = decimals;
   body.innerHTML = gridTrades.map(t => {
     const dirCls = t.dir === 1 ? "up" : "down";
@@ -4209,6 +4249,17 @@ function renderGridTrades(){
     </tr>`;
   }).join("");
   gridSet("gridPnL", anyResolved ? (net>=0?"+":"") + net.toFixed(2) + " " + gridCurrency : "—");
+  // Update split balance sheet
+  const sp = $("gridPlSplit");
+  if(sp){ sp.style.display = (demoAny||realAny) ? "grid" : "none"; }
+  function pnlStr(v,any){ return any ? (v>=0?"+":"") + v.toFixed(2)+" "+gridCurrency : "—"; }
+  function rateStr(won,lost){ const t=won+lost; return t?((won/t*100).toFixed(1)+"%"):"—"; }
+  gridSet("gridDemoWon", demoWon); gridSet("gridDemoLost", demoLost);
+  gridSet("gridDemoRate", rateStr(demoWon,demoLost)); gridSet("gridDemoPnL", pnlStr(demoNet,demoAny));
+  const dpnl=$("gridDemoPnL"); if(dpnl){ dpnl.className="grid-pl-val "+(demoNet>=0?"pos":"neg"); }
+  gridSet("gridRealWon", realWon); gridSet("gridRealLost", realLost);
+  gridSet("gridRealRate", rateStr(realWon,realLost)); gridSet("gridRealPnL", pnlStr(realNet,realAny));
+  const rpnl=$("gridRealPnL"); if(rpnl){ rpnl.className="grid-pl-val "+(realNet>=0?"pos":"neg"); }
 }
 
 // ── manual + automatic firing ────────────────────────────────────────
@@ -5228,41 +5279,75 @@ function chartRenderAll(){
   const W=1000,H=160;
   if(!data.length){["chartDMI","chartMACD","chartCCI","chartChop"].forEach(id=>{const s=$(id);if(s)s.innerHTML="<text x='500' y='90' text-anchor='middle' fill='#475569' font-size='28' font-family='IBM Plex Mono'>No data yet — connect and wait for ticks</text>";});return;}
 
+  // ── DMI / ADX: +DI green, −DI red, ADX white ─────────────────────
   const dmiSvg=$("chartDMI");
   if(dmiSvg){
     const sc=chartScale([...data.map(d=>d.pdi),...data.map(d=>d.ndi),...data.map(d=>d.adx)].filter(v=>v!=null),H,0.05);
     dmiSvg.innerHTML=chartHline(sc.toY(25),W,"#56b6ff","6,3")+
-      chartPolyline(chartPoints(data,d=>d.pdi,sc,W),"#16e08b",1.5)+
-      chartPolyline(chartPoints(data,d=>d.ndi,sc,W),"#ff4d5e",1.5)+
-      chartPolyline(chartPoints(data,d=>d.adx,sc,W),"#e6ebf5",2);
+      chartPolyline(chartPoints(data,d=>d.pdi,sc,W),"#16e08b",2)+
+      chartPolyline(chartPoints(data,d=>d.ndi,sc,W),"#ff4d5e",2)+
+      chartPolyline(chartPoints(data,d=>d.adx,sc,W),"#e6ebf5",2.5);
     const last=data[data.length-1];
     gridSet("chartAdxVal",last&&last.adx!=null?`ADX ${last.adx.toFixed(1)} · +DI ${last.pdi!=null?last.pdi.toFixed(1):"—"} · −DI ${last.ndi!=null?last.ndi.toFixed(1):"—"}`:"—");
     const axisEl=$("chartDMIAxis");if(axisEl)axisEl.innerHTML=`<span>${sc.max.toFixed(1)}</span><span>${((sc.max+sc.min)/2).toFixed(1)}</span><span>${sc.min.toFixed(1)}</span>`;
   }
+
+  // ── MACD: proper rect bars + MACD white line + Signal red line ────
   const macdSvg=$("chartMACD");
   if(macdSvg){
     const histVals=data.map(d=>d.macdHist);
     const sc=chartScale([...data.map(d=>d.macd),...data.map(d=>d.macdSig),...histVals].filter(v=>v!=null),H,0.08);
-    macdSvg.innerHTML=chartHline(sc.toY(0),W,"#475569","4,3")+
-      chartBars(histVals,"#16e08b55","#ff4d5e55",W,H,sc.min,sc.max)+
-      chartPolyline(chartPoints(data,d=>d.macd,sc,W),"#56b6ff",1.5)+
-      chartPolyline(chartPoints(data,d=>d.macdSig,sc,W),"#fbbf24",1.5);
+    const zeroY=sc.toY(0);
+    const barW=Math.max(1,(W/Math.max(data.length,1))*0.7);
+    let bars="";
+    data.forEach((d,i)=>{
+      if(d.macdHist==null) return;
+      const x=i/(Math.max(data.length-1,1))*W;
+      const y=sc.toY(d.macdHist);
+      const top=Math.min(y,zeroY),bot=Math.max(y,zeroY);
+      bars+=`<rect x="${(x-barW/2).toFixed(1)}" y="${top.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(1,bot-top).toFixed(1)}" fill="${d.macdHist>=0?"#16e08b":"#ff4d5e"}" opacity="0.65"/>`;
+    });
+    macdSvg.innerHTML=chartHline(zeroY,W,"#475569","4,3")+bars+
+      chartPolyline(chartPoints(data,d=>d.macd,sc,W),"#e6ebf5",2)+
+      chartPolyline(chartPoints(data,d=>d.macdSig,sc,W),"#ff4d5e",1.5);
     const last=data[data.length-1];
     gridSet("chartMacdVal",last&&last.macd!=null?`MACD ${last.macd.toFixed(3)} · Sig ${last.macdSig!=null?last.macdSig.toFixed(3):"—"} · Hist ${last.macdHist!=null?last.macdHist.toFixed(3):"—"}`:"—");
   }
+
+  // ── CCI: filled area above/below zero + white line ────────────────
   const cciSvg=$("chartCCI");
   if(cciSvg){
     const sc=chartScale([...data.map(d=>d.cci),100,-100].filter(v=>v!=null),H,0.05);
-    cciSvg.innerHTML=chartHline(sc.toY(100),W,"#16e08b")+chartHline(sc.toY(-100),W,"#ff4d5e")+chartHline(sc.toY(0),W,"#475569","4,3")+
-      chartPolyline(chartPoints(data,d=>d.cci,sc,W),"#56b6ff",1.5);
+    const zeroY=sc.toY(0);
+    const pts=chartPoints(data,d=>d.cci,sc,W);
+    let fill="";
+    if(pts.length>=2){
+      const poly=pts.map(p=>`${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+      const fx=pts[0][0].toFixed(1),lx=pts[pts.length-1][0].toFixed(1),zy=zeroY.toFixed(1);
+      fill=`<defs>
+        <clipPath id="cciTop"><rect x="0" y="0" width="${W}" height="${zy}"/></clipPath>
+        <clipPath id="cciBt"><rect x="0" y="${zy}" width="${W}" height="${H}"/></clipPath>
+      </defs>
+      <polygon points="${poly} ${lx},${zy} ${fx},${zy}" fill="#16e08b" opacity="0.2" clip-path="url(#cciTop)"/>
+      <polygon points="${poly} ${lx},${zy} ${fx},${zy}" fill="#ff4d5e" opacity="0.2" clip-path="url(#cciBt)"/>`;
+    }
+    cciSvg.innerHTML=fill+
+      chartHline(sc.toY(100),W,"#16e08b")+chartHline(sc.toY(-100),W,"#ff4d5e")+
+      chartHline(zeroY,W,"#475569","4,3")+
+      chartPolyline(pts,"#e6ebf5",1.5);
     const last=data[data.length-1];const cv=last&&last.cci!=null?last.cci:null;
     const el=$("chartCciVal");if(el){el.textContent=cv!=null?cv.toFixed(2):"—";el.style.color=cv!=null?(cv>100?"#16e08b":cv<-100?"#ff4d5e":"#56b6ff"):"var(--muted)";}
   }
+
+  // ── Choppiness: filled neutral zone + yellow line ─────────────────
   const chopSvg=$("chartChop");
   if(chopSvg){
     const sc=chartScale([...data.map(d=>d.chop),100,0].filter(v=>v!=null),H,0.03);
-    chopSvg.innerHTML=chartHline(sc.toY(61.8),W,"#ff4d5e")+chartHline(sc.toY(38.2),W,"#16e08b")+
-      chartPolyline(chartPoints(data,d=>d.chop,sc,W),"#fbbf24",1.5);
+    const y618=sc.toY(61.8),y382=sc.toY(38.2);
+    chopSvg.innerHTML=
+      `<rect x="0" y="${Math.min(y618,y382).toFixed(1)}" width="${W}" height="${Math.abs(y618-y382).toFixed(1)}" fill="#56b6ff" opacity="0.07"/>` +
+      chartHline(y618,W,"#ff4d5e")+chartHline(y382,W,"#16e08b")+
+      chartPolyline(chartPoints(data,d=>d.chop,sc,W),"#fbbf24",1.8);
     const last=data[data.length-1];const cv=last&&last.chop!=null?last.chop:null;
     const el=$("chartChopVal");if(el){el.textContent=cv!=null?cv.toFixed(2):"—";el.style.color=cv!=null?(cv>=61.8?"#ff4d5e":cv<=38.2?"#16e08b":"#fbbf24"):"var(--muted)";}
   }
@@ -5449,6 +5534,32 @@ try {
 /* ── drag hint ───────────────────────────────────────────────────── */
 .mfx-hint{font-size:8.5px;color:#cbd5e1;text-align:center;margin-top:8px;
   letter-spacing:.06em;}
+/* ── Only Ups/Only Downs tick-duration buttons ───────────────────── */
+.mfx-ou-dur-btn{font-family:inherit;font-size:13px;font-weight:800;padding:8px 0;
+  border-radius:8px;border:1.5px solid #e2e8f0;background:#f8fafc;color:#64748b;
+  cursor:pointer;transition:all .15s;text-align:center;}
+.mfx-ou-dur-btn:hover{border-color:#6366f1;color:#6366f1;background:rgba(99,102,241,.06);}
+.mfx-ou-dur-btn.active{border-color:#6366f1;background:rgba(99,102,241,.1);color:#4f46e5;font-weight:900;}
+/* ── Split account P/L panel ─────────────────────────────────────── */
+.mfx-acct-pl{margin-bottom:10px;}
+.mfx-acct-pl-tabs{display:flex;gap:4px;margin-bottom:6px;}
+.mfx-acct-pl-tab{font-family:inherit;font-size:9px;font-weight:700;letter-spacing:.06em;
+  text-transform:uppercase;padding:4px 10px;border-radius:6px;border:1.5px solid #e2e8f0;
+  background:#f8fafc;color:#64748b;cursor:pointer;transition:all .15s;}
+.mfx-acct-pl-tab.active{border-color:#6366f1;background:rgba(99,102,241,.08);color:#4f46e5;}
+.mfx-pl-panel{display:none;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;}
+.mfx-pl-panel.visible{display:block;}
+.mfx-pl-row{display:flex;justify-content:space-between;align-items:center;font-size:11px;margin-bottom:4px;}
+.mfx-pl-row:last-child{margin-bottom:0;}
+.mfx-pl-lab{color:#64748b;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;}
+.mfx-pl-val{font-weight:800;font-variant-numeric:tabular-nums;font-size:13px;}
+/* Trading Grid split P/L table */
+.grid-pl-split{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.grid-pl-card{background:#0a0e17;border:1px solid var(--line);border-radius:12px;padding:12px}
+.grid-pl-card h3{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;font-weight:600}
+.grid-pl-row{display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px;font-variant-numeric:tabular-nums}
+.grid-pl-row .lab{color:var(--muted);font-size:10px}
+.grid-pl-val.pos{color:var(--up)}.grid-pl-val.neg{color:var(--down)}
 </style>
 
 <!-- Bot markup -->
@@ -5476,23 +5587,30 @@ try {
       <div style="font-size:8.5px;letter-spacing:.1em;text-transform:uppercase;color:#94a3b8;margin-bottom:5px">Market</div>
       <select id="mfxMarketSel" style="width:100%;font-family:inherit;font-size:11px;font-weight:600;padding:7px 10px;border-radius:8px;border:1.5px solid #e2e8f0;background:#f8fafc;color:#1e293b;outline:none;cursor:pointer;" onchange="mfxChangeMarket()"></select>
     </div>
-    <!-- Stats: Won / Lost / P/L -->
-    <div class="mfx-stats">
-      <div class="mfx-stat">
-        <div class="lab">Won</div>
-        <div id="mfxWon" class="val up">0</div>
+    <!-- Stats: Won / Lost / P/L — split by Demo / Real -->
+    <div class="mfx-acct-pl">
+      <div class="mfx-acct-pl-tabs">
+        <button class="mfx-acct-pl-tab active" onclick="mfxShowPlTab('demo')">Demo</button>
+        <button class="mfx-acct-pl-tab" onclick="mfxShowPlTab('real')">Real</button>
+        <button class="mfx-acct-pl-tab" onclick="mfxShowPlTab('all')">All</button>
       </div>
-      <div class="mfx-stat">
-        <div class="lab">Lost</div>
-        <div id="mfxLost" class="val dn">0</div>
+      <div id="mfxPlDemo" class="mfx-pl-panel visible">
+        <div class="mfx-pl-row"><span class="mfx-pl-lab">Won</span><span id="mfxWonDemo" class="mfx-pl-val" style="color:#10b981">0</span></div>
+        <div class="mfx-pl-row"><span class="mfx-pl-lab">Lost</span><span id="mfxLostDemo" class="mfx-pl-val" style="color:#ef4444">0</span></div>
+        <div class="mfx-pl-row"><span class="mfx-pl-lab">Win Rate</span><span id="mfxWinRateDemo" class="mfx-pl-val" style="color:#3b82f6">—</span></div>
+        <div class="mfx-pl-row"><span class="mfx-pl-lab">P/L</span><span id="mfxPnLDemo" class="mfx-pl-val">—</span></div>
       </div>
-      <div class="mfx-stat">
-        <div class="lab">Win rate</div>
-        <div id="mfxWinRate" class="val acc">—</div>
+      <div id="mfxPlReal" class="mfx-pl-panel">
+        <div class="mfx-pl-row"><span class="mfx-pl-lab">Won</span><span id="mfxWonReal" class="mfx-pl-val" style="color:#10b981">0</span></div>
+        <div class="mfx-pl-row"><span class="mfx-pl-lab">Lost</span><span id="mfxLostReal" class="mfx-pl-val" style="color:#ef4444">0</span></div>
+        <div class="mfx-pl-row"><span class="mfx-pl-lab">Win Rate</span><span id="mfxWinRateReal" class="mfx-pl-val" style="color:#3b82f6">—</span></div>
+        <div class="mfx-pl-row"><span class="mfx-pl-lab">P/L</span><span id="mfxPnLReal" class="mfx-pl-val">—</span></div>
       </div>
-      <div class="mfx-stat">
-        <div class="lab">Session P/L</div>
-        <div id="mfxPnL" class="val">—</div>
+      <div id="mfxPlAll" class="mfx-pl-panel">
+        <div class="mfx-pl-row"><span class="mfx-pl-lab">Won</span><span id="mfxWon" class="mfx-pl-val" style="color:#10b981">0</span></div>
+        <div class="mfx-pl-row"><span class="mfx-pl-lab">Lost</span><span id="mfxLost" class="mfx-pl-val" style="color:#ef4444">0</span></div>
+        <div class="mfx-pl-row"><span class="mfx-pl-lab">Win Rate</span><span id="mfxWinRate" class="mfx-pl-val" style="color:#3b82f6">—</span></div>
+        <div class="mfx-pl-row"><span class="mfx-pl-lab">P/L</span><span id="mfxPnL" class="mfx-pl-val">—</span></div>
       </div>
     </div>
     <!-- Account -->
@@ -5512,9 +5630,8 @@ try {
       </div>
     </div>
     <!-- Quick-trade -->
-    <!-- Quick-trade -->
     <div style="margin-bottom:8px">
-      <select id="mfxContractType" style="width:100%;font-family:inherit;font-size:11px;font-weight:600;padding:7px 10px;border-radius:8px;border:1.5px solid #e2e8f0;background:#f8fafc;color:#1e293b;outline:none;cursor:pointer;">
+      <select id="mfxContractType" style="width:100%;font-family:inherit;font-size:11px;font-weight:600;padding:7px 10px;border-radius:8px;border:1.5px solid #e2e8f0;background:#f8fafc;color:#1e293b;outline:none;cursor:pointer;" onchange="mfxOnContractTypeChange()">
         <option value="CALL_PUT">Rise / Fall</option>
         <option value="DIGITEVEN">Even / Odd</option>
         <option value="DIGITOVER">Over / Under</option>
@@ -5522,6 +5639,19 @@ try {
         <option value="EXPIRYRANGE">Stay Between</option>
         <option value="UPORDOWN">Only Ups / Only Downs</option>
       </select>
+    </div>
+    <!-- Only Ups/Only Downs: tick duration selector (2–5) — hidden for other types -->
+    <div id="mfxOuDurWrap" style="display:none;margin-bottom:8px">
+      <div style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:#64748b;margin-bottom:5px">Number of consecutive ticks</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
+        <button class="mfx-ou-dur-btn" id="mfxOuDur2" onclick="mfxSetOuDur(2)">2</button>
+        <button class="mfx-ou-dur-btn active" id="mfxOuDur3" onclick="mfxSetOuDur(3)">3</button>
+        <button class="mfx-ou-dur-btn" id="mfxOuDur4" onclick="mfxSetOuDur(4)">4</button>
+        <button class="mfx-ou-dur-btn" id="mfxOuDur5" onclick="mfxSetOuDur(5)">5</button>
+      </div>
+      <div style="font-size:8.5px;color:#94a3b8;margin-top:5px;line-height:1.5">
+        Only Ups: <b>every</b> single tick must rise. Only Downs: <b>every</b> single tick must fall. Payout is significantly higher than Rise/Fall because the condition is much stricter.
+      </div>
     </div>
     <div class="mfx-btns">
       <button class="mfx-btn rise" id="mfxRiseBtn" onclick="mfxQuickTrade(1)" disabled>▲ RISE</button>
@@ -5638,23 +5768,44 @@ try {
       runText.textContent = '— no active run'; runText.style.color='#475569';
     }
 
-    /* stats: won / lost / win rate / P/L */
+    /* stats: won / lost / win rate / P/L — split by Demo vs Real */
     let net=0, won=0, lost=0;
+    let dWon=0,dLost=0,dNet=0, rWon=0,rLost=0,rNet=0;
     const trades = [...(typeof gridTrades!=='undefined'?gridTrades:[]),
                     ...(typeof digTrades!=='undefined'?digTrades:[])];
     trades.forEach(t=>{
-      if(t.status==='won'){ won++; if(t.pnl!=null) net+=t.pnl; }
-      if(t.status==='lost'){ lost++; if(t.pnl!=null) net+=t.pnl; }
+      const demo = t.isVirtual != null ? t.isVirtual : (typeof gridIsVirtual!=='undefined'?gridIsVirtual!==false:true);
+      const pnl = t.pnl != null ? t.pnl : 0;
+      if(t.status==='won'){
+        won++; net+=pnl;
+        if(demo){ dWon++; dNet+=pnl; } else { rWon++; rNet+=pnl; }
+      }
+      if(t.status==='lost'){
+        lost++; net+=pnl;
+        if(demo){ dLost++; dNet+=pnl; } else { rLost++; rNet+=pnl; }
+      }
     });
-    document.getElementById('mfxWon').textContent  = won;
-    document.getElementById('mfxLost').textContent = lost;
-    const total = won+lost;
-    const wrEl = document.getElementById('mfxWinRate');
-    wrEl.textContent = total>0 ? Math.round(won/total*100)+'%' : '—';
-
-    const pnlEl = document.getElementById('mfxPnL');
-    if(total>0){ const p=fmtPnl(net); pnlEl.textContent=p.t; pnlEl.className='val '+(net>=0?'up':'dn'); }
-    else { pnlEl.textContent='—'; pnlEl.className='val'; }
+    function mfxRateStr(w,l){ const t=w+l; return t>0?Math.round(w/t*100)+'%':'—'; }
+    function mfxPnlStr(v,any){ return any?(v>=0?'+':'')+v.toFixed(2):'—'; }
+    const total=won+lost, dTotal=dWon+dLost, rTotal=rWon+rLost;
+    // All tab
+    const elWon=document.getElementById('mfxWon'); if(elWon) elWon.textContent=won;
+    const elLost=document.getElementById('mfxLost'); if(elLost) elLost.textContent=lost;
+    const elWr=document.getElementById('mfxWinRate'); if(elWr) elWr.textContent=mfxRateStr(won,lost);
+    const elPnl=document.getElementById('mfxPnL');
+    if(elPnl){ elPnl.textContent=mfxPnlStr(net,total>0); elPnl.style.color=net>=0?'#10b981':'#ef4444'; }
+    // Demo tab
+    const elDW=document.getElementById('mfxWonDemo'); if(elDW) elDW.textContent=dWon;
+    const elDL=document.getElementById('mfxLostDemo'); if(elDL) elDL.textContent=dLost;
+    const elDR=document.getElementById('mfxWinRateDemo'); if(elDR) elDR.textContent=mfxRateStr(dWon,dLost);
+    const elDP=document.getElementById('mfxPnLDemo');
+    if(elDP){ elDP.textContent=mfxPnlStr(dNet,dTotal>0); elDP.style.color=dNet>=0?'#10b981':'#ef4444'; }
+    // Real tab
+    const elRW=document.getElementById('mfxWonReal'); if(elRW) elRW.textContent=rWon;
+    const elRL=document.getElementById('mfxLostReal'); if(elRL) elRL.textContent=rLost;
+    const elRR=document.getElementById('mfxWinRateReal'); if(elRR) elRR.textContent=mfxRateStr(rWon,rLost);
+    const elRP=document.getElementById('mfxPnLReal');
+    if(elRP){ elRP.textContent=mfxPnlStr(rNet,rTotal>0); elRP.style.color=rNet>=0?'#10b981':'#ef4444'; }
 
     /* keep market selector in sync with active symbol */
     const mktSel = document.getElementById('mfxMarketSel');
@@ -5716,6 +5867,34 @@ try {
     if(riseEl) riseEl.textContent=lRise;
     if(fallEl) fallEl.textContent=lFall;
   }
+
+  /* ── contract type change: show/hide tick-duration bar ───────── */
+  let mfxOuDur = 3; // default 3 ticks for Only Ups/Only Downs
+  window.mfxOnContractTypeChange = function(){
+    const ct = (document.getElementById('mfxContractType')||{}).value||'CALL_PUT';
+    const wrap = document.getElementById('mfxOuDurWrap');
+    if(wrap) wrap.style.display = ct==='UPORDOWN' ? 'block' : 'none';
+    refreshBot(); // update button labels
+  };
+  window.mfxSetOuDur = function(n){
+    mfxOuDur = n;
+    [2,3,4,5].forEach(d=>{
+      const btn = document.getElementById('mfxOuDur'+d);
+      if(btn) btn.classList.toggle('active', d===n);
+    });
+  };
+
+  /* ── P/L tab switching (Demo / Real / All) ───────────────────── */
+  let mfxPlTab = 'demo';
+  window.mfxShowPlTab = function(tab){
+    mfxPlTab = tab;
+    ['demo','real','all'].forEach(t=>{
+      const panel = document.getElementById('mfxPl'+t[0].toUpperCase()+t.slice(1));
+      const btn = document.querySelector('.mfx-acct-pl-tab[onclick*="\''+t+'\'"]');
+      if(panel) panel.classList.toggle('visible', t===tab);
+      if(btn) btn.classList.toggle('active', t===tab);
+    });
+  };
 
   /* ── quick-trade from the bot ────────────────────────────────── */
   window.mfxQuickTrade = function(dir){
@@ -5787,12 +5966,12 @@ try {
     };
     // ONETOUCH / NOTOUCH (Only Ups / Only Downs) use a single barrier
     if(ctype==='ONETOUCH'||ctype==='NOTOUCH'){
-      // For Only Ups: set barrier above current price; Only Downs: below
+      // Every single tick must move in the chosen direction — use the selected tick count
       const curPrice = tks[tks.length-1].price;
       msg.barrier = ctype==='ONETOUCH'
         ? '+' + (rng*1.5).toFixed(dec)   // relative barrier above
         : '-' + (rng*1.5).toFixed(dec);  // relative barrier below
-      msg.duration = 10; // slightly longer for barrier contracts
+      msg.duration = mfxOuDur; // uses the 2/3/4/5 tick selector
     } else {
       // EXPIRYRANGE / EXPIRYMISS: high + low barriers
       msg.high_barrier = (hi+(rng*0.5)).toFixed(dec);
