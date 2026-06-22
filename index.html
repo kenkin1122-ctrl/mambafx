@@ -5931,9 +5931,13 @@ try {
 
   /* ── quick-trade from the bot ────────────────────────────────── */
   window.mfxQuickTrade = function(dir){
-    if(!window.gridWs||window.gridWs.readyState!==1||!window.gridAuthed){
+    // gridWs and gridAuthed are let-declared in the main script — accessible
+    // by name from any script on the same page, but NOT via window.gridWs
+    // (let at top-level doesn't attach to window, unlike var).
+    if(typeof gridWs==='undefined'||!gridWs||gridWs.readyState!==1||!gridAuthed){
       alert('Connect on the Trading Grid page first.'); return;
     }
+    console.log('[MambaFX Bot] trade initiated — ws ready:', gridWs.readyState, 'authed:', gridAuthed);
     const ct = (document.getElementById('mfxContractType')||{}).value||'CALL_PUT';
     if(ct==='CALL_PUT'||ct==='CALL_PUT_H'){
       // Rise/Fall and Higher/Lower: CALL (rise) or PUT (fall)
@@ -5962,7 +5966,7 @@ try {
   // (the contract is evaluated tick-by-tick, not just at expiry), which
   // is why the payout is ~30× higher — the probability is 0.5^N per tick.
   function mfxSendOuProposal(contractType, dur){
-    if(!window.gridWs||window.gridWs.readyState!==1) return;
+    if(typeof gridWs==='undefined'||!gridWs||gridWs.readyState!==1) return;
     const stake = mfxGetStake();
     const reqId = (typeof gridReqId!=='undefined'?++gridReqId:Date.now());
     const proposalMsg = {
@@ -6014,10 +6018,10 @@ try {
             if(buy) console.log('[MambaFX Bot] Only Ups/Downs contract opened:',buy.contract_id);
           };
         }
-        window.gridWs.send(JSON.stringify(buyMsg));
+        gridWs.send(JSON.stringify(buyMsg));
       };
     }
-    window.gridWs.send(JSON.stringify(proposalMsg));
+    gridWs.send(JSON.stringify(proposalMsg));
   }
 
   /* ── auto-run ────────────────────────────────────────────────── */
@@ -6033,7 +6037,7 @@ try {
 
   /* ── digit proposal helper ───────────────────────────────────── */
   function mfxSendDigitProposal(ctype, barrier){
-    if(!window.gridWs||window.gridWs.readyState!==1) return;
+    if(typeof gridWs==="undefined"||!gridWs||gridWs.readyState!==1) return;
     const stake = mfxGetStake();
     const reqId = (typeof gridReqId!=='undefined'?++gridReqId:Date.now());
     const msg = {
@@ -6049,15 +6053,15 @@ try {
         if(typeof gridPending!=='undefined') gridPending[buyReqId]=(buy,buyErr)=>{
           if(!buyErr&&buy) console.log('[MambaFX Bot] digit contract:',buy.contract_id);
         };
-        window.gridWs.send(JSON.stringify({buy:proposal.id,price:proposal.ask_price,req_id:buyReqId}));
+        gridWs.send(JSON.stringify({buy:proposal.id,price:proposal.ask_price,req_id:buyReqId}));
       };
     }
-    window.gridWs.send(JSON.stringify(msg));
+    gridWs.send(JSON.stringify(msg));
   }
 
   /* ── barrier proposal helper (Stay Between / Goes Out) ──────── */
   function mfxSendBarrierProposal(ctype){
-    if(!window.gridWs||window.gridWs.readyState!==1) return;
+    if(typeof gridWs==="undefined"||!gridWs||gridWs.readyState!==1) return;
     const tks = typeof ticks!=='undefined'?ticks:[];
     if(tks.length<5) return;
     const prices = tks.slice(-20).map(t=>t.price);
@@ -6081,10 +6085,10 @@ try {
           if(buyErr) console.warn('[MambaFX Bot] barrier buy error:', buyErr.message);
           else if(buy) console.log('[MambaFX Bot] barrier contract:',buy.contract_id);
         };
-        window.gridWs.send(JSON.stringify({buy:proposal.id,price:proposal.ask_price,req_id:buyReqId}));
+        gridWs.send(JSON.stringify({buy:proposal.id,price:proposal.ask_price,req_id:buyReqId}));
       };
     }
-    window.gridWs.send(JSON.stringify(msg));
+    gridWs.send(JSON.stringify(msg));
   }
 
   /* ── signal flash + auto-run hook ────────────────────────────── */
