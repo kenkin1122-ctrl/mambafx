@@ -4926,5 +4926,368 @@ try {
   console.error("Boot failed:", err);
 }
 </script>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     MAMBA FX FLOATING BOT — Deriv-style overlay widget
+     • Draggable across the entire viewport (all pages)
+     • Double-click header to minimise/restore
+     • Position stored in sessionStorage so it persists across page tabs
+     • Reads live globals: lastPrice, runDir, runLen, upSignals,
+       downSignals, SYMBOL, MARKETS, gridAuthed, gridBalance,
+       gridCurrency, gridLoginId, gridIsVirtual, gridTrades, digTrades
+     ══════════════════════════════════════════════════════════════════ -->
+<style>
+/* ── bot shell ──────────────────────────────────────────────────── */
+#mfxBot{
+  position:fixed;z-index:9999;width:300px;
+  background:#0e131e;border:1px solid #1c2334;border-radius:16px;
+  box-shadow:0 8px 40px rgba(0,0,0,.7),0 0 0 1px rgba(86,182,255,.08);
+  font-family:'IBM Plex Mono',monospace;font-size:12px;color:#e6ebf5;
+  user-select:none;transition:box-shadow .2s;
+  /* default position — bottom-right; JS overrides from sessionStorage */
+  bottom:24px;right:24px;top:auto;left:auto;
+}
+#mfxBot.dragging{ box-shadow:0 16px 60px rgba(0,0,0,.9),0 0 0 1.5px rgba(86,182,255,.25); }
+/* ── header ─────────────────────────────────────────────────────── */
+#mfxBotHead{
+  display:flex;align-items:center;gap:8px;
+  padding:11px 14px;border-radius:16px 16px 0 0;
+  background:linear-gradient(135deg,#111827,#0d1420);
+  border-bottom:1px solid #1c2334;cursor:grab;
+}
+#mfxBotHead:active{ cursor:grabbing; }
+.mfx-logo{ font-size:14px;font-weight:800;letter-spacing:.04em;
+  background:linear-gradient(90deg,#56b6ff,#16e08b);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent; }
+.mfx-title{ font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:#475569;flex:1; }
+.mfx-conn{display:flex;align-items:center;gap:5px;font-size:9.5px;
+  color:#475569;padding:3px 8px;border-radius:999px;
+  background:#080b12;border:1px solid #1c2334;}
+.mfx-conn .d{width:7px;height:7px;border-radius:50%;background:#475569;flex-shrink:0;}
+.mfx-conn .d.on{background:#16e08b;box-shadow:0 0 6px rgba(22,224,139,.5);}
+.mfx-conn .d.off{background:#ff4d5e;}
+.mfx-min{width:22px;height:22px;border-radius:6px;border:1px solid #1c2334;
+  background:#131c2e;cursor:pointer;display:flex;align-items:center;
+  justify-content:center;font-size:11px;color:#475569;
+  transition:background .15s,color .15s;flex-shrink:0;}
+.mfx-min:hover{background:#1c2a42;color:#e6ebf5;}
+/* ── body ───────────────────────────────────────────────────────── */
+#mfxBotBody{ padding:12px 14px 14px; }
+#mfxBot.minimised #mfxBotBody{ display:none; }
+#mfxBot.minimised{ border-radius:16px; width:168px; }
+#mfxBot.minimised #mfxBotHead{ border-bottom:none;border-radius:16px; }
+/* ── price row ──────────────────────────────────────────────────── */
+.mfx-price-row{display:flex;align-items:baseline;gap:8px;margin-bottom:10px;}
+#mfxPrice{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;
+  letter-spacing:-.01em;color:#e6ebf5;}
+#mfxMarket{font-size:9px;letter-spacing:.1em;text-transform:uppercase;
+  color:#475569;margin-left:auto;}
+/* ── run bar ────────────────────────────────────────────────────── */
+.mfx-run-wrap{margin-bottom:10px;}
+.mfx-run-label{font-size:9px;letter-spacing:.1em;text-transform:uppercase;
+  color:#475569;margin-bottom:5px;}
+.mfx-run-track{height:6px;background:#131c2e;border-radius:3px;overflow:hidden;
+  border:1px solid #1c2334;}
+.mfx-run-fill{height:100%;border-radius:3px;width:0%;
+  transition:width .25s,background .25s;}
+#mfxRunText{font-size:11px;font-weight:700;margin-top:4px;}
+/* ── stat grid ──────────────────────────────────────────────────── */
+.mfx-stats{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:10px;}
+.mfx-stat{background:#080b12;border:1px solid #1c2334;border-radius:10px;
+  padding:8px 10px;}
+.mfx-stat .lab{font-size:8.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:#475569;margin-bottom:4px;}
+.mfx-stat .val{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;}
+.mfx-stat .val.up{color:#16e08b;}
+.mfx-stat .val.dn{color:#ff4d5e;}
+.mfx-stat .val.acc{color:#56b6ff;}
+/* ── account row ─────────────────────────────────────────────────── */
+.mfx-acct{background:#080b12;border:1px solid #1c2334;border-radius:10px;
+  padding:8px 10px;margin-bottom:10px;display:flex;align-items:center;gap:8px;}
+.mfx-acct .acct-id{font-size:11px;font-weight:700;color:#56b6ff;flex:1;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.mfx-acct .acct-bal{font-size:12px;font-weight:800;color:#16e08b;
+  font-variant-numeric:tabular-nums;}
+.mfx-acct .acct-type{font-size:8px;letter-spacing:.1em;text-transform:uppercase;
+  color:#475569;padding:2px 6px;border-radius:4px;border:1px solid #1c2334;
+  background:#131c2e;white-space:nowrap;}
+/* ── last trade row ──────────────────────────────────────────────── */
+.mfx-last{background:#080b12;border:1px solid #1c2334;border-radius:10px;
+  padding:8px 10px;margin-bottom:10px;}
+.mfx-last .lab{font-size:8.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:#475569;margin-bottom:4px;}
+.mfx-last-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.mfx-trade-dir{font-size:9px;font-weight:700;padding:2px 7px;border-radius:5px;}
+.mfx-trade-dir.up{background:rgba(22,224,139,.15);color:#16e08b;}
+.mfx-trade-dir.dn{background:rgba(255,77,94,.15);color:#ff4d5e;}
+.mfx-trade-status{font-size:10px;color:#475569;margin-left:auto;}
+.mfx-trade-pnl{font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;}
+.mfx-trade-pnl.pos{color:#16e08b;}
+.mfx-trade-pnl.neg{color:#ff4d5e;}
+/* ── quick-trade buttons ─────────────────────────────────────────── */
+.mfx-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.mfx-btn{font-family:inherit;font-size:11px;font-weight:700;
+  padding:9px 0;border-radius:10px;border:1px solid;cursor:pointer;
+  letter-spacing:.02em;transition:all .15s;text-align:center;}
+.mfx-btn:disabled{opacity:.35;cursor:not-allowed;}
+.mfx-btn.rise{background:rgba(22,224,139,.12);border-color:#16e08b;
+  color:#16e08b;}
+.mfx-btn.rise:hover:not(:disabled){background:rgba(22,224,139,.22);}
+.mfx-btn.fall{background:rgba(255,77,94,.12);border-color:#ff4d5e;
+  color:#ff4d5e;}
+.mfx-btn.fall:hover:not(:disabled){background:rgba(255,77,94,.22);}
+/* ── signal flash ────────────────────────────────────────────────── */
+@keyframes mfxFlash{0%{opacity:1}50%{opacity:.3}100%{opacity:1}}
+.mfx-flash{ animation:mfxFlash .4s 3; }
+/* ── drag hint tooltip ───────────────────────────────────────────── */
+.mfx-hint{font-size:8.5px;color:#2a3650;text-align:center;margin-top:8px;
+  letter-spacing:.06em;}
+</style>
+
+<!-- Bot markup -->
+<div id="mfxBot">
+  <div id="mfxBotHead">
+    <span class="mfx-logo">M</span>
+    <span class="mfx-title">Mamba FX Bot</span>
+    <span class="mfx-conn"><span id="mfxDot" class="d"></span><span id="mfxConnLbl">offline</span></span>
+    <div class="mfx-min" id="mfxMinBtn" title="Double-click header or click to minimise">⟨⟩</div>
+  </div>
+  <div id="mfxBotBody">
+    <!-- Price -->
+    <div class="mfx-price-row">
+      <span id="mfxPrice">—</span>
+      <span id="mfxMarket">—</span>
+    </div>
+    <!-- Run progress bar -->
+    <div class="mfx-run-wrap">
+      <div class="mfx-run-label">5-tick run progress</div>
+      <div class="mfx-run-track"><div id="mfxRunFill" class="mfx-run-fill"></div></div>
+      <div id="mfxRunText" style="color:#475569">— no active run</div>
+    </div>
+    <!-- Stats -->
+    <div class="mfx-stats">
+      <div class="mfx-stat">
+        <div class="lab">Rise signals</div>
+        <div id="mfxUp" class="val up">0</div>
+      </div>
+      <div class="mfx-stat">
+        <div class="lab">Fall signals</div>
+        <div id="mfxDn" class="val dn">0</div>
+      </div>
+      <div class="mfx-stat">
+        <div class="lab">Ticks seen</div>
+        <div id="mfxTicks" class="val acc">0</div>
+      </div>
+      <div class="mfx-stat">
+        <div class="lab">Session P/L</div>
+        <div id="mfxPnL" class="val">—</div>
+      </div>
+    </div>
+    <!-- Account -->
+    <div class="mfx-acct" id="mfxAcctRow" style="display:none">
+      <span id="mfxAcctId" class="acct-id">—</span>
+      <span id="mfxAcctBal" class="acct-bal">—</span>
+      <span id="mfxAcctType" class="acct-type">—</span>
+    </div>
+    <!-- Last trade -->
+    <div class="mfx-last" id="mfxLastTradeRow" style="display:none">
+      <div class="lab">Last trade</div>
+      <div class="mfx-last-row">
+        <span id="mfxLastDir" class="mfx-trade-dir">—</span>
+        <span id="mfxLastContract" style="font-size:10px;color:#475569">—</span>
+        <span id="mfxLastStatus" class="mfx-trade-status">—</span>
+        <span id="mfxLastPnL" class="mfx-trade-pnl">—</span>
+      </div>
+    </div>
+    <!-- Quick-trade -->
+    <div class="mfx-btns">
+      <button class="mfx-btn rise" id="mfxRiseBtn" onclick="mfxQuickTrade(1)" disabled>▲ RISE</button>
+      <button class="mfx-btn fall" id="mfxFallBtn" onclick="mfxQuickTrade(-1)" disabled>▼ FALL</button>
+    </div>
+    <div class="mfx-hint">drag to move · double-click to minimise</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const bot    = document.getElementById('mfxBot');
+  const head   = document.getElementById('mfxBotHead');
+  const minBtn = document.getElementById('mfxMinBtn');
+  const STORE  = 'mfxBotState_v1';
+
+  /* ── position persistence ────────────────────────────────────── */
+  function savePos(){
+    try{ sessionStorage.setItem(STORE, JSON.stringify({
+      x: bot.style.left, y: bot.style.top,
+      min: bot.classList.contains('minimised')
+    })); }catch(_){}
+  }
+  function loadPos(){
+    try{
+      const s = JSON.parse(sessionStorage.getItem(STORE)||'null');
+      if(!s) return;
+      if(s.x){ bot.style.left=s.x; bot.style.right='auto'; }
+      if(s.y){ bot.style.top=s.y;  bot.style.bottom='auto'; }
+      if(s.min) setMin(true);
+    }catch(_){}
+  }
+
+  /* ── minimise / restore ──────────────────────────────────────── */
+  function setMin(on){
+    bot.classList.toggle('minimised', on);
+    minBtn.textContent = on ? '▣' : '⟨⟩';
+    minBtn.title = on ? 'Restore' : 'Double-click header or click to minimise';
+    savePos();
+  }
+  minBtn.addEventListener('click', e=>{ e.stopPropagation(); setMin(!bot.classList.contains('minimised')); });
+  head.addEventListener('dblclick', ()=> setMin(!bot.classList.contains('minimised')));
+
+  /* ── drag ────────────────────────────────────────────────────── */
+  let dragging=false, ox=0, oy=0;
+  head.addEventListener('mousedown', e=>{
+    if(e.target===minBtn) return;
+    dragging=true; ox=e.clientX-bot.offsetLeft; oy=e.clientY-bot.offsetTop;
+    bot.style.left=bot.offsetLeft+'px'; bot.style.top=bot.offsetTop+'px';
+    bot.style.right='auto'; bot.style.bottom='auto';
+    bot.classList.add('dragging');
+  });
+  document.addEventListener('mousemove', e=>{
+    if(!dragging) return;
+    const x=Math.max(0,Math.min(e.clientX-ox, window.innerWidth-bot.offsetWidth));
+    const y=Math.max(0,Math.min(e.clientY-oy, window.innerHeight-bot.offsetHeight));
+    bot.style.left=x+'px'; bot.style.top=y+'px';
+  });
+  document.addEventListener('mouseup', ()=>{ if(!dragging)return; dragging=false; bot.classList.remove('dragging'); savePos(); });
+
+  /* touch drag */
+  head.addEventListener('touchstart', e=>{
+    if(e.target===minBtn) return;
+    const t=e.touches[0];
+    dragging=true; ox=t.clientX-bot.offsetLeft; oy=t.clientY-bot.offsetTop;
+    bot.style.left=bot.offsetLeft+'px'; bot.style.top=bot.offsetTop+'px';
+    bot.style.right='auto'; bot.style.bottom='auto';
+  },{passive:true});
+  document.addEventListener('touchmove', e=>{
+    if(!dragging) return;
+    const t=e.touches[0];
+    const x=Math.max(0,Math.min(t.clientX-ox, window.innerWidth-bot.offsetWidth));
+    const y=Math.max(0,Math.min(t.clientY-oy, window.innerHeight-bot.offsetHeight));
+    bot.style.left=x+'px'; bot.style.top=y+'px';
+  },{passive:true});
+  document.addEventListener('touchend', ()=>{ if(!dragging)return; dragging=false; savePos(); });
+
+  /* ── live data refresh (every tick, ~250 ms) ─────────────────── */
+  function fmt(v,d){ return (v==null||isNaN(v)) ? '—' : Number(v).toFixed(d??2); }
+  function fmtPnl(v){ if(v==null||isNaN(v))return{t:'—',c:''}; return{t:(v>=0?'+':'')+v.toFixed(2),c:v>=0?'pos':'neg'}; }
+
+  function refreshBot(){
+    /* price */
+    const price = typeof lastPrice!=='undefined'?lastPrice:null;
+    const el_price = document.getElementById('mfxPrice');
+    const prev = el_price._prev;
+    el_price.textContent = price!=null?fmt(price,typeof decimals!=='undefined'?decimals:2):'—';
+    if(prev!=null&&price!=null&&price!==prev){
+      el_price.style.color = price>prev?'#16e08b':price<prev?'#ff4d5e':'#e6ebf5';
+    }
+    el_price._prev = price;
+
+    /* market */
+    const sym = typeof SYMBOL!=='undefined'?SYMBOL:'';
+    const mktName = (typeof MARKETS!=='undefined'&&MARKETS[sym])||sym||'—';
+    // abbreviate long names
+    const shortName = mktName.replace('Volatility ','V').replace('(1s)','1s').replace('(','').replace(')','');
+    document.getElementById('mfxMarket').textContent = shortName;
+
+    /* run bar */
+    const rLen = typeof runLen!=='undefined'?runLen:0;
+    const rDir = typeof runDir!=='undefined'?runDir:0;
+    const rMax = typeof RUN_LENGTH!=='undefined'?RUN_LENGTH:5;
+    const pct  = Math.min(100, rLen/rMax*100);
+    const fill = document.getElementById('mfxRunFill');
+    fill.style.width = pct+'%';
+    fill.style.background = rDir===1?'#16e08b':rDir===-1?'#ff4d5e':'#56b6ff';
+    const runText = document.getElementById('mfxRunText');
+    if(rLen>0){
+      runText.textContent = `${rDir===1?'▲ RISE':'▼ FALL'} · ${rLen} / ${rMax} ticks`;
+      runText.style.color = rDir===1?'#16e08b':'#ff4d5e';
+    } else {
+      runText.textContent = '— no active run'; runText.style.color='#475569';
+    }
+
+    /* stats */
+    const up  = typeof upSignals!=='undefined'?upSignals:0;
+    const dn  = typeof downSignals!=='undefined'?downSignals:0;
+    const tc  = typeof tickCount!=='undefined'?tickCount:(typeof ticks!=='undefined'?ticks.length:0);
+    document.getElementById('mfxUp').textContent    = up;
+    document.getElementById('mfxDn').textContent    = dn;
+    document.getElementById('mfxTicks').textContent = tc;
+
+    /* session P/L from gridTrades + digTrades */
+    let net=0, any=false;
+    const trades = [...(typeof gridTrades!=='undefined'?gridTrades:[]),
+                    ...(typeof digTrades!=='undefined'?digTrades:[])];
+    trades.forEach(t=>{ if(t.pnl!=null&&(t.status==='won'||t.status==='lost')){ net+=t.pnl; any=true; } });
+    const pnlEl = document.getElementById('mfxPnL');
+    if(any){ const p=fmtPnl(net); pnlEl.textContent=p.t; pnlEl.className='val '+(net>=0?'up':'dn'); }
+    else { pnlEl.textContent='—'; pnlEl.className='val'; }
+
+    /* connection */
+    const authed = typeof gridAuthed!=='undefined'&&gridAuthed;
+    const dot = document.getElementById('mfxDot');
+    dot.className = 'd'+(authed?' on':typeof gridConnecting!=='undefined'&&gridConnecting?'':' off');
+    document.getElementById('mfxConnLbl').textContent = authed?'live':typeof gridConnecting!=='undefined'&&gridConnecting?'…':'offline';
+
+    /* account row */
+    const acctRow = document.getElementById('mfxAcctRow');
+    if(authed&&typeof gridLoginId!=='undefined'&&gridLoginId){
+      acctRow.style.display='flex';
+      document.getElementById('mfxAcctId').textContent  = gridLoginId;
+      const bal = typeof gridBalance!=='undefined'&&gridBalance!=null?gridBalance.toFixed(2)+' '+(typeof gridCurrency!=='undefined'?gridCurrency:''):'—';
+      document.getElementById('mfxAcctBal').textContent = bal;
+      document.getElementById('mfxAcctType').textContent= typeof gridIsVirtual!=='undefined'?(gridIsVirtual?'DEMO':'REAL'):'—';
+    } else { acctRow.style.display='none'; }
+
+    /* last trade */
+    const lastTradeRow = document.getElementById('mfxLastTradeRow');
+    if(trades.length){
+      const t = trades[0];
+      lastTradeRow.style.display='block';
+      const dirEl=document.getElementById('mfxLastDir');
+      dirEl.textContent  = t.dir===1?'RISE ▲':'FALL ▼';
+      dirEl.className    = 'mfx-trade-dir '+(t.dir===1?'up':'dn');
+      document.getElementById('mfxLastContract').textContent = t.contractType||t.digit!=null?('Digit '+t.digit):'—';
+      document.getElementById('mfxLastStatus').textContent   = t.status||'—';
+      const tp=fmtPnl(t.pnl);
+      const pEl=document.getElementById('mfxLastPnL');
+      pEl.textContent=tp.t; pEl.className='mfx-trade-pnl '+(tp.c||'');
+    } else { lastTradeRow.style.display='none'; }
+
+    /* quick-trade buttons */
+    const canTrade = authed&&typeof gridWs!=='undefined'&&gridWs&&gridWs.readyState===1;
+    document.getElementById('mfxRiseBtn').disabled=!canTrade;
+    document.getElementById('mfxFallBtn').disabled=!canTrade;
+  }
+
+  /* ── quick-trade from the bot ────────────────────────────────── */
+  window.mfxQuickTrade = function(dir){
+    if(typeof gridPlaceTrade==='function') gridPlaceTrade(dir,'bot');
+  };
+
+  /* ── signal flash when a run fires ──────────────────────────── */
+  const _origOnSignalFired = window.onSignalFired;
+  window.onSignalFired = function(dir, price, epoch){
+    const fill = document.getElementById('mfxRunFill');
+    fill.classList.add('mfx-flash');
+    fill.addEventListener('animationend', ()=>fill.classList.remove('mfx-flash'),{once:true});
+    if(typeof _origOnSignalFired==='function') _origOnSignalFired(dir,price,epoch);
+  };
+
+  /* ── init ────────────────────────────────────────────────────── */
+  loadPos();
+  setInterval(refreshBot, 300);
+  refreshBot();
+})();
+</script>
 </body>
 </html>
