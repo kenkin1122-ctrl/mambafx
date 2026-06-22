@@ -965,8 +965,22 @@ table.an-table tbody tr:last-child td{border-bottom:none}
 
     <!-- Execution panel -->
     <div class="dig-card">
-      <h2>⚡ Trade execution — Matches contracts</h2>
-      <div class="dig-sub">Places Deriv <b>Matches</b> contracts: you win if the last digit of the exit tick equals your chosen digit. Uses the same Deriv connection from the Trading Grid page. <b id="digConnStatus" style="color:var(--down)">Not connected — connect on the Trading Grid page first.</b></div>
+      <h2>⚡ Trade execution — Digits contracts</h2>
+      <div class="dig-sub">Places Deriv Digits contracts on the selected type. Uses the same Deriv connection from the Trading Grid page. <b id="digConnStatus" style="color:var(--down)">Not connected — connect on the Trading Grid page first.</b></div>
+
+      <!-- Contract type selector -->
+      <div class="gc-field" style="margin-bottom:14px">
+        <label for="digContractType">Contract type</label>
+        <select id="digContractType" onchange="digUpdateContractUI()">
+          <option value="DIGITMATCH" selected>Matches — digit equals chosen</option>
+          <option value="DIGITDIFF">Differs — digit ≠ chosen</option>
+          <option value="DIGITEVEN">Even / Odd</option>
+          <option value="DIGITOVER">Over — last digit &gt; barrier</option>
+          <option value="DIGITUNDER">Under — last digit &lt; barrier</option>
+          <option value="DIGITODD">Odd</option>
+        </select>
+      </div>
+
       <div class="dig-exec">
         <div>
           <div class="gc-row">
@@ -979,9 +993,19 @@ table.an-table tbody tr:last-child td{border-bottom:none}
               <input type="number" id="digDuration" min="1" max="10" step="1" value="5">
             </div>
           </div>
-          <div class="gc-field">
-            <label>Manual — click a digit to buy Matches</label>
+          <!-- Barrier (shown for Over/Under only) -->
+          <div class="gc-field" id="digBarrierWrap" style="display:none">
+            <label for="digBarrier">Barrier digit (0–9)</label>
+            <input type="number" id="digBarrier" min="0" max="9" step="1" value="5">
+          </div>
+          <div class="gc-field" id="digManualBtnWrap">
+            <label id="digManualBtnLabel">Manual — click a digit to buy Matches</label>
             <div class="dig-digit-btns" id="digManualBtns"></div>
+          </div>
+          <!-- Even/Odd / Higher/Lower quick buttons -->
+          <div class="gc-row" id="digEvenOddBtns" style="display:none;margin-top:6px">
+            <button class="gc-btn" id="digBtn_A" onclick="digManualTrade('A')" disabled style="font-weight:800">EVEN</button>
+            <button class="gc-btn" id="digBtn_B" onclick="digManualTrade('B')" disabled style="font-weight:800">ODD</button>
           </div>
         </div>
         <div>
@@ -1017,6 +1041,8 @@ table.an-table tbody tr:last-child td{border-bottom:none}
                 <option value="top" selected>Top-scored digit</option>
                 <option value="gap">Longest-gap digit</option>
                 <option value="cold">Coldest (lowest freq)</option>
+                <option value="even">Always EVEN</option>
+                <option value="odd">Always ODD</option>
               </select>
             </div>
           </div>
@@ -4557,6 +4583,7 @@ function digOnTick(price, epoch){
 function digPageInit(){
   digPageReady = true;
   const mn = $("digMarket"); if (mn) mn.textContent = MARKETS[SYMBOL] || SYMBOL;
+  digUpdateContractUI();
   // build manual buttons
   const btnsEl = $("digManualBtns");
   if (btnsEl && !btnsEl.childElementCount){
@@ -4694,10 +4721,40 @@ function digUpdateConnStatus(){
     el.style.color = "var(--up)";
     el.textContent = "Connected (" + (gridLoginId || "—") + ").";
     for (let d = 0; d < 10; d++){ const b = $("digBtn" + d); if (b) b.disabled = false; }
+    ["digBtn_A","digBtn_B"].forEach(id=>{ const b=$(id); if(b) b.disabled=false; });
   } else {
     el.style.color = "var(--down)";
     el.textContent = "Not connected — connect on the Trading Grid page first.";
     for (let d = 0; d < 10; d++){ const b = $("digBtn" + d); if (b) b.disabled = true; }
+    ["digBtn_A","digBtn_B"].forEach(id=>{ const b=$(id); if(b) b.disabled=true; });
+  }
+}
+
+// Show/hide UI controls depending on selected contract type
+function digUpdateContractUI(){
+  const ct = $("digContractType") ? $("digContractType").value : "DIGITMATCH";
+  const isDigit   = ["DIGITMATCH","DIGITDIFF","DIGITOVER","DIGITUNDER"].includes(ct);
+  const isEvenOdd = ["DIGITEVEN","DIGITODD"].includes(ct);
+  const needBarrier = ["DIGITOVER","DIGITUNDER"].includes(ct);
+  // digit buttons: shown for Matches/Differs/Over/Under
+  const wrap = $("digManualBtnWrap");
+  if(wrap) wrap.style.display = isDigit ? "" : "none";
+  // even/odd buttons
+  const eoWrap = $("digEvenOddBtns");
+  if(eoWrap) eoWrap.style.display = isEvenOdd ? "grid" : "none";
+  // barrier input
+  const bWrap = $("digBarrierWrap");
+  if(bWrap) bWrap.style.display = needBarrier ? "" : "none";
+  // update even/odd button labels
+  const bA = $("digBtn_A"), bB = $("digBtn_B");
+  if(ct === "DIGITEVEN"){ if(bA) bA.textContent="EVEN"; if(bB) bB.textContent="ODD"; }
+  if(ct === "DIGITODD"){ if(bA) bA.textContent="ODD"; if(bB) bB.textContent="EVEN"; }
+  // update label
+  const lbl = $("digManualBtnLabel"); if(lbl){
+    const map={DIGITMATCH:"Click a digit to buy Matches",DIGITDIFF:"Click a digit to buy Differs",
+      DIGITOVER:"Click a digit as the barrier (win if last digit > barrier)",
+      DIGITUNDER:"Click a digit as the barrier (win if last digit < barrier)"};
+    lbl.textContent = map[ct] || "";
   }
 }
 
@@ -4714,16 +4771,26 @@ function digPlaceTrade(digit, source){
   const stake = Math.max(0.35, parseFloat($("digStake").value || "0.50"));
   const duration = Math.max(1, parseInt($("digDuration").value || "5", 10));
   const proposalReqId = ++gridReqId;
+  const ct = $("digContractType") ? $("digContractType").value : "DIGITMATCH";
 
+  // Build proposal — contract type determines whether barrier is needed
   const proposalMsg = {
     proposal: 1, req_id: proposalReqId,
-    amount: stake, basis: "stake", contract_type: "DIGITMATCH",
+    amount: stake, basis: "stake", contract_type: ct,
     currency: gridCurrency, duration, duration_unit: "t",
-    underlying_symbol: SYMBOL, barrier: String(digit),
+    underlying_symbol: SYMBOL,
   };
+  // Matches/Differs/Over/Under need a barrier digit
+  if (["DIGITMATCH","DIGITDIFF","DIGITOVER","DIGITUNDER"].includes(ct)){
+    // digit may be a number 0-9 or a special string ('even','odd','A','B')
+    const barrierVal = (digit === "A" || digit === "B") ? null : digit;
+    if (barrierVal !== null && barrierVal !== undefined) proposalMsg.barrier = String(barrierVal);
+  }
+  // Even/Odd contract types don't need a barrier at all
 
   const row = {
     id: "pending-" + proposalReqId, digit, source, stake,
+    contractType: ct,
     currency: gridCurrency, time: Math.floor(Date.now()/1000),
     entry: null, exit: null, exitDigit: null, payout: null, pnl: null, status: "pricing…",
   };
@@ -4842,6 +4909,13 @@ function digCheckAuto(){
   // pick digit based on mode
   const mode = $("digAutoMode") ? $("digAutoMode").value : "top";
   let pickDigit;
+  const ct = $("digContractType") ? $("digContractType").value : "DIGITMATCH";
+  // Even/Odd contract types don't need a specific digit — use special markers
+  if (mode === "even"){ digPlaceTrade("A", "auto"); digAutoLastAt = tickIdx; digAutoCount++; gridSet("digAutoStatus",`Fired EVEN · auto-trades: ${digAutoCount}`); return; }
+  if (mode === "odd"){ digPlaceTrade("B", "auto"); digAutoLastAt = tickIdx; digAutoCount++; gridSet("digAutoStatus",`Fired ODD · auto-trades: ${digAutoCount}`); return; }
+  if (ct === "DIGITEVEN"){ digPlaceTrade("A", "auto"); digAutoLastAt = tickIdx; digAutoCount++; gridSet("digAutoStatus",`Fired EVEN · auto-trades: ${digAutoCount}`); return; }
+  if (ct === "DIGITODD"){ digPlaceTrade("B", "auto"); digAutoLastAt = tickIdx; digAutoCount++; gridSet("digAutoStatus",`Fired ODD · auto-trades: ${digAutoCount}`); return; }
+
   if (mode === "gap"){
     pickDigit = gaps.indexOf(Math.max(...gaps));
   } else if (mode === "cold"){
@@ -4940,108 +5014,116 @@ try {
 /* ── bot shell ──────────────────────────────────────────────────── */
 #mfxBot{
   position:fixed;z-index:9999;width:300px;
-  background:#0e131e;border:1px solid #1c2334;border-radius:16px;
-  box-shadow:0 8px 40px rgba(0,0,0,.7),0 0 0 1px rgba(86,182,255,.08);
-  font-family:'IBM Plex Mono',monospace;font-size:12px;color:#e6ebf5;
+  background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;
+  box-shadow:0 8px 40px rgba(0,0,0,.15),0 0 0 1px rgba(99,102,241,.06);
+  font-family:'IBM Plex Mono',monospace;font-size:12px;color:#1e293b;
   user-select:none;transition:box-shadow .2s;
-  /* default position — bottom-right; JS overrides from sessionStorage */
   bottom:24px;right:24px;top:auto;left:auto;
 }
-#mfxBot.dragging{ box-shadow:0 16px 60px rgba(0,0,0,.9),0 0 0 1.5px rgba(86,182,255,.25); }
+#mfxBot.dragging{ box-shadow:0 16px 60px rgba(0,0,0,.22),0 0 0 1.5px rgba(99,102,241,.2); }
 /* ── header ─────────────────────────────────────────────────────── */
 #mfxBotHead{
   display:flex;align-items:center;gap:8px;
   padding:11px 14px;border-radius:16px 16px 0 0;
-  background:linear-gradient(135deg,#111827,#0d1420);
-  border-bottom:1px solid #1c2334;cursor:grab;
+  background:linear-gradient(135deg,#1e293b,#0f172a);
+  border-bottom:1px solid #e2e8f0;cursor:grab;
 }
 #mfxBotHead:active{ cursor:grabbing; }
 .mfx-logo{ font-size:14px;font-weight:800;letter-spacing:.04em;
-  background:linear-gradient(90deg,#56b6ff,#16e08b);
+  background:linear-gradient(90deg,#38bdf8,#34d399);
   -webkit-background-clip:text;-webkit-text-fill-color:transparent; }
 .mfx-title{ font-size:10px;letter-spacing:.12em;text-transform:uppercase;
-  color:#475569;flex:1; }
+  color:#94a3b8;flex:1; }
 .mfx-conn{display:flex;align-items:center;gap:5px;font-size:9.5px;
-  color:#475569;padding:3px 8px;border-radius:999px;
-  background:#080b12;border:1px solid #1c2334;}
-.mfx-conn .d{width:7px;height:7px;border-radius:50%;background:#475569;flex-shrink:0;}
-.mfx-conn .d.on{background:#16e08b;box-shadow:0 0 6px rgba(22,224,139,.5);}
-.mfx-conn .d.off{background:#ff4d5e;}
-.mfx-min{width:22px;height:22px;border-radius:6px;border:1px solid #1c2334;
-  background:#131c2e;cursor:pointer;display:flex;align-items:center;
-  justify-content:center;font-size:11px;color:#475569;
+  color:#94a3b8;padding:3px 8px;border-radius:999px;
+  background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);}
+.mfx-conn .d{width:7px;height:7px;border-radius:50%;background:#64748b;flex-shrink:0;}
+.mfx-conn .d.on{background:#34d399;box-shadow:0 0 6px rgba(52,211,153,.6);}
+.mfx-conn .d.off{background:#f87171;}
+.mfx-min{width:22px;height:22px;border-radius:6px;border:1px solid rgba(255,255,255,.15);
+  background:rgba(255,255,255,.08);cursor:pointer;display:flex;align-items:center;
+  justify-content:center;font-size:11px;color:#94a3b8;
   transition:background .15s,color .15s;flex-shrink:0;}
-.mfx-min:hover{background:#1c2a42;color:#e6ebf5;}
+.mfx-min:hover{background:rgba(255,255,255,.18);color:#fff;}
 /* ── body ───────────────────────────────────────────────────────── */
-#mfxBotBody{ padding:12px 14px 14px; }
+#mfxBotBody{ padding:12px 14px 14px;background:#ffffff;border-radius:0 0 16px 16px; }
 #mfxBot.minimised #mfxBotBody{ display:none; }
 #mfxBot.minimised{ border-radius:16px; width:168px; }
 #mfxBot.minimised #mfxBotHead{ border-bottom:none;border-radius:16px; }
 /* ── price row ──────────────────────────────────────────────────── */
 .mfx-price-row{display:flex;align-items:baseline;gap:8px;margin-bottom:10px;}
 #mfxPrice{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;
-  letter-spacing:-.01em;color:#e6ebf5;}
+  letter-spacing:-.01em;color:#1e293b;}
 #mfxMarket{font-size:9px;letter-spacing:.1em;text-transform:uppercase;
-  color:#475569;margin-left:auto;}
+  color:#94a3b8;margin-left:auto;}
 /* ── run bar ────────────────────────────────────────────────────── */
 .mfx-run-wrap{margin-bottom:10px;}
 .mfx-run-label{font-size:9px;letter-spacing:.1em;text-transform:uppercase;
-  color:#475569;margin-bottom:5px;}
-.mfx-run-track{height:6px;background:#131c2e;border-radius:3px;overflow:hidden;
-  border:1px solid #1c2334;}
+  color:#94a3b8;margin-bottom:5px;}
+.mfx-run-track{height:6px;background:#f1f5f9;border-radius:3px;overflow:hidden;
+  border:1px solid #e2e8f0;}
 .mfx-run-fill{height:100%;border-radius:3px;width:0%;
   transition:width .25s,background .25s;}
 #mfxRunText{font-size:11px;font-weight:700;margin-top:4px;}
 /* ── stat grid ──────────────────────────────────────────────────── */
 .mfx-stats{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:10px;}
-.mfx-stat{background:#080b12;border:1px solid #1c2334;border-radius:10px;
+.mfx-stat{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
   padding:8px 10px;}
 .mfx-stat .lab{font-size:8.5px;letter-spacing:.1em;text-transform:uppercase;
-  color:#475569;margin-bottom:4px;}
-.mfx-stat .val{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;}
-.mfx-stat .val.up{color:#16e08b;}
-.mfx-stat .val.dn{color:#ff4d5e;}
-.mfx-stat .val.acc{color:#56b6ff;}
+  color:#94a3b8;margin-bottom:4px;}
+.mfx-stat .val{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;color:#1e293b;}
+.mfx-stat .val.up{color:#10b981;}
+.mfx-stat .val.dn{color:#ef4444;}
+.mfx-stat .val.acc{color:#3b82f6;}
 /* ── account row ─────────────────────────────────────────────────── */
-.mfx-acct{background:#080b12;border:1px solid #1c2334;border-radius:10px;
+.mfx-acct{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
   padding:8px 10px;margin-bottom:10px;display:flex;align-items:center;gap:8px;}
-.mfx-acct .acct-id{font-size:11px;font-weight:700;color:#56b6ff;flex:1;
+.mfx-acct .acct-id{font-size:11px;font-weight:700;color:#3b82f6;flex:1;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.mfx-acct .acct-bal{font-size:12px;font-weight:800;color:#16e08b;
+.mfx-acct .acct-bal{font-size:12px;font-weight:800;color:#10b981;
   font-variant-numeric:tabular-nums;}
 .mfx-acct .acct-type{font-size:8px;letter-spacing:.1em;text-transform:uppercase;
-  color:#475569;padding:2px 6px;border-radius:4px;border:1px solid #1c2334;
-  background:#131c2e;white-space:nowrap;}
+  color:#64748b;padding:2px 6px;border-radius:4px;border:1px solid #e2e8f0;
+  background:#fff;white-space:nowrap;}
 /* ── last trade row ──────────────────────────────────────────────── */
-.mfx-last{background:#080b12;border:1px solid #1c2334;border-radius:10px;
+.mfx-last{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
   padding:8px 10px;margin-bottom:10px;}
 .mfx-last .lab{font-size:8.5px;letter-spacing:.1em;text-transform:uppercase;
-  color:#475569;margin-bottom:4px;}
+  color:#94a3b8;margin-bottom:4px;}
 .mfx-last-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
 .mfx-trade-dir{font-size:9px;font-weight:700;padding:2px 7px;border-radius:5px;}
-.mfx-trade-dir.up{background:rgba(22,224,139,.15);color:#16e08b;}
-.mfx-trade-dir.dn{background:rgba(255,77,94,.15);color:#ff4d5e;}
-.mfx-trade-status{font-size:10px;color:#475569;margin-left:auto;}
+.mfx-trade-dir.up{background:rgba(16,185,129,.12);color:#059669;}
+.mfx-trade-dir.dn{background:rgba(239,68,68,.12);color:#dc2626;}
+.mfx-trade-status{font-size:10px;color:#94a3b8;margin-left:auto;}
 .mfx-trade-pnl{font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;}
-.mfx-trade-pnl.pos{color:#16e08b;}
-.mfx-trade-pnl.neg{color:#ff4d5e;}
-/* ── quick-trade buttons ─────────────────────────────────────────── */
+.mfx-trade-pnl.pos{color:#10b981;}
+.mfx-trade-pnl.neg{color:#ef4444;}
+/* ── quick-trade + run button ────────────────────────────────────── */
 .mfx-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
 .mfx-btn{font-family:inherit;font-size:11px;font-weight:700;
-  padding:9px 0;border-radius:10px;border:1px solid;cursor:pointer;
+  padding:9px 0;border-radius:10px;border:1.5px solid;cursor:pointer;
   letter-spacing:.02em;transition:all .15s;text-align:center;}
 .mfx-btn:disabled{opacity:.35;cursor:not-allowed;}
-.mfx-btn.rise{background:rgba(22,224,139,.12);border-color:#16e08b;
-  color:#16e08b;}
-.mfx-btn.rise:hover:not(:disabled){background:rgba(22,224,139,.22);}
-.mfx-btn.fall{background:rgba(255,77,94,.12);border-color:#ff4d5e;
-  color:#ff4d5e;}
-.mfx-btn.fall:hover:not(:disabled){background:rgba(255,77,94,.22);}
+.mfx-btn.rise{background:rgba(16,185,129,.08);border-color:#10b981;color:#059669;}
+.mfx-btn.rise:hover:not(:disabled){background:rgba(16,185,129,.18);}
+.mfx-btn.fall{background:rgba(239,68,68,.08);border-color:#ef4444;color:#dc2626;}
+.mfx-btn.fall:hover:not(:disabled){background:rgba(239,68,68,.18);}
+.mfx-run-btn{margin-top:8px;width:100%;font-family:inherit;font-size:11px;font-weight:800;
+  padding:10px 0;border-radius:10px;cursor:pointer;letter-spacing:.04em;
+  border:1.5px solid #6366f1;transition:all .2s;text-align:center;
+  background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;
+  box-shadow:0 2px 8px rgba(99,102,241,.3);}
+.mfx-run-btn:hover:not(:disabled){background:linear-gradient(135deg,#4f46e5,#7c3aed);
+  box-shadow:0 4px 14px rgba(99,102,241,.45);}
+.mfx-run-btn:disabled{opacity:.4;cursor:not-allowed;box-shadow:none;}
+.mfx-run-btn.running{background:linear-gradient(135deg,#ef4444,#f97316);
+  border-color:#ef4444;box-shadow:0 2px 8px rgba(239,68,68,.35);}
+.mfx-run-btn.running:hover:not(:disabled){background:linear-gradient(135deg,#dc2626,#ea580c);}
 /* ── signal flash ────────────────────────────────────────────────── */
 @keyframes mfxFlash{0%{opacity:1}50%{opacity:.3}100%{opacity:1}}
 .mfx-flash{ animation:mfxFlash .4s 3; }
-/* ── drag hint tooltip ───────────────────────────────────────────── */
-.mfx-hint{font-size:8.5px;color:#2a3650;text-align:center;margin-top:8px;
+/* ── drag hint ───────────────────────────────────────────────────── */
+.mfx-hint{font-size:8.5px;color:#cbd5e1;text-align:center;margin-top:8px;
   letter-spacing:.06em;}
 </style>
 
@@ -5101,10 +5183,22 @@ try {
       </div>
     </div>
     <!-- Quick-trade -->
+    <!-- Quick-trade -->
+    <div style="margin-bottom:8px">
+      <select id="mfxContractType" style="width:100%;font-family:inherit;font-size:11px;font-weight:600;padding:7px 10px;border-radius:8px;border:1.5px solid #e2e8f0;background:#f8fafc;color:#1e293b;outline:none;cursor:pointer;">
+        <option value="CALL_PUT">Rise / Fall</option>
+        <option value="DIGITEVEN">Even / Odd</option>
+        <option value="DIGITOVER">Over / Under</option>
+        <option value="CALL_PUT_H">Higher / Lower</option>
+        <option value="EXPIRYRANGE">Stay Between</option>
+        <option value="UPORDOWN">Only Ups / Only Downs</option>
+      </select>
+    </div>
     <div class="mfx-btns">
       <button class="mfx-btn rise" id="mfxRiseBtn" onclick="mfxQuickTrade(1)" disabled>▲ RISE</button>
       <button class="mfx-btn fall" id="mfxFallBtn" onclick="mfxQuickTrade(-1)" disabled>▼ FALL</button>
     </div>
+    <button class="mfx-run-btn" id="mfxRunBtn" onclick="mfxToggleRun()" disabled>▶ RUN AUTO</button>
     <div class="mfx-hint">drag to move · double-click to minimise</div>
   </div>
 </div>
@@ -5267,19 +5361,125 @@ try {
     const canTrade = authed&&typeof gridWs!=='undefined'&&gridWs&&gridWs.readyState===1;
     document.getElementById('mfxRiseBtn').disabled=!canTrade;
     document.getElementById('mfxFallBtn').disabled=!canTrade;
+    const runBtn = document.getElementById('mfxRunBtn');
+    if(runBtn){ runBtn.disabled=!canTrade; }
+    /* sync button labels with selected contract type */
+    const ctSel = document.getElementById('mfxContractType');
+    const ct = ctSel ? ctSel.value : 'CALL_PUT';
+    const riseEl = document.getElementById('mfxRiseBtn');
+    const fallEl = document.getElementById('mfxFallBtn');
+    const labels = {
+      CALL_PUT:    ['▲ RISE','▼ FALL'],
+      DIGITEVEN:   ['EVEN','ODD'],
+      DIGITOVER:   ['OVER','UNDER'],
+      CALL_PUT_H:  ['▲ HIGHER','▼ LOWER'],
+      EXPIRYRANGE: ['STAY IN','GOES OUT'],
+      UPORDOWN:    ['ONLY UPS','ONLY DOWNS'],
+    };
+    const [lRise, lFall] = labels[ct]||labels.CALL_PUT;
+    if(riseEl) riseEl.textContent=lRise;
+    if(fallEl) fallEl.textContent=lFall;
   }
 
   /* ── quick-trade from the bot ────────────────────────────────── */
   window.mfxQuickTrade = function(dir){
-    if(typeof gridPlaceTrade==='function') gridPlaceTrade(dir,'bot');
+    const ct = (document.getElementById('mfxContractType')||{}).value||'CALL_PUT';
+    if(ct==='CALL_PUT'||ct==='CALL_PUT_H'){
+      if(typeof gridPlaceTrade==='function') gridPlaceTrade(dir,'bot');
+    } else if(ct==='DIGITEVEN'){
+      if(typeof digPlaceTrade==='function') digPlaceTrade(dir===1?'even':'odd','bot');
+      else if(typeof gridWs!=='undefined'&&gridWs) mfxSendDigitProposal(dir===1?'DIGITEVEN':'DIGITODD',null);
+    } else if(ct==='DIGITOVER'){
+      if(typeof gridWs!=='undefined'&&gridWs) mfxSendDigitProposal(dir===1?'DIGITOVER':'DIGITUNDER',5);
+    } else if(ct==='EXPIRYRANGE'){
+      if(typeof gridWs!=='undefined'&&gridWs) mfxSendBarrierProposal(dir===1?'EXPIRYRANGE':'EXPIRYMISS');
+    } else if(ct==='UPORDOWN'){
+      if(typeof gridWs!=='undefined'&&gridWs) mfxSendBarrierProposal(dir===1?'ONETOUCH':'NOTOUCH');
+    } else {
+      if(typeof gridPlaceTrade==='function') gridPlaceTrade(dir,'bot');
+    }
   };
 
-  /* ── signal flash when a run fires ──────────────────────────── */
+  /* ── auto-run: fires a trade every time a 5-tick signal triggers ─ */
+  let mfxRunning = false;
+  window.mfxToggleRun = function(){
+    mfxRunning = !mfxRunning;
+    const btn = document.getElementById('mfxRunBtn');
+    if(btn){
+      btn.textContent = mfxRunning ? '⏹ STOP AUTO' : '▶ RUN AUTO';
+      btn.classList.toggle('running', mfxRunning);
+    }
+  };
+
+  /* generic proposal+buy helpers for contract types that don't go through gridPlaceTrade */
+  function mfxSendDigitProposal(ctype, barrier){
+    if(!window.gridWs||window.gridWs.readyState!==1) return;
+    const stake = 0.35;
+    const reqId = (typeof gridReqId!=='undefined' ? ++gridReqId : Date.now());
+    const msg = {
+      proposal:1, req_id:reqId, amount:stake, basis:'stake',
+      contract_type:ctype, currency:typeof gridCurrency!=='undefined'?gridCurrency:'USD',
+      duration:5, duration_unit:'t', underlying_symbol:typeof SYMBOL!=='undefined'?SYMBOL:'1HZ100V',
+    };
+    if(barrier!==null&&barrier!==undefined) msg.barrier=String(barrier);
+    if(typeof gridPending!=='undefined'){
+      gridPending[reqId]=(proposal,err)=>{
+        if(err||!proposal||!proposal.id) return;
+        const buyReqId = (typeof gridReqId!=='undefined' ? ++gridReqId : Date.now()+1);
+        if(typeof gridPending!=='undefined') gridPending[buyReqId]=(buy,buyErr)=>{
+          if(!buyErr&&buy) console.log('[MambaFX Bot] contract opened:',buy.contract_id);
+        };
+        window.gridWs.send(JSON.stringify({buy:proposal.id,price:proposal.ask_price,req_id:buyReqId}));
+      };
+    }
+    window.gridWs.send(JSON.stringify(msg));
+  }
+  function mfxSendBarrierProposal(ctype){
+    /* Stay Between / Only Ups / Only Downs need high/low barriers computed from recent ticks */
+    if(!window.gridWs||window.gridWs.readyState!==1) return;
+    const tks = typeof ticks!=='undefined'?ticks:[];
+    if(tks.length<5) return;
+    const prices = tks.slice(-20).map(t=>t.price);
+    const hi = Math.max(...prices), lo = Math.min(...prices);
+    const mid = ((hi+lo)/2);
+    const dec = typeof decimals!=='undefined'?decimals:2;
+    const highBarrier = (hi+(hi-lo)*0.5).toFixed(dec);
+    const lowBarrier  = (lo-(hi-lo)*0.5).toFixed(dec);
+    const stake=0.35;
+    const reqId=(typeof gridReqId!=='undefined'?++gridReqId:Date.now());
+    const msg={
+      proposal:1,req_id:reqId,amount:stake,basis:'stake',
+      contract_type:ctype,currency:typeof gridCurrency!=='undefined'?gridCurrency:'USD',
+      duration:5,duration_unit:'t',underlying_symbol:typeof SYMBOL!=='undefined'?SYMBOL:'1HZ100V',
+      high_barrier:highBarrier,low_barrier:lowBarrier,
+    };
+    if(typeof gridPending!=='undefined'){
+      gridPending[reqId]=(proposal,err)=>{
+        if(err||!proposal||!proposal.id) return;
+        const buyReqId=(typeof gridReqId!=='undefined'?++gridReqId:Date.now()+1);
+        if(typeof gridPending!=='undefined') gridPending[buyReqId]=(buy,buyErr)=>{
+          if(!buyErr&&buy) console.log('[MambaFX Bot] contract opened:',buy.contract_id);
+        };
+        window.gridWs.send(JSON.stringify({buy:proposal.id,price:proposal.ask_price,req_id:buyReqId}));
+      };
+    }
+    window.gridWs.send(JSON.stringify(msg));
+  }
+
+  /* ── signal flash + auto-run hook ────────────────────────────── */
   const _origOnSignalFired = window.onSignalFired;
   window.onSignalFired = function(dir, price, epoch){
     const fill = document.getElementById('mfxRunFill');
-    fill.classList.add('mfx-flash');
-    fill.addEventListener('animationend', ()=>fill.classList.remove('mfx-flash'),{once:true});
+    if(fill){ fill.classList.add('mfx-flash'); fill.addEventListener('animationend',()=>fill.classList.remove('mfx-flash'),{once:true}); }
+    /* auto-run: fire a trade in the signal direction when running */
+    if(mfxRunning){
+      const ct=(document.getElementById('mfxContractType')||{}).value||'CALL_PUT';
+      if(ct==='CALL_PUT'||ct==='CALL_PUT_H'){
+        if(typeof gridPlaceTrade==='function') gridPlaceTrade(dir,'bot-auto');
+      } else {
+        window.mfxQuickTrade(dir);
+      }
+    }
     if(typeof _origOnSignalFired==='function') _origOnSignalFired(dir,price,epoch);
   };
 
