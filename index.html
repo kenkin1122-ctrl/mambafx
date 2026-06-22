@@ -5640,19 +5640,43 @@ try {
         <option value="UPORDOWN">Only Ups / Only Downs</option>
       </select>
     </div>
+
+    <!-- Stake editor — always visible -->
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+      <span style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:#64748b;white-space:nowrap">Stake</span>
+      <input id="mfxStakeInput" type="number" min="0.35" step="0.01" value="1.00"
+        style="flex:1;font-family:inherit;font-size:12px;font-weight:700;padding:6px 9px;
+               border-radius:8px;border:1.5px solid #e2e8f0;background:#f8fafc;
+               color:#1e293b;outline:none;min-width:0">
+      <span style="font-size:10px;color:#94a3b8;white-space:nowrap" id="mfxStakeCcy">USD</span>
+    </div>
+
     <!-- Only Ups/Only Downs: tick duration selector (2–5) — hidden for other types -->
     <div id="mfxOuDurWrap" style="display:none;margin-bottom:8px">
-      <div style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:#64748b;margin-bottom:5px">Number of consecutive ticks</div>
+      <div style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:#64748b;margin-bottom:5px">Ticks (every tick must move the same way)</div>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
         <button class="mfx-ou-dur-btn" id="mfxOuDur2" onclick="mfxSetOuDur(2)">2</button>
-        <button class="mfx-ou-dur-btn active" id="mfxOuDur3" onclick="mfxSetOuDur(3)">3</button>
+        <button class="mfx-ou-dur-btn" id="mfxOuDur3" onclick="mfxSetOuDur(3)">3</button>
         <button class="mfx-ou-dur-btn" id="mfxOuDur4" onclick="mfxSetOuDur(4)">4</button>
-        <button class="mfx-ou-dur-btn" id="mfxOuDur5" onclick="mfxSetOuDur(5)">5</button>
+        <button class="mfx-ou-dur-btn active" id="mfxOuDur5" onclick="mfxSetOuDur(5)">5</button>
       </div>
-      <div style="font-size:8.5px;color:#94a3b8;margin-top:5px;line-height:1.5">
-        Only Ups: <b>every</b> single tick must rise. Only Downs: <b>every</b> single tick must fall. Payout is significantly higher than Rise/Fall because the condition is much stricter.
+      <!-- Payout preview — filled after proposal response -->
+      <div id="mfxPayoutPreview" style="display:none;margin-top:8px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:8px 10px">
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:#15803d;font-weight:700;margin-bottom:2px">
+          <span>Payout</span><span id="mfxPreviewPayout">—</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:#15803d">
+          <span>Net profit</span><span id="mfxPreviewProfit">—</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:#64748b;margin-top:2px">
+          <span>Return</span><span id="mfxPreviewReturn">—</span>
+        </div>
+      </div>
+      <div style="font-size:8px;color:#94a3b8;margin-top:5px;line-height:1.5">
+        Only Ups (CALL): <b>every</b> tick must rise. Only Downs (PUT): <b>every</b> tick must fall. Payout is ~30× higher than Rise/Fall due to the strict consecutive requirement.
       </div>
     </div>
+
     <div class="mfx-btns">
       <button class="mfx-btn rise" id="mfxRiseBtn" onclick="mfxQuickTrade(1)" disabled>▲ RISE</button>
       <button class="mfx-btn fall" id="mfxFallBtn" onclick="mfxQuickTrade(-1)" disabled>▼ FALL</button>
@@ -5818,6 +5842,8 @@ try {
     const dot = document.getElementById('mfxDot');
     dot.className = 'd'+(authed?' on':typeof gridConnecting!=='undefined'&&gridConnecting?'':' off');
     document.getElementById('mfxConnLbl').textContent = authed?'live':typeof gridConnecting!=='undefined'&&gridConnecting?'…':'offline';
+    const ccyEl = document.getElementById('mfxStakeCcy');
+    if(ccyEl && typeof gridCurrency!=='undefined') ccyEl.textContent = gridCurrency;
 
     /* account row */
     const acctRow = document.getElementById('mfxAcctRow');
@@ -5869,7 +5895,7 @@ try {
   }
 
   /* ── contract type change: show/hide tick-duration bar ───────── */
-  let mfxOuDur = 3; // default 3 ticks for Only Ups/Only Downs
+  let mfxOuDur = 5; // default 5 ticks — matches Deriv's default for Only Ups/Only Downs
   window.mfxOnContractTypeChange = function(){
     const ct = (document.getElementById('mfxContractType')||{}).value||'CALL_PUT';
     const wrap = document.getElementById('mfxOuDurWrap');
@@ -5897,25 +5923,104 @@ try {
   };
 
   /* ── quick-trade from the bot ────────────────────────────────── */
+  /* ── stake helper ────────────────────────────────────────────── */
+  function mfxGetStake(){
+    const el = document.getElementById('mfxStakeInput');
+    return Math.max(0.35, parseFloat((el&&el.value)||'1'));
+  }
+
+  /* ── quick-trade from the bot ────────────────────────────────── */
   window.mfxQuickTrade = function(dir){
+    if(!window.gridWs||window.gridWs.readyState!==1||!window.gridAuthed){
+      alert('Connect on the Trading Grid page first.'); return;
+    }
     const ct = (document.getElementById('mfxContractType')||{}).value||'CALL_PUT';
     if(ct==='CALL_PUT'||ct==='CALL_PUT_H'){
+      // Rise/Fall and Higher/Lower: CALL (rise) or PUT (fall)
       if(typeof gridPlaceTrade==='function') gridPlaceTrade(dir,'bot');
+    } else if(ct==='UPORDOWN'){
+      // Only Ups = CALL, Only Downs = PUT — same contract type as Rise/Fall
+      // but with mfxOuDur ticks: EVERY tick must move the same way
+      // Uses the proposal→buy flow directly; no barrier needed
+      mfxSendOuProposal(dir===1?'CALL':'PUT', mfxOuDur);
     } else if(ct==='DIGITEVEN'){
       if(typeof digPlaceTrade==='function') digPlaceTrade(dir===1?'even':'odd','bot');
-      else if(typeof gridWs!=='undefined'&&gridWs) mfxSendDigitProposal(dir===1?'DIGITEVEN':'DIGITODD',null);
+      else mfxSendDigitProposal(dir===1?'DIGITEVEN':'DIGITODD',null);
     } else if(ct==='DIGITOVER'){
-      if(typeof gridWs!=='undefined'&&gridWs) mfxSendDigitProposal(dir===1?'DIGITOVER':'DIGITUNDER',5);
+      mfxSendDigitProposal(dir===1?'DIGITOVER':'DIGITUNDER',5);
     } else if(ct==='EXPIRYRANGE'){
-      if(typeof gridWs!=='undefined'&&gridWs) mfxSendBarrierProposal(dir===1?'EXPIRYRANGE':'EXPIRYMISS');
-    } else if(ct==='UPORDOWN'){
-      if(typeof gridWs!=='undefined'&&gridWs) mfxSendBarrierProposal(dir===1?'ONETOUCH':'NOTOUCH');
+      mfxSendBarrierProposal(dir===1?'EXPIRYRANGE':'EXPIRYMISS');
     } else {
       if(typeof gridPlaceTrade==='function') gridPlaceTrade(dir,'bot');
     }
   };
 
-  /* ── auto-run: fires a trade every time a 5-tick signal triggers ─ */
+  /* ── Only Ups / Only Downs: CALL or PUT, no barrier ─────────── */
+  // Per Deriv's confirmed API: Only Ups = CALL, Only Downs = PUT.
+  // Same contract types as Rise/Fall. The difference is that for Only
+  // Ups/Only Downs the payout requires EVERY tick to move the right way
+  // (the contract is evaluated tick-by-tick, not just at expiry), which
+  // is why the payout is ~30× higher — the probability is 0.5^N per tick.
+  function mfxSendOuProposal(contractType, dur){
+    if(!window.gridWs||window.gridWs.readyState!==1) return;
+    const stake = mfxGetStake();
+    const reqId = (typeof gridReqId!=='undefined'?++gridReqId:Date.now());
+    const proposalMsg = {
+      proposal: 1,
+      req_id: reqId,
+      amount: stake,
+      basis: 'stake',
+      contract_type: contractType,           // 'CALL' or 'PUT'
+      currency: typeof gridCurrency!=='undefined'?gridCurrency:'USD',
+      duration: dur,                         // 2, 3, 4, or 5 ticks
+      duration_unit: 't',
+      underlying_symbol: typeof SYMBOL!=='undefined'?SYMBOL:'1HZ100V',
+    };
+
+    if(typeof gridPending!=='undefined'){
+      gridPending[reqId] = (proposal, err) => {
+        if(err){
+          console.warn('[MambaFX Bot] OU proposal error:', err.message, err.details);
+          return;
+        }
+        if(!proposal||!proposal.id||proposal.ask_price==null){
+          console.warn('[MambaFX Bot] OU proposal missing id/ask_price');
+          return;
+        }
+
+        // Show payout preview panel
+        const payout = Number(proposal.payout||0);
+        const askPrice = Number(proposal.ask_price||stake);
+        const profit = payout - askPrice;
+        const ret = askPrice>0 ? (profit/askPrice*100).toFixed(1) : '—';
+        const prev = document.getElementById('mfxPayoutPreview');
+        const ccy = typeof gridCurrency!=='undefined'?gridCurrency:'USD';
+        if(prev){
+          document.getElementById('mfxPreviewPayout').textContent  = payout.toFixed(2)+' '+ccy;
+          document.getElementById('mfxPreviewProfit').textContent  = (profit>=0?'+':'')+profit.toFixed(2)+' '+ccy;
+          document.getElementById('mfxPreviewReturn').textContent  = ret+'%';
+          prev.style.display = 'block';
+        }
+
+        // Buy immediately with the exact proposal.id and ask_price
+        const buyReqId = (typeof gridReqId!=='undefined'?++gridReqId:Date.now()+1);
+        const buyMsg = { buy: proposal.id, price: proposal.ask_price, req_id: buyReqId };
+        if(typeof gridPending!=='undefined'){
+          gridPending[buyReqId] = (buy, buyErr) => {
+            if(buyErr){
+              console.warn('[MambaFX Bot] OU buy error:', buyErr.message, buyErr.details);
+              return;
+            }
+            if(buy) console.log('[MambaFX Bot] Only Ups/Downs contract opened:',buy.contract_id);
+          };
+        }
+        window.gridWs.send(JSON.stringify(buyMsg));
+      };
+    }
+    window.gridWs.send(JSON.stringify(proposalMsg));
+  }
+
+  /* ── auto-run ────────────────────────────────────────────────── */
   let mfxRunning = false;
   window.mfxToggleRun = function(){
     mfxRunning = !mfxRunning;
@@ -5926,11 +6031,11 @@ try {
     }
   };
 
-  /* generic proposal+buy helpers for contract types that don't go through gridPlaceTrade */
+  /* ── digit proposal helper ───────────────────────────────────── */
   function mfxSendDigitProposal(ctype, barrier){
     if(!window.gridWs||window.gridWs.readyState!==1) return;
-    const stake = 0.35;
-    const reqId = (typeof gridReqId!=='undefined' ? ++gridReqId : Date.now());
+    const stake = mfxGetStake();
+    const reqId = (typeof gridReqId!=='undefined'?++gridReqId:Date.now());
     const msg = {
       proposal:1, req_id:reqId, amount:stake, basis:'stake',
       contract_type:ctype, currency:typeof gridCurrency!=='undefined'?gridCurrency:'USD',
@@ -5940,51 +6045,41 @@ try {
     if(typeof gridPending!=='undefined'){
       gridPending[reqId]=(proposal,err)=>{
         if(err||!proposal||!proposal.id) return;
-        const buyReqId = (typeof gridReqId!=='undefined' ? ++gridReqId : Date.now()+1);
+        const buyReqId=(typeof gridReqId!=='undefined'?++gridReqId:Date.now()+1);
         if(typeof gridPending!=='undefined') gridPending[buyReqId]=(buy,buyErr)=>{
-          if(!buyErr&&buy) console.log('[MambaFX Bot] contract opened:',buy.contract_id);
+          if(!buyErr&&buy) console.log('[MambaFX Bot] digit contract:',buy.contract_id);
         };
         window.gridWs.send(JSON.stringify({buy:proposal.id,price:proposal.ask_price,req_id:buyReqId}));
       };
     }
     window.gridWs.send(JSON.stringify(msg));
   }
+
+  /* ── barrier proposal helper (Stay Between / Goes Out) ──────── */
   function mfxSendBarrierProposal(ctype){
     if(!window.gridWs||window.gridWs.readyState!==1) return;
     const tks = typeof ticks!=='undefined'?ticks:[];
     if(tks.length<5) return;
     const prices = tks.slice(-20).map(t=>t.price);
-    const hi = Math.max(...prices), lo = Math.min(...prices);
-    const dec = typeof decimals!=='undefined'?decimals:2;
-    const rng = hi - lo;
-    const stake=0.35;
+    const hi=Math.max(...prices), lo=Math.min(...prices);
+    const dec=typeof decimals!=='undefined'?decimals:2;
+    const rng=hi-lo;
+    const stake=mfxGetStake();
     const reqId=(typeof gridReqId!=='undefined'?++gridReqId:Date.now());
     const msg={
       proposal:1,req_id:reqId,amount:stake,basis:'stake',
       contract_type:ctype,currency:typeof gridCurrency!=='undefined'?gridCurrency:'USD',
       duration:5,duration_unit:'t',underlying_symbol:typeof SYMBOL!=='undefined'?SYMBOL:'1HZ100V',
+      high_barrier:(hi+(rng*0.5)).toFixed(dec),
+      low_barrier:(lo-(rng*0.5)).toFixed(dec),
     };
-    // ONETOUCH / NOTOUCH (Only Ups / Only Downs) use a single barrier
-    if(ctype==='ONETOUCH'||ctype==='NOTOUCH'){
-      // Every single tick must move in the chosen direction — use the selected tick count
-      const curPrice = tks[tks.length-1].price;
-      msg.barrier = ctype==='ONETOUCH'
-        ? '+' + (rng*1.5).toFixed(dec)   // relative barrier above
-        : '-' + (rng*1.5).toFixed(dec);  // relative barrier below
-      msg.duration = mfxOuDur; // uses the 2/3/4/5 tick selector
-    } else {
-      // EXPIRYRANGE / EXPIRYMISS: high + low barriers
-      msg.high_barrier = (hi+(rng*0.5)).toFixed(dec);
-      msg.low_barrier  = (lo-(rng*0.5)).toFixed(dec);
-    }
     if(typeof gridPending!=='undefined'){
       gridPending[reqId]=(proposal,err)=>{
-        if(err){ console.warn('[MambaFX Bot] proposal error:', err.message); return; }
-        if(!proposal||!proposal.id) return;
+        if(err||!proposal||!proposal.id) return;
         const buyReqId=(typeof gridReqId!=='undefined'?++gridReqId:Date.now()+1);
         if(typeof gridPending!=='undefined') gridPending[buyReqId]=(buy,buyErr)=>{
-          if(buyErr) console.warn('[MambaFX Bot] buy error:', buyErr.message);
-          else if(buy) console.log('[MambaFX Bot] contract opened:',buy.contract_id);
+          if(buyErr) console.warn('[MambaFX Bot] barrier buy error:', buyErr.message);
+          else if(buy) console.log('[MambaFX Bot] barrier contract:',buy.contract_id);
         };
         window.gridWs.send(JSON.stringify({buy:proposal.id,price:proposal.ask_price,req_id:buyReqId}));
       };
