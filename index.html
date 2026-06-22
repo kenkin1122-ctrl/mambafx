@@ -402,6 +402,11 @@ table.an-table tbody tr:last-child td{border-bottom:none}
 .dig-auto-bar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:#0a0e17;border:1px solid var(--line);border-radius:12px;padding:13px 16px;margin-top:6px}
 .dig-pred-legend{font-size:10px;color:var(--muted);margin-top:8px;line-height:1.55}
 .dig-pred-legend b{color:var(--text)}
+/* ── Indicator Charts (Page 8) ───────────────────────────────────── */
+.ind-chart{width:100%;height:160px;display:block;background:#080b12;
+  border-radius:8px;border:1px solid var(--line);overflow:visible;}
+.chart-axis-y{font-size:9px;color:var(--muted);display:flex;justify-content:space-between;
+  margin-top:3px;padding:0 2px;font-variant-numeric:tabular-nums;}
 </style>
 </head>
 <body>
@@ -428,6 +433,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button id="navAnalysis" onclick="showPage('analysis')">🔬 Analysis Tool</button>
     <button id="navDigits" onclick="showPage('digits')">🎲 Digits Bot</button>
     <button id="navDiag" onclick="showPage('diag')">🩺 API Diagnostics</button>
+    <button id="navCharts" onclick="showPage('charts')">📈 Indicator Charts</button>
   </nav>
 
   <!-- ============ PAGE 1: LIVE TRACKER ============ -->
@@ -865,7 +871,15 @@ table.an-table tbody tr:last-child td{border-bottom:none}
         <label for="anRunPick">Run</label>
         <select id="anRunPick" onchange="renderAnalysis()"></select>
       </div>
-      <button class="gc-btn" onclick="exportAnalysisCsv()">⬇ CSV</button>
+      <button class="gc-btn" onclick="exportFullDayCsv()" title="Download full session: every tick, last digit, run direction, signal log">⬇ CSV (full day)</button>
+    </div>
+
+    <!-- Digit circles tracker -->
+    <div class="dig-card" style="margin-bottom:16px">
+      <h2 style="font-size:13px;font-weight:700;margin-bottom:6px">🔢 Last-digit tracker
+        <span style="font-size:10px;font-weight:400;color:var(--muted);margin-left:8px">Green cursor = current last digit</span>
+      </h2>
+      <div id="anDigitCircles" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px"></div>
     </div>
 
     <div class="an-phase-key">
@@ -1094,6 +1108,60 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       Diagnostics run against whatever account is currently connected on the Trading Grid page. Step 4 places a real contract at minimum stake (0.35) on that account — use a demo account while testing.
     </footer>
   </div><!-- /page-diag -->
+
+  <!-- ============ PAGE 8: INDICATOR CHARTS ============ -->
+  <div id="page-charts" class="page">
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>📈 Indicator charts — live line graphs</h2>
+      <div class="gc-sub">Real-time line graphs of all four indicators computed on the live tick series. Each chart scrolls with the last <b id="chartWindowLabel">200</b> ticks. DMI/ADX shows three lines: +DI (green), −DI (red), ADX (black). <button class="gc-btn" style="margin-left:auto" onclick="chartClearHistory()">Clear history</button></div>
+      <div class="gc-row" style="gap:12px;align-items:center;flex-wrap:wrap">
+        <div class="gc-field" style="margin:0;flex:0 0 auto">
+          <label for="chartWindow">Window (ticks)</label>
+          <select id="chartWindow" onchange="chartSetWindow()" style="padding:6px 10px">
+            <option value="50">50</option>
+            <option value="100">100</option>
+            <option value="200" selected>200</option>
+            <option value="500">500</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- DMI / ADX -->
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>📐 DMI / ADX <span style="font-size:10px;font-weight:400;color:var(--muted);margin-left:8px"><span style="color:#16e08b">■ +DI</span> &nbsp; <span style="color:#ff4d5e">■ −DI</span> &nbsp; <span style="color:#e6ebf5">■ ADX</span></span>
+        <span id="chartAdxVal" style="font-size:11px;font-weight:700;color:var(--accent);margin-left:auto">—</span>
+      </h2>
+      <div class="gc-sub">+DI rising and crossing above −DI signals upward momentum; ADX &gt; 25 confirms trend strength.</div>
+      <svg id="chartDMI" class="ind-chart" viewBox="0 0 1000 160" preserveAspectRatio="none"></svg>
+      <div class="chart-axis-y" id="chartDMIAxis"></div>
+    </div>
+
+    <!-- MACD -->
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>📊 MACD (12,26,9) <span style="font-size:10px;font-weight:400;color:var(--muted);margin-left:8px"><span style="color:#56b6ff">■ MACD</span> &nbsp; <span style="color:#fbbf24">■ Signal</span> &nbsp; <span style="color:#475569">▮ Hist</span></span>
+        <span id="chartMacdVal" style="font-size:11px;font-weight:700;color:var(--accent);margin-left:auto">—</span>
+      </h2>
+      <div class="gc-sub">MACD line crossing above signal line = bullish momentum. Histogram bars show the difference (MACD − Signal).</div>
+      <svg id="chartMACD" class="ind-chart" viewBox="0 0 1000 160" preserveAspectRatio="none"></svg>
+    </div>
+
+    <!-- CCI -->
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>🎯 CCI (20) <span id="chartCciVal" style="font-size:11px;font-weight:700;margin-left:auto">—</span></h2>
+      <div class="gc-sub">Commodity Channel Index. Above +100 = overbought (look for reversal). Below −100 = oversold. Between = neutral.</div>
+      <svg id="chartCCI" class="ind-chart" viewBox="0 0 1000 160" preserveAspectRatio="none"></svg>
+    </div>
+
+    <!-- Choppiness -->
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>〰️ Choppiness Index (14) <span id="chartChopVal" style="font-size:11px;font-weight:700;margin-left:auto">—</span></h2>
+      <div class="gc-sub">≥ 61.8 = choppy/range-bound (avoid trend trades). ≤ 38.2 = strongly trending. Dashed lines mark the two thresholds.</div>
+      <svg id="chartChop" class="ind-chart" viewBox="0 0 1000 160" preserveAspectRatio="none"></svg>
+    </div>
+
+    <footer>All indicators are computed on the same live tick series as the rest of the dashboard. DMI/ADX uses a 14-period smoothed true-range calculation. MACD uses EMA(12,26) with a 9-period signal line. Charts update on every tick.</footer>
+  </div><!-- /page-charts -->
 </div>
 
 <script>
@@ -1314,6 +1382,10 @@ function handleTick(price, epoch){
   drawLiveCandles();
   engineOnTick(price, epoch, dir);
   digOnTick(price, epoch);
+  if (document.getElementById("page-analysis") &&
+      document.getElementById("page-analysis").classList.contains("active")){
+    renderAnalysisDigitCircles();
+  }
 
   // Persist the last 100 ticks (throttled: every 3rd tick, plus always on a signal)
   _saveThrottle++;
@@ -1709,7 +1781,10 @@ function recordIndicatorTick(epoch, price){
     bbLower:  b ? b.lower : null,
     bbPctB:   b ? b.pctB : null,
     bbWidth:  b ? b.bandwidth : null,
+    price,
   };
+  // feed chart history for Page 8
+  if (typeof chartPushTick === "function") chartPushTick(indSnapshot);
   const snap = makeSnap(epoch, price);
   indHistory.push(snap);
   if (indHistory.length > IND_HIST_MAX) indHistory.shift();
@@ -2291,8 +2366,8 @@ function startTfTimers(){
 }
 
 function showPage(which){
-  const pages = { live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", digits:"page-digits", diag:"page-diag" };
-  const navs  = { live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", digits:"navDigits", diag:"navDiag" };
+  const pages = { live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", digits:"page-digits", diag:"page-diag", charts:"page-charts" };
+  const navs  = { live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", digits:"navDigits", diag:"navDiag", charts:"navCharts" };
   Object.keys(pages).forEach(k => {
     document.getElementById(pages[k]).classList.toggle("active", k===which);
     const nav = document.getElementById(navs[k]); if (nav) nav.classList.toggle("active", k===which);
@@ -2311,12 +2386,16 @@ function showPage(which){
   if (which === "analysis"){
     buildAnalysisSelector();
     renderAnalysis();
+    renderAnalysisDigitCircles();
   }
   if (which === "digits"){
     digPageInit();
   }
   if (which === "diag"){
     diagUpdateConnStatus();
+  }
+  if (which === "charts"){
+    chartRenderAll();
   }
 }
 
@@ -4430,6 +4509,122 @@ function drawAnSpark(data, cols){
   svg.innerHTML = out;
 }
 
+// ── Analysis Tool: digit circles tracker ─────────────────────────────
+// Shows digits 0–9 as circles; the circle for the current last digit
+// has a green animated cursor. Updates every tick via handleTick.
+function renderAnalysisDigitCircles(){
+  const container = $("anDigitCircles");
+  if (!container) return;
+  const ld = lastPrice != null ? digLastDigit(lastPrice) : null;
+  // build circles if not already built
+  if (!container.childElementCount){
+    let h = "";
+    for (let d = 0; d < 10; d++){
+      h += `<div id="anCircle${d}" style="
+        width:36px;height:36px;border-radius:50%;display:flex;align-items:center;
+        justify-content:center;font-size:13px;font-weight:800;font-variant-numeric:tabular-nums;
+        border:2px solid var(--line);background:#0a0e17;color:var(--muted);
+        position:relative;transition:border-color .15s,background .15s,color .15s;
+        flex-shrink:0;">${d}</div>`;
+    }
+    container.innerHTML = h;
+  }
+  // update active state
+  for (let d = 0; d < 10; d++){
+    const el = $(`anCircle${d}`);
+    if (!el) continue;
+    if (d === ld){
+      el.style.borderColor = "#16e08b";
+      el.style.background  = "rgba(22,224,139,.15)";
+      el.style.color       = "#16e08b";
+      el.style.boxShadow   = "0 0 0 3px rgba(22,224,139,.25)";
+    } else {
+      el.style.borderColor = "var(--line)";
+      el.style.background  = "#0a0e17";
+      el.style.color       = "var(--muted)";
+      el.style.boxShadow   = "none";
+    }
+  }
+}
+
+// ── Full-day CSV export ───────────────────────────────────────────────
+// Exports the complete session tick-level dataset: every tick price,
+// its timestamp, the last digit, the running run direction/length, and
+// whether each tick was part of a rise or fall run (or neutral).
+// Also includes the signal log (every 5-tick run's indicator snapshot).
+function exportFullDayCsv(){
+  if (!ticks || !ticks.length){ alert("No tick data to export yet."); return; }
+  const dec = decimals;
+  const lines = [];
+
+  // ── Section 1: Tick-level dataset ────────────────────────────────
+  lines.push("# MAMBA FX — FULL SESSION TICK DATA");
+  lines.push(`# Market: ${MARKETS[SYMBOL]||SYMBOL} (${SYMBOL})`);
+  lines.push(`# Exported: ${new Date().toISOString()}`);
+  lines.push(`# Ticks in session: ${ticks.length}`);
+  lines.push("");
+  lines.push("## TICK DATA");
+  lines.push(["tick_no","epoch","datetime","price","last_digit","run_dir","run_len","in_run","signal_fired"].join(","));
+
+  // Replay the run state from signalRecords to annotate each tick
+  // (tick array is ordered oldest→newest)
+  const signalEpochs = new Set((signalRecords || []).map(r => r.epoch));
+  let rDir = 0, rLen = 0;
+  for (let i = 0; i < ticks.length; i++){
+    const t = ticks[i];
+    const price = t.price;
+    const epoch = t.epoch || 0;
+    const dt = epoch ? new Date(epoch * 1000).toISOString() : "";
+    const ld = digLastDigit(price);
+    // recompute run direction using same logic as handleTick
+    const dir = i > 0 ? (price > ticks[i-1].price ? 1 : price < ticks[i-1].price ? -1 : 0) : 0;
+    if (dir !== 0 && dir === rDir){ rLen++; }
+    else if (dir !== 0){ rDir = dir; rLen = 1; }
+    else { rDir = 0; rLen = 0; }
+    const inRun = rLen >= 2 ? (rDir === 1 ? "rise" : "fall") : "neutral";
+    const sigFired = signalEpochs.has(epoch) ? (rDir === 1 ? "RISE_SIGNAL" : "FALL_SIGNAL") : "";
+    lines.push([i+1, epoch, dt, Number(price).toFixed(dec), ld, rDir, rLen, inRun, sigFired].join(","));
+  }
+
+  // ── Section 2: Signal log ─────────────────────────────────────────
+  lines.push("");
+  lines.push("## SIGNAL LOG (5-TICK RUNS)");
+  if (!signalRecords || !signalRecords.length){
+    lines.push("# No 5-tick runs recorded this session.");
+  } else {
+    lines.push(["signal_no","epoch","datetime","direction","p1","p2","p3","p4","p5",
+      "macd","macd_signal","macd_hist","chop","cci","bb_upper","bb_mid","bb_lower","bb_pct_b"].join(","));
+    const sorted = [...signalRecords].reverse(); // oldest first
+    sorted.forEach((r, i) => {
+      const dt = r.epoch ? new Date(r.epoch*1000).toISOString() : "";
+      const prices = (r.prices||[]).map(p => p!=null?Number(p).toFixed(dec):"");
+      const dir = r.dir === 1 ? "rise" : r.dir === -1 ? "fall" : "unknown";
+      lines.push([
+        i+1, r.epoch, dt, dir,
+        prices[0]||"", prices[1]||"", prices[2]||"", prices[3]||"", prices[4]||"",
+        r.macd!=null?Number(r.macd).toFixed(5):"",
+        r.macdSig!=null?Number(r.macdSig).toFixed(5):"",
+        r.macdHist!=null?Number(r.macdHist).toFixed(5):"",
+        r.chop!=null?Number(r.chop).toFixed(2):"",
+        r.cci!=null?Number(r.cci).toFixed(2):"",
+        r.bbUpper!=null?Number(r.bbUpper).toFixed(dec):"",
+        r.bbMid!=null?Number(r.bbMid).toFixed(dec):"",
+        r.bbLower!=null?Number(r.bbLower).toFixed(dec):"",
+        r.bbPctB!=null?Number(r.bbPctB).toFixed(4):"",
+      ].join(","));
+    });
+  }
+
+  const csv = lines.join("\n");
+  const blob = new Blob([csv], { type:"text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const ts = new Date().toISOString().slice(0,10);
+  a.href = url; a.download = `mamba_fullday_${SYMBOL}_${ts}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function exportAnalysisCsv(){
   const cols = anColumns();
   const data = anResolveData();
@@ -4944,6 +5139,135 @@ window.addEventListener("error", (e) => {
   console.error("Runtime error:", e.message);
 });
 
+// =====================================================================
+// PAGE 8 — INDICATOR CHARTS
+// =====================================================================
+let chartWindow = 200;
+let chartHistory = [];
+const CHART_MAX = 1000;
+
+let _dmi = { pdm:0, ndm:0, tr:0, pdi:0, ndi:0, adx:0, prevHigh:null, prevLow:null, prevClose:null, n:0 };
+function dmiUpdate(price){
+  const h=price, l=price;
+  const d=_dmi;
+  if(d.prevClose==null){d.prevHigh=h;d.prevLow=l;d.prevClose=price;return null;}
+  const per=14;
+  const trv=Math.max(h-l,Math.abs(h-d.prevClose),Math.abs(l-d.prevClose));
+  const updm=h>d.prevHigh?Math.max(h-d.prevHigh,0):0;
+  const undm=l<d.prevLow?Math.max(d.prevLow-l,0):0;
+  const posm=updm>undm?updm:0;
+  const negm=undm>updm?undm:0;
+  const k=1-1/per;
+  d.tr=d.n<per?d.tr+trv:d.tr*k+trv;
+  d.pdm=d.n<per?d.pdm+posm:d.pdm*k+posm;
+  d.ndm=d.n<per?d.ndm+negm:d.ndm*k+negm;
+  d.n++;
+  if(d.n<per||d.tr===0){d.prevHigh=h;d.prevLow=l;d.prevClose=price;return null;}
+  d.pdi=(d.pdm/d.tr)*100;
+  d.ndi=(d.ndm/d.tr)*100;
+  const sum=d.pdi+d.ndi;
+  const dx=sum>0?Math.abs(d.pdi-d.ndi)/sum*100:0;
+  d.adx=d.n===per?dx:d.adx*k+dx*(1-k);
+  d.prevHigh=h;d.prevLow=l;d.prevClose=price;
+  return{pdi:d.pdi,ndi:d.ndi,adx:d.adx};
+}
+
+function chartPushTick(snap){
+  if(!snap) return;
+  const dmi=dmiUpdate(snap.price||lastPrice);
+  chartHistory.push({
+    macd:snap.macd, macdSig:snap.macdSig, macdHist:snap.macdHist,
+    chop:snap.chop, cci:snap.cci, price:snap.price||lastPrice,
+    pdi:dmi?dmi.pdi:null, ndi:dmi?dmi.ndi:null, adx:dmi?dmi.adx:null,
+  });
+  if(chartHistory.length>CHART_MAX) chartHistory.shift();
+  if(document.getElementById("page-charts")&&document.getElementById("page-charts").classList.contains("active"))
+    chartRenderAll();
+}
+function chartSetWindow(){
+  const s=$("chartWindow");
+  chartWindow=s?parseInt(s.value,10)||200:200;
+  const lbl=$("chartWindowLabel");if(lbl)lbl.textContent=chartWindow;
+  chartRenderAll();
+}
+function chartClearHistory(){
+  chartHistory=[];
+  Object.assign(_dmi,{pdm:0,ndm:0,tr:0,pdi:0,ndi:0,adx:0,prevHigh:null,prevLow:null,prevClose:null,n:0});
+  chartRenderAll();
+}
+function chartPolyline(pts,color,sw,dash){
+  if(!pts.length)return"";
+  const d=pts.map((p,i)=>(i===0?"M":"L")+p[0].toFixed(1)+","+p[1].toFixed(1)).join(" ");
+  const da=dash?` stroke-dasharray="${dash}"`:"";
+  return`<path d="${d}" stroke="${color}" stroke-width="${sw||1.5}" fill="none" stroke-linejoin="round" stroke-linecap="round"${da}/>`;
+}
+function chartBars(bars,posC,negC,W,H,mn,mx){
+  const rng=(mx-mn)||1, zero=H-((0-mn)/rng)*H;
+  return bars.map((v,i)=>{if(v==null)return"";
+    const x=(i/bars.length)*W, bw=Math.max(1,W/bars.length-1);
+    const y=H-((v-mn)/rng)*H, yt=Math.min(y,zero), h=Math.max(1,Math.max(y,zero)-yt);
+    return`<rect x="${x.toFixed(1)}" y="${yt.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" fill="${v>=0?posC:negC}" opacity="0.55"/>`;
+  }).join("");
+}
+function chartHline(y,W,color,dash){return`<line x1="0" y1="${y.toFixed(1)}" x2="${W}" y2="${y.toFixed(1)}" stroke="${color}" stroke-width="1" stroke-dasharray="${dash||"4,4"}" opacity="0.5"/>`;}
+function chartScale(vals,H,pad){
+  const c=vals.filter(v=>v!=null&&isFinite(v));
+  if(!c.length)return{min:0,max:1,toY:()=>H/2};
+  let mn=Math.min(...c), mx=Math.max(...c);
+  const mg=(mx-mn)*(pad||0.1);
+  mn-=mg;mx+=mg;if(mn===mx){mn-=1;mx+=1;}
+  return{min:mn,max:mx,toY:v=>H-((v-mn)/(mx-mn))*H};
+}
+function chartPoints(arr,acc,sc,W){
+  const n=arr.length, pts=[];
+  arr.forEach((d,i)=>{const v=acc(d);if(v==null||!isFinite(v))return;pts.push([(i/(n-1||1))*W,sc.toY(v)]);});
+  return pts;
+}
+function chartRenderAll(){
+  const data=chartHistory.slice(-chartWindow);
+  const W=1000,H=160;
+  if(!data.length){["chartDMI","chartMACD","chartCCI","chartChop"].forEach(id=>{const s=$(id);if(s)s.innerHTML="<text x='500' y='90' text-anchor='middle' fill='#475569' font-size='28' font-family='IBM Plex Mono'>No data yet — connect and wait for ticks</text>";});return;}
+
+  const dmiSvg=$("chartDMI");
+  if(dmiSvg){
+    const sc=chartScale([...data.map(d=>d.pdi),...data.map(d=>d.ndi),...data.map(d=>d.adx)].filter(v=>v!=null),H,0.05);
+    dmiSvg.innerHTML=chartHline(sc.toY(25),W,"#56b6ff","6,3")+
+      chartPolyline(chartPoints(data,d=>d.pdi,sc,W),"#16e08b",1.5)+
+      chartPolyline(chartPoints(data,d=>d.ndi,sc,W),"#ff4d5e",1.5)+
+      chartPolyline(chartPoints(data,d=>d.adx,sc,W),"#e6ebf5",2);
+    const last=data[data.length-1];
+    gridSet("chartAdxVal",last&&last.adx!=null?`ADX ${last.adx.toFixed(1)} · +DI ${last.pdi!=null?last.pdi.toFixed(1):"—"} · −DI ${last.ndi!=null?last.ndi.toFixed(1):"—"}`:"—");
+    const axisEl=$("chartDMIAxis");if(axisEl)axisEl.innerHTML=`<span>${sc.max.toFixed(1)}</span><span>${((sc.max+sc.min)/2).toFixed(1)}</span><span>${sc.min.toFixed(1)}</span>`;
+  }
+  const macdSvg=$("chartMACD");
+  if(macdSvg){
+    const histVals=data.map(d=>d.macdHist);
+    const sc=chartScale([...data.map(d=>d.macd),...data.map(d=>d.macdSig),...histVals].filter(v=>v!=null),H,0.08);
+    macdSvg.innerHTML=chartHline(sc.toY(0),W,"#475569","4,3")+
+      chartBars(histVals,"#16e08b55","#ff4d5e55",W,H,sc.min,sc.max)+
+      chartPolyline(chartPoints(data,d=>d.macd,sc,W),"#56b6ff",1.5)+
+      chartPolyline(chartPoints(data,d=>d.macdSig,sc,W),"#fbbf24",1.5);
+    const last=data[data.length-1];
+    gridSet("chartMacdVal",last&&last.macd!=null?`MACD ${last.macd.toFixed(3)} · Sig ${last.macdSig!=null?last.macdSig.toFixed(3):"—"} · Hist ${last.macdHist!=null?last.macdHist.toFixed(3):"—"}`:"—");
+  }
+  const cciSvg=$("chartCCI");
+  if(cciSvg){
+    const sc=chartScale([...data.map(d=>d.cci),100,-100].filter(v=>v!=null),H,0.05);
+    cciSvg.innerHTML=chartHline(sc.toY(100),W,"#16e08b")+chartHline(sc.toY(-100),W,"#ff4d5e")+chartHline(sc.toY(0),W,"#475569","4,3")+
+      chartPolyline(chartPoints(data,d=>d.cci,sc,W),"#56b6ff",1.5);
+    const last=data[data.length-1];const cv=last&&last.cci!=null?last.cci:null;
+    const el=$("chartCciVal");if(el){el.textContent=cv!=null?cv.toFixed(2):"—";el.style.color=cv!=null?(cv>100?"#16e08b":cv<-100?"#ff4d5e":"#56b6ff"):"var(--muted)";}
+  }
+  const chopSvg=$("chartChop");
+  if(chopSvg){
+    const sc=chartScale([...data.map(d=>d.chop),100,0].filter(v=>v!=null),H,0.03);
+    chopSvg.innerHTML=chartHline(sc.toY(61.8),W,"#ff4d5e")+chartHline(sc.toY(38.2),W,"#16e08b")+
+      chartPolyline(chartPoints(data,d=>d.chop,sc,W),"#fbbf24",1.5);
+    const last=data[data.length-1];const cv=last&&last.chop!=null?last.chop:null;
+    const el=$("chartChopVal");if(el){el.textContent=cv!=null?cv.toFixed(2):"—";el.style.color=cv!=null?(cv>=61.8?"#ff4d5e":cv<=38.2?"#16e08b":"#fbbf24"):"var(--muted)";}
+  }
+}
+
 try {
   // Resume the market that was open before the refresh, if any
   const savedMarket = localStorage.getItem(LAST_MARKET_KEY);
@@ -5147,19 +5471,24 @@ try {
       <div class="mfx-run-track"><div id="mfxRunFill" class="mfx-run-fill"></div></div>
       <div id="mfxRunText" style="color:#475569">— no active run</div>
     </div>
-    <!-- Stats -->
+    <!-- Market selector -->
+    <div style="margin-bottom:10px">
+      <div style="font-size:8.5px;letter-spacing:.1em;text-transform:uppercase;color:#94a3b8;margin-bottom:5px">Market</div>
+      <select id="mfxMarketSel" style="width:100%;font-family:inherit;font-size:11px;font-weight:600;padding:7px 10px;border-radius:8px;border:1.5px solid #e2e8f0;background:#f8fafc;color:#1e293b;outline:none;cursor:pointer;" onchange="mfxChangeMarket()"></select>
+    </div>
+    <!-- Stats: Won / Lost / P/L -->
     <div class="mfx-stats">
       <div class="mfx-stat">
-        <div class="lab">Rise signals</div>
-        <div id="mfxUp" class="val up">0</div>
+        <div class="lab">Won</div>
+        <div id="mfxWon" class="val up">0</div>
       </div>
       <div class="mfx-stat">
-        <div class="lab">Fall signals</div>
-        <div id="mfxDn" class="val dn">0</div>
+        <div class="lab">Lost</div>
+        <div id="mfxLost" class="val dn">0</div>
       </div>
       <div class="mfx-stat">
-        <div class="lab">Ticks seen</div>
-        <div id="mfxTicks" class="val acc">0</div>
+        <div class="lab">Win rate</div>
+        <div id="mfxWinRate" class="val acc">—</div>
       </div>
       <div class="mfx-stat">
         <div class="lab">Session P/L</div>
@@ -5309,22 +5638,29 @@ try {
       runText.textContent = '— no active run'; runText.style.color='#475569';
     }
 
-    /* stats */
-    const up  = typeof upSignals!=='undefined'?upSignals:0;
-    const dn  = typeof downSignals!=='undefined'?downSignals:0;
-    const tc  = typeof tickCount!=='undefined'?tickCount:(typeof ticks!=='undefined'?ticks.length:0);
-    document.getElementById('mfxUp').textContent    = up;
-    document.getElementById('mfxDn').textContent    = dn;
-    document.getElementById('mfxTicks').textContent = tc;
-
-    /* session P/L from gridTrades + digTrades */
-    let net=0, any=false;
+    /* stats: won / lost / win rate / P/L */
+    let net=0, won=0, lost=0;
     const trades = [...(typeof gridTrades!=='undefined'?gridTrades:[]),
                     ...(typeof digTrades!=='undefined'?digTrades:[])];
-    trades.forEach(t=>{ if(t.pnl!=null&&(t.status==='won'||t.status==='lost')){ net+=t.pnl; any=true; } });
+    trades.forEach(t=>{
+      if(t.status==='won'){ won++; if(t.pnl!=null) net+=t.pnl; }
+      if(t.status==='lost'){ lost++; if(t.pnl!=null) net+=t.pnl; }
+    });
+    document.getElementById('mfxWon').textContent  = won;
+    document.getElementById('mfxLost').textContent = lost;
+    const total = won+lost;
+    const wrEl = document.getElementById('mfxWinRate');
+    wrEl.textContent = total>0 ? Math.round(won/total*100)+'%' : '—';
+
     const pnlEl = document.getElementById('mfxPnL');
-    if(any){ const p=fmtPnl(net); pnlEl.textContent=p.t; pnlEl.className='val '+(net>=0?'up':'dn'); }
+    if(total>0){ const p=fmtPnl(net); pnlEl.textContent=p.t; pnlEl.className='val '+(net>=0?'up':'dn'); }
     else { pnlEl.textContent='—'; pnlEl.className='val'; }
+
+    /* keep market selector in sync with active symbol */
+    const mktSel = document.getElementById('mfxMarketSel');
+    if(mktSel && typeof SYMBOL!=='undefined' && mktSel.value !== SYMBOL){
+      mktSel.value = SYMBOL;
+    }
 
     /* connection */
     const authed = typeof gridAuthed!=='undefined'&&gridAuthed;
@@ -5435,30 +5771,41 @@ try {
     window.gridWs.send(JSON.stringify(msg));
   }
   function mfxSendBarrierProposal(ctype){
-    /* Stay Between / Only Ups / Only Downs need high/low barriers computed from recent ticks */
     if(!window.gridWs||window.gridWs.readyState!==1) return;
     const tks = typeof ticks!=='undefined'?ticks:[];
     if(tks.length<5) return;
     const prices = tks.slice(-20).map(t=>t.price);
     const hi = Math.max(...prices), lo = Math.min(...prices);
-    const mid = ((hi+lo)/2);
     const dec = typeof decimals!=='undefined'?decimals:2;
-    const highBarrier = (hi+(hi-lo)*0.5).toFixed(dec);
-    const lowBarrier  = (lo-(hi-lo)*0.5).toFixed(dec);
+    const rng = hi - lo;
     const stake=0.35;
     const reqId=(typeof gridReqId!=='undefined'?++gridReqId:Date.now());
     const msg={
       proposal:1,req_id:reqId,amount:stake,basis:'stake',
       contract_type:ctype,currency:typeof gridCurrency!=='undefined'?gridCurrency:'USD',
       duration:5,duration_unit:'t',underlying_symbol:typeof SYMBOL!=='undefined'?SYMBOL:'1HZ100V',
-      high_barrier:highBarrier,low_barrier:lowBarrier,
     };
+    // ONETOUCH / NOTOUCH (Only Ups / Only Downs) use a single barrier
+    if(ctype==='ONETOUCH'||ctype==='NOTOUCH'){
+      // For Only Ups: set barrier above current price; Only Downs: below
+      const curPrice = tks[tks.length-1].price;
+      msg.barrier = ctype==='ONETOUCH'
+        ? '+' + (rng*1.5).toFixed(dec)   // relative barrier above
+        : '-' + (rng*1.5).toFixed(dec);  // relative barrier below
+      msg.duration = 10; // slightly longer for barrier contracts
+    } else {
+      // EXPIRYRANGE / EXPIRYMISS: high + low barriers
+      msg.high_barrier = (hi+(rng*0.5)).toFixed(dec);
+      msg.low_barrier  = (lo-(rng*0.5)).toFixed(dec);
+    }
     if(typeof gridPending!=='undefined'){
       gridPending[reqId]=(proposal,err)=>{
-        if(err||!proposal||!proposal.id) return;
+        if(err){ console.warn('[MambaFX Bot] proposal error:', err.message); return; }
+        if(!proposal||!proposal.id) return;
         const buyReqId=(typeof gridReqId!=='undefined'?++gridReqId:Date.now()+1);
         if(typeof gridPending!=='undefined') gridPending[buyReqId]=(buy,buyErr)=>{
-          if(!buyErr&&buy) console.log('[MambaFX Bot] contract opened:',buy.contract_id);
+          if(buyErr) console.warn('[MambaFX Bot] buy error:', buyErr.message);
+          else if(buy) console.log('[MambaFX Bot] contract opened:',buy.contract_id);
         };
         window.gridWs.send(JSON.stringify({buy:proposal.id,price:proposal.ask_price,req_id:buyReqId}));
       };
@@ -5483,8 +5830,28 @@ try {
     if(typeof _origOnSignalFired==='function') _origOnSignalFired(dir,price,epoch);
   };
 
+  /* ── market change from bot selector ─────────────────────────── */
+  window.mfxChangeMarket = function(){
+    const sel = document.getElementById('mfxMarketSel');
+    if(!sel) return;
+    const code = sel.value;
+    if(typeof switchMarket==='function') switchMarket(code);
+  };
+
   /* ── init ────────────────────────────────────────────────────── */
   loadPos();
+  // Populate the market selector from the app's own MARKETS constant
+  (function initMarketSel(){
+    const sel = document.getElementById('mfxMarketSel');
+    if(!sel) return;
+    try{
+      if(typeof MARKETS!=='undefined'){
+        sel.innerHTML = Object.entries(MARKETS).map(([k,v])=>
+          `<option value="${k}"${k===SYMBOL?' selected':''}>${v.replace('Volatility ','V').replace(' Index','').replace('(','').replace(')','')}</option>`
+        ).join('');
+      }
+    }catch(_){}
+  })();
   setInterval(refreshBot, 300);
   refreshBot();
 })();
