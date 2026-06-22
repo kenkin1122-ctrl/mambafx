@@ -427,6 +427,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button id="navGrid" onclick="showPage('grid')">🎯 Trading Grid</button>
     <button id="navAnalysis" onclick="showPage('analysis')">🔬 Analysis Tool</button>
     <button id="navDigits" onclick="showPage('digits')">🎲 Digits Bot</button>
+    <button id="navDiag" onclick="showPage('diag')">🩺 API Diagnostics</button>
   </nav>
 
   <!-- ============ PAGE 1: LIVE TRACKER ============ -->
@@ -1040,6 +1041,33 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       The prediction engine uses purely mathematical/statistical methods (frequency analysis, chi-square uniformity test, Markov transition probabilities, gap scoring). Synthetic indices produce random last digits by design — deviations from uniformity are expected noise and do not guarantee future outcomes. Use a demo account until you understand the behaviour.
     </footer>
   </div><!-- /page-digits -->
+
+  <!-- ============ PAGE 7: API DIAGNOSTICS ============ -->
+  <div id="page-diag" class="page">
+    <div class="grid-card" style="margin-bottom:16px">
+      <h2>🩺 API diagnostics
+        <span class="gc-conn-pill" style="margin-left:auto"><span id="diagConnDot" class="d"></span><span id="diagConnText">not connected</span></span>
+      </h2>
+      <div class="gc-sub">
+        Runs the raw WebSocket calls directly on the connected OTP socket and shows Deriv's exact JSON response — use this to see <code>proposal.validation_params</code> (min/max stake &amp; duration), <code>contracts_for</code> (which contract types/durations this symbol actually allows), and any <code>error.details.field</code> on a rejection. <b>Requires Connect to be active on the Trading Grid page first</b> — this page reads the same live socket, it doesn't open its own connection.
+      </div>
+      <div class="gc-row3">
+        <button class="gc-btn" onclick="diagPing()">1) Ping (time)</button>
+        <button class="gc-btn" onclick="diagContractsFor()">2) contracts_for this symbol</button>
+        <button class="gc-btn" onclick="diagTestProposal()">3) Test proposal (no buy)</button>
+      </div>
+      <div class="gc-row" style="margin-top:10px">
+        <button class="gc-btn danger" onclick="diagFullBuyTrace()">4) Full proposal→buy trace (places a REAL trade at min stake)</button>
+        <button class="gc-btn" onclick="diagCopyAll()">📋 Copy full log</button>
+        <button class="gc-btn" onclick="diagClearLog()">Clear log</button>
+      </div>
+      <pre id="apiDiagOut" style="margin-top:12px;background:#0a0e17;border:1px solid var(--line);border-radius:10px;padding:14px;font-size:11.5px;color:var(--accent);white-space:pre-wrap;word-break:break-all;max-height:600px;overflow-y:auto;display:none"></pre>
+    </div>
+
+    <footer>
+      Diagnostics run against whatever account is currently connected on the Trading Grid page. Step 4 places a real contract at minimum stake (0.35) on that account — use a demo account while testing.
+    </footer>
+  </div><!-- /page-diag -->
 </div>
 
 <script>
@@ -2237,8 +2265,8 @@ function startTfTimers(){
 }
 
 function showPage(which){
-  const pages = { live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", digits:"page-digits" };
-  const navs  = { live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", digits:"navDigits" };
+  const pages = { live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", digits:"page-digits", diag:"page-diag" };
+  const navs  = { live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", digits:"navDigits", diag:"navDiag" };
   Object.keys(pages).forEach(k => {
     document.getElementById(pages[k]).classList.toggle("active", k===which);
     const nav = document.getElementById(navs[k]); if (nav) nav.classList.toggle("active", k===which);
@@ -2260,6 +2288,9 @@ function showPage(which){
   }
   if (which === "digits"){
     digPageInit();
+  }
+  if (which === "diag"){
+    diagUpdateConnStatus();
   }
 }
 
@@ -3721,6 +3752,7 @@ async function gridConnect(){
     if (gridPing) clearInterval(gridPing);
     gridPing = setInterval(() => { if (gridWs && gridWs.readyState===WebSocket.OPEN) gridWs.send(JSON.stringify({ ping:1 })); }, 20000);
     if (typeof digUpdateConnStatus === "function") digUpdateConnStatus();
+    if (typeof diagUpdateConnStatus === "function") diagUpdateConnStatus();
   };
   gridWs.onmessage = ev => {
     let msg; try { msg = JSON.parse(ev.data); } catch(_) { return; }
@@ -3761,6 +3793,7 @@ function gridDisconnect(){
   gridDiag(null);
   gridSet("gridAcct","—"); gridSet("gridBal","—"); gridSet("gridType","—");
   if (typeof digUpdateConnStatus === "function") digUpdateConnStatus();
+  if (typeof diagUpdateConnStatus === "function") diagUpdateConnStatus();
 }
 
 function gridHandleMsg(msg){
@@ -3787,6 +3820,11 @@ function gridHandleMsg(msg){
       }
       break;
     }
+    case "proposal": {
+      const cb = msg.req_id && gridPending[msg.req_id];
+      if (cb){ cb(msg.proposal, null); delete gridPending[msg.req_id]; }
+      break;
+    }
     case "buy": {
       const cb = msg.req_id && gridPending[msg.req_id];
       if (cb){ cb(msg.buy, null); delete gridPending[msg.req_id]; }
@@ -3795,6 +3833,16 @@ function gridHandleMsg(msg){
     case "proposal_open_contract": {
       const c = msg.proposal_open_contract;
       if (c && c.contract_id) gridUpdateContract(c);
+      break;
+    }
+    case "time": {
+      const cb = msg.req_id && gridPending[msg.req_id];
+      if (cb){ cb(msg.time, null); delete gridPending[msg.req_id]; }
+      break;
+    }
+    case "contracts_for": {
+      const cb = msg.req_id && gridPending[msg.req_id];
+      if (cb){ cb(msg.contracts_for, null); delete gridPending[msg.req_id]; }
       break;
     }
   }
@@ -3816,40 +3864,188 @@ function gridPlaceTrade(dir, source){
   const durUnit = $("gridDurUnit").value;
   const duration = Math.max(1, parseInt($("gridDuration").value || "5", 10));
   const contractType = dir === 1 ? "CALL" : "PUT";
-  const reqId = ++gridReqId;
+  const proposalReqId = ++gridReqId;
 
-  const params = {
-    buy: 1, price: stake, req_id: reqId,
-    parameters: {
-      amount: stake, basis: "stake", contract_type: contractType,
-      currency: gridCurrency, duration, duration_unit: durUnit, symbol: SYMBOL,
-    }
+  // Step 1: request a proposal. Buying requires the proposal's id + ask_price
+  // — Deriv does not accept an inline-parameters instant buy on this API
+  // generation, and the field is `underlying_symbol`, not `symbol` (the
+  // New API schema renamed it; using the old name causes a silent
+  // validation rejection with no obviously-named field).
+  const proposalMsg = {
+    proposal: 1, req_id: proposalReqId,
+    amount: stake, basis: "stake", contract_type: contractType,
+    currency: gridCurrency, duration, duration_unit: durUnit,
+    underlying_symbol: SYMBOL,
   };
 
-  // pre-insert a pending row
+  // pre-insert a pending row so the user sees something immediately
   const row = {
-    id: "pending-" + reqId, dir, source, contractType,
+    id: "pending-" + proposalReqId, dir, source, contractType,
     stake, currency: gridCurrency, time: Math.floor(Date.now()/1000),
-    entry: null, exit: null, payout: null, pnl: null, status: "buying…",
+    entry: null, exit: null, payout: null, pnl: null, status: "pricing…",
   };
   gridTrades.unshift(row);
   if (gridTrades.length > 100) gridTrades.pop();
   renderGridTrades();
 
-  gridPending[reqId] = (buy, err) => {
+  gridPending[proposalReqId] = (proposal, err) => {
     if (err){
-      row.status = "rejected: " + (err.message || "error");
+      const detail = err.details ? ` [${err.details.field || "?"}: ${err.details.message || JSON.stringify(err.details)}]` : "";
+      row.status = "rejected: " + (err.message || "error") + detail;
+      renderGridTrades();
+      gridDiag(`<b>Proposal rejected by Deriv.</b> ${err.message || "error"}${detail}<br><br><code>${JSON.stringify(proposalMsg)}</code>`, true);
+      return;
+    }
+    if (!proposal || !proposal.id || proposal.ask_price == null){
+      row.status = "rejected: proposal response missing id/ask_price";
       renderGridTrades();
       return;
     }
-    row.id = String(buy.contract_id);
-    row.buyPrice = buy.buy_price;
-    row.status = "open";
-    gridOpenContracts[row.id] = row;
+    // Step 2: buy using the EXACT proposal id and ask_price — do not alter
+    // symbol/duration/etc between proposal and buy, and do it immediately
+    // since proposal ids are short-lived.
+    const buyReqId = ++gridReqId;
+    const buyMsg = { buy: proposal.id, price: proposal.ask_price, req_id: buyReqId };
+    row.status = "buying…";
     renderGridTrades();
+    gridPending[buyReqId] = (buy, buyErr) => {
+      if (buyErr){
+        const detail = buyErr.details ? ` [${buyErr.details.field || "?"}: ${buyErr.details.message || JSON.stringify(buyErr.details)}]` : "";
+        row.status = "rejected: " + (buyErr.message || "error") + detail;
+        renderGridTrades();
+        gridDiag(`<b>Buy rejected by Deriv.</b> ${buyErr.message || "error"}${detail}<br><br><code>${JSON.stringify(buyMsg)}</code>`, true);
+        return;
+      }
+      row.id = String(buy.contract_id);
+      row.buyPrice = buy.buy_price;
+      row.status = "open";
+      gridOpenContracts[row.id] = row;
+      renderGridTrades();
+    };
+    gridWs.send(JSON.stringify(buyMsg));
   };
-  gridWs.send(JSON.stringify(params));
+  gridWs.send(JSON.stringify(proposalMsg));
   return true;
+}
+
+// =====================================================================
+// RAW API DIAGNOSTICS — direct, unmodified calls on the connected OTP
+// socket, surfacing Deriv's exact JSON so a buy rejection can be pinned
+// down precisely (validation_params, contracts_for limits, error.details).
+// =====================================================================
+let diagReqCounter = 50000;
+let diagLog = [];   // chronological list of {stamp, label, obj} for clean copy-out
+function diagPrint(label, obj){
+  const out = $("apiDiagOut");
+  if (!out) return;
+  out.style.display = "block";
+  const stamp = new Date().toLocaleTimeString([], { hour12:false });
+  diagLog.push({ stamp, label, obj });
+  out.textContent = diagLog.map(e => `[${e.stamp}] ${e.label}\n` + JSON.stringify(e.obj, null, 2)).join("\n\n");
+  out.scrollTop = out.scrollHeight; // keep the newest entry in view
+}
+function diagRequireConn(){
+  if (!gridWs || gridWs.readyState !== WebSocket.OPEN || !gridAuthed){
+    alert("Connect on the Trading Grid page first — diagnostics run on the live OTP socket.");
+    return false;
+  }
+  return true;
+}
+function diagCopyAll(){
+  const out = $("apiDiagOut");
+  if (!out || !diagLog.length){ alert("Nothing logged yet — run a diagnostic first."); return; }
+  const text = out.textContent;
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(
+      () => alert("Full diagnostic log copied — paste it directly into chat."),
+      () => alert("Could not copy automatically — select the text in the panel and copy manually.")
+    );
+  } else {
+    alert("Clipboard API unavailable — select the text in the panel and copy manually.");
+  }
+}
+function diagClearLog(){
+  diagLog = [];
+  const out = $("apiDiagOut");
+  if (out){ out.textContent = ""; out.style.display = "none"; }
+}
+// This page has its own connection-status pill (it shares the live socket
+// from the Trading Grid page rather than opening its own), so it needs to
+// be refreshed any time grid's connection state changes too.
+function diagUpdateConnStatus(){
+  const dot = $("diagConnDot"), txt = $("diagConnText");
+  if (!dot && !txt) return;
+  const ok = !!(gridWs && gridWs.readyState === WebSocket.OPEN && gridAuthed);
+  if (dot) dot.className = "d" + (ok ? " on" : " off");
+  if (txt) txt.textContent = ok ? ("connected (" + (gridLoginId || "—") + ")") : "not connected";
+}
+// One-shot request/response helper for diagnostics: sends a message, waits
+// for the matching req_id to come back (success OR error), prints it raw.
+function diagSendOnce(msg, label){
+  if (!diagRequireConn()) return;
+  const reqId = ++diagReqCounter;
+  msg.req_id = reqId;
+  gridPending[reqId] = (data, err) => {
+    if (err){ diagPrint(label + " — ERROR", err); return; }
+    diagPrint(label + " — OK", data);
+  };
+  diagPrint(label + " — sent", msg);
+  gridWs.send(JSON.stringify(msg));
+}
+function diagPing(){
+  diagSendOnce({ time: 1 }, "1) time (connectivity check)");
+}
+function diagContractsFor(){
+  diagSendOnce({ contracts_for: SYMBOL }, `2) contracts_for "${SYMBOL}"`);
+}
+function diagTestProposal(){
+  const stake = Math.max(0.35, parseFloat($("gridStake").value || "1"));
+  const durUnit = $("gridDurUnit").value;
+  const duration = Math.max(1, parseInt($("gridDuration").value || "5", 10));
+  diagSendOnce({
+    proposal: 1, amount: stake, basis: "stake", contract_type: "CALL",
+    currency: gridCurrency, duration, duration_unit: durUnit, underlying_symbol: SYMBOL,
+  }, "3) test proposal (CALL, no buy sent)");
+}
+// Step 4: the REAL round trip — proposal then immediately buy, logging every
+// request and response exactly as sent/received, including a rejection if
+// one occurs. Uses the smallest practical stake (0.35) since this places an
+// actual contract on whatever account is connected (demo by default).
+function diagFullBuyTrace(){
+  if (!diagRequireConn()) return;
+  if (!confirm("This sends a REAL buy request (stake 0.35) on the currently connected account. Continue?")) return;
+  const durUnit = $("gridDurUnit") ? $("gridDurUnit").value : "t";
+  const duration = Math.max(1, parseInt(($("gridDuration") && $("gridDuration").value) || "5", 10));
+  const proposalReqId = ++diagReqCounter;
+  const proposalMsg = {
+    proposal: 1, req_id: proposalReqId,
+    amount: 0.35, basis: "stake", contract_type: "CALL",
+    currency: gridCurrency, duration, duration_unit: durUnit, underlying_symbol: SYMBOL,
+  };
+  diagPrint("4a) REAL proposal request", proposalMsg);
+  gridPending[proposalReqId] = (proposal, err) => {
+    if (err){
+      diagPrint("4a) proposal — ERROR (this is the rejection — check error.code / error.message / error.details.field above)", err);
+      return;
+    }
+    diagPrint("4a) proposal — OK (note validation_params, id, ask_price)", proposal);
+    if (!proposal || !proposal.id || proposal.ask_price == null){
+      diagPrint("4b) aborted — proposal response missing id/ask_price, cannot buy", proposal);
+      return;
+    }
+    const buyReqId = ++diagReqCounter;
+    const buyMsg = { buy: proposal.id, price: proposal.ask_price, req_id: buyReqId };
+    diagPrint("4b) REAL buy request (using proposal.id + proposal.ask_price exactly)", buyMsg);
+    gridPending[buyReqId] = (buy, buyErr) => {
+      if (buyErr){
+        diagPrint("4b) buy — ERROR (this is the rejection — check error.code / error.message / error.details.field above)", buyErr);
+        return;
+      }
+      diagPrint("4b) buy — OK, contract opened", buy);
+    };
+    gridWs.send(JSON.stringify(buyMsg));
+  };
+  gridWs.send(JSON.stringify(proposalMsg));
 }
 
 function gridUpdateContract(c){
@@ -4517,39 +4713,58 @@ function digPlaceTrade(digit, source){
   }
   const stake = Math.max(0.35, parseFloat($("digStake").value || "0.50"));
   const duration = Math.max(1, parseInt($("digDuration").value || "5", 10));
-  const reqId = ++gridReqId;
+  const proposalReqId = ++gridReqId;
 
-  const params = {
-    buy: 1, price: stake, req_id: reqId,
-    parameters: {
-      amount: stake, basis: "stake", contract_type: "DIGITMATCH",
-      currency: gridCurrency, duration, duration_unit: "t",
-      symbol: SYMBOL, barrier: String(digit),
-    }
+  const proposalMsg = {
+    proposal: 1, req_id: proposalReqId,
+    amount: stake, basis: "stake", contract_type: "DIGITMATCH",
+    currency: gridCurrency, duration, duration_unit: "t",
+    underlying_symbol: SYMBOL, barrier: String(digit),
   };
 
   const row = {
-    id: "pending-" + reqId, digit, source, stake,
+    id: "pending-" + proposalReqId, digit, source, stake,
     currency: gridCurrency, time: Math.floor(Date.now()/1000),
-    entry: null, exit: null, exitDigit: null, payout: null, pnl: null, status: "buying…",
+    entry: null, exit: null, exitDigit: null, payout: null, pnl: null, status: "pricing…",
   };
   digTrades.unshift(row);
   if (digTrades.length > 100) digTrades.pop();
   digRenderTrades();
 
-  gridPending[reqId] = (buy, err) => {
+  gridPending[proposalReqId] = (proposal, err) => {
     if (err){
-      row.status = "rejected: " + (err.message || "error");
+      const detail = err.details ? ` [${err.details.field || "?"}: ${err.details.message || JSON.stringify(err.details)}]` : "";
+      row.status = "rejected: " + (err.message || "error") + detail;
+      digRenderTrades();
+      gridDiag(`<b>Matches proposal rejected by Deriv.</b> ${err.message || "error"}${detail}<br><br><code>${JSON.stringify(proposalMsg)}</code>`, true);
+      return;
+    }
+    if (!proposal || !proposal.id || proposal.ask_price == null){
+      row.status = "rejected: proposal response missing id/ask_price";
       digRenderTrades();
       return;
     }
-    row.id = String(buy.contract_id);
-    row.buyPrice = buy.buy_price;
-    row.status = "open";
-    gridOpenContracts[row.id] = row;
+    const buyReqId = ++gridReqId;
+    const buyMsg = { buy: proposal.id, price: proposal.ask_price, req_id: buyReqId };
+    row.status = "buying…";
     digRenderTrades();
+    gridPending[buyReqId] = (buy, buyErr) => {
+      if (buyErr){
+        const detail = buyErr.details ? ` [${buyErr.details.field || "?"}: ${buyErr.details.message || JSON.stringify(buyErr.details)}]` : "";
+        row.status = "rejected: " + (buyErr.message || "error") + detail;
+        digRenderTrades();
+        gridDiag(`<b>Matches buy rejected by Deriv.</b> ${buyErr.message || "error"}${detail}<br><br><code>${JSON.stringify(buyMsg)}</code>`, true);
+        return;
+      }
+      row.id = String(buy.contract_id);
+      row.buyPrice = buy.buy_price;
+      row.status = "open";
+      gridOpenContracts[row.id] = row;
+      digRenderTrades();
+    };
+    gridWs.send(JSON.stringify(buyMsg));
   };
-  gridWs.send(JSON.stringify(params));
+  gridWs.send(JSON.stringify(proposalMsg));
   return true;
 }
 
