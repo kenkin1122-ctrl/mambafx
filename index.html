@@ -5673,7 +5673,7 @@ try {
         </div>
       </div>
       <div style="font-size:8px;color:#94a3b8;margin-top:5px;line-height:1.5">
-        Only Ups (CALL): <b>every</b> tick must rise. Only Downs (PUT): <b>every</b> tick must fall. Payout is ~30× higher than Rise/Fall due to the strict consecutive requirement.
+        Only Ups (RUNHIGH): <b>every</b> tick must rise. Only Downs (RUNLOW): <b>every</b> tick must fall. Payout is ~30× higher than Rise/Fall — correct return at 5 ticks is ~2953%.
       </div>
     </div>
 
@@ -5943,10 +5943,9 @@ try {
       // Rise/Fall and Higher/Lower: CALL (rise) or PUT (fall)
       if(typeof gridPlaceTrade==='function') gridPlaceTrade(dir,'bot');
     } else if(ct==='UPORDOWN'){
-      // Only Ups = CALL, Only Downs = PUT — same contract type as Rise/Fall
-      // but with mfxOuDur ticks: EVERY tick must move the same way
-      // Uses the proposal→buy flow directly; no barrier needed
-      mfxSendOuProposal(dir===1?'CALL':'PUT', mfxOuDur);
+      // Only Ups = RUNHIGH, Only Downs = RUNLOW (Deriv API docs confirmed)
+      // These give the correct ~2953% return for 5 ticks, not the ~81% CALL/PUT return
+      mfxSendOuProposal(dir===1?'RUNHIGH':'RUNLOW', mfxOuDur);
     } else if(ct==='DIGITEVEN'){
       if(typeof digPlaceTrade==='function') digPlaceTrade(dir===1?'even':'odd','bot');
       else mfxSendDigitProposal(dir===1?'DIGITEVEN':'DIGITODD',null);
@@ -5959,13 +5958,17 @@ try {
     }
   };
 
-  /* ── Only Ups / Only Downs: CALL or PUT, no barrier ─────────── */
-  // Per Deriv's confirmed API: Only Ups = CALL, Only Downs = PUT.
-  // Same contract types as Rise/Fall. The difference is that for Only
-  // Ups/Only Downs the payout requires EVERY tick to move the right way
-  // (the contract is evaluated tick-by-tick, not just at expiry), which
-  // is why the payout is ~30× higher — the probability is 0.5^N per tick.
+  /* ── Only Ups / Only Downs: RUNHIGH or RUNLOW, no barrier ───────
+   * Per Deriv's official API docs (developers.deriv.com/docs/only-upsonly-downs):
+   *   Only Ups  → contract_type: "RUNHIGH"
+   *   Only Downs → contract_type: "RUNLOW"
+   * These are NOT CALL/PUT. Using CALL/PUT gives a standard Rise/Fall
+   * quote (~81% return). RUNHIGH/RUNLOW gives the correct ~2953% return
+   * at 5 ticks because every consecutive tick must move in the same direction.
+   * No barrier field is used — just duration (ticks) and underlying_symbol.
+   * ──────────────────────────────────────────────────────────────── */
   function mfxSendOuProposal(contractType, dur){
+    // contractType will be 'RUNHIGH' (Only Ups) or 'RUNLOW' (Only Downs)
     if(typeof gridWs==='undefined'||!gridWs||gridWs.readyState!==1) return;
     const stake = mfxGetStake();
     const reqId = (typeof gridReqId!=='undefined'?++gridReqId:Date.now());
