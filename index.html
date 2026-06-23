@@ -226,6 +226,38 @@ footer{text-align:center;color:var(--muted);font-size:11px;margin-top:22px;line-
 .eng-log{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;max-height:230px;overflow-y:auto}
 .eng-log h3{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:10px}
 .eng-log .row{display:flex;align-items:center;gap:10px;font-size:12px;padding:6px 0;border-bottom:1px solid #161d2b;font-variant-numeric:tabular-nums}
+/* ── Engine trade panel ─────────────────────────────────────────── */
+.eng-trade-panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
+.eng-trade-panel h3{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.eng-trade-top{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+@media(max-width:680px){.eng-trade-top{grid-template-columns:1fr}}
+.eng-stake-row{display:flex;align-items:center;gap:8px;background:#0a0e17;border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+.eng-stake-row label{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+.eng-stake-row input{flex:1;background:none;border:none;font-family:inherit;font-size:14px;font-weight:800;color:var(--text);outline:none;min-width:0;font-variant-numeric:tabular-nums}
+.eng-stake-row .ccy{font-size:10px;color:var(--muted);white-space:nowrap}
+.eng-manual-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.eng-btn{font-family:inherit;font-size:12px;font-weight:800;padding:11px 0;border-radius:10px;border:1.5px solid;cursor:pointer;letter-spacing:.03em;transition:all .15s;text-align:center}
+.eng-btn:disabled{opacity:.35;cursor:not-allowed}
+.eng-btn.long{background:rgba(22,224,139,.1);border-color:var(--up);color:var(--up)}
+.eng-btn.long:hover:not(:disabled){background:rgba(22,224,139,.22)}
+.eng-btn.short{background:rgba(255,77,94,.1);border-color:var(--down);color:var(--down)}
+.eng-btn.short:hover:not(:disabled){background:rgba(255,77,94,.22)}
+.eng-auto-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#0a0e17;border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:10px}
+.eng-auto-status{font-size:10px;color:var(--muted);flex:1;min-width:100px}
+.eng-auto-cfg{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+@media(max-width:680px){.eng-auto-cfg{grid-template-columns:1fr 1fr}}
+.eng-auto-run-btn{width:100%;font-family:inherit;font-size:12px;font-weight:800;padding:10px 0;border-radius:10px;cursor:pointer;letter-spacing:.04em;border:1.5px solid #6366f1;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;box-shadow:0 2px 8px rgba(99,102,241,.3);transition:all .2s;margin-top:6px}
+.eng-auto-run-btn:hover:not(:disabled){background:linear-gradient(135deg,#4f46e5,#7c3aed)}
+.eng-auto-run-btn:disabled{opacity:.4;cursor:not-allowed;box-shadow:none}
+.eng-auto-run-btn.armed{background:linear-gradient(135deg,#ef4444,#f97316);border-color:#ef4444;box-shadow:0 2px 8px rgba(239,68,68,.35)}
+.eng-trade-log{max-height:180px;overflow-y:auto;margin-top:10px}
+.eng-trade-log table{width:100%;border-collapse:collapse;font-size:11px;font-variant-numeric:tabular-nums}
+.eng-trade-log th{background:#0d1320;color:var(--muted);font-size:9px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;padding:6px 8px;text-align:center;border-bottom:1px solid var(--line)}
+.eng-trade-log td{text-align:center;padding:5px 8px;border-bottom:1px solid #161d2b}
+.eng-pnl-row{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px}
+.eng-pnl-chip{background:#0a0e17;border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-size:11px;display:flex;gap:6px;align-items:center}
+.eng-pnl-chip .lab{color:var(--muted);font-size:9px;letter-spacing:.08em;text-transform:uppercase}
+.eng-pnl-chip .val{font-weight:700;font-variant-numeric:tabular-nums}
 .eng-log .row:last-child{border-bottom:none}
 .eng-log .row .t{color:var(--muted);font-size:11px;min-width:62px}
 .eng-log .row .dir{font-weight:700;min-width:54px}
@@ -542,7 +574,81 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       </div>
     </div>
 
-    <!-- tunable thresholds -->
+    <!-- ── Engine Trade Panel ─────────────────────────────────── -->
+    <div class="eng-trade-panel">
+      <h3>⚡ Engine Trade Execution
+        <span id="engTradeConnStatus" style="font-size:9px;font-weight:400;letter-spacing:.06em;padding:2px 8px;border-radius:999px;background:#0a0e17;border:1px solid var(--line);color:var(--down)">not connected</span>
+        <span style="margin-left:auto;font-size:10px;font-weight:400;letter-spacing:.04em;color:var(--muted);text-transform:none">connect on Trading Grid first</span>
+      </h3>
+
+      <div class="eng-trade-top">
+        <!-- Stake + manual buttons -->
+        <div>
+          <div class="eng-stake-row" style="margin-bottom:10px">
+            <label>Stake</label>
+            <input id="engStake" type="number" min="0.35" step="0.01" value="1.00">
+            <span class="ccy" id="engStakeCcy">USD</span>
+          </div>
+          <div style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Manual — place immediately</div>
+          <div class="eng-manual-btns">
+            <button class="eng-btn long" id="engBuyLong" onclick="engManualTrade(1)" disabled>▲ BUY LONG</button>
+            <button class="eng-btn short" id="engBuyShort" onclick="engManualTrade(-1)" disabled>▼ BUY SHORT</button>
+          </div>
+          <div style="font-size:9px;color:var(--muted);margin-top:6px;line-height:1.5">
+            Manual: buys CALL (LONG) or PUT (SHORT) on the engine signal direction — 5-tick duration.
+          </div>
+        </div>
+
+        <!-- Auto-bot -->
+        <div>
+          <div style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Automatic — fires on engine signal</div>
+          <div class="eng-auto-row">
+            <label class="auto-toggle">
+              <input type="checkbox" id="engAutoArm" onchange="engToggleAuto()">
+              <span class="track"></span>
+              <span id="engAutoLabel">Auto: OFF</span>
+            </label>
+            <span id="engAutoStatus" class="eng-auto-status">Disarmed — will fire on LONG/SHORT signal.</span>
+          </div>
+          <div class="eng-auto-cfg">
+            <div class="gc-field" style="margin:0">
+              <label for="engAutoDir">Direction</label>
+              <select id="engAutoDir">
+                <option value="both" selected>Both</option>
+                <option value="long">Long only</option>
+                <option value="short">Short only</option>
+              </select>
+            </div>
+            <div class="gc-field" style="margin:0">
+              <label for="engAutoCooldown">Cooldown (s)</label>
+              <input type="number" id="engAutoCooldown" min="0" step="1" value="10">
+            </div>
+            <div class="gc-field" style="margin:0">
+              <label for="engAutoMax">Max trades (0=∞)</label>
+              <input type="number" id="engAutoMax" min="0" step="1" value="0">
+            </div>
+          </div>
+          <button class="eng-auto-run-btn" id="engAutoRunBtn" onclick="engToggleAuto()" disabled>▶ ARM AUTO-BOT</button>
+        </div>
+      </div>
+
+      <!-- P/L summary chips -->
+      <div class="eng-pnl-row">
+        <div class="eng-pnl-chip"><span class="lab">Won</span><span class="val" id="engTradeWon" style="color:var(--up)">0</span></div>
+        <div class="eng-pnl-chip"><span class="lab">Lost</span><span class="val" id="engTradeLost" style="color:var(--down)">0</span></div>
+        <div class="eng-pnl-chip"><span class="lab">Win Rate</span><span class="val" id="engTradeRate" style="color:var(--accent)">—</span></div>
+        <div class="eng-pnl-chip"><span class="lab">P/L</span><span class="val" id="engTradePnL">—</span></div>
+      </div>
+
+      <!-- Trade log -->
+      <div class="eng-trade-log" id="engTradeLogWrap" style="display:none">
+        <table>
+          <thead><tr><th>Time</th><th>Dir</th><th>Stake</th><th>Entry</th><th>Exit</th><th>P/L</th><th>Status</th></tr></thead>
+          <tbody id="engTradeBody"><tr><td colspan="7" class="sig-empty">No trades yet.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <!-- ── End Engine Trade Panel ─────────────────────────────── -->
     <div class="eng-controls">
       <div class="ec-item"><label>Window (ticks) <b id="engWlab">14</b></label><input type="range" id="engW" min="8" max="60" step="1" value="14"></div>
       <div class="ec-item"><label>TD% fire threshold <b id="engTHlab">35</b></label><input type="range" id="engTH" min="10" max="90" step="1" value="35"></div>
@@ -2414,6 +2520,10 @@ function showPage(which){
   if (which === "digits"){
     digPageInit();
   }
+  if (which === "engine"){
+    engUpdateConnStatus();
+    engRenderTrades();
+  }
   if (which === "diag"){
     diagUpdateConnStatus();
   }
@@ -3881,6 +3991,7 @@ async function gridConnect(){
     gridPing = setInterval(() => { if (gridWs && gridWs.readyState===WebSocket.OPEN) gridWs.send(JSON.stringify({ ping:1 })); }, 20000);
     if (typeof digUpdateConnStatus === "function") digUpdateConnStatus();
     if (typeof diagUpdateConnStatus === "function") diagUpdateConnStatus();
+    if (typeof engUpdateConnStatus === "function") engUpdateConnStatus();
   };
   gridWs.onmessage = ev => {
     let msg; try { msg = JSON.parse(ev.data); } catch(_) { return; }
@@ -3922,6 +4033,7 @@ function gridDisconnect(){
   gridSet("gridAcct","—"); gridSet("gridBal","—"); gridSet("gridType","—");
   if (typeof digUpdateConnStatus === "function") digUpdateConnStatus();
   if (typeof diagUpdateConnStatus === "function") diagUpdateConnStatus();
+  if (typeof engUpdateConnStatus === "function") engUpdateConnStatus();
 }
 
 function gridHandleMsg(msg){
@@ -4178,7 +4290,10 @@ function diagFullBuyTrace(){
 
 function gridUpdateContract(c){
   const id = String(c.contract_id);
-  let row = gridOpenContracts[id] || gridTrades.find(t => t.id === id) || digTrades.find(t => t.id === id);
+  let row = gridOpenContracts[id]
+    || gridTrades.find(t => t.id === id)
+    || digTrades.find(t => t.id === id)
+    || (typeof engTrades !== 'undefined' ? engTrades.find(t => t.id === id) : null);
   if (!row) return;
   if (c.buy_price != null) row.stake = Number(c.buy_price);
   if (c.entry_tick_display_value != null) row.entry = Number(c.entry_tick_display_value);
@@ -4199,6 +4314,7 @@ function gridUpdateContract(c){
   }
   renderGridTrades();
   if (row.digit !== undefined) digRenderTrades();
+  if (typeof engTrades !== 'undefined' && engTrades.some(t => t.id === id)) engRenderTrades();
 }
 
 function renderGridTrades(){
@@ -4311,10 +4427,180 @@ function onSignalFired(dir, price, epoch){
     gridAutoCount++;
     gridSet("gridAutoStatus", `Fired ${dir===1?"RISE":"FALL"} at ${price.toFixed(decimals)} · auto-trades: ${gridAutoCount}${maxN?(" / "+maxN):""}.`);
   }
+  // Engine auto-bot also listens to the same signal
+  if (typeof engHandleSignal === "function") engHandleSignal(dir, price, epoch);
 }
 
 // =====================================================================
-// PAGE 5 — ANALYSIS TOOL
+// ENGINE TRADE EXECUTION
+// Manual + auto trading wired to the 5-tick engine signal. Separate
+// trade ledger from the Trading Grid so P/L is tracked independently.
+// Uses the same gridWs / gridPlaceTrade infrastructure.
+// =====================================================================
+let engTrades = [];           // engine-specific ledger
+let engAutoArmed = false;
+let engAutoCount = 0;
+let engAutoLastAt = 0;
+
+function engUpdateConnStatus(){
+  const el = $("engTradeConnStatus");
+  const btns = [$("engBuyLong"), $("engBuyShort"), $("engAutoRunBtn")];
+  if (!el) return;
+  if (gridAuthed){
+    el.style.color = "var(--up)"; el.textContent = "connected";
+    el.style.background = "rgba(22,224,139,.08)"; el.style.borderColor = "var(--up)";
+    btns.forEach(b => { if (b) b.disabled = false; });
+    const ccy = $("engStakeCcy"); if (ccy) ccy.textContent = gridCurrency;
+  } else {
+    el.style.color = "var(--down)"; el.textContent = "not connected";
+    el.style.background = "#0a0e17"; el.style.borderColor = "var(--line)";
+    btns.forEach(b => { if (b) b.disabled = true; });
+    if (engAutoArmed) engDisarmAuto("disconnected");
+  }
+}
+
+function engManualTrade(dir){
+  if (!gridWs || gridWs.readyState !== WebSocket.OPEN || !gridAuthed){
+    alert("Connect on the Trading Grid page first."); return;
+  }
+  const stake = Math.max(0.35, parseFloat($("engStake").value || "1"));
+  const reqId = ++gridReqId;
+  const contractType = dir === 1 ? "CALL" : "PUT";
+  const proposalMsg = {
+    proposal: 1, req_id: reqId,
+    amount: stake, basis: "stake",
+    contract_type: contractType,
+    currency: gridCurrency,
+    duration: 5, duration_unit: "t",
+    underlying_symbol: SYMBOL,
+  };
+  const row = {
+    id: "pending-" + reqId, dir, source: "manual",
+    stake, currency: gridCurrency,
+    contractType, isVirtual: !!gridIsVirtual,
+    time: Math.floor(Date.now()/1000),
+    entry: null, exit: null, payout: null, pnl: null, status: "pricing…",
+  };
+  engTrades.unshift(row);
+  if (engTrades.length > 100) engTrades.pop();
+  engRenderTrades();
+  gridPending[reqId] = (proposal, err) => {
+    if (err){
+      const detail = err.details ? ` [${err.details.field||"?"}]` : "";
+      row.status = "rejected: " + (err.message||"error") + detail;
+      engRenderTrades(); return;
+    }
+    if (!proposal || !proposal.id || proposal.ask_price == null){
+      row.status = "rejected: no price returned"; engRenderTrades(); return;
+    }
+    const buyReqId = ++gridReqId;
+    const buyMsg = { buy: proposal.id, price: proposal.ask_price, req_id: buyReqId };
+    row.status = "buying…"; engRenderTrades();
+    gridPending[buyReqId] = (buy, buyErr) => {
+      if (buyErr){
+        const d = buyErr.details ? ` [${buyErr.details.field||"?"}]` : "";
+        row.status = "rejected: " + (buyErr.message||"error") + d;
+        engRenderTrades(); return;
+      }
+      row.id = String(buy.contract_id);
+      row.buyPrice = buy.buy_price;
+      row.status = "open";
+      gridOpenContracts[row.id] = row;
+      engRenderTrades();
+    };
+    gridWs.send(JSON.stringify(buyMsg));
+  };
+  gridWs.send(JSON.stringify(proposalMsg));
+}
+
+function engRenderTrades(){
+  const body = $("engTradeBody");
+  const wrap = $("engTradeLogWrap");
+  if (!body) return;
+  if (!engTrades.length){
+    body.innerHTML = '<tr><td colspan="7" class="sig-empty">No trades yet.</td></tr>';
+    if (wrap) wrap.style.display = "none";
+    gridSet("engTradeWon","0"); gridSet("engTradeLost","0");
+    gridSet("engTradeRate","—"); gridSet("engTradePnL","—");
+    return;
+  }
+  if (wrap) wrap.style.display = "block";
+  let won=0, lost=0, net=0, any=false;
+  engTrades.forEach(t => {
+    if (t.status==="won"){ won++; if(t.pnl!=null){net+=t.pnl;any=true;} }
+    if (t.status==="lost"){ lost++; if(t.pnl!=null){net+=t.pnl;any=true;} }
+  });
+  const dec = decimals;
+  body.innerHTML = engTrades.map(t => {
+    const dc = t.dir===1?"cell-pos":"cell-neg";
+    const dt = t.dir===1?"▲ LONG":"▼ SHORT";
+    const pc = t.pnl==null?"cell-mut":t.pnl>=0?"cell-pos":"cell-neg";
+    const sc = t.status==="won"?"cell-pos":t.status==="lost"?"cell-neg":/reject/.test(t.status)?"cell-warn":"cell-mut";
+    return `<tr>
+      <td>${fmtTime(t.time)}</td>
+      <td class="${dc}">${dt}</td>
+      <td>${t.stake!=null?Number(t.stake).toFixed(2):"—"}</td>
+      <td>${t.entry!=null?fmtPrice(t.entry,dec):"—"}</td>
+      <td>${t.exit!=null?fmtPrice(t.exit,dec):"—"}</td>
+      <td class="${pc}">${t.pnl!=null?(t.pnl>=0?"+":"")+t.pnl.toFixed(2):"—"}</td>
+      <td class="${sc}">${t.status}</td>
+    </tr>`;
+  }).join("");
+  gridSet("engTradeWon", won);
+  gridSet("engTradeLost", lost);
+  const total = won+lost;
+  gridSet("engTradeRate", total > 0 ? (won/total*100).toFixed(1)+"%" : "—");
+  const pnlEl = $("engTradePnL");
+  if (pnlEl){
+    pnlEl.textContent = any ? (net>=0?"+":"")+net.toFixed(2)+" "+gridCurrency : "—";
+    pnlEl.style.color = any ? (net>=0?"var(--up)":"var(--down)") : "";
+  }
+}
+
+function engToggleAuto(){
+  const armed = $("engAutoArm") ? $("engAutoArm").checked : !engAutoArmed;
+  if (armed){
+    if (!gridAuthed){
+      const cb = $("engAutoArm"); if (cb) cb.checked = false;
+      alert("Connect on the Trading Grid page first."); return;
+    }
+    engAutoArmed = true; engAutoCount = 0; engAutoLastAt = 0;
+    const lbl = $("engAutoLabel"); if (lbl) lbl.textContent = "Auto: ON";
+    const btn = $("engAutoRunBtn"); if (btn){ btn.textContent = "⏹ DISARM AUTO-BOT"; btn.classList.add("armed"); }
+    gridSet("engAutoStatus", "Armed — watching for engine LONG/SHORT signal…");
+  } else {
+    engDisarmAuto("turned off");
+  }
+}
+
+function engDisarmAuto(reason){
+  engAutoArmed = false;
+  const cb = $("engAutoArm"); if (cb) cb.checked = false;
+  const lbl = $("engAutoLabel"); if (lbl) lbl.textContent = "Auto: OFF";
+  const btn = $("engAutoRunBtn"); if (btn){ btn.textContent = "▶ ARM AUTO-BOT"; btn.classList.remove("armed"); }
+  gridSet("engAutoStatus", "Disarmed" + (reason ? " — " + reason + "." : "."));
+}
+
+// Called by onSignalFired in the main engine path
+function engHandleSignal(dir, price, epoch){
+  if (!engAutoArmed || !gridAuthed) return;
+  const want = $("engAutoDir") ? $("engAutoDir").value : "both";
+  if (want === "long"  && dir !== 1)  return;
+  if (want === "short" && dir !== -1) return;
+  const cooldown = Math.max(0, parseInt(($("engAutoCooldown")||{}).value||"10",10)) * 1000;
+  const now = Date.now();
+  if (cooldown && now - engAutoLastAt < cooldown){
+    gridSet("engAutoStatus", `Signal skipped — cooldown ${Math.ceil((cooldown-(now-engAutoLastAt))/1000)}s left.`);
+    return;
+  }
+  const maxN = Math.max(0, parseInt(($("engAutoMax")||{}).value||"0",10));
+  if (maxN && engAutoCount >= maxN){ engDisarmAuto(`reached ${maxN} trades`); return; }
+  engManualTrade(dir);
+  engAutoLastAt = now; engAutoCount++;
+  gridSet("engAutoStatus", `Fired ${dir===1?"▲ LONG":"▼ SHORT"} at ${price.toFixed(decimals)} · auto: ${engAutoCount}${maxN?"/"+maxN:""}`);
+}
+
+
 // Lays the indicators out as rows and the tick positions as columns:
 //   before-3 … before-1 | P1(start) P2 P3 P4 P5 | after-1 … after-4
 // for one chosen run, or averaged across all/rise/fall runs. Reads the
