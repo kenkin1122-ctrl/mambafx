@@ -4293,7 +4293,8 @@ function gridUpdateContract(c){
   let row = gridOpenContracts[id]
     || gridTrades.find(t => t.id === id)
     || digTrades.find(t => t.id === id)
-    || (typeof engTrades !== 'undefined' ? engTrades.find(t => t.id === id) : null);
+    || (typeof engTrades !== 'undefined' ? engTrades.find(t => t.id === id) : null)
+    || (typeof window._dabTrades !== 'undefined' ? window._dabTrades.find(t => t.id === id) : null);
   if (!row) return;
   if (c.buy_price != null) row.stake = Number(c.buy_price);
   if (c.entry_tick_display_value != null) row.entry = Number(c.entry_tick_display_value);
@@ -4315,6 +4316,9 @@ function gridUpdateContract(c){
   renderGridTrades();
   if (row.digit !== undefined) digRenderTrades();
   if (typeof engTrades !== 'undefined' && engTrades.some(t => t.id === id)) engRenderTrades();
+  if (typeof window._dabTrades !== 'undefined' && window._dabTrades.some(t => t.id === id)){
+    if (typeof window._dabRenderStats === 'function') window._dabRenderStats();
+  }
 }
 
 function renderGridTrades(){
@@ -6440,6 +6444,580 @@ try {
   })();
   setInterval(refreshBot, 300);
   refreshBot();
+})();
+</script>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     DERIV AUTO BOT — dark-themed, instant-fire, no analysis,
+     with bust mode (back-to-back contracts without waiting)
+     Default position: bottom-left (distinct from Mamba FX bot)
+     ══════════════════════════════════════════════════════════════════ -->
+<style>
+/* ── Deriv Auto Bot shell ───────────────────────────────────────── */
+#dabBot{
+  position:fixed;z-index:9998;width:292px;
+  background:#0b1426;border:1px solid rgba(86,182,255,.18);border-radius:16px;
+  box-shadow:0 8px 40px rgba(0,0,0,.8),0 0 0 1px rgba(86,182,255,.06);
+  font-family:'IBM Plex Mono',monospace;font-size:12px;color:#e6ebf5;
+  user-select:none;transition:box-shadow .2s;
+  bottom:24px;left:24px;top:auto;right:auto;
+}
+#dabBot.dragging{box-shadow:0 16px 60px rgba(0,0,0,.95),0 0 0 1.5px rgba(86,182,255,.3);}
+/* header */
+#dabHead{
+  display:flex;align-items:center;gap:8px;padding:11px 14px;
+  border-radius:16px 16px 0 0;cursor:grab;
+  background:linear-gradient(135deg,#0f1e35,#091526);
+  border-bottom:1px solid rgba(86,182,255,.12);
+}
+#dabHead:active{cursor:grabbing;}
+.dab-logo{font-size:14px;font-weight:900;letter-spacing:.04em;
+  background:linear-gradient(90deg,#ff6b35,#f7c59f);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.dab-title{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#4a6480;flex:1;}
+.dab-conn{display:flex;align-items:center;gap:5px;font-size:9px;color:#4a6480;
+  padding:3px 8px;border-radius:999px;background:#060e1a;border:1px solid rgba(86,182,255,.1);}
+.dab-conn .d{width:7px;height:7px;border-radius:50%;background:#4a6480;flex-shrink:0;}
+.dab-conn .d.on{background:#16e08b;box-shadow:0 0 6px rgba(22,224,139,.5);}
+.dab-conn .d.off{background:#ff4d5e;}
+.dab-min{width:22px;height:22px;border-radius:6px;border:1px solid rgba(255,255,255,.1);
+  background:rgba(255,255,255,.04);cursor:pointer;display:flex;align-items:center;
+  justify-content:center;font-size:11px;color:#4a6480;transition:all .15s;flex-shrink:0;}
+.dab-min:hover{background:rgba(255,255,255,.1);color:#e6ebf5;}
+/* body */
+#dabBody{padding:12px 14px 14px;}
+#dabBot.minimised #dabBody{display:none;}
+#dabBot.minimised{border-radius:16px;width:160px;}
+#dabBot.minimised #dabHead{border-bottom:none;border-radius:16px;}
+/* price strip */
+.dab-price-strip{display:flex;align-items:baseline;gap:8px;margin-bottom:10px;
+  background:#060e1a;border:1px solid rgba(86,182,255,.1);border-radius:10px;padding:8px 12px;}
+#dabPrice{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;color:#e6ebf5;}
+#dabPriceSub{font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:#4a6480;margin-left:auto;}
+/* controls */
+.dab-field{margin-bottom:8px;}
+.dab-field label{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:#4a6480;display:block;margin-bottom:4px;}
+.dab-field select,.dab-field input[type=number]{
+  width:100%;font-family:inherit;font-size:12px;font-weight:600;
+  padding:7px 10px;border-radius:8px;border:1px solid rgba(86,182,255,.15);
+  background:#060e1a;color:#e6ebf5;outline:none;cursor:pointer;box-sizing:border-box;
+}
+.dab-stake-row{display:flex;align-items:center;gap:6px;background:#060e1a;
+  border:1px solid rgba(86,182,255,.15);border-radius:8px;padding:6px 10px;margin-bottom:8px;}
+.dab-stake-row label{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:#4a6480;white-space:nowrap;}
+.dab-stake-row input{flex:1;background:none;border:none;font-family:inherit;font-size:14px;
+  font-weight:800;color:#e6ebf5;outline:none;min-width:0;font-variant-numeric:tabular-nums;}
+.dab-stake-row .ccy{font-size:10px;color:#4a6480;white-space:nowrap;}
+/* tick-dur buttons (Only Ups/Downs) */
+.dab-dur-wrap{display:none;margin-bottom:8px;}
+.dab-dur-wrap .dab-dur-label{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:#4a6480;margin-bottom:5px;}
+.dab-dur-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;}
+.dab-dur-btn{font-family:inherit;font-size:13px;font-weight:800;padding:7px 0;
+  border-radius:7px;border:1px solid rgba(86,182,255,.15);background:#060e1a;
+  color:#4a6480;cursor:pointer;transition:all .15s;text-align:center;}
+.dab-dur-btn:hover{border-color:#56b6ff;color:#56b6ff;}
+.dab-dur-btn.active{border-color:#56b6ff;background:rgba(86,182,255,.1);color:#56b6ff;font-weight:900;}
+/* trade buttons */
+.dab-trade-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;}
+.dab-btn{font-family:inherit;font-size:12px;font-weight:800;padding:10px 0;
+  border-radius:10px;border:1.5px solid;cursor:pointer;transition:all .15s;text-align:center;}
+.dab-btn:disabled{opacity:.3;cursor:not-allowed;}
+.dab-btn.up{background:rgba(22,224,139,.1);border-color:#16e08b;color:#16e08b;}
+.dab-btn.up:hover:not(:disabled){background:rgba(22,224,139,.22);}
+.dab-btn.dn{background:rgba(255,77,94,.1);border-color:#ff4d5e;color:#ff4d5e;}
+.dab-btn.dn:hover:not(:disabled){background:rgba(255,77,94,.22);}
+/* bust toggle */
+.dab-bust-row{display:flex;align-items:center;gap:8px;background:#060e1a;
+  border:1px solid rgba(255,196,77,.2);border-radius:9px;padding:8px 12px;margin-bottom:8px;}
+.dab-bust-row .bust-label{font-size:10px;font-weight:700;color:#ffc44d;flex:1;}
+.dab-bust-row .bust-sub{font-size:8.5px;color:#4a6480;line-height:1.4;}
+.dab-bust-toggle{position:relative;display:inline-block;width:36px;height:20px;flex-shrink:0;}
+.dab-bust-toggle input{opacity:0;width:0;height:0;}
+.dab-bust-slider{position:absolute;inset:0;border-radius:20px;background:#1a2535;
+  transition:.2s;cursor:pointer;border:1px solid rgba(255,196,77,.2);}
+.dab-bust-slider::before{content:"";position:absolute;width:14px;height:14px;
+  left:2px;bottom:2px;background:#4a6480;border-radius:50%;transition:.2s;}
+.dab-bust-toggle input:checked+.dab-bust-slider{background:rgba(255,196,77,.15);border-color:#ffc44d;}
+.dab-bust-toggle input:checked+.dab-bust-slider::before{transform:translateX(16px);background:#ffc44d;}
+/* auto fire */
+.dab-auto-btn{width:100%;font-family:inherit;font-size:12px;font-weight:800;
+  padding:10px 0;border-radius:10px;cursor:pointer;letter-spacing:.04em;
+  border:1.5px solid #56b6ff;background:rgba(86,182,255,.1);color:#56b6ff;
+  transition:all .2s;margin-bottom:8px;}
+.dab-auto-btn:hover:not(:disabled){background:rgba(86,182,255,.2);}
+.dab-auto-btn:disabled{opacity:.35;cursor:not-allowed;}
+.dab-auto-btn.firing{border-color:#ff4d5e;background:rgba(255,77,94,.12);color:#ff4d5e;
+  animation:dabPulse 1s infinite;}
+@keyframes dabPulse{0%,100%{opacity:1}50%{opacity:.65}}
+/* auto-config row */
+.dab-auto-cfg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px;}
+/* stats */
+.dab-stats{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;}
+.dab-stat{background:#060e1a;border:1px solid rgba(86,182,255,.1);border-radius:9px;padding:8px 10px;}
+.dab-stat .lab{font-size:8.5px;letter-spacing:.1em;text-transform:uppercase;color:#4a6480;margin-bottom:4px;}
+.dab-stat .val{font-size:15px;font-weight:800;font-variant-numeric:tabular-nums;color:#e6ebf5;}
+.dab-stat .val.up{color:#16e08b;}.dab-stat .val.dn{color:#ff4d5e;}.dab-stat .val.acc{color:#56b6ff;}
+/* last trade */
+.dab-last{background:#060e1a;border:1px solid rgba(86,182,255,.1);border-radius:9px;
+  padding:7px 10px;margin-bottom:8px;font-size:10px;}
+.dab-last .lab{font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:#4a6480;margin-bottom:3px;}
+.dab-last-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.dab-dir{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;}
+.dab-dir.up{background:rgba(22,224,139,.12);color:#16e08b;}
+.dab-dir.dn{background:rgba(255,77,94,.12);color:#ff4d5e;}
+.dab-last-pnl{font-size:11px;font-weight:800;font-variant-numeric:tabular-nums;margin-left:auto;}
+.dab-last-pnl.pos{color:#16e08b;}.dab-last-pnl.neg{color:#ff4d5e;}
+/* status bar */
+#dabStatus{font-size:9.5px;color:#4a6480;text-align:center;margin-top:4px;line-height:1.4;min-height:14px;}
+.dab-hint{font-size:8px;color:#1c2d42;text-align:center;margin-top:6px;letter-spacing:.06em;}
+</style>
+
+<div id="dabBot">
+  <div id="dabHead">
+    <span class="dab-logo">D</span>
+    <span class="dab-title">Deriv Auto Bot</span>
+    <span class="dab-conn"><span id="dabDot" class="d"></span><span id="dabConnLbl">offline</span></span>
+    <div class="dab-min" id="dabMinBtn" title="Double-click header or click to minimise">⟨⟩</div>
+  </div>
+  <div id="dabBody">
+
+    <!-- Live price -->
+    <div class="dab-price-strip">
+      <span id="dabPrice">—</span>
+      <span id="dabPriceSub">—</span>
+    </div>
+
+    <!-- Contract type -->
+    <div class="dab-field">
+      <label>Contract type</label>
+      <select id="dabContractType" onchange="dabOnContractChange()">
+        <option value="CALL_PUT" selected>Rise / Fall</option>
+        <option value="UPORDOWN">Only Ups / Only Downs</option>
+        <option value="DIGITEVEN">Even / Odd</option>
+        <option value="DIGITOVER">Over / Under</option>
+        <option value="EXPIRYRANGE">Stay Between / Goes Out</option>
+      </select>
+    </div>
+
+    <!-- Duration (hidden for Only Ups/Downs which uses the tick bar) -->
+    <div class="dab-field" id="dabDurField">
+      <label>Duration (ticks)</label>
+      <input id="dabDuration" type="number" min="1" max="10" value="5">
+    </div>
+
+    <!-- Only Ups/Only Downs tick-count bar -->
+    <div class="dab-dur-wrap" id="dabOuDurWrap">
+      <div class="dab-dur-label">Consecutive ticks required</div>
+      <div class="dab-dur-grid">
+        <button class="dab-dur-btn" id="dabOuDur2" onclick="dabSetOuDur(2)">2</button>
+        <button class="dab-dur-btn" id="dabOuDur3" onclick="dabSetOuDur(3)">3</button>
+        <button class="dab-dur-btn" id="dabOuDur4" onclick="dabSetOuDur(4)">4</button>
+        <button class="dab-dur-btn active" id="dabOuDur5" onclick="dabSetOuDur(5)">5</button>
+      </div>
+    </div>
+
+    <!-- Stake -->
+    <div class="dab-stake-row">
+      <label>Stake</label>
+      <input id="dabStake" type="number" min="0.35" step="0.01" value="1.00">
+      <span class="ccy" id="dabStakeCcy">USD</span>
+    </div>
+
+    <!-- BUST MODE toggle -->
+    <div class="dab-bust-row">
+      <div style="flex:1">
+        <div class="bust-label">💥 Bust Mode</div>
+        <div class="bust-sub">Fires contracts back-to-back without waiting for the previous outcome. High risk — use demo account only.</div>
+      </div>
+      <label class="dab-bust-toggle">
+        <input type="checkbox" id="dabBust">
+        <span class="dab-bust-slider"></span>
+      </label>
+    </div>
+
+    <!-- Manual fire -->
+    <div class="dab-trade-row">
+      <button class="dab-btn up" id="dabBtnUp" onclick="dabFire(1,'manual')" disabled>▲ UP</button>
+      <button class="dab-btn dn" id="dabBtnDn" onclick="dabFire(-1,'manual')" disabled>▼ DOWN</button>
+    </div>
+
+    <!-- Auto-fire config -->
+    <div class="dab-auto-cfg">
+      <div class="dab-field" style="margin:0">
+        <label>Direction</label>
+        <select id="dabAutoDir">
+          <option value="both" selected>Both</option>
+          <option value="up">Up only</option>
+          <option value="down">Down only</option>
+        </select>
+      </div>
+      <div class="dab-field" style="margin:0">
+        <label>Interval (s)</label>
+        <input id="dabAutoInterval" type="number" min="1" max="60" value="6">
+      </div>
+      <div class="dab-field" style="margin:0">
+        <label>Max fires (0=∞)</label>
+        <input id="dabAutoMax" type="number" min="0" value="0">
+      </div>
+    </div>
+
+    <!-- Auto-fire button -->
+    <button class="dab-auto-btn" id="dabAutoBtn" onclick="dabToggleAuto()" disabled>⚡ START AUTO FIRE</button>
+
+    <!-- Stats -->
+    <div class="dab-stats">
+      <div class="dab-stat"><div class="lab">Won</div><div id="dabWon" class="val up">0</div></div>
+      <div class="dab-stat"><div class="lab">Lost</div><div id="dabLost" class="val dn">0</div></div>
+      <div class="dab-stat"><div class="lab">Win rate</div><div id="dabWinRate" class="val acc">—</div></div>
+      <div class="dab-stat"><div class="lab">P/L</div><div id="dabPnL" class="val">—</div></div>
+    </div>
+
+    <!-- Last trade -->
+    <div class="dab-last" id="dabLastRow" style="display:none">
+      <div class="lab">Last trade</div>
+      <div class="dab-last-row">
+        <span id="dabLastDir" class="dab-dir up">—</span>
+        <span id="dabLastType" style="color:#4a6480;font-size:10px">—</span>
+        <span id="dabLastStatus" style="color:#4a6480;font-size:10px;margin-left:4px">—</span>
+        <span id="dabLastPnl" class="dab-last-pnl">—</span>
+      </div>
+    </div>
+
+    <div id="dabStatus">Connect on Trading Grid to enable.</div>
+    <div class="dab-hint">drag · double-click to minimise</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const bot  = document.getElementById('dabBot');
+  const head = document.getElementById('dabHead');
+  const minB = document.getElementById('dabMinBtn');
+  const STORE = 'dabBotState_v1';
+
+  /* ── position persistence ────────────────────────────────── */
+  function savePos(){
+    try{ sessionStorage.setItem(STORE, JSON.stringify({
+      x:bot.style.left, y:bot.style.top,
+      min:bot.classList.contains('minimised')
+    }));}catch(_){}
+  }
+  function loadPos(){
+    try{
+      const s=JSON.parse(sessionStorage.getItem(STORE)||'null');
+      if(!s) return;
+      if(s.x){bot.style.left=s.x;bot.style.right='auto';}
+      if(s.y){bot.style.top=s.y;bot.style.bottom='auto';}
+      if(s.min) setMin(true);
+    }catch(_){}
+  }
+
+  /* ── minimise ─────────────────────────────────────────────── */
+  function setMin(on){
+    bot.classList.toggle('minimised',on);
+    minB.textContent=on?'▣':'⟨⟩';
+    savePos();
+  }
+  minB.addEventListener('click',e=>{e.stopPropagation();setMin(!bot.classList.contains('minimised'));});
+  head.addEventListener('dblclick',()=>setMin(!bot.classList.contains('minimised')));
+
+  /* ── drag (mouse) ─────────────────────────────────────────── */
+  let dragging=false,ox=0,oy=0;
+  head.addEventListener('mousedown',e=>{
+    if(e.target===minB)return;
+    dragging=true;ox=e.clientX-bot.offsetLeft;oy=e.clientY-bot.offsetTop;
+    bot.style.left=bot.offsetLeft+'px';bot.style.top=bot.offsetTop+'px';
+    bot.style.right='auto';bot.style.bottom='auto';
+    bot.classList.add('dragging');
+  });
+  document.addEventListener('mousemove',e=>{
+    if(!dragging)return;
+    bot.style.left=Math.max(0,Math.min(e.clientX-ox,window.innerWidth-bot.offsetWidth))+'px';
+    bot.style.top=Math.max(0,Math.min(e.clientY-oy,window.innerHeight-bot.offsetHeight))+'px';
+  });
+  document.addEventListener('mouseup',()=>{if(!dragging)return;dragging=false;bot.classList.remove('dragging');savePos();});
+
+  /* ── drag (touch) ─────────────────────────────────────────── */
+  head.addEventListener('touchstart',e=>{
+    if(e.target===minB)return;
+    const t=e.touches[0];
+    dragging=true;ox=t.clientX-bot.offsetLeft;oy=t.clientY-bot.offsetTop;
+    bot.style.left=bot.offsetLeft+'px';bot.style.top=bot.offsetTop+'px';
+    bot.style.right='auto';bot.style.bottom='auto';
+  },{passive:true});
+  document.addEventListener('touchmove',e=>{
+    if(!dragging)return;
+    const t=e.touches[0];
+    bot.style.left=Math.max(0,Math.min(t.clientX-ox,window.innerWidth-bot.offsetWidth))+'px';
+    bot.style.top=Math.max(0,Math.min(t.clientY-oy,window.innerHeight-bot.offsetHeight))+'px';
+  },{passive:true});
+  document.addEventListener('touchend',()=>{if(!dragging)return;dragging=false;savePos();});
+
+  /* ── helpers ──────────────────────────────────────────────── */
+  function dabSet(id,v){const e=document.getElementById(id);if(e)e.textContent=v;}
+  function dabGet(id){const e=document.getElementById(id);return e?e.value:'';}
+  function dabGetStake(){return Math.max(0.35,parseFloat(dabGet('dabStake')||'1'));}
+  function dabGetDur(){
+    const ct=dabGet('dabContractType');
+    if(ct==='UPORDOWN') return dabOuDur;
+    return Math.max(1,parseInt(dabGet('dabDuration')||'5',10));
+  }
+
+  /* ── contract type change ─────────────────────────────────── */
+  let dabOuDur=5;
+  window.dabSetOuDur=function(n){
+    dabOuDur=n;
+    [2,3,4,5].forEach(d=>{
+      const b=document.getElementById('dabOuDur'+d);
+      if(b)b.classList.toggle('active',d===n);
+    });
+  };
+  window.dabOnContractChange=function(){
+    const ct=dabGet('dabContractType');
+    const ouWrap=document.getElementById('dabOuDurWrap');
+    const durField=document.getElementById('dabDurField');
+    if(ouWrap) ouWrap.style.display=ct==='UPORDOWN'?'block':'none';
+    if(durField) durField.style.display=ct==='UPORDOWN'?'none':'block';
+    const btnUp=document.getElementById('dabBtnUp');
+    const btnDn=document.getElementById('dabBtnDn');
+    const labels={
+      CALL_PUT:['▲ UP','▼ DOWN'],UPORDOWN:['ONLY UPS','ONLY DOWNS'],
+      DIGITEVEN:['EVEN','ODD'],DIGITOVER:['OVER','UNDER'],
+      EXPIRYRANGE:['STAY IN','GOES OUT']
+    };
+    const [lu,ld]=(labels[ct]||labels.CALL_PUT);
+    if(btnUp)btnUp.textContent=lu;
+    if(btnDn)btnDn.textContent=ld;
+  };
+
+  /* ── trade ledger ─────────────────────────────────────────── */
+  const dabTrades=[];
+  function dabRenderStats(){
+    let won=0,lost=0,net=0,any=false;
+    dabTrades.forEach(t=>{
+      if(t.status==='won'){won++;if(t.pnl!=null){net+=t.pnl;any=true;}}
+      if(t.status==='lost'){lost++;if(t.pnl!=null){net+=t.pnl;any=true;}}
+    });
+    dabSet('dabWon',won); dabSet('dabLost',lost);
+    const tot=won+lost;
+    dabSet('dabWinRate',tot>0?(won/tot*100).toFixed(1)+'%':'—');
+    const ccy=(typeof gridCurrency!=='undefined'?gridCurrency:'USD');
+    const pEl=document.getElementById('dabPnL');
+    if(pEl){
+      pEl.textContent=any?(net>=0?'+':'')+net.toFixed(2)+' '+ccy:'—';
+      pEl.className='val '+(any?(net>=0?'up':'dn'):'');
+    }
+    // last trade
+    if(dabTrades.length){
+      const t=dabTrades[0];
+      document.getElementById('dabLastRow').style.display='block';
+      const dEl=document.getElementById('dabLastDir');
+      dEl.textContent=t.dir===1?'▲ UP':'▼ DOWN';
+      dEl.className='dab-dir '+(t.dir===1?'up':'dn');
+      dabSet('dabLastType',t.contractType||'—');
+      dabSet('dabLastStatus',t.status||'—');
+      const pEl2=document.getElementById('dabLastPnl');
+      if(pEl2){
+        pEl2.textContent=t.pnl!=null?(t.pnl>=0?'+':'')+t.pnl.toFixed(2):'—';
+        pEl2.className='dab-last-pnl '+(t.pnl!=null?(t.pnl>=0?'pos':'neg'):'');
+      }
+    }
+  }
+
+  /* ── connection status ────────────────────────────────────── */
+  function dabRefreshConn(){
+    const ok=typeof gridWs!=='undefined'&&gridWs&&gridWs.readyState===1&&(typeof gridAuthed!=='undefined'&&gridAuthed);
+    const dot=document.getElementById('dabDot');
+    if(dot)dot.className='d'+(ok?' on':' off');
+    dabSet('dabConnLbl',ok?'live':'offline');
+    const ccy=(typeof gridCurrency!=='undefined'?gridCurrency:'USD');
+    const ccyEl=document.getElementById('dabStakeCcy');if(ccyEl)ccyEl.textContent=ccy;
+    ['dabBtnUp','dabBtnDn','dabAutoBtn'].forEach(id=>{
+      const b=document.getElementById(id);if(b)b.disabled=!ok;
+    });
+    if(!ok&&dabAutoRunning) dabStopAuto('disconnected');
+  }
+
+  /* ── core fire function ───────────────────────────────────── */
+  function dabFire(dir,source){
+    if(typeof gridWs==='undefined'||!gridWs||gridWs.readyState!==1||!(typeof gridAuthed!=='undefined'&&gridAuthed)){
+      dabSet('dabStatus','Not connected — connect on Trading Grid first.');return;
+    }
+    const ct=dabGet('dabContractType');
+    const dur=dabGetDur();
+    const stake=dabGetStake();
+    const bust=document.getElementById('dabBust')&&document.getElementById('dabBust').checked;
+
+    // Build the proposal
+    let contractType;
+    if(ct==='CALL_PUT')       contractType=dir===1?'CALL':'PUT';
+    else if(ct==='UPORDOWN')  contractType=dir===1?'RUNHIGH':'RUNLOW';
+    else if(ct==='DIGITEVEN') contractType=dir===1?'DIGITEVEN':'DIGITODD';
+    else if(ct==='DIGITOVER') contractType=dir===1?'DIGITOVER':'DIGITUNDER';
+    else if(ct==='EXPIRYRANGE') contractType=dir===1?'EXPIRYRANGE':'EXPIRYMISS';
+    else contractType=dir===1?'CALL':'PUT';
+
+    const reqId=(typeof gridReqId!=='undefined'?++gridReqId:Date.now());
+    const proposal={
+      proposal:1, req_id:reqId,
+      amount:stake, basis:'stake',
+      contract_type:contractType,
+      currency:(typeof gridCurrency!=='undefined'?gridCurrency:'USD'),
+      duration:dur, duration_unit:'t',
+      underlying_symbol:(typeof SYMBOL!=='undefined'?SYMBOL:'1HZ100V'),
+    };
+    // Barrier for Over/Under digit contracts
+    if(ct==='DIGITOVER'||ct==='DIGITUNDER') proposal.barrier='5';
+    // High/low barriers for Stay Between / Goes Out
+    if(ct==='EXPIRYRANGE'){
+      const tks=typeof ticks!=='undefined'?ticks:[];
+      if(tks.length>=5){
+        const prices=tks.slice(-20).map(t=>t.price);
+        const hi=Math.max(...prices),lo=Math.min(...prices),rng=hi-lo;
+        const dec=(typeof decimals!=='undefined'?decimals:2);
+        proposal.high_barrier=(hi+rng*0.5).toFixed(dec);
+        proposal.low_barrier=(lo-rng*0.5).toFixed(dec);
+      }
+    }
+
+    const row={
+      id:'pending-'+reqId,dir,source,contractType,stake,
+      currency:(typeof gridCurrency!=='undefined'?gridCurrency:'USD'),
+      isVirtual:typeof gridIsVirtual!=='undefined'?!!gridIsVirtual:true,
+      time:Math.floor(Date.now()/1000),
+      entry:null,exit:null,payout:null,pnl:null,status:'pricing…'
+    };
+    dabTrades.unshift(row);
+    if(dabTrades.length>200)dabTrades.pop();
+    dabRenderStats();
+    dabSet('dabStatus',`Pricing ${contractType}…`);
+
+    // In BUST MODE: we fire and forget — don't wait for the outcome before
+    // allowing the next trade. The contract is tracked for P/L but execution
+    // continues immediately. Without bust mode, the auto-fire interval still
+    // controls timing; bust simply removes the "wait for settlement" gate.
+    if(typeof gridPending!=='undefined'){
+      gridPending[reqId]=(prop,err)=>{
+        if(err){
+          row.status='rejected: '+(err.message||err.code||'error')+(err.details?` [${err.details.field||'?'}]`:'');
+          dabRenderStats();
+          dabSet('dabStatus',row.status);
+          return;
+        }
+        if(!prop||!prop.id||prop.ask_price==null){
+          row.status='rejected: no price';dabRenderStats();return;
+        }
+        const buyReqId=(typeof gridReqId!=='undefined'?++gridReqId:Date.now()+1);
+        const buyMsg={buy:prop.id,price:prop.ask_price,req_id:buyReqId};
+        row.status='open';dabRenderStats();
+        dabSet('dabStatus',`Contract open — payout if won: ${Number(prop.payout||0).toFixed(2)}`);
+        if(typeof gridPending!=='undefined'){
+          gridPending[buyReqId]=(buy,buyErr)=>{
+            if(buyErr){
+              row.status='buy failed: '+(buyErr.message||buyErr.code||'error');
+              dabRenderStats();dabSet('dabStatus',row.status);return;
+            }
+            if(buy){
+              row.id=String(buy.contract_id);
+              row.buyPrice=buy.buy_price;
+              row.status='open';
+              if(typeof gridOpenContracts!=='undefined') gridOpenContracts[row.id]=row;
+              dabRenderStats();
+              console.log('[Deriv Auto Bot] contract opened:',buy.contract_id,contractType);
+            }
+          };
+        }
+        gridWs.send(JSON.stringify(buyMsg));
+      };
+    }
+    gridWs.send(JSON.stringify(proposal));
+    console.log('[Deriv Auto Bot] proposal sent:',contractType,'dur:',dur,'stake:',stake,'bust:',bust);
+  }
+  // Expose so gridUpdateContract can call engRenderStats equivalent
+  window.dabFire=dabFire;
+
+  // Hook into gridUpdateContract to update dabTrades on settlement
+  const _origUpdate=window.gridUpdateContract;
+  // Patch is done by checking dabTrades inside the existing gridUpdateContract,
+  // not by wrapping (gridUpdateContract already checks dabTrades via reference).
+
+  /* ── AUTO FIRE ────────────────────────────────────────────── */
+  let dabAutoRunning=false,dabAutoTimer=null,dabAutoFired=0;
+
+  window.dabToggleAuto=function(){
+    if(dabAutoRunning){dabStopAuto('stopped by user');}
+    else{dabStartAuto();}
+  };
+
+  function dabStartAuto(){
+    if(typeof gridWs==='undefined'||!gridWs||gridWs.readyState!==1){
+      dabSet('dabStatus','Not connected.');return;
+    }
+    dabAutoRunning=true;dabAutoFired=0;
+    const btn=document.getElementById('dabAutoBtn');
+    if(btn){btn.textContent='⏹ STOP AUTO FIRE';btn.classList.add('firing');}
+    dabSet('dabStatus','Auto fire armed — firing on interval…');
+    dabScheduleNext();
+  }
+
+  function dabStopAuto(reason){
+    dabAutoRunning=false;
+    if(dabAutoTimer){clearTimeout(dabAutoTimer);dabAutoTimer=null;}
+    const btn=document.getElementById('dabAutoBtn');
+    if(btn){btn.textContent='⚡ START AUTO FIRE';btn.classList.remove('firing');}
+    dabSet('dabStatus','Auto fire stopped'+(reason?' ('+reason+')':'')+'.');
+  }
+
+  function dabScheduleNext(){
+    if(!dabAutoRunning)return;
+    const maxN=Math.max(0,parseInt(dabGet('dabAutoMax')||'0',10));
+    if(maxN&&dabAutoFired>=maxN){dabStopAuto('reached '+maxN+' fires');return;}
+    const interval=Math.max(1,parseFloat(dabGet('dabAutoInterval')||'6'))*1000;
+    dabAutoTimer=setTimeout(()=>{
+      if(!dabAutoRunning)return;
+      // Determine direction from auto-dir setting
+      const dir_pref=dabGet('dabAutoDir');
+      let dir;
+      if(dir_pref==='up') dir=1;
+      else if(dir_pref==='down') dir=-1;
+      else dir=(Math.random()>0.5?1:-1); // both: alternate randomly
+      dabFire(dir,'auto');
+      dabAutoFired++;
+      dabSet('dabStatus',`Auto fired #${dabAutoFired}${maxN?' of '+maxN:''} — ${dir===1?'UP':'DOWN'}`);
+      dabScheduleNext();
+    },interval);
+  }
+
+  /* ── refresh loop ─────────────────────────────────────────── */
+  function dabRefresh(){
+    dabRefreshConn();
+    // live price
+    const price=(typeof lastPrice!=='undefined'&&lastPrice!=null)?lastPrice:null;
+    const dec=(typeof decimals!=='undefined'?decimals:2);
+    const prEl=document.getElementById('dabPrice');
+    if(prEl&&price!=null){
+      const prev=prEl._prev;
+      prEl.textContent=Number(price).toFixed(dec);
+      prEl.style.color=prev==null?'#e6ebf5':price>prev?'#16e08b':price<prev?'#ff4d5e':'#e6ebf5';
+      prEl._prev=price;
+    }
+    const dir=(typeof runDir!=='undefined'?runDir:0);
+    const rLen=(typeof runLen!=='undefined'?runLen:0);
+    const sym=(typeof SYMBOL!=='undefined'?SYMBOL:'');
+    const mkts=(typeof MARKETS!=='undefined'?MARKETS:{});
+    const mktName=(mkts[sym]||sym).replace('Volatility ','V').replace(' Index','').replace(/[()]/g,'');
+    dabSet('dabPriceSub',rLen>0?(dir===1?'▲':'▼')+' run '+rLen:mktName);
+  }
+
+  /* ── init ─────────────────────────────────────────────────── */
+  loadPos();
+  setInterval(dabRefresh,300);
+  dabRefresh();
+  dabOnContractChange(); // set initial labels
+
+  // Make dabRenderStats accessible so gridUpdateContract can trigger it
+  window._dabRenderStats=dabRenderStats;
+  window._dabTrades=dabTrades;
 })();
 </script>
 </body>
