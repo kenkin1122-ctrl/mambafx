@@ -5958,17 +5958,9 @@ try {
     }
   };
 
-  /* ── Only Ups / Only Downs: RUNHIGH or RUNLOW, no barrier ───────
-   * Per Deriv's official API docs (developers.deriv.com/docs/only-upsonly-downs):
-   *   Only Ups  → contract_type: "RUNHIGH"
-   *   Only Downs → contract_type: "RUNLOW"
-   * These are NOT CALL/PUT. Using CALL/PUT gives a standard Rise/Fall
-   * quote (~81% return). RUNHIGH/RUNLOW gives the correct ~2953% return
-   * at 5 ticks because every consecutive tick must move in the same direction.
-   * No barrier field is used — just duration (ticks) and underlying_symbol.
-   * ──────────────────────────────────────────────────────────────── */
   function mfxSendOuProposal(contractType, dur){
-    // contractType will be 'RUNHIGH' (Only Ups) or 'RUNLOW' (Only Downs)
+    // contractType: 'RUNHIGH' = Only Ups, 'RUNLOW' = Only Downs
+    // Confirmed from Deriv API docs: developers.deriv.com/docs/only-upsonly-downs
     if(typeof gridWs==='undefined'||!gridWs||gridWs.readyState!==1) return;
     const stake = mfxGetStake();
     const reqId = (typeof gridReqId!=='undefined'?++gridReqId:Date.now());
@@ -5977,23 +5969,41 @@ try {
       req_id: reqId,
       amount: stake,
       basis: 'stake',
-      contract_type: contractType,           // 'CALL' or 'PUT'
+      contract_type: contractType,           // 'RUNHIGH' or 'RUNLOW'
       currency: typeof gridCurrency!=='undefined'?gridCurrency:'USD',
       duration: dur,                         // 2, 3, 4, or 5 ticks
       duration_unit: 't',
       underlying_symbol: typeof SYMBOL!=='undefined'?SYMBOL:'1HZ100V',
     };
+    console.log('[MambaFX Bot] Sending OU proposal:', JSON.stringify(proposalMsg));
+
+    function showPreviewError(msg){
+      const prev = document.getElementById('mfxPayoutPreview');
+      if(prev){
+        prev.style.background='#fef2f2'; prev.style.borderColor='#fecaca';
+        prev.style.display='block';
+        const p1=document.getElementById('mfxPreviewPayout');
+        const p2=document.getElementById('mfxPreviewProfit');
+        const p3=document.getElementById('mfxPreviewReturn');
+        if(p1) p1.textContent='Error';
+        if(p2) p2.textContent=msg;
+        if(p3) p3.textContent='—';
+      }
+    }
 
     if(typeof gridPending!=='undefined'){
       gridPending[reqId] = (proposal, err) => {
         if(err){
-          console.warn('[MambaFX Bot] OU proposal error:', err.message, err.details);
+          console.error('[MambaFX Bot] OU proposal error:', err.code, err.message, err.details);
+          showPreviewError((err.message||'Proposal rejected')+' ['+( err.details&&err.details.field?err.details.field:err.code||'?')+']');
           return;
         }
         if(!proposal||!proposal.id||proposal.ask_price==null){
-          console.warn('[MambaFX Bot] OU proposal missing id/ask_price');
+          console.error('[MambaFX Bot] OU proposal missing id/ask_price:', proposal);
+          showPreviewError('Proposal returned no price — check API Diagnostics page');
           return;
         }
+        console.log('[MambaFX Bot] OU proposal OK:', JSON.stringify(proposal));
 
         // Show payout preview panel
         const payout = Number(proposal.payout||0);
@@ -6003,6 +6013,7 @@ try {
         const prev = document.getElementById('mfxPayoutPreview');
         const ccy = typeof gridCurrency!=='undefined'?gridCurrency:'USD';
         if(prev){
+          prev.style.background=''; prev.style.borderColor='';
           document.getElementById('mfxPreviewPayout').textContent  = payout.toFixed(2)+' '+ccy;
           document.getElementById('mfxPreviewProfit').textContent  = (profit>=0?'+':'')+profit.toFixed(2)+' '+ccy;
           document.getElementById('mfxPreviewReturn').textContent  = ret+'%';
@@ -6012,17 +6023,25 @@ try {
         // Buy immediately with the exact proposal.id and ask_price
         const buyReqId = (typeof gridReqId!=='undefined'?++gridReqId:Date.now()+1);
         const buyMsg = { buy: proposal.id, price: proposal.ask_price, req_id: buyReqId };
+        console.log('[MambaFX Bot] Sending OU buy:', JSON.stringify(buyMsg));
         if(typeof gridPending!=='undefined'){
           gridPending[buyReqId] = (buy, buyErr) => {
             if(buyErr){
-              console.warn('[MambaFX Bot] OU buy error:', buyErr.message, buyErr.details);
+              console.error('[MambaFX Bot] OU buy error:', buyErr.code, buyErr.message, buyErr.details);
+              showPreviewError('Buy failed: '+(buyErr.message||buyErr.code||'error'));
               return;
             }
-            if(buy) console.log('[MambaFX Bot] Only Ups/Downs contract opened:',buy.contract_id);
+            if(buy){
+              console.log('[MambaFX Bot] ✅ Only Ups/Downs contract opened:', buy.contract_id, 'payout:', buy.payout);
+              const prev2 = document.getElementById('mfxPayoutPreview');
+              if(prev2) prev2.style.borderColor='#86efac';
+            }
           };
         }
         gridWs.send(JSON.stringify(buyMsg));
       };
+    } else {
+      console.error('[MambaFX Bot] gridPending not accessible — cannot register proposal callback');
     }
     gridWs.send(JSON.stringify(proposalMsg));
   }
