@@ -463,6 +463,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button id="navEngine" onclick="showPage('engine')">⚡ 5-Tick Engine</button>
     <button id="navGrid" onclick="showPage('grid')">🎯 Trading Grid</button>
     <button id="navAnalysis" onclick="showPage('analysis')">🔬 Analysis Tool</button>
+    <button id="navTracker" onclick="showPage('tracker')">🔢 Digit Tracker</button>
     <button id="navDigits" onclick="showPage('digits')">🎲 Digits Bot</button>
     <button id="navDiag" onclick="showPage('diag')">🩺 API Diagnostics</button>
     <button id="navCharts" onclick="showPage('charts')">📈 Indicator Charts</button>
@@ -923,15 +924,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
         <label for="anRunPick">Run</label>
         <select id="anRunPick" onchange="renderAnalysis()"></select>
       </div>
-      <button class="gc-btn" onclick="exportFullDayCsv()" title="Download full session: every tick, last digit, run direction, signal log">⬇ CSV (full day)</button>
-    </div>
-
-    <!-- Digit circles tracker -->
-    <div class="dig-card" style="margin-bottom:16px">
-      <h2 style="font-size:13px;font-weight:700;margin-bottom:6px">🔢 Last-digit tracker
-        <span style="font-size:10px;font-weight:400;color:var(--muted);margin-left:8px">Green cursor = current last digit</span>
-      </h2>
-      <div id="anDigitCircles" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px"></div>
+      <button class="gc-btn" onclick="exportAnalysisCsv()" title="Download 3 spreadsheets: B (before), P (run), A (after) — each with price + all indicators">⬇ CSV (3 sheets)</button>
     </div>
 
     <div class="an-phase-key">
@@ -964,6 +957,39 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       The analysis window is captured automatically for every run: 3 ticks before, the 5 run ticks, and the 4 ticks after. Averages are computed over all runs stored for the selected market. Synthetic indices are random — patterns here describe past runs, they do not predict the next one.
     </footer>
   </div><!-- /page-analysis -->
+
+  <!-- ============ PAGE: DIGIT TRACKER ============ -->
+  <div id="page-tracker" class="page">
+    <div class="dig-card" style="margin-bottom:16px">
+      <h2>🔢 Last-digit tracker
+        <span style="font-size:10px;font-weight:400;color:var(--muted);margin-left:10px">Green cursor = current last digit · updates every tick</span>
+        <span id="trackerMarket" style="font-size:10px;font-weight:600;color:var(--accent);margin-left:auto"></span>
+      </h2>
+      <div class="gc-sub" style="margin-bottom:14px">
+        Tracks the last digit (0–9) of every live tick price. The green-highlighted circle marks the current last digit. Frequency counts update in real time — useful for spotting digit distribution skew in the current session.
+      </div>
+
+      <!-- Digit circles -->
+      <div id="anDigitCircles" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;justify-content:center"></div>
+
+      <!-- Frequency bar chart -->
+      <div style="margin-bottom:6px;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)">Frequency — last 500 ticks</div>
+      <div id="trackerFreqBars" style="display:grid;grid-template-columns:repeat(10,1fr);gap:6px"></div>
+
+      <!-- Stats row -->
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:14px">
+        <div class="em-card"><div class="em-lab">Current Digit</div><div id="trackerCurDigit" class="em-val neu" style="font-size:26px">—</div></div>
+        <div class="em-card"><div class="em-lab">Ticks Seen</div><div id="trackerTotal" class="em-val acc">0</div></div>
+        <div class="em-card"><div class="em-lab">Most frequent</div><div id="trackerMost" class="em-val up">—</div></div>
+        <div class="em-card"><div class="em-lab">Least frequent</div><div id="trackerLeast" class="em-val dn">—</div></div>
+        <div class="em-card"><div class="em-lab">Last 10 digits</div><div id="trackerLast10" class="em-val neu" style="font-size:13px;letter-spacing:.12em">—</div></div>
+      </div>
+    </div>
+
+    <footer>
+      Synthetic indices produce last digits that are statistically uniform over large samples — deviations from 10% per digit are expected noise, not a persistent pattern. This tracker shows the real-time distribution for awareness, not for prediction.
+    </footer>
+  </div><!-- /page-tracker -->
 
   <!-- ============ PAGE 6: DIGITS / MATCHES BOT ============ -->
   <div id="page-digits" class="page">
@@ -1547,9 +1573,10 @@ function handleTick(price, epoch){
   drawLiveCandles();
   engineOnTick(price, epoch, dir);
   digOnTick(price, epoch);
-  if (document.getElementById("page-analysis") &&
-      document.getElementById("page-analysis").classList.contains("active")){
+  if (document.getElementById("page-tracker") &&
+      document.getElementById("page-tracker").classList.contains("active")){
     renderAnalysisDigitCircles();
+    renderTrackerPage();
   }
 
   // Persist the last 100 ticks (throttled: every 3rd tick, plus always on a signal)
@@ -2537,8 +2564,8 @@ function startTfTimers(){
 }
 
 function showPage(which){
-  const pages = { live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", digits:"page-digits", diag:"page-diag", charts:"page-charts" };
-  const navs  = { live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", digits:"navDigits", diag:"navDiag", charts:"navCharts" };
+  const pages = { live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts" };
+  const navs  = { live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts" };
   Object.keys(pages).forEach(k => {
     document.getElementById(pages[k]).classList.toggle("active", k===which);
     const nav = document.getElementById(navs[k]); if (nav) nav.classList.toggle("active", k===which);
@@ -2557,7 +2584,10 @@ function showPage(which){
   if (which === "analysis"){
     buildAnalysisSelector();
     renderAnalysis();
+  }
+  if (which === "tracker"){
     renderAnalysisDigitCircles();
+    renderTrackerPage();
   }
   if (which === "digits"){
     digPageInit();
@@ -4921,33 +4951,31 @@ function drawAnSpark(data, cols){
 
 // ── Analysis Tool: digit circles tracker ─────────────────────────────
 // Shows digits 0–9 as circles; the circle for the current last digit
-// has a green animated cursor. Updates every tick via handleTick.
+// has a green animated cursor. Lives on page-tracker.
 function renderAnalysisDigitCircles(){
   const container = $("anDigitCircles");
   if (!container) return;
   const ld = lastPrice != null ? digLastDigit(lastPrice) : null;
-  // build circles if not already built
   if (!container.childElementCount){
     let h = "";
     for (let d = 0; d < 10; d++){
       h += `<div id="anCircle${d}" style="
-        width:36px;height:36px;border-radius:50%;display:flex;align-items:center;
-        justify-content:center;font-size:13px;font-weight:800;font-variant-numeric:tabular-nums;
+        width:44px;height:44px;border-radius:50%;display:flex;align-items:center;
+        justify-content:center;font-size:15px;font-weight:800;font-variant-numeric:tabular-nums;
         border:2px solid var(--line);background:#0a0e17;color:var(--muted);
-        position:relative;transition:border-color .15s,background .15s,color .15s;
+        position:relative;transition:border-color .15s,background .15s,color .15s,box-shadow .15s;
         flex-shrink:0;">${d}</div>`;
     }
     container.innerHTML = h;
   }
-  // update active state
   for (let d = 0; d < 10; d++){
     const el = $(`anCircle${d}`);
     if (!el) continue;
     if (d === ld){
       el.style.borderColor = "#16e08b";
-      el.style.background  = "rgba(22,224,139,.15)";
+      el.style.background  = "rgba(22,224,139,.18)";
       el.style.color       = "#16e08b";
-      el.style.boxShadow   = "0 0 0 3px rgba(22,224,139,.25)";
+      el.style.boxShadow   = "0 0 0 4px rgba(22,224,139,.22)";
     } else {
       el.style.borderColor = "var(--line)";
       el.style.background  = "#0a0e17";
@@ -4955,6 +4983,55 @@ function renderAnalysisDigitCircles(){
       el.style.boxShadow   = "none";
     }
   }
+}
+
+function renderTrackerPage(){
+  const ld = lastPrice != null ? digLastDigit(lastPrice) : null;
+  // current digit stat
+  const cdEl = $("trackerCurDigit");
+  if (cdEl){ cdEl.textContent = ld != null ? String(ld) : "—"; cdEl.style.color = ld != null ? "#16e08b" : ""; }
+
+  // ticks seen
+  const totEl = $("trackerTotal"); if (totEl) totEl.textContent = ticks.length;
+
+  // last 10 digits
+  const last10 = ticks.slice(-10).map(t => digLastDigit(t.price)).join(" ");
+  const l10El = $("trackerLast10"); if (l10El) l10El.textContent = last10 || "—";
+
+  // frequency from last 500 ticks
+  const recent = ticks.slice(-500);
+  const counts = new Array(10).fill(0);
+  recent.forEach(t => counts[digLastDigit(t.price)]++);
+  const n = recent.length || 1;
+
+  // most / least
+  let maxD=0, minD=0;
+  counts.forEach((c,d) => { if(c>counts[maxD]) maxD=d; if(c<counts[minD]) minD=d; });
+  const mEl=$("trackerMost"); if(mEl) mEl.textContent = `${maxD} (${(counts[maxD]/n*100).toFixed(1)}%)`;
+  const lEl=$("trackerLeast"); if(lEl) lEl.textContent = `${minD} (${(counts[minD]/n*100).toFixed(1)}%)`;
+
+  // frequency bar chart
+  const bars = $("trackerFreqBars");
+  if (bars){
+    const maxCount = Math.max(...counts, 1);
+    bars.innerHTML = counts.map((c,d) => {
+      const pct = (c/maxCount*100).toFixed(1);
+      const freqPct = (c/n*100).toFixed(1);
+      const isActive = d === ld;
+      const color = isActive ? "#16e08b" : (d===maxD ? "#56b6ff" : d===minD ? "#ff4d5e" : "#2a3650");
+      return `<div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+        <div style="font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums">${freqPct}%</div>
+        <div style="width:100%;background:#0a0e17;border-radius:4px;overflow:hidden;height:80px;display:flex;align-items:flex-end;border:1px solid var(--line)">
+          <div style="width:100%;background:${color};height:${pct}%;transition:height .3s;border-radius:2px 2px 0 0"></div>
+        </div>
+        <div style="font-size:13px;font-weight:800;color:${isActive?'#16e08b':'var(--text)'}">${d}</div>
+        <div style="font-size:9px;color:var(--muted)">${c}</div>
+      </div>`;
+    }).join("");
+  }
+
+  // market name
+  const mEl2=$("trackerMarket"); if(mEl2) mEl2.textContent = MARKETS[SYMBOL]||SYMBOL;
 }
 
 // ── Full-day CSV export ───────────────────────────────────────────────
@@ -5036,60 +5113,79 @@ function exportFullDayCsv(){
 }
 
 function exportAnalysisCsv(){
-  if (!signalRecords.length){ alert("No signal records to export yet — wait for 5-tick runs to fire."); return; }
+  if (!signalRecords.length){ alert("No signal records yet — wait for 5-tick runs to fire."); return; }
 
-  const cols = anColumns();   // [{phase,label}] — 12 entries: B-3…B-1, P1…P5, A-1…A-4
-  const dec  = decimals || 2;
+  const cols   = anColumns();   // 12 entries: B-3,B-2,B-1, P1..P5, A-1..A-4
+  const dec    = decimals || 2;
+  const total  = signalRecords.length;
+  const today  = new Date().toISOString().slice(0,10);
 
-  // ── Header row ───────────────────────────────────────────────────────
-  // Metadata columns, then for each position: price + every indicator
-  const posLabels = cols.map(c => c.label.replace('·start','_start').replace('-','_'));
+  // ── Column index ranges ──────────────────────────────────────────────
+  // B (before): colIdx 0,1,2       → B-3, B-2, B-1
+  // P (run):    colIdx 3,4,5,6,7   → P1, P2, P3, P4, P5
+  // A (after):  colIdx 8,9,10,11   → A-1, A-2, A-3, A-4
+  const bIdx = [0,1,2];
+  const pIdx = [3,4,5,6,7];
+  const aIdx = [8,9,10,11];
 
-  const headerCols = [
-    "signal_no", "epoch", "datetime", "direction",
-    // Price at every position
-    ...posLabels.map(p => "price_" + p),
-    // Each indicator at every position
-    ...AN_METRICS.flatMap(m => posLabels.map(p => m.label + "_" + p)),
-  ];
-  const rows = [ headerCols.join(",") ];
+  const META = ["signal_no","epoch","datetime","direction"];
 
-  const total = signalRecords.length;
+  // Generates one CSV string for a given set of column indices
+  function buildCsv(indices){
+    const posLabels = indices.map(ci => cols[ci].label
+      .replace('·start','_start').replace(/-/g,'_'));
 
-  signalRecords.forEach((rec, idx) => {
-    // signal_no: 1 = oldest, total = newest
-    const sigNo   = total - idx;
-    const epoch   = rec.epoch || "";
-    const dt      = epoch ? new Date(epoch * 1000).toISOString().replace("T"," ").slice(0,19) : "";
-    const dir     = rec.dir === 1 ? "rise" : "fall";
+    // Header: metadata + price_X + indicator_X for each position
+    const header = [
+      ...META,
+      ...posLabels.map(p => "price_"+p),
+      ...AN_METRICS.flatMap(m => posLabels.map(p => m.label+"_"+p)),
+    ].join(",");
 
-    // For each of the 12 column positions, extract the snapshot
-    const snaps = cols.map((_, ci) => anSnapAt(rec, ci));
+    const rows = [header];
 
-    // Price per position
-    const prices = snaps.map(s => s && s.price != null ? Number(s.price).toFixed(dec) : "");
+    signalRecords.forEach((rec, idx) => {
+      const sigNo = total - idx;
+      const epoch = rec.epoch || "";
+      const dt    = epoch ? new Date(epoch*1000).toISOString().replace("T"," ").slice(0,19) : "";
+      const dir   = rec.dir === 1 ? "rise" : "fall";
 
-    // Indicator values: for each metric, for each position
-    const inds = AN_METRICS.flatMap(m =>
-      snaps.map(s => {
-        if (!s) return "";
-        const v = s[m.key];
-        if (v == null || (typeof v === "number" && isNaN(v))) return "";
-        return Number(v).toFixed(m.price ? dec : 5);
-      })
-    );
+      const snaps = indices.map(ci => anSnapAt(rec, ci));
 
-    rows.push([ sigNo, epoch, dt, dir, ...prices, ...inds ].join(","));
-  });
+      const prices = snaps.map(s =>
+        s && s.price != null ? Number(s.price).toFixed(dec) : "");
 
-  const csv  = rows.join("\r\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement("a");
-  a.href     = url;
-  a.download = `mamba_analysis_${SYMBOL}_${new Date().toISOString().slice(0,10)}.csv`;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const inds = AN_METRICS.flatMap(m =>
+        snaps.map(s => {
+          if (!s) return "";
+          const v = s[m.key];
+          if (v == null || (typeof v === "number" && isNaN(v))) return "";
+          return Number(v).toFixed(m.price ? dec : 5);
+        })
+      );
+
+      rows.push([sigNo, epoch, dt, dir, ...prices, ...inds].join(","));
+    });
+
+    return rows.join("\r\n");
+  }
+
+  // Download helper
+  function download(csv, name){
+    const blob = new Blob([csv], { type:"text/csv;charset=utf-8;" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  // Fire three downloads in quick succession
+  // (browsers allow multiple sequential downloads from the same user action)
+  const sym = SYMBOL;
+  download(buildCsv(bIdx), `mamba_B_before_${sym}_${today}.csv`);
+  setTimeout(() => download(buildCsv(pIdx), `mamba_P_run_${sym}_${today}.csv`),   300);
+  setTimeout(() => download(buildCsv(aIdx), `mamba_A_after_${sym}_${today}.csv`), 600);
 }
 
 // =====================================================================
