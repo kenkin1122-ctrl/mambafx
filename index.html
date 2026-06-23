@@ -1910,7 +1910,8 @@ function choppiness(closes, period=14){
 // fired run can attach the per-tick indicator path across its 5 ticks.
 // =====================================================================
 let indSnapshot = { macd:null, macdSig:null, macdHist:null, chop:null, cci:null,
-                    bbUpper:null, bbMid:null, bbLower:null, bbPctB:null, bbWidth:null };
+                    bbUpper:null, bbMid:null, bbLower:null, bbPctB:null, bbWidth:null,
+                    pdi:null, ndi:null, adx:null };
 const indHistory = [];          // full per-tick snapshots (see snapFields)
 const IND_HIST_MAX = 256;
 // Window captured around each run for the Page 5 analysis tool
@@ -1925,7 +1926,8 @@ function makeSnap(epoch, price){
     macd: indSnapshot.macd, signal: indSnapshot.macdSig, hist: indSnapshot.macdHist,
     chop: indSnapshot.chop, cci: indSnapshot.cci,
     bbPctB: indSnapshot.bbPctB, bbUpper: indSnapshot.bbUpper,
-    bbMid: indSnapshot.bbMid, bbLower: indSnapshot.bbLower,
+    bbMid:  indSnapshot.bbMid,  bbLower: indSnapshot.bbLower,
+    pdi:  indSnapshot.pdi,  ndi: indSnapshot.ndi,  adx: indSnapshot.adx,
   };
 }
 
@@ -1935,6 +1937,7 @@ function recordIndicatorTick(epoch, price){
   const ch = choppiness(closes);
   const c  = cci(closes);
   const b  = bollinger(closes);
+  const dmi = (typeof dmiUpdate === "function") ? dmiUpdate(price) : null;
   indSnapshot = {
     macd:     m ? m.macd : null,
     macdSig:  m ? m.signal : null,
@@ -1946,6 +1949,9 @@ function recordIndicatorTick(epoch, price){
     bbLower:  b ? b.lower : null,
     bbPctB:   b ? b.pctB : null,
     bbWidth:  b ? b.bandwidth : null,
+    pdi:  dmi ? dmi.pdi : null,
+    ndi:  dmi ? dmi.ndi : null,
+    adx:  dmi ? dmi.adx : null,
     price,
   };
   // feed chart history for Page 8
@@ -4680,6 +4686,9 @@ const AN_METRICS = [
   { key:"bbUpper",label:"BB upper", kind:"price", price:true },
   { key:"bbMid",  label:"BB mid",   kind:"price", price:true },
   { key:"bbLower",label:"BB lower", kind:"price", price:true },
+  { key:"pdi",    label:"+DI",      kind:"dmi",   price:false },
+  { key:"ndi",    label:"-DI",      kind:"dmi",   price:false },
+  { key:"adx",    label:"ADX",      kind:"dmi",   price:false },
 ];
 // Column layout: BEFORE_N before + 5 run + AFTER_N after
 function anColumns(){
@@ -5027,71 +5036,58 @@ function exportFullDayCsv(){
 }
 
 function exportAnalysisCsv(){
-  // Export every captured signal record as its own row, with all 12 position
-  // columns (B-3…B-1, P1…P5, A-1…A-4) showing price + each indicator.
-  // This is the "full dataset" view suitable for analysis in Excel/Python.
-  if (!signalRecords.length){ alert("No signal records to export yet."); return; }
+  if (!signalRecords.length){ alert("No signal records to export yet — wait for 5-tick runs to fire."); return; }
 
-  const cols = anColumns(); // [{phase, label}, …]
-  const colLabels = cols.map(c => c.label.replace('·start','_start'));
+  const cols = anColumns();   // [{phase,label}] — 12 entries: B-3…B-1, P1…P5, A-1…A-4
+  const dec  = decimals || 2;
 
-  // Build header: run metadata + price per column + each indicator per column
-  const metaFields = ["run_no","time","symbol","direction","signal_epoch"];
-  const priceHeaders = colLabels.map(l => "price_" + l);
-  const indHeaders = [];
-  AN_METRICS.forEach(m => { colLabels.forEach(l => indHeaders.push(m.label + "_" + l)); });
-  const header = [...metaFields, ...priceHeaders, ...indHeaders].join(",");
+  // ── Header row ───────────────────────────────────────────────────────
+  // Metadata columns, then for each position: price + every indicator
+  const posLabels = cols.map(c => c.label.replace('·start','_start').replace('-','_'));
 
-  const rows = [header];
+  const headerCols = [
+    "signal_no", "epoch", "datetime", "direction",
+    // Price at every position
+    ...posLabels.map(p => "price_" + p),
+    // Each indicator at every position
+    ...AN_METRICS.flatMap(m => posLabels.map(p => m.label + "_" + p)),
+  ];
+  const rows = [ headerCols.join(",") ];
+
   const total = signalRecords.length;
 
   signalRecords.forEach((rec, idx) => {
-    // rec has: epoch, dir, before[], run[], after[], (each is an indSnapshot)
-    const runNo = total - idx; // run_no: oldest = 1, newest = total
-    const dirStr = rec.dir === 1 ? "rise" : "fall";
-    const timeStr = rec.epoch ? new Date(rec.epoch * 1000).toISOString().replace('T',' ').slice(0,19) : "";
-    const meta = [runNo, timeStr, SYMBOL, dirStr, rec.epoch || ""].join(",");
+    // signal_no: 1 = oldest, total = newest
+    const sigNo   = total - idx;
+    const epoch   = rec.epoch || "";
+    const dt      = epoch ? new Date(epoch * 1000).toISOString().replace("T"," ").slice(0,19) : "";
+    const dir     = rec.dir === 1 ? "rise" : "fall";
 
-    // Resolve price + indicator snapshot for each column
-    const dec = decimals;
-    const priceVals = colLabels.map((_, ci) => {
-      const snap = anSnapAt(rec, ci);
-      if (!snap) return "";
-      const p = snap.price != null ? snap.price : (snap.macd != null ? null : null);
-      // price is stored in rec.prices[] separately for the run ticks
-      return "";
-    });
+    // For each of the 12 column positions, extract the snapshot
+    const snaps = cols.map((_, ci) => anSnapAt(rec, ci));
 
-    // Actually price is in indHistory snapshots but the snapshots are indicator-only;
-    // the run prices are in rec.runPrices if stored, or we use the snapshot's price field.
-    // Let's extract from the snapshot objects directly:
-    const getPriceAt = (ci) => {
-      const snap = anSnapAt(rec, ci);
-      return snap && snap.price != null ? Number(snap.price).toFixed(dec) : "";
-    };
-    const prices = colLabels.map((_, ci) => getPriceAt(ci));
+    // Price per position
+    const prices = snaps.map(s => s && s.price != null ? Number(s.price).toFixed(dec) : "");
 
-    // Indicators per column
-    const inds = [];
-    AN_METRICS.forEach(m => {
-      colLabels.forEach((_, ci) => {
-        const snap = anSnapAt(rec, ci);
-        const v = snap ? snap[m.key] : null;
-        if (v == null || Number.isNaN(v)) inds.push("");
-        else if (m.pct) inds.push(Number(v).toFixed(4));
-        else inds.push(Number(v).toFixed(m.price ? dec : 5));
-      });
-    });
+    // Indicator values: for each metric, for each position
+    const inds = AN_METRICS.flatMap(m =>
+      snaps.map(s => {
+        if (!s) return "";
+        const v = s[m.key];
+        if (v == null || (typeof v === "number" && isNaN(v))) return "";
+        return Number(v).toFixed(m.price ? dec : 5);
+      })
+    );
 
-    rows.push([meta, ...prices, ...inds].join(","));
+    rows.push([ sigNo, epoch, dt, dir, ...prices, ...inds ].join(","));
   });
 
-  const csv = rows.join("\n");
-  const blob = new Blob([csv], { type:"text/csv" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `mamba_analysis_full_${SYMBOL}_${Date.now()}.csv`;
+  const csv  = rows.join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href     = url;
+  a.download = `mamba_analysis_${SYMBOL}_${new Date().toISOString().slice(0,10)}.csv`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
@@ -5621,11 +5617,14 @@ function dmiUpdate(price){
 
 function chartPushTick(snap){
   if(!snap) return;
-  const dmi=dmiUpdate(snap.price||lastPrice);
+  // DMI is already computed in recordIndicatorTick and stored in indSnapshot
+  // — read from snap directly so we don't double-update the _dmi state
   chartHistory.push({
-    macd:snap.macd, macdSig:snap.macdSig, macdHist:snap.macdHist,
+    macd:snap.macd, macdSig:snap.macdSig||snap.signal, macdHist:snap.macdHist||snap.hist,
     chop:snap.chop, cci:snap.cci, price:snap.price||lastPrice,
-    pdi:dmi?dmi.pdi:null, ndi:dmi?dmi.ndi:null, adx:dmi?dmi.adx:null,
+    pdi:snap.pdi!=null?snap.pdi:(snap.macd!=null?null:null),
+    ndi:snap.ndi!=null?snap.ndi:null,
+    adx:snap.adx!=null?snap.adx:null,
   });
   if(chartHistory.length>CHART_MAX) chartHistory.shift();
   if(document.getElementById("page-charts")&&document.getElementById("page-charts").classList.contains("active"))
