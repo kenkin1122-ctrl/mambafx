@@ -1415,8 +1415,70 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       </div>
     </div>
 
+    <!-- ── Live Model Validation ──────────────────────────────────── -->
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>🔴 Live Model Validation
+        <span id="lmvLiveTag" style="display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:400;color:var(--muted);margin-left:12px">
+          <span id="lmvDot" style="width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block"></span>
+          <span id="lmvStatusTag">inactive — train models first</span>
+        </span>
+        <span style="margin-left:auto;display:flex;gap:8px">
+          <button class="gc-btn" id="lmvToggleBtn" onclick="lmvToggle()" disabled>▶ Start Validation</button>
+          <button class="gc-btn" onclick="lmvClear()">Clear</button>
+        </span>
+      </h2>
+      <div class="gc-sub" style="margin-bottom:12px">
+        When started, detects each B-window (3 consecutive ticks) in the live Deriv stream, predicts with all three models, then waits exactly 5 ticks to see if a clean run forms. Records whether the prediction matched reality and whether a 5-tick run occurred at all.
+      </div>
+
+      <!-- Statistics panel -->
+      <div id="lmvStats" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:14px">
+        <div class="em-card"><div class="em-lab">Total Predictions</div><div id="lmvTotal" class="em-val acc">0</div></div>
+        <div class="em-card"><div class="em-lab">Wins</div><div id="lmvWins" class="em-val up">0</div></div>
+        <div class="em-card"><div class="em-lab">Losses</div><div id="lmvLosses" class="em-val dn">0</div></div>
+        <div class="em-card"><div class="em-lab">Failed Pattern</div><div id="lmvFailed" class="em-val neu">0</div></div>
+        <div class="em-card"><div class="em-lab">Accuracy</div><div id="lmvAccuracy" class="em-val acc">—</div></div>
+        <div class="em-card"><div class="em-lab">Avg Confidence</div><div id="lmvAvgConf" class="em-val acc">—</div></div>
+        <div class="em-card"><div class="em-lab">High Conf (&gt;65%) Acc</div><div id="lmvHighConfAcc" class="em-val up">—</div></div>
+        <div class="em-card"><div class="em-lab">Low Conf (&lt;60%) Acc</div><div id="lmvLowConfAcc" class="em-val dn">—</div></div>
+        <div class="em-card"><div class="em-lab">Avg Prediction Time</div><div id="lmvAvgTime" class="em-val neu">—</div></div>
+        <div class="em-card"><div class="em-lab">Win Streak</div><div id="lmvWinStreak" class="em-val up">0</div></div>
+        <div class="em-card"><div class="em-lab">Loss Streak</div><div id="lmvLossStreak" class="em-val dn">0</div></div>
+        <div class="em-card"><div class="em-lab">Longest Win</div><div id="lmvLongestWin" class="em-val up">0</div></div>
+        <div class="em-card"><div class="em-lab">Longest Loss</div><div id="lmvLongestLoss" class="em-val dn">0</div></div>
+        <div class="em-card"><div class="em-lab">3/3 Consensus Acc</div><div id="lmv33Acc" class="em-val acc">—</div></div>
+        <div class="em-card"><div class="em-lab">2/3 Consensus Acc</div><div id="lmv23Acc" class="em-val acc">—</div></div>
+        <div class="em-card"><div class="em-lab">Pending</div><div id="lmvPending" class="em-val neu">0</div></div>
+      </div>
+
+      <!-- Validation table -->
+      <div style="overflow-x:auto">
+        <table class="sig-table" id="lmvTable" style="min-width:1100px;font-size:10px">
+          <thead>
+            <tr>
+              <th class="l">Time</th>
+              <th class="l">Prediction</th>
+              <th class="l">Consensus</th>
+              <th>XGB Prob</th>
+              <th>LGB Prob</th>
+              <th>CB Prob</th>
+              <th>Avg Prob</th>
+              <th class="l">Top 5 Features</th>
+              <th class="l">Actual</th>
+              <th>5-Run?</th>
+              <th>Result</th>
+              <th class="l">Status</th>
+            </tr>
+          </thead>
+          <tbody id="lmvBody">
+            <tr><td colspan="12" class="sig-empty">Start validation to begin collecting live predictions.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <footer>
-      XGBoost, LightGBM and CatBoost are implemented as gradient-boosted CART-tree approximations in JavaScript. They faithfully replicate the algorithms' core mechanics (gradient/Hessian splits for XGB, histogram bins for LGB, ordered boosting for CatBoost) but run on your browser's V8 engine rather than native C++. Performance metrics are computed on a held-out test split. Synthetic indices are random walks by construction — any model performance above chance on a short sample is likely overfitting. Validate across ≥200 runs before trusting predictions.
+      XGBoost, LightGBM and CatBoost are implemented as gradient-boosted CART-tree approximations in JavaScript. Performance metrics are computed on a held-out test split. Live Validation monitors the Deriv tick stream continuously — a prediction fires when 3 consecutive ticks form a B-window, then the next 5 ticks determine ground truth. Synthetic indices are random walks by construction — validate across ≥200 events before drawing conclusions.
     </footer>
   </div><!-- /page-predbot -->
 
@@ -1799,6 +1861,8 @@ function handleTick(price, epoch){
     renderAnalysisDigitCircles();
     renderTrackerPage();
   }
+  // Live model validation — always runs when active regardless of which page is shown
+  if (typeof lmvOnTick === "function") lmvOnTick(price, epoch, dir);
 
   // Persist the last 100 ticks (throttled: every 3rd tick, plus always on a signal)
   _saveThrottle++;
@@ -2903,7 +2967,7 @@ function showPage(which){
     featPageInit();
   }
   if (which === "predbot"){
-    pbPageInit();
+    pbPageInit();  // also calls lmvPageInit
   }
   if (which === "charts"){
     chartRenderAll();
@@ -6933,6 +6997,7 @@ function pbPageInit(){
   if(status) status.textContent=n<20?`Need ≥20 signal records (have ${n}).`:`${n} records ready — click Run Pipeline.`;
   if(btn) btn.disabled=n<20;
   if(_pbModels){ $("pbPredBtn").disabled=false; }
+  lmvPageInit();
 }
 
 function _pbStep(idx, state){
@@ -7131,6 +7196,7 @@ function pbTrain(){
 
       _pbStep(5,'best'); _pbStep(6,'active');
       $("pbPredBtn").disabled=false;
+      const lmvBtn=$("lmvToggleBtn"); if(lmvBtn) lmvBtn.disabled=false;
       if(status) status.textContent=`✅ Pipeline complete — ${best.name} selected (AUC ${bestMet.auc.toFixed(3)}) · no leakage: B-only features, chronological split, feature selection on training set only.`;
 
     } catch(e){
@@ -7257,6 +7323,316 @@ function pbPredict(){
   $("pbStatus").textContent=`Prediction: ${dir} at ${pct}% confidence · ${riseVotes}/3 models agree · using ${selK.length} B-only features`;
 }
 
+// =====================================================================
+// LIVE MODEL VALIDATION ENGINE
+// Hooks into the live Deriv tick stream. Operates as a state machine:
+//
+// IDLE  →  COLLECTING_B (waiting for 3 ticks to form B-window)
+//       →  PREDICTING   (have B3,B2,B1 — fire all 3 models)
+//       →  WATCHING_P   (counting the next 5 ticks for ground truth)
+//       →  RESOLVING    (determine outcome, log row, back to IDLE)
+//
+// A B-window is defined as 3 consecutive ticks (any direction).
+// Ground truth: were the next 5 ticks all rises or all falls?
+// =====================================================================
+
+let _lmvActive    = false;       // validation running
+let _lmvRecords   = [];          // completed validation rows (newest first)
+let _lmvPendingQ  = [];          // pending: {prediction data, waiting for P-ticks}
+let _lmvBWindow   = [];          // accumulating B-window ticks [{price,epoch,snap}]
+let _lmvBReady    = false;       // true when 3 B-ticks captured and prediction fired
+let _lmvPTicks    = [];          // accumulating P-ticks after prediction
+
+// ── Stats ────────────────────────────────────────────────────────────
+const _lmvStats = {
+  total:0, wins:0, losses:0, failed:0,
+  winStreak:0, lossStreak:0, longestWin:0, longestLoss:0,
+  sumConf:0, predTimes:[],
+  highConfW:0, highConfTotal:0,
+  lowConfW:0,  lowConfTotal:0,
+  v33W:0, v33Total:0,
+  v23W:0, v23Total:0,
+  pending:0,
+};
+
+function lmvToggle(){
+  if(!_pbModels){ alert('Train the pipeline first.'); return; }
+  _lmvActive = !_lmvActive;
+  const btn = $("lmvToggleBtn");
+  const dot = $("lmvDot");
+  const tag = $("lmvStatusTag");
+  if(_lmvActive){
+    btn.textContent = '⏹ Stop Validation';
+    if(dot){ dot.style.background='#ff4d5e'; dot.style.boxShadow='0 0 6px rgba(255,77,94,.5)'; }
+    if(tag) tag.textContent = 'running — watching live ticks…';
+    // Reset B-window state
+    _lmvBWindow=[]; _lmvBReady=false; _lmvPTicks=[];
+  } else {
+    btn.textContent = '▶ Start Validation';
+    if(dot){ dot.style.background='var(--muted)'; dot.style.boxShadow='none'; }
+    if(tag) tag.textContent = 'paused';
+  }
+}
+
+function lmvClear(){
+  _lmvRecords=[]; _lmvPendingQ=[];
+  _lmvBWindow=[]; _lmvBReady=false; _lmvPTicks=[];
+  Object.keys(_lmvStats).forEach(k=>{ _lmvStats[k]=typeof _lmvStats[k]==='number'?0:[];});
+  _lmvStats.predTimes=[];
+  lmvRenderStats(); lmvRenderTable();
+}
+
+// ── Feature vector builder (mirrors pbPredict logic) ─────────────────
+function lmvBuildFeatureVector(snaps12){
+  // snaps12 = array of 12 indHistory snapshots (B3=0, B2=1, B1=2, P1-P5, A1-A4)
+  // We only use indices 0,1,2 (the B-window).
+  if(!_pbModels) return null;
+  const {selK,bFeatIdxs,colMeans}=_pbModels;
+  const feats=_FEAT_DEFS;
+  // compute all _FEAT_DEFS features for the given snaps
+  const rawRow=feats.map(f=>{ try{ return f.fn(snaps12); } catch(_){ return null; } });
+  const bRow=bFeatIdxs.map(fi=>rawRow[fi]);
+  return selK.map((k,j)=>{
+    const v=bRow[k];
+    return (v!=null&&isFinite(v))?v:colMeans[j];
+  });
+}
+
+function lmvModelProb(model,x){
+  const lr=model.name==='XGBoost'?0.1:model.name==='LightGBM'?0.08:0.05;
+  let s=0; model.trees.forEach(t=>s+=lr*_pbPredictTree(t,x));
+  return _pbSigmoid(s);
+}
+
+// ── Top-5 feature names from the best model ───────────────────────────
+function lmvTop5Features(){
+  if(!_pbModels) return '—';
+  const {best,selK,topNames}=_pbModels;
+  const imp=best.imp||[];
+  return selK.map((k,j)=>({name:topNames[j]||('f'+j),imp:imp[j]||0}))
+    .sort((a,b)=>b.imp-a.imp).slice(0,5).map(f=>f.name).join(' · ');
+}
+
+// ── Main tick hook — called from handleTick for every live price ──────
+function lmvOnTick(price, epoch, dir){
+  if(!_lmvActive || !_pbModels) return;
+
+  if(!_lmvBReady){
+    // ── Collecting B-window: accumulate 3 consecutive ticks ──────────
+    // We use the current indSnapshot (already updated by recordIndicatorTick)
+    // as the snapshot for this tick. We collect ANY 3 ticks as a B-window.
+    // Reset window on flat tick (dir===0 breaks strict-move requirement)
+    if(dir===0){
+      _lmvBWindow=[]; return;
+    }
+    // Snapshot the current indicator state (indSnapshot is already updated)
+    const snap=Object.assign({},indSnapshot,{price,epoch});
+    _lmvBWindow.push({price,epoch,snap,dir});
+    if(_lmvBWindow.length<3) return;
+
+    // Keep only the last 3 (slide window)
+    if(_lmvBWindow.length>3) _lmvBWindow.shift();
+
+    // B-window ready: B3=window[0], B2=window[1], B1=window[2]
+    // Build snaps12 with correct column indices — B3=0,B2=1,B1=2, rest null
+    const snaps12=Array(12).fill(null);
+    snaps12[0]=_lmvBWindow[0].snap;  // B-3
+    snaps12[1]=_lmvBWindow[1].snap;  // B-2
+    snaps12[2]=_lmvBWindow[2].snap;  // B-1
+
+    const x=lmvBuildFeatureVector(snaps12);
+    if(!x){ _lmvBWindow=[]; return; }
+
+    const {xgb,lgb,cb,best,topNames,selK}=_pbModels;
+    const pXGB=lmvModelProb(xgb,x);
+    const pLGB=lmvModelProb(lgb,x);
+    const pCB =lmvModelProb(cb, x);
+    const votes=[pXGB,pLGB,pCB].map(p=>p>=0.5?1:0);
+    const riseVotes=votes.reduce((a,b)=>a+b,0);
+    const avgProb=(pXGB+pLGB+pCB)/3;
+    let pred,consensus;
+    if(riseVotes===3){  pred='RISE'; consensus='STRONG RISE (3/3)'; }
+    else if(riseVotes===2){ pred='RISE'; consensus='LEAN RISE (2/3)'; }
+    else if(riseVotes===1){ pred='FALL'; consensus='LEAN FALL (2/3)'; }
+    else {                  pred='FALL'; consensus='STRONG FALL (3/3)'; }
+
+    const pendingRow={
+      time: fmtTime(epoch),
+      epoch,
+      pred,
+      consensus,
+      pXGB,pLGB,pCB,avgProb,
+      top5: lmvTop5Features(),
+      pTicks: [],          // will collect the next 5 ticks
+      fireTime: Date.now(),
+    };
+    _lmvPendingQ.push(pendingRow);
+    _lmvStats.pending++;
+    _lmvBReady=true;
+    _lmvPTicks=[];
+    lmvRenderStats();
+
+  } else {
+    // ── Watching P-ticks: collect next 5 ticks ───────────────────────
+    _lmvPTicks.push({price,dir});
+
+    // Also feed to all pending rows (there may be multiple if predictions
+    // overlap — each pending row collects its own copy)
+    _lmvPendingQ.forEach(row=>{
+      if(row.pTicks.length<5) row.pTicks.push({price,dir});
+    });
+
+    // Resolve any pending rows that now have 5 P-ticks
+    const stillPending=[];
+    _lmvPendingQ.forEach(row=>{
+      if(row.pTicks.length>=5){
+        lmvResolveRow(row);
+      } else {
+        stillPending.push(row);
+      }
+    });
+    _lmvPendingQ=stillPending;
+    _lmvStats.pending=_lmvPendingQ.length;
+
+    // After 5 P-ticks watched, reset to collect next B-window
+    if(_lmvPTicks.length>=5){
+      _lmvBReady=false;
+      _lmvBWindow=[];
+      _lmvPTicks=[];
+    }
+    lmvRenderStats();
+  }
+}
+
+function lmvResolveRow(row){
+  const pts=row.pTicks;
+  // Determine if 5 P-ticks form a clean run (all rises or all falls)
+  const allRise=pts.every(t=>t.dir===1);
+  const allFall=pts.every(t=>t.dir===-1);
+  const runFormed = allRise||allFall;
+  let actual='—', result, status;
+
+  if(!runFormed){
+    actual='—';
+    result='FAILED PATTERN';
+    status='no clean run';
+    _lmvStats.failed++;
+  } else {
+    actual = allRise?'RISE':'FALL';
+    if(row.pred===actual){
+      result='✅ WIN';
+      status='correct';
+      _lmvStats.wins++;
+      _lmvStats.winStreak++;
+      _lmvStats.lossStreak=0;
+      if(_lmvStats.winStreak>_lmvStats.longestWin) _lmvStats.longestWin=_lmvStats.winStreak;
+    } else {
+      result='❌ LOSS';
+      status='incorrect';
+      _lmvStats.losses++;
+      _lmvStats.lossStreak++;
+      _lmvStats.winStreak=0;
+      if(_lmvStats.lossStreak>_lmvStats.longestLoss) _lmvStats.longestLoss=_lmvStats.lossStreak;
+    }
+
+    // Confidence buckets
+    const conf=row.avgProb>=0.5?row.avgProb:(1-row.avgProb); // distance from 0.5
+    const confPct=conf*100;
+    if(confPct>=65){
+      _lmvStats.highConfTotal++;
+      if(result==='✅ WIN') _lmvStats.highConfW++;
+    }
+    if(confPct<60){
+      _lmvStats.lowConfTotal++;
+      if(result==='✅ WIN') _lmvStats.lowConfW++;
+    }
+
+    // Consensus accuracy
+    const isStrong=row.consensus.includes('3/3');
+    const isLean=row.consensus.includes('2/3');
+    if(isStrong){ _lmvStats.v33Total++; if(result==='✅ WIN') _lmvStats.v33W++; }
+    if(isLean){   _lmvStats.v23Total++; if(result==='✅ WIN') _lmvStats.v23W++; }
+  }
+
+  _lmvStats.total++;
+  _lmvStats.sumConf+=(row.avgProb>=0.5?row.avgProb:(1-row.avgProb));
+  const elapsed=(Date.now()-row.fireTime)/1000;
+  _lmvStats.predTimes.push(elapsed);
+
+  _lmvRecords.unshift({...row, actual, result, status, runFormed});
+  if(_lmvRecords.length>200) _lmvRecords.pop();
+  lmvRenderTable();
+  lmvRenderStats();
+}
+
+function lmvRenderStats(){
+  const s=_lmvStats;
+  const resolved=s.wins+s.losses;
+  const acc=resolved>0?((s.wins/resolved)*100).toFixed(1)+'%':'—';
+  const avgConf=s.total>0?((s.sumConf/s.total)*100).toFixed(1)+'%':'—';
+  const avgTime=s.predTimes.length>0?(s.predTimes.reduce((a,b)=>a+b,0)/s.predTimes.length).toFixed(1)+'s':'—';
+  const highAcc=s.highConfTotal>0?((s.highConfW/s.highConfTotal)*100).toFixed(1)+'%':'—';
+  const lowAcc =s.lowConfTotal>0? ((s.lowConfW/s.lowConfTotal)*100).toFixed(1)+'%':'—';
+  const v33Acc =s.v33Total>0?    ((s.v33W/s.v33Total)*100).toFixed(1)+'%':'—';
+  const v23Acc =s.v23Total>0?    ((s.v23W/s.v23Total)*100).toFixed(1)+'%':'—';
+
+  function set(id,v){ const e=$(id); if(e) e.textContent=v; }
+  set('lmvTotal',   s.total);
+  set('lmvWins',    s.wins);
+  set('lmvLosses',  s.losses);
+  set('lmvFailed',  s.failed);
+  set('lmvAccuracy',acc);
+  set('lmvAvgConf', avgConf);
+  set('lmvHighConfAcc',highAcc);
+  set('lmvLowConfAcc', lowAcc);
+  set('lmvAvgTime', avgTime);
+  set('lmvWinStreak',  s.winStreak);
+  set('lmvLossStreak', s.lossStreak);
+  set('lmvLongestWin', s.longestWin);
+  set('lmvLongestLoss',s.longestLoss);
+  set('lmv33Acc', v33Acc);
+  set('lmv23Acc', v23Acc);
+  set('lmvPending', s.pending+_lmvPendingQ.length);
+}
+
+function lmvRenderTable(){
+  const body=$("lmvBody");
+  if(!body) return;
+  if(!_lmvRecords.length){
+    body.innerHTML='<tr><td colspan="12" class="sig-empty">No completed validations yet.</td></tr>';
+    return;
+  }
+  const f2=v=>(v*100).toFixed(1)+'%';
+  body.innerHTML=_lmvRecords.map(r=>{
+    const predCls=r.pred==='RISE'?'cell-pos':'cell-neg';
+    const resCls=r.result==='✅ WIN'?'cell-pos':r.result==='❌ LOSS'?'cell-neg':'cell-mut';
+    const consCls=r.consensus.includes('STRONG')?'font-weight:800':'';
+    const consColor=r.consensus.includes('RISE')?'color:var(--up)':'color:var(--down)';
+    const runStr=r.runFormed?'<span style="color:var(--up)">YES</span>':'<span style="color:var(--down)">NO</span>';
+    const actCls=r.actual==='RISE'?'cell-pos':r.actual==='FALL'?'cell-neg':'cell-mut';
+    return `<tr>
+      <td class="l" style="white-space:nowrap">${r.time}</td>
+      <td class="l ${predCls}" style="font-weight:700">${r.pred}</td>
+      <td class="l" style="${consCls};${consColor}">${r.consensus}</td>
+      <td>${f2(r.pXGB)}</td>
+      <td>${f2(r.pLGB)}</td>
+      <td>${f2(r.pCB)}</td>
+      <td style="font-weight:700;color:var(--accent)">${f2(r.avgProb)}</td>
+      <td class="l cell-mut" style="font-size:9px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.top5}">${r.top5}</td>
+      <td class="l ${actCls}">${r.actual}</td>
+      <td>${runStr}</td>
+      <td class="${resCls}" style="font-weight:700">${r.result}</td>
+      <td class="l cell-mut" style="font-size:9px">${r.status}</td>
+    </tr>`;
+  }).join('');
+}
+
+function lmvPageInit(){
+  const btn=$("lmvToggleBtn");
+  if(btn) btn.disabled=!_pbModels;
+  lmvRenderStats();
+  lmvRenderTable();
+}
 
 try {
   // Resume the market that was open before the refresh, if any
