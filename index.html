@@ -1297,10 +1297,10 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       <!-- Pipeline diagram -->
       <div id="pbPipeline" style="display:flex;align-items:center;flex-wrap:wrap;gap:0;margin-bottom:14px;overflow-x:auto">
         <div class="pb-step" id="pbStep0">📊 Raw Ticks</div><div class="pb-arrow">▶</div>
-        <div class="pb-step" id="pbStep1">⚙ Feature Eng.</div><div class="pb-arrow">▶</div>
-        <div class="pb-step" id="pbStep2">🎯 Select Top-50</div><div class="pb-arrow">▶</div>
+        <div class="pb-step" id="pbStep1">⚙ B-Features Only</div><div class="pb-arrow">▶</div>
+        <div class="pb-step" id="pbStep2">✂ Chrono Split → MI/SHAP on Train</div><div class="pb-arrow">▶</div>
         <div class="pb-step" id="pbStep3">🌲 Train Models</div><div class="pb-arrow">▶</div>
-        <div class="pb-step" id="pbStep4">📈 Compare</div><div class="pb-arrow">▶</div>
+        <div class="pb-step" id="pbStep4">📈 Evaluate on Test</div><div class="pb-arrow">▶</div>
         <div class="pb-step" id="pbStep5">🏆 Best Model</div><div class="pb-arrow">▶</div>
         <div class="pb-step" id="pbStep6">⚡ Live Predict</div>
       </div>
@@ -1308,11 +1308,11 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       <!-- Controls -->
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
         <div class="gc-field" style="margin:0;flex:0 0 auto">
-          <label for="pbTrainSplit">Train / test split</label>
+          <label for="pbTrainSplit">Chrono split (train % oldest)</label>
           <select id="pbTrainSplit" style="padding:6px 10px">
-            <option value="0.7" selected>70% / 30%</option>
-            <option value="0.8">80% / 20%</option>
-            <option value="0.6">60% / 40%</option>
+            <option value="0.7" selected>70% oldest train / 30% newest test</option>
+            <option value="0.8">80% oldest train / 20% newest test</option>
+            <option value="0.6">60% oldest train / 40% newest test</option>
           </select>
         </div>
         <div class="gc-field" style="margin:0;flex:0 0 auto">
@@ -6974,53 +6974,91 @@ function pbTrain(){
   const n=signalRecords.length;
   if(n<20){ if(status) status.textContent='Need ≥20 signal records.'; return; }
 
-  if(status) status.textContent='Step 1: Engineering features…';
+  if(status) status.textContent='Step 1: Engineering B-window features…';
   [0,1,2,3,4,5,6].forEach(i=>_pbStep(i,''));
 
   setTimeout(()=>{
     try{
-      // ── Step 1: Feature engineering ──────────────────────────────
+      // ── Step 1: Feature engineering — B-window ONLY ───────────────
+      // No data leakage: only use B-3, B-2, B-1 features (data that exists
+      // BEFORE the run fires). P and A features would require knowing the
+      // run outcome, which is exactly what we are trying to predict.
       _pbStep(0,'done'); _pbStep(1,'active');
+
       const featData=featComputeAll();
       if(!featData){ if(status) status.textContent='Feature engineering failed.'; return; }
       const {matrix,labels,feats}=featData;
-      if(status) status.textContent='Step 2: Selecting top features…';
+
+      // Filter to B-phase features only
+      const bFeatIdxs=feats.map((f,i)=>({f,i})).filter(({f})=>f.phase==='B').map(({i})=>i);
+      if(bFeatIdxs.length<5){
+        if(status) status.textContent='Too few B-phase features — collect more signal records.';
+        return;
+      }
+      const bMatrix=matrix.map(row=>bFeatIdxs.map(fi=>row[fi]));
+      const bFeats=bFeatIdxs.map(fi=>feats[fi]);
+
+      // ── Step 2: Chronological split FIRST (no leakage) ────────────
+      // signalRecords is stored newest-first, so:
+      //   index 0   = most recent run  → test
+      //   index n-1 = oldest run       → train
+      // Training = oldest records (back of array), test = most recent (front).
+      // This mirrors real deployment: train on past, predict the future.
+      if(status) status.textContent='Step 2: Chronological split & feature selection on train set…';
       _pbStep(1,'done'); _pbStep(2,'active');
 
-      // ── Step 2: Feature selection (top-K by composite MI+RFI+SHAP) ─
-      const topK=parseInt(($("pbTopK")||{value:'50'}).value||'50',10);
-      // Score each feature
-      const scores=feats.map((f,fi)=>{
-        const cv=matrix.map(r=>r[fi]);
-        const mi=featMutualInfo(cv,labels);
-        const rfi=featRfImportance(cv,labels);
-        const shap=featShap(cv,labels);
-        return {fi,score:(mi+rfi*2+shap)/4};
-      });
-      scores.sort((a,b)=>b.score-a.score);
-      const topIdxs=scores.slice(0,topK).map(s=>s.fi);
-      const topNames=topIdxs.map(i=>feats[i].label);
+      const splitFrac=parseFloat(($("pbTrainSplit")||{value:'0.7'}).value||'0.7');
+      const nTest=Math.max(4,Math.floor(n*(1-splitFrac)));
+      const nTrain=n-nTest;
+      // Oldest records first: signalRecords[n-1] is oldest → becomes row 0 in matrix
+      // matrix is built forEach in signalRecords order (newest first), so:
+      //   matrix[0]   = newest = test
+      //   matrix[n-1] = oldest = train
+      // Training indices = matrix rows nTest..n-1 (oldest)
+      // Test indices     = matrix rows 0..nTest-1  (newest)
+      const trainIdxs=Array.from({length:nTrain},(_,i)=>nTest+i); // oldest nTrain rows
+      const testIdxs =Array.from({length:nTest}, (_,i)=>i);        // newest nTest rows
 
-      // Build reduced feature matrix (impute nulls with column mean)
-      const colMeans=topIdxs.map(fi=>{
-        const v=matrix.map(r=>r[fi]).filter(x=>x!=null&&isFinite(x));
+      const XbTr=trainIdxs.map(i=>bMatrix[i]);
+      const yTr =trainIdxs.map(i=>labels[i]);
+      const XbTe=testIdxs.map(i=>bMatrix[i]);
+      const yTe =testIdxs.map(i=>labels[i]);
+
+      // ── Feature selection: MI + SHAP computed ON TRAINING SET ONLY ─
+      // This is the correct order: Split → MI on train → SHAP on train → top-K → train → test
+      const topK=parseInt(($("pbTopK")||{value:'50'}).value||'50',10);
+      const selScores=bFeats.map((f,k)=>{
+        const cv=XbTr.map(row=>row[k]);
+        const mi=featMutualInfo(cv,yTr);
+        const shap=featShap(cv,yTr);
+        // RFI also on training set only
+        const rfi=featRfImportance(cv,yTr);
+        return {k,score:(mi+rfi*2+shap)/4};
+      });
+      selScores.sort((a,b)=>b.score-a.score);
+      const topKActual=Math.min(topK,bFeats.length);
+      const selK=selScores.slice(0,topKActual).map(s=>s.k);
+      const topNames=selK.map(k=>bFeats[k].label);
+      const topOrigIdxs=selK.map(k=>bFeatIdxs[k]);  // original _FEAT_DEFS indices
+
+      // Column means from TRAINING SET ONLY (no leakage into imputation)
+      const colMeans=selK.map(k=>{
+        const v=XbTr.map(row=>row[k]).filter(x=>x!=null&&isFinite(x));
         return v.length?v.reduce((a,b)=>a+b,0)/v.length:0;
       });
-      const Xfull=matrix.map(row=>topIdxs.map((fi,k)=>{
-        const v=row[fi];
-        return (v!=null&&isFinite(v))?v:colMeans[k];
-      }));
 
-      // Train/test split
-      const splitFrac=parseFloat(($("pbTrainSplit")||{value:'0.7'}).value||'0.7');
-      const nTrain=Math.max(10,Math.floor(n*splitFrac));
-      // Shuffle indices
-      const idx=Array.from({length:n},(_,i)=>i).sort(()=>Math.random()-0.5);
-      const trainIdx=idx.slice(0,nTrain), testIdx=idx.slice(nTrain);
-      const Xtr=trainIdx.map(i=>Xfull[i]), ytr=trainIdx.map(i=>labels[i]);
-      const Xte=testIdx.map(i=>Xfull[i]),  yte=testIdx.map(i=>labels[i]);
+      // Build final reduced matrices
+      const impute=(row,means)=>selK.map((k,j)=>{
+        const v=row[k];
+        return (v!=null&&isFinite(v))?v:means[j];
+      });
+      const Xtr=XbTr.map(row=>impute(row,colMeans));
+      const Xte=XbTe.map(row=>impute(row,colMeans));
 
-      if(Xte.length<4){ if(status) status.textContent='Not enough test samples — use a smaller split or collect more records.'; return; }
+      if(Xte.length<4){
+        if(status) status.textContent='Not enough test samples — collect more records or reduce split %.';
+        return;
+      }
 
       const nTrees=parseInt(($("pbNTrees")||{value:'50'}).value||'50',10);
       if(status) status.textContent='Step 3: Training XGBoost…';
@@ -7028,24 +7066,24 @@ function pbTrain(){
 
       // ── Step 3: Train three models ────────────────────────────────
       const t0=performance.now();
-      const xgb=pbXGBoost(Xtr,ytr,Xte,yte,{nTrees,lr:0.1,maxDepth:4,lambda:1,nBins:16});
+      const xgb=pbXGBoost(Xtr,yTr,Xte,yTe,{nTrees,lr:0.1,maxDepth:4,lambda:1,nBins:16});
       const txgb=(performance.now()-t0).toFixed(0)+'ms';
       if(status) status.textContent='Training LightGBM…';
       const t1=performance.now();
-      const lgb=pbLightGBM(Xtr,ytr,Xte,yte,{nTrees,lr:0.08,numLeaves:16,nBins:24});
+      const lgb=pbLightGBM(Xtr,yTr,Xte,yTe,{nTrees,lr:0.08,numLeaves:16,nBins:24});
       const tlgb=(performance.now()-t1).toFixed(0)+'ms';
       if(status) status.textContent='Training CatBoost…';
       const t2=performance.now();
-      const cb=pbCatBoost(Xtr,ytr,Xte,yte,{nTrees,lr:0.05,depth:4,l2:3});
+      const cb=pbCatBoost(Xtr,yTr,Xte,yTe,{nTrees,lr:0.05,depth:4,l2:3});
       const tcb=(performance.now()-t2).toFixed(0)+'ms';
 
-      // ── Step 4: Evaluate ──────────────────────────────────────────
-      if(status) status.textContent='Step 4: Comparing models…';
+      // ── Step 4: Evaluate on held-out test set (newest records) ────
+      if(status) status.textContent='Step 4: Comparing models on test set (newest '+nTest+' runs)…';
       _pbStep(3,'done'); _pbStep(4,'active');
 
-      const mXGB=pbMetrics(xgb.scores,yte);
-      const mLGB=pbMetrics(lgb.scores,yte);
-      const mCB =pbMetrics(cb.scores, yte);
+      const mXGB=pbMetrics(xgb.scores,yTe);
+      const mLGB=pbMetrics(lgb.scores,yTe);
+      const mCB =pbMetrics(cb.scores, yTe);
 
       // Render comparison table
       const models=[
@@ -7088,18 +7126,25 @@ function pbTrain(){
         });
       }
       const bestLbl=$("pbBestLabel");
-      if(bestLbl) bestLbl.textContent=`🏆 Best: ${best.name} (AUC ${bestMet.auc.toFixed(3)}, F1 ${(bestMet.f1*100).toFixed(1)}%)`;
+      if(bestLbl) bestLbl.textContent=`🏆 Best: ${best.name} (AUC ${bestMet.auc.toFixed(3)}, F1 ${(bestMet.f1*100).toFixed(1)}%) · trained on ${nTrain} oldest, tested on ${nTest} newest`;
 
-      // Store models
-      _pbModels={xgb,lgb,cb,best,bestMet,
-        featIdxs:topIdxs,featNames:topNames,colMeans,
-        allFeat:feats};
+      // Store models + metadata (B-only, train-selected features)
+      _pbModels={
+        xgb,lgb,cb,best,bestMet,
+        selK,              // indices into bFeats
+        topOrigIdxs,       // indices into _FEAT_DEFS (for featComputeAll lookup)
+        topNames,
+        colMeans,
+        bFeatIdxs,         // all B-feature indices in _FEAT_DEFS
+        nTrain,nTest,
+        splitFrac,
+      };
 
       // ── Feature importance from best model ────────────────────────
       const impEl=$("pbFeatImpBars");
       if(impEl){
         const imp=best.imp;
-        const featImpPairs=topIdxs.map((fi,k)=>({name:topNames[k],imp:imp[k]||0}))
+        const featImpPairs=selK.map((k,j)=>({name:topNames[j],imp:imp[j]||0}))
           .sort((a,b)=>b.imp-a.imp).slice(0,20);
         const maxI=featImpPairs[0]?.imp||1;
         impEl.innerHTML=featImpPairs.map(({name,imp:iv})=>`
@@ -7114,7 +7159,7 @@ function pbTrain(){
 
       _pbStep(5,'best'); _pbStep(6,'active');
       $("pbPredBtn").disabled=false;
-      if(status) status.textContent=`✅ Pipeline complete — ${best.name} selected as best (AUC ${bestMet.auc.toFixed(3)}).`;
+      if(status) status.textContent=`✅ Pipeline complete — ${best.name} selected (AUC ${bestMet.auc.toFixed(3)}) · no leakage: B-only features, chronological split, feature selection on training set only.`;
 
     } catch(e){
       console.error('pbTrain error:',e);
@@ -7125,28 +7170,36 @@ function pbTrain(){
 
 function pbPredict(){
   if(!_pbModels){ alert('Train the model first.'); return; }
-  const {best,featIdxs,featNames,colMeans,xgb,lgb,cb}=_pbModels;
+  const {best,selK,colMeans,bFeatIdxs,xgb,lgb,cb}=_pbModels;
 
-  // Build current feature vector from latest signal records (most recent run)
+  // Build feature vector from the MOST RECENT completed signal record.
+  // We only use B-window features (B-3, B-2, B-1) — the data that
+  // genuinely exists BEFORE a run fires, matching what the model was trained on.
   const featData=featComputeAll();
-  if(!featData||!featData.matrix.length){ $("pbStatus").textContent='No signal records to predict from.'; return; }
-
-  // Use the most recent record's feature row
+  if(!featData||!featData.matrix.length){
+    $("pbStatus").textContent='No signal records to predict from.'; return;
+  }
+  // matrix[0] = newest record's full feature row (all _FEAT_DEFS features)
+  // selK[j] = index into the b-only sub-matrix of bFeatIdxs
+  // We need: bFeatIdxs[selK[j]] = index into full _FEAT_DEFS
   const rawRow=featData.matrix[0];
-  const x=featIdxs.map((fi,k)=>{
-    const v=rawRow[fi];
-    return (v!=null&&isFinite(v))?v:colMeans[k];
+  // bMatrix row: index into bFeatIdxs
+  const bRow=bFeatIdxs.map(fi=>rawRow[fi]);
+  // Reduced to selected top-K B features
+  const x=selK.map((k,j)=>{
+    const v=bRow[k];
+    return (v!=null&&isFinite(v))?v:colMeans[j];
   });
 
-  // Get probability from all three models
-  const getProbFromModel=(model)=>{
-    let s=0; model.trees.forEach(t=>s+=(model.name==='CatBoost'?0.05:model.name==='LightGBM'?0.08:0.1)*_pbPredictTree(t,x));
+  // Get probability from each model
+  const getProb=(model,lrV)=>{
+    let s=0; model.trees.forEach(t=>s+=lrV*_pbPredictTree(t,x));
     return _pbSigmoid(s);
   };
-  const pXGB=getProbFromModel(xgb);
-  const pLGB=getProbFromModel(lgb);
-  const pCB =getProbFromModel(cb);
-  const pBest=getProbFromModel(best);
+  const pXGB=getProb(xgb, 0.1);
+  const pLGB=getProb(lgb, 0.08);
+  const pCB =getProb(cb,  0.05);
+  const pBest=getProb(best, best.name==='XGBoost'?0.1:best.name==='LightGBM'?0.08:0.05);
 
   // Update confidence meter
   const dir=pBest>=0.5?'▲ RISE':'▼ FALL';
@@ -7155,7 +7208,7 @@ function pbPredict(){
   const dirEl=$("pbPredDir"); if(dirEl){ dirEl.textContent=dir; dirEl.style.color=dirColor; }
   const barEl=$("pbConfBar"); if(barEl){ barEl.style.width=pct+'%'; barEl.style.background=dirColor; }
   const pctEl=$("pbConfPct"); if(pctEl){ pctEl.textContent=pct+'% RISE probability'; pctEl.style.color=dirColor; }
-  const modEl=$("pbPredModel"); if(modEl) modEl.textContent=`Predicted by ${best.name}`;
+  const modEl=$("pbPredModel"); if(modEl) modEl.textContent=`Predicted by ${best.name} using ${selK.length} B-window features (no leakage)`;
 
   // Vote panel
   const voteRow=(id,name,prob)=>{
@@ -7173,35 +7226,38 @@ function pbPredict(){
   const riseVotes=votes.reduce((a,b)=>a+b,0);
   const consensusEl=$("pbConsensus");
   if(consensusEl){
-    if(riseVotes===3) consensusEl.innerHTML='<span style="color:var(--up);font-weight:800">STRONG RISE ▲▲▲ (3/3)</span>';
-    else if(riseVotes===2) consensusEl.innerHTML='<span style="color:var(--up)">Lean RISE ▲ (2/3)</span>';
-    else if(riseVotes===1) consensusEl.innerHTML='<span style="color:var(--down)">Lean FALL ▼ (2/3)</span>';
-    else consensusEl.innerHTML='<span style="color:var(--down);font-weight:800">STRONG FALL ▼▼▼ (3/3)</span>';
+    if(riseVotes===3)       consensusEl.innerHTML='<span style="color:var(--up);font-weight:800">STRONG RISE ▲▲▲ (3/3)</span>';
+    else if(riseVotes===2)  consensusEl.innerHTML='<span style="color:var(--up)">Lean RISE ▲ (2/3)</span>';
+    else if(riseVotes===1)  consensusEl.innerHTML='<span style="color:var(--down)">Lean FALL ▼ (2/3)</span>';
+    else                    consensusEl.innerHTML='<span style="color:var(--down);font-weight:800">STRONG FALL ▼▼▼ (3/3)</span>';
   }
 
-  // Save to history
+  // Save to history and resolve prior pending predictions
   const rec=signalRecords[0];
   _pbHistory.unshift({
     time:fmtTime(Math.floor(Date.now()/1000)),
     pred:pBest>=0.5?'RISE':'FALL',
-    conf:(pBest*100).toFixed(1)+'%',
-    actual:rec?( rec.dir===1?'RISE':'FALL'):'—',
+    conf:pct+'%',
+    actual:rec?(rec.dir===1?'RISE':'FALL'):'—',
     result:'pending',
     model:best.name,
-    prob:pBest
+    prob:pBest,
   });
   if(_pbHistory.length>50) _pbHistory.pop();
 
-  // Try to resolve prior pending predictions against actual next run
-  _pbHistory.forEach((h,i)=>{
-    if(h.result==='pending'&&i>0){
-      const next=_pbHistory[i-1];
-      if(next&&next.actual!=='—'){
-        h.actual=next.actual;
-        h.result=h.pred===next.actual?'✅ WIN':'❌ LOSS';
+  // Attempt to resolve older pendings against the now-known actual direction
+  for(let i=1;i<_pbHistory.length;i++){
+    const h=_pbHistory[i];
+    if(h.result==='pending'){
+      // The actual direction for this prediction was the NEXT run after it was made
+      // which is now at _pbHistory[i-1].actual
+      const nextActual=_pbHistory[i-1].actual;
+      if(nextActual&&nextActual!=='—'){
+        h.actual=nextActual;
+        h.result=h.pred===nextActual?'✅ WIN':'❌ LOSS';
       }
     }
-  });
+  }
 
   // Render history
   const histBody=$("pbHistBody");
@@ -7226,7 +7282,7 @@ function pbPredict(){
   const accEl=$("pbHistAccuracy");
   if(accEl&&resolved.length) accEl.textContent=`${wins}/${resolved.length} correct (${(wins/resolved.length*100).toFixed(1)}%)`;
 
-  $("pbStatus").textContent=`Prediction: ${dir} at ${pct}% confidence — ${riseVotes}/3 models agree.`;
+  $("pbStatus").textContent=`Prediction: ${dir} at ${pct}% confidence · ${riseVotes}/3 models agree · using ${selK.length} B-only features`;
 }
 
 
