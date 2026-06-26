@@ -906,9 +906,8 @@ table.an-table tbody tr:last-child td{border-bottom:none}
         <table class="sig-table">
           <thead>
             <tr>
-              <th class="l">Start time</th>
+              <th class="l">Time</th>
               <th class="l">Dir</th>
-              <th>P1 (start)</th><th>P2</th><th>P3</th><th>P4</th><th>P5</th>
               <th class="grp">MACD</th><th>Signal</th><th>Hist</th>
               <th class="grp">Chop</th>
               <th class="grp">CCI</th>
@@ -916,12 +915,12 @@ table.an-table tbody tr:last-child td{border-bottom:none}
             </tr>
           </thead>
           <tbody id="signalTableBody">
-            <tr><td colspan="16" class="sig-empty">No 5-in-a-row runs recorded yet. They appear here the moment one fires.</td></tr>
+            <tr><td colspan="11" class="sig-empty">No 5-in-a-row runs recorded yet. They appear here the moment one fires.</td></tr>
           </tbody>
         </table>
       </div>
       <div class="sig-legend">
-        <b>Reading it:</b> P1–P5 are the five consecutive tick prices that built the run. <b>MACD/Signal/Hist</b> are the live MACD line, its signal line and the histogram (Hist&gt;0 bullish). <b>Chop</b> ≥61.8 = choppy/sideways, ≤38.2 = trending. <b>CCI</b> &gt;+100 overbought, &lt;−100 oversold. <b>BB %B</b> is position within the Bollinger band (0 = lower, 1 = upper). Values are computed on the tick-price series, so they update on every tick.
+        <b>Reading it:</b> the three columns show indicator values at B-3, B-2, B-1 — the three ticks immediately before a 5-tick run fired. <b>MACD/Signal/Hist</b>, <b>Chop</b> (≤38.2 trending), <b>CCI</b>, <b>BB %B</b>. In average modes each cell is the mean across all captured runs at that B-window position.
       </div>
     </div>
 
@@ -936,23 +935,21 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       <div class="gc-field">
         <label for="anMode">Show</label>
         <select id="anMode" onchange="onAnalysisModeChange()">
-          <option value="run" selected>A specific 5-tick run</option>
-          <option value="avg-all">Average across all runs</option>
-          <option value="avg-rise">Average across rise runs</option>
-          <option value="avg-fall">Average across fall runs</option>
+          <option value="run" selected>A specific run (B-window)</option>
+          <option value="avg-all">Average — all runs</option>
+          <option value="avg-rise">Average — rise runs</option>
+          <option value="avg-fall">Average — fall runs</option>
         </select>
       </div>
       <div class="gc-field" id="anRunPickWrap">
         <label for="anRunPick">Run</label>
         <select id="anRunPick" onchange="renderAnalysis()"></select>
       </div>
-      <button class="gc-btn" onclick="exportAnalysisCsv()" title="Download 3 spreadsheets: B (before), P (run), A (after) — each with price + all indicators">⬇ CSV (3 sheets)</button>
+      <button class="gc-btn" onclick="exportAnalysisCsv()" title="Download B-window CSV: B-3, B-2, B-1 price + all indicators for every captured run">⬇ CSV (B-window)</button>
     </div>
 
     <div class="an-phase-key">
-      <span><i class="before"></i> before (3 ticks pre-run)</span>
-      <span><i class="run"></i> the 5-tick run (P1 = start)</span>
-      <span><i class="after"></i> after (4 ticks post-run)</span>
+      <span><i class="before"></i> B-window — 3 ticks before the run fired (B-3, B-2, B-1)</span>
     </div>
 
     <div id="anSummary" class="an-summary"></div>
@@ -972,7 +969,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     </div>
 
     <div class="an-legend">
-      <b>How to read it:</b> each column is one tick. <b>P1–P5</b> are the five consecutive ticks of the run (P1 is where it began); <b>before</b> are the 3 ticks leading in, <b>after</b> are the 4 ticks that followed. Each row is an indicator value computed on the live tick series at that tick: <b>MACD / Signal / Hist</b> (Hist&gt;0 bullish), <b>Chop</b> (≥61.8 choppy, ≤38.2 trending), <b>CCI</b> (&gt;+100 overbought, &lt;−100 oversold), <b>BB %B</b> (0 = lower band, 1 = upper) and the three Bollinger band prices. In <b>average</b> modes each cell is the mean of that indicator at that position across every captured run (missing values are skipped), so you can see the typical indicator shape around a 5-tick run.
+      <b>How to read it:</b> the three columns are the B-window — B-3, B-2, B-1 (the three ticks immediately before the run fired). Each row is an indicator value. In <b>average</b> modes each cell is the mean across all captured runs, showing the typical indicator state before a run fires.
     </div>
 
     <footer>
@@ -1226,15 +1223,14 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <div class="grid-card" style="margin-bottom:14px">
       <h2>🧠 ML Feature Engineering — Derived Indicators</h2>
       <div class="gc-sub">
-        Computes 150+ derived features across the B-3→A-4 window of every captured 5-tick run.
+        Computes B-window derived features from the 3 ticks before each captured 5-tick run (B-3, B-2, B-1).
         Features cover: slope, acceleration, threshold triggers, interaction cross-terms, histogram momentum, price-EMA deviations, Bollinger squeeze, Choppiness regime, pattern alignment.
-        Ranking uses mutual information (MI), Random Forest importance (RFI), and SHAP value approximation — all computed in-browser on the actual signal records.
+        Only B-window features are used — P1-P5 (run) and A1-A4 (after) data are not stored and cannot leak into the model.
+        Ranking uses mutual information (MI), Random Forest importance (RFI), and SHAP value approximation — all computed on the training set only.
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
         <button class="gc-btn" id="featCompBtn" onclick="featCompute()">⚙ Compute features &amp; rank</button>
-        <button class="gc-btn" id="featCsvBBtn" onclick="featExportCsv('B')" disabled>⬇ CSV B (before)</button>
-        <button class="gc-btn" id="featCsvPBtn" onclick="featExportCsv('P')" disabled>⬇ CSV P (run)</button>
-        <button class="gc-btn" id="featCsvABtn" onclick="featExportCsv('A')" disabled>⬇ CSV A (after)</button>
+        <button class="gc-btn" id="featCsvBBtn" onclick="featExportCsv('B')" disabled>⬇ CSV (B-window features)</button>
         <span id="featStatus" style="font-size:10px;color:var(--muted)">Waiting for signal records…</span>
       </div>
     </div>
@@ -2493,8 +2489,8 @@ const indHistory = [];          // full per-tick snapshots (see snapFields)
 const IND_HIST_MAX = 256;
 // Window captured around each run for the Page 5 analysis tool
 const BEFORE_N = 3;             // ticks captured before the run starts
-const AFTER_N  = 4;             // ticks captured after the run's 5th tick
-const pendingAnalysis = [];     // run records still collecting their "after" ticks
+const AFTER_N  = 0;             // after-ticks removed — only B-window (B-3,B-2,B-1) is stored
+let signalRecords = [];          // newest first — B-window (before) only
 
 // Build a compact full-indicator snapshot for one tick.
 function makeSnap(epoch, price){
@@ -2553,35 +2549,11 @@ function recordIndicatorTick(epoch, price){
   const snap = makeSnap(epoch, price);
   indHistory.push(snap);
   if (indHistory.length > IND_HIST_MAX) indHistory.shift();
-
-  // Fill the "after" window of any run that fired on an earlier tick.
-  if (pendingAnalysis.length){
-    let finalized = false;
-    for (let i = pendingAnalysis.length - 1; i >= 0; i--){
-      const rec = pendingAnalysis[i];
-      if (snap.epoch > rec._bornEpoch && rec.after.length < AFTER_N){
-        rec.after.push(snap);
-      }
-      if (rec.after.length >= AFTER_N){
-        delete rec._bornEpoch;
-        pendingAnalysis.splice(i, 1);
-        finalized = true;
-      }
-    }
-    if (finalized){
-      saveSignalRecords();
-      if (document.getElementById("page-analysis") &&
-          document.getElementById("page-analysis").classList.contains("active")){
-        renderAnalysis();
-      }
-    }
-  }
 }
 
-// Persistent store of every 5-tick run, with the indicator values observed
-// before, during and after the run. Drives the Signal Log (Page 4) and the
-// Analysis Tool (Page 5).
-let signalRecords = [];          // newest first
+// Persistent store of every 5-tick run — B-window (before) only.
+// P1-P5 (run) and A1-A4 (after) are not stored.
+// Drives the Signal Log (Page 4) and the Analysis Tool (Page 5).
 const SIGNAL_REC_MAX = 200;
 const SIGREC_KEY_PREFIX = "v100tracker_sigrec_v1_";
 
@@ -2596,37 +2568,32 @@ function loadSignalRecords(code){
   } catch(_){ signalRecords = []; }
 }
 
-// Capture a run the moment it reaches 5 consecutive ticks. `runPrices` are the
-// 5 prices p1..p5 that built the run (p1 = price at which the run began).
+// Capture a run the moment it reaches 5 consecutive ticks.
+// Only the B-window (3 ticks before the run) is stored — P1-P5 and A1-A4
+// are deleted from the dataset. The B-window is the only data used for
+// feature engineering and ML training.
 function recordSignal(dir, runPrices, epoch){
   const s = indSnapshot || {};
-  // indHistory ends with P5 (pushed this tick). The 5 run snapshots are the
-  // last 5 entries; the 3 ticks before the run are the 3 entries before those.
-  const runSnaps    = indHistory.slice(-RUN_LENGTH);
+  // indHistory ends with P5 (pushed this tick).
+  // The 3 ticks before the run = 3 entries before the last RUN_LENGTH entries.
   const beforeSnaps = indHistory.slice(-(RUN_LENGTH + BEFORE_N), -RUN_LENGTH);
   const rec = {
     epoch: epoch || Math.floor(Date.now()/1000),
     dir,                                    // 1 rise, -1 fall
-    prices: runPrices.slice(0, RUN_LENGTH), // [p1..p5]
     // single-snapshot fields (kept for the Page 4 signal-log table)
     macd: s.macd, macdSig: s.macdSig, macdHist: s.macdHist,
     chop: s.chop, cci: s.cci,
     bbUpper: s.bbUpper, bbMid: s.bbMid, bbLower: s.bbLower,
     bbPctB: s.bbPctB, bbWidth: s.bbWidth,
     market: SYMBOL, decimals,
-    // window for the Page 5 analysis tool
+    // B-window only — the 3 ticks before the run fired
     before: beforeSnaps.map(x => ({ ...x })),
-    run:    runSnaps.map(x => ({ ...x })),
-    after:  [],
-    _bornEpoch: epoch,
+    // run and after removed — not stored
   };
   signalRecords.unshift(rec);
   if (signalRecords.length > SIGNAL_REC_MAX){
-    const dropped = signalRecords.pop();
-    const pi = pendingAnalysis.indexOf(dropped);
-    if (pi >= 0) pendingAnalysis.splice(pi, 1);
+    signalRecords.pop();
   }
-  pendingAnalysis.push(rec);     // collect its "after" ticks over the next AFTER_N ticks
   saveSignalRecords();
   renderSignalTable();
   if (document.getElementById("page-analysis") &&
@@ -2934,7 +2901,6 @@ function switchMarket(code){
   // Page 4/5: reload this market's signal log, refresh labels, and disarm auto
   // (the selected symbol changed, so don't keep auto-firing on the old basis).
   indHistory.length = 0;
-  pendingAnalysis.length = 0;
   // Page 6: reset digit analysis for the new market
   digRing.length = 0;
   digTransitions = Array.from({length:10}, () => new Array(10).fill(0));
@@ -4339,21 +4305,17 @@ function renderSignalTable(){
   const body = $("signalTableBody");
   if (!body) return;
   if (!signalRecords.length){
-    body.innerHTML = '<tr><td colspan="16" class="sig-empty">No 5-in-a-row runs recorded yet. They appear here the moment one fires.</td></tr>';
+    body.innerHTML = '<tr><td colspan="11" class="sig-empty">No 5-in-a-row runs recorded yet. They appear here the moment one fires.</td></tr>';
     return;
   }
   body.innerHTML = signalRecords.map(r => {
     const dec = r.decimals != null ? r.decimals : 2;
-    const prices = r.prices || [];
-    const pCells = [0,1,2,3,4].map(i =>
-      `<td>${prices[i] != null ? fmtPrice(prices[i], dec) : "—"}</td>`).join("");
     const dirCls = r.dir === 1 ? "up" : "down";
     const dirTxt = r.dir === 1 ? "RISE ▲" : "FALL ▼";
     const md = r.macdHist;
     return `<tr>
       <td class="l">${fmtTime(r.epoch)}</td>
       <td class="l"><span class="sig-dir ${dirCls}">${dirTxt}</span></td>
-      ${pCells}
       <td class="grp">${fmtNum(r.macd, Math.min(dec+1,5))}</td>
       <td>${fmtNum(r.macdSig, Math.min(dec+1,5))}</td>
       <td class="${indCellClass('macdHist', md)}">${fmtNum(md, Math.min(dec+1,5))}</td>
@@ -4376,17 +4338,14 @@ function clearSignalRecords(){
 
 function exportSignalCsv(){
   if (!signalRecords.length){ alert("No signal rows to export yet."); return; }
-  const head = ["start_time","direction","p1_start","p2","p3","p4","p5",
+  const head = ["time","direction",
                 "macd","macd_signal","macd_hist","choppiness","cci",
                 "bb_pctB","bb_upper","bb_mid","bb_lower","market"];
   const rows = signalRecords.map(r => {
     const dec = r.decimals != null ? r.decimals : 2;
-    const p = r.prices || [];
-    const px = i => p[i] != null ? Number(p[i]).toFixed(dec) : "";
     return [
       new Date(r.epoch*1000).toISOString(),
       r.dir === 1 ? "RISE" : "FALL",
-      px(0),px(1),px(2),px(3),px(4),
       r.macd ?? "", r.macdSig ?? "", r.macdHist ?? "",
       r.chop ?? "", r.cci ?? "",
       r.bbPctB != null ? r.bbPctB.toFixed(4) : "",
@@ -4548,8 +4507,12 @@ async function gridLoadAccounts(){
       const m = (body && body.message) || `HTTP ${resp.status}`;
       throw new Error(m);
     }
+    // Handle both { data: [...] } and { error: "no_accounts" }
+    if (body && body.error === "no_accounts"){
+      throw new Error("Deriv returned no accounts — try logging out and back in.");
+    }
     gridAccounts = (body && body.data) || [];
-    if (!gridAccounts.length) throw new Error("No accounts returned for this session.");
+    if (!gridAccounts.length) throw new Error("No accounts returned — try logging out and back in.");
   } catch (e) {
     const isNetErr = e instanceof TypeError;
     gridDiag(
@@ -5713,17 +5676,16 @@ function featCompute(){
       rankings.sort((a,b)=>b.composite-a.composite);
       _featCache={rankings,matrix,labels,feats,computed:new Date()};
 
-      // Render rank table (top 50)
+      // Render rank table (top 50 B-phase features only)
       const body=$("featRankBody");
       if(body){
-        body.innerHTML=rankings.slice(0,50).map((r,rank)=>{
+        body.innerHTML=rankings.filter(r=>r.f.phase==='B').slice(0,50).map((r,rank)=>{
           const f2=v=>v!=null?v.toFixed(4):"—";
           const f3=v=>v!=null?v.toFixed(5):"—";
-          const phaseClr=r.f.phase==='B'?'color:#56b6ff':r.f.phase==='P'?'color:#16e08b':'color:#fbbf24';
           return `<tr>
             <td class="l cell-mut">${rank+1}</td>
             <td class="l" style="font-size:11px;font-weight:600">${r.f.label}</td>
-            <td class="l" style="${phaseClr};font-weight:700">${r.f.phase}</td>
+            <td class="l" style="color:#56b6ff;font-weight:700">B</td>
             <td class="l cell-mut" style="font-size:10px">${r.f.family}</td>
             <td>${f3(r.mi)}</td>
             <td>${f3(r.rfi)}</td>
@@ -5775,7 +5737,7 @@ function featCompute(){
       }
 
       // Enable CSV buttons
-      ['featCsvBBtn','featCsvPBtn','featCsvABtn'].forEach(id=>{const b=$(id);if(b)b.disabled=false;});
+      ['featCsvBBtn'].forEach(id=>{const b=$(id);if(b)b.disabled=false;});
       if(status) status.textContent=`✅ ${nFeat} features computed · ${rankings.length} ranked · ${signalRecords.length} signal records · computed at ${new Date().toLocaleTimeString()}`;
 
     } catch(e){
@@ -5862,31 +5824,22 @@ const AN_METRICS = [
   // ── ROC ───────────────────────────────────────────────────────────
   { key:"roc",    label:"ROC(10)",    kind:"roc",   price:false },
 ];
-// Column layout: BEFORE_N before + 5 run + AFTER_N after
+// Column layout: B-window only (B-3, B-2, B-1)
+// P1-P5 (run) and A1-A4 (after) removed from all analysis displays and CSV exports.
 function anColumns(){
   const cols = [];
   for (let i = BEFORE_N; i >= 1; i--) cols.push({ phase:"before", label:"B-"+i });
-  for (let i = 1; i <= RUN_LENGTH; i++) cols.push({ phase:"run", label:i===1?"P1·start":("P"+i), start:i===1 });
-  for (let i = 1; i <= AFTER_N; i++) cols.push({ phase:"after", label:"A-"+i });
   return cols;
 }
 
 // Pull the snapshot for a given column index from one record (or null).
+// Only before columns remain: colIdx 0=B-3, 1=B-2, 2=B-1
 function anSnapAt(rec, colIdx){
   const before = rec.before || [];
-  const run = rec.run || [];
-  const after = rec.after || [];
-  if (colIdx < BEFORE_N){
-    // before columns are right-aligned: last `before` entry is B-1 (closest)
-    const need = BEFORE_N - colIdx;            // colIdx0 -> B-3 -> need 3rd-from-end
-    const idx = before.length - need;
-    return idx >= 0 ? before[idx] : null;
-  }
-  if (colIdx < BEFORE_N + RUN_LENGTH){
-    return run[colIdx - BEFORE_N] || null;
-  }
-  const aIdx = colIdx - BEFORE_N - RUN_LENGTH;
-  return after[aIdx] || null;
+  // before columns are right-aligned: last entry = B-1 (closest to run)
+  const need = BEFORE_N - colIdx;    // colIdx 0 -> B-3 -> need 3rd-from-end
+  const idx = before.length - need;
+  return idx >= 0 ? before[idx] : null;
 }
 
 function buildAnalysisSelector(){
@@ -5900,11 +5853,8 @@ function buildAnalysisSelector(){
   }
   sel.innerHTML = recs.map((r, i) => {
     const dir = r.dir === 1 ? "RISE ▲" : "FALL ▼";
-    const aft = r.after ? r.after.length : 0;
-    const tag = aft < AFTER_N ? " · collecting…" : "";
-    return `<option value="${i}">${fmtTime(r.epoch)} · ${dir}${tag}</option>`;
+    return `<option value="${i}">${fmtTime(r.epoch)} · ${dir}</option>`;
   }).join("");
-  // keep selection if still valid, else default to newest (index 0)
   if (prev !== "" && Number(prev) < recs.length) sel.value = prev;
   else sel.value = "0";
 }
@@ -6029,13 +5979,9 @@ function renderAnalysisSummary(data, cols){
   if (!box) return;
   if (!data || data.cells === null){ box.innerHTML = ""; return; }
   const dec = data.dec;
-  const startIdx = BEFORE_N;                 // P1
-  const lastRunIdx = BEFORE_N + RUN_LENGTH-1;// P5
-  const p1 = data.prices[startIdx], p5 = data.prices[lastRunIdx];
-  const lastAfterIdx = (() => { for (let i = data.prices.length-1; i >= 0; i--) if (data.prices[i]!=null) return i; return -1; })();
-  const pAfter = lastAfterIdx > lastRunIdx ? data.prices[lastAfterIdx] : null;
-  const runMove = (p1!=null && p5!=null) ? (p5 - p1) : null;
-  const follow = (p5!=null && pAfter!=null) ? (pAfter - p5) : null;
+  // B-window: cols are B-3 (0), B-2 (1), B-1 (2)
+  const b3 = data.prices[0], b2 = data.prices[1], b1 = data.prices[2];
+  const bMove = (b3!=null&&b1!=null) ? (b1-b3) : null;
 
   const srcLabel = data.source === "run" ? (data.dir===1?"Single RISE run":"Single FALL run")
                  : data.source === "avg-rise" ? `Avg of ${data.count} rise runs`
@@ -6044,18 +5990,16 @@ function renderAnalysisSummary(data, cols){
 
   const sgn = v => v==null ? "—" : (v>=0?"+":"") + v.toFixed(dec);
   const cls = v => v==null ? "" : v>0 ? "up" : v<0 ? "down" : "";
-  const followNote = follow==null ? "no post-run data yet"
-    : (data.dir===1 ? (follow>=0?"continued up":"reversed down")
-      : data.dir===-1 ? (follow<=0?"continued down":"reversed up")
-      : (follow>=0?"net up after":"net down after"));
 
   box.innerHTML = `
     <div class="an-stat"><div class="lab">Source</div><div class="v">${srcLabel}</div><div class="s">${data.source==="run"?fmtTime(data.rec.epoch):"this market"}</div></div>
-    <div class="an-stat"><div class="lab">Run move (P1→P5)</div><div class="v ${cls(runMove)}">${sgn(runMove)}</div><div class="s">price travelled during the run</div></div>
-    <div class="an-stat"><div class="lab">After-run follow</div><div class="v ${cls(data.dir===-1?(follow==null?null:-follow):follow)}">${sgn(follow)}</div><div class="s">${followNote}</div></div>
-    <div class="an-stat"><div class="lab">MACD hist @ P5</div><div class="v ${ (data.cells.hist[lastRunIdx]||0) >=0 ? 'up':'down'}">${data.cells.hist[lastRunIdx]!=null?data.cells.hist[lastRunIdx].toFixed(Math.min(dec+1,5)):"—"}</div><div class="s">momentum at run end</div></div>
-    <div class="an-stat"><div class="lab">Chop @ P5</div><div class="v ${ (data.cells.chop[lastRunIdx]!=null && data.cells.chop[lastRunIdx]>=61.8)?'warn':(data.cells.chop[lastRunIdx]!=null && data.cells.chop[lastRunIdx]<=38.2?'up':'') }">${data.cells.chop[lastRunIdx]!=null?data.cells.chop[lastRunIdx].toFixed(1):"—"}</div><div class="s">≤38.2 trending · ≥61.8 choppy</div></div>
-    <div class="an-stat"><div class="lab">CCI @ P5</div><div class="v ${ (data.cells.cci[lastRunIdx]!=null && data.cells.cci[lastRunIdx]>100)?'up':(data.cells.cci[lastRunIdx]!=null && data.cells.cci[lastRunIdx]<-100?'down':'') }">${data.cells.cci[lastRunIdx]!=null?data.cells.cci[lastRunIdx].toFixed(1):"—"}</div><div class="s">&gt;100 OB · &lt;−100 OS</div></div>`;
+    <div class="an-stat"><div class="lab">B-window move (B-3→B-1)</div><div class="v ${cls(bMove)}">${sgn(bMove)}</div><div class="s">price change in the 3 pre-run ticks</div></div>
+    <div class="an-stat"><div class="lab">MACD hist @ B-1</div><div class="v ${(data.cells.hist&&data.cells.hist[2]!=null)?(data.cells.hist[2]>=0?'up':'down'):''}">
+      ${data.cells.hist&&data.cells.hist[2]!=null?data.cells.hist[2].toFixed(Math.min(dec+1,5)):"—"}</div><div class="s">momentum at B-1</div></div>
+    <div class="an-stat"><div class="lab">Chop @ B-1</div><div class="v ${data.cells.chop&&data.cells.chop[2]!=null?(data.cells.chop[2]>=61.8?'warn':data.cells.chop[2]<=38.2?'up':''):''}">
+      ${data.cells.chop&&data.cells.chop[2]!=null?data.cells.chop[2].toFixed(1):"—"}</div><div class="s">≤38.2 trending · ≥61.8 choppy</div></div>
+    <div class="an-stat"><div class="lab">CCI @ B-1</div><div class="v ${data.cells.cci&&data.cells.cci[2]!=null?(data.cells.cci[2]>100?'up':data.cells.cci[2]<-100?'down':''):''}">
+      ${data.cells.cci&&data.cells.cci[2]!=null?data.cells.cci[2].toFixed(1):"—"}</div><div class="s">&gt;100 OB · &lt;−100 OS</div></div>`;
 }
 
 function drawAnSpark(data, cols){
@@ -6067,12 +6011,13 @@ function drawAnSpark(data, cols){
     return;
   }
   const W = 1000, H = 140, padT = 14, padB = 22, padL = 40, padR = 12;
-  const pts = data.prices;
+  const pts = data.prices;  // 3 prices: B-3, B-2, B-1
   const valid = pts.map((p,i)=>({p,i})).filter(o=>o.p!=null);
+  if (!valid.length){ svg.innerHTML=''; return; }
   let hi = Math.max(...valid.map(o=>o.p)), lo = Math.min(...valid.map(o=>o.p));
   if (hi===lo){ hi+=1; lo-=1; }
   const pad=(hi-lo)*0.15; hi+=pad; lo-=pad; const range=hi-lo;
-  const n = cols.length;
+  const n = cols.length;  // 3
   const x = i => padL + (W-padL-padR) * (n<=1?0.5:i/(n-1));
   const y = p => padT + (H-padT-padB) * (1 - (p-lo)/range);
   const dec = data.dec;
@@ -6081,21 +6026,17 @@ function drawAnSpark(data, cols){
   for (let g=0; g<=2; g++){ const gy=padT+(H-padT-padB)/2*g; const gp=hi-range/2*g;
     out += `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${W-padR}" y2="${gy.toFixed(1)}" stroke="#1a2130"/>`;
     out += `<text x="4" y="${(gy+3).toFixed(1)}" fill="#475569" font-size="9" font-family="monospace">${gp.toFixed(dec)}</text>`; }
-  // run band
-  const rx0 = x(BEFORE_N) - (W-padL-padR)/(n-1)/2;
-  const rx1 = x(BEFORE_N+RUN_LENGTH-1) + (W-padL-padR)/(n-1)/2;
-  out += `<rect x="${rx0.toFixed(1)}" y="${padT}" width="${(rx1-rx0).toFixed(1)}" height="${H-padT-padB}" fill="rgba(86,182,255,0.07)"/>`;
-  // path (split into before/run/after colors)
-  const segCol = i => i < BEFORE_N ? "#6b7689" : i < BEFORE_N+RUN_LENGTH ? "var(--accent)" : (data.dir===1?"var(--up)":data.dir===-1?"var(--down)":"#6b7689");
+  // B-window shading
+  out += `<rect x="${padL}" y="${padT}" width="${W-padL-padR}" height="${H-padT-padB}" fill="rgba(86,182,255,0.04)"/>`;
+  // path in blue
   for (let i=1;i<pts.length;i++){
     if (pts[i]==null || pts[i-1]==null) continue;
-    out += `<line x1="${x(i-1).toFixed(1)}" y1="${y(pts[i-1]).toFixed(1)}" x2="${x(i).toFixed(1)}" y2="${y(pts[i]).toFixed(1)}" stroke="${segCol(i)}" stroke-width="2"/>`;
+    out += `<line x1="${x(i-1).toFixed(1)}" y1="${y(pts[i-1]).toFixed(1)}" x2="${x(i).toFixed(1)}" y2="${y(pts[i]).toFixed(1)}" stroke="var(--accent)" stroke-width="2.5"/>`;
   }
-  // points + labels
+  // points + column labels
   pts.forEach((p,i)=>{ if(p==null) return;
-    const col = i < BEFORE_N ? "#6b7689" : i < BEFORE_N+RUN_LENGTH ? "var(--accent)" : (data.dir===1?"var(--up)":data.dir===-1?"var(--down)":"#9aa6bd");
-    out += `<circle cx="${x(i).toFixed(1)}" cy="${y(p).toFixed(1)}" r="2.6" fill="${col}"/>`;
-    out += `<text x="${x(i).toFixed(1)}" y="${H-7}" fill="#475569" font-size="8" text-anchor="middle" font-family="monospace">${cols[i].label.replace('·start','')}</text>`;
+    out += `<circle cx="${x(i).toFixed(1)}" cy="${y(p).toFixed(1)}" r="3.5" fill="var(--accent)"/>`;
+    out += `<text x="${x(i).toFixed(1)}" y="${H-7}" fill="#56b6ff" font-size="10" text-anchor="middle" font-family="monospace" font-weight="700">${cols[i].label}</text>`;
   });
   svg.innerHTML = out;
 }
@@ -6266,77 +6207,48 @@ function exportFullDayCsv(){
 function exportAnalysisCsv(){
   if (!signalRecords.length){ alert("No signal records yet — wait for 5-tick runs to fire."); return; }
 
-  const cols   = anColumns();   // 12 entries: B-3,B-2,B-1, P1..P5, A-1..A-4
-  const dec    = decimals || 2;
-  const total  = signalRecords.length;
-  const today  = new Date().toISOString().slice(0,10);
+  const cols  = anColumns();   // only 3 cols now: B-3, B-2, B-1
+  const dec   = decimals || 2;
+  const total = signalRecords.length;
+  const today = new Date().toISOString().slice(0,10);
+  const sym   = SYMBOL;
 
-  // ── Column index ranges ──────────────────────────────────────────────
-  // B (before): colIdx 0,1,2       → B-3, B-2, B-1
-  // P (run):    colIdx 3,4,5,6,7   → P1, P2, P3, P4, P5
-  // A (after):  colIdx 8,9,10,11   → A-1, A-2, A-3, A-4
-  const bIdx = [0,1,2];
-  const pIdx = [3,4,5,6,7];
-  const aIdx = [8,9,10,11];
+  // Position labels — just the 3 B columns
+  const posLabels = cols.map(c => c.label.replace(/-/g,'_'));
 
-  const META = ["signal_no","epoch","datetime","direction"];
+  const header = [
+    "signal_no","epoch","datetime","direction",
+    ...posLabels.map(p => "price_"+p),
+    ...AN_METRICS.flatMap(m => posLabels.map(p => m.label+"_"+p)),
+  ].join(",");
 
-  // Generates one CSV string for a given set of column indices
-  function buildCsv(indices){
-    const posLabels = indices.map(ci => cols[ci].label
-      .replace('·start','_start').replace(/-/g,'_'));
+  const rows = [header];
+  signalRecords.forEach((rec, idx) => {
+    const sigNo = total - idx;
+    const epoch = rec.epoch || "";
+    const dt    = epoch ? new Date(epoch*1000).toISOString().replace("T"," ").slice(0,19) : "";
+    const dir   = rec.dir === 1 ? "rise" : "fall";
+    const snaps = cols.map((_, ci) => anSnapAt(rec, ci));
+    const prices = snaps.map(s => s && s.price != null ? Number(s.price).toFixed(dec) : "");
+    const inds = AN_METRICS.flatMap(m =>
+      snaps.map(s => {
+        if (!s) return "";
+        const v = s[m.key];
+        if (v == null || (typeof v === "number" && isNaN(v))) return "";
+        return Number(v).toFixed(m.price ? dec : 5);
+      })
+    );
+    rows.push([sigNo, epoch, dt, dir, ...prices, ...inds].join(","));
+  });
 
-    // Header: metadata + price_X + indicator_X for each position
-    const header = [
-      ...META,
-      ...posLabels.map(p => "price_"+p),
-      ...AN_METRICS.flatMap(m => posLabels.map(p => m.label+"_"+p)),
-    ].join(",");
-
-    const rows = [header];
-
-    signalRecords.forEach((rec, idx) => {
-      const sigNo = total - idx;
-      const epoch = rec.epoch || "";
-      const dt    = epoch ? new Date(epoch*1000).toISOString().replace("T"," ").slice(0,19) : "";
-      const dir   = rec.dir === 1 ? "rise" : "fall";
-
-      const snaps = indices.map(ci => anSnapAt(rec, ci));
-
-      const prices = snaps.map(s =>
-        s && s.price != null ? Number(s.price).toFixed(dec) : "");
-
-      const inds = AN_METRICS.flatMap(m =>
-        snaps.map(s => {
-          if (!s) return "";
-          const v = s[m.key];
-          if (v == null || (typeof v === "number" && isNaN(v))) return "";
-          return Number(v).toFixed(m.price ? dec : 5);
-        })
-      );
-
-      rows.push([sigNo, epoch, dt, dir, ...prices, ...inds].join(","));
-    });
-
-    return rows.join("\r\n");
-  }
-
-  // Download helper
-  function download(csv, name){
-    const blob = new Blob([csv], { type:"text/csv;charset=utf-8;" });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement("a");
-    a.href = url; a.download = name;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
-  }
-
-  // Fire three downloads in quick succession
-  // (browsers allow multiple sequential downloads from the same user action)
-  const sym = SYMBOL;
-  download(buildCsv(bIdx), `mamba_B_before_${sym}_${today}.csv`);
-  setTimeout(() => download(buildCsv(pIdx), `mamba_P_run_${sym}_${today}.csv`),   300);
-  setTimeout(() => download(buildCsv(aIdx), `mamba_A_after_${sym}_${today}.csv`), 600);
+  const csv  = rows.join("\r\n");
+  const blob = new Blob([csv], { type:"text/csv;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href     = url;
+  a.download = `mamba_B_window_${sym}_${today}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // =====================================================================
