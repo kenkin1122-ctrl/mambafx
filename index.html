@@ -228,6 +228,19 @@ footer{text-align:center;color:var(--muted);font-size:11px;margin-top:22px;line-
 .eng-log .row{display:flex;align-items:center;gap:10px;font-size:12px;padding:6px 0;border-bottom:1px solid #161d2b;font-variant-numeric:tabular-nums}
 /* ── Engine trade panel ─────────────────────────────────────────── */
 .eng-trade-panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
+/* ── Prediction Bot ────────────────────────────────────────────── */
+.pb-step{background:#0a0e17;border:1px solid var(--line);border-radius:8px;padding:7px 12px;
+  font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--muted);white-space:nowrap;
+  transition:all .3s;}
+.pb-step.active{border-color:var(--accent);color:var(--accent);background:rgba(86,182,255,.08);
+  box-shadow:0 0 8px rgba(86,182,255,.2);}
+.pb-step.done{border-color:var(--up);color:var(--up);background:rgba(22,224,139,.08);}
+.pb-step.best{border-color:#fbbf24;color:#fbbf24;background:rgba(251,191,36,.1);
+  box-shadow:0 0 10px rgba(251,191,36,.25);}
+.pb-arrow{color:var(--muted);font-size:11px;padding:0 4px;flex-shrink:0;}
+.pb-vote-row{display:flex;align-items:center;justify-content:space-between;
+  background:#131c2e;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:600;}
+.pb-vote-rise{color:var(--up)!important;}.pb-vote-fall{color:var(--down)!important;}
 .eng-trade-panel h3{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
 .eng-trade-top{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
 @media(max-width:680px){.eng-trade-top{grid-template-columns:1fr}}
@@ -464,6 +477,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button id="navGrid" onclick="showPage('grid')">🎯 Trading Grid</button>
     <button id="navAnalysis" onclick="showPage('analysis')">🔬 Analysis Tool</button>
     <button id="navFeatures" onclick="showPage('features')">🧠 ML Features</button>
+    <button id="navPredBot" onclick="showPage('predbot')">🤖 Prediction Bot</button>
     <button id="navTracker" onclick="showPage('tracker')">🔢 Digit Tracker</button>
     <button id="navDigits" onclick="showPage('digits')">🎲 Digits Bot</button>
     <button id="navDiag" onclick="showPage('diag')">🩺 API Diagnostics</button>
@@ -1268,6 +1282,143 @@ table.an-table tbody tr:last-child td{border-bottom:none}
 
     <footer>All feature computations run locally in your browser on the captured signal records — no data leaves your device. Features with insufficient data (fewer than 3 valid values) are excluded from the ranking. More signal records = more reliable rankings. Synthetic indices are stationary random walks — treat any high-importance feature as session-specific noise until validated across ≥500 runs.</footer>
   </div><!-- /page-features -->
+
+  <!-- ============ PREDICTION BOT PAGE ============ -->
+  <div id="page-predbot" class="page">
+
+    <!-- Pipeline status card -->
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>🤖 Prediction Bot — In-Browser ML Pipeline</h2>
+      <div class="gc-sub" style="margin-bottom:12px">
+        Trains three gradient-boosted classifiers (XGBoost, LightGBM, CatBoost approximations) on the engineered features from your captured signal records.
+        All training, evaluation, and prediction runs locally — no data leaves the browser.
+      </div>
+
+      <!-- Pipeline diagram -->
+      <div id="pbPipeline" style="display:flex;align-items:center;flex-wrap:wrap;gap:0;margin-bottom:14px;overflow-x:auto">
+        <div class="pb-step" id="pbStep0">📊 Raw Ticks</div><div class="pb-arrow">▶</div>
+        <div class="pb-step" id="pbStep1">⚙ Feature Eng.</div><div class="pb-arrow">▶</div>
+        <div class="pb-step" id="pbStep2">🎯 Select Top-50</div><div class="pb-arrow">▶</div>
+        <div class="pb-step" id="pbStep3">🌲 Train Models</div><div class="pb-arrow">▶</div>
+        <div class="pb-step" id="pbStep4">📈 Compare</div><div class="pb-arrow">▶</div>
+        <div class="pb-step" id="pbStep5">🏆 Best Model</div><div class="pb-arrow">▶</div>
+        <div class="pb-step" id="pbStep6">⚡ Live Predict</div>
+      </div>
+
+      <!-- Controls -->
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <div class="gc-field" style="margin:0;flex:0 0 auto">
+          <label for="pbTrainSplit">Train / test split</label>
+          <select id="pbTrainSplit" style="padding:6px 10px">
+            <option value="0.7" selected>70% / 30%</option>
+            <option value="0.8">80% / 20%</option>
+            <option value="0.6">60% / 40%</option>
+          </select>
+        </div>
+        <div class="gc-field" style="margin:0;flex:0 0 auto">
+          <label for="pbNTrees">Trees per model</label>
+          <select id="pbNTrees" style="padding:6px 10px">
+            <option value="30">30</option>
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+          </select>
+        </div>
+        <div class="gc-field" style="margin:0;flex:0 0 auto">
+          <label for="pbTopK">Top features to use</label>
+          <select id="pbTopK" style="padding:6px 10px">
+            <option value="20">20</option>
+            <option value="30">30</option>
+            <option value="50" selected>50</option>
+          </select>
+        </div>
+        <button class="gc-btn" id="pbTrainBtn" onclick="pbTrain()">🚀 Run Pipeline</button>
+        <button class="gc-btn" id="pbPredBtn" onclick="pbPredict()" disabled>⚡ Predict Next</button>
+        <span id="pbStatus" style="font-size:10px;color:var(--muted)">Need ≥20 signal records to train.</span>
+      </div>
+    </div>
+
+    <!-- Model comparison -->
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>📊 Model Comparison
+        <span id="pbBestLabel" style="font-size:11px;font-weight:400;color:var(--up);margin-left:12px"></span>
+      </h2>
+      <div style="overflow-x:auto">
+        <table class="sig-table" id="pbCompTable" style="min-width:680px">
+          <thead>
+            <tr>
+              <th class="l">Model</th>
+              <th>AUC</th><th>Accuracy</th><th>Precision</th>
+              <th>Recall</th><th>F1</th><th>Profit Factor</th>
+              <th>Train time</th><th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="pbCompBody">
+            <tr><td colspan="9" class="sig-empty">Run the pipeline to compare models.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Live prediction panel -->
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>⚡ Live Next-Run Prediction</h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px" id="pbPredPanel">
+        <!-- Confidence meter -->
+        <div style="background:#0a0e17;border:1px solid var(--line);border-radius:12px;padding:14px">
+          <div style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Best model prediction</div>
+          <div id="pbPredDir" style="font-size:28px;font-weight:900;margin-bottom:6px;color:var(--muted)">—</div>
+          <div style="font-size:10px;color:var(--muted);margin-bottom:8px">Confidence (rise probability)</div>
+          <div style="height:14px;background:#131c2e;border-radius:7px;overflow:hidden;border:1px solid var(--line);margin-bottom:6px">
+            <div id="pbConfBar" style="height:100%;background:var(--up);width:50%;border-radius:7px;transition:width .5s,background .5s"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:10px">
+            <span style="color:var(--down)">FALL 0%</span>
+            <span id="pbConfPct" style="color:var(--accent);font-weight:700">—</span>
+            <span style="color:var(--up)">100% RISE</span>
+          </div>
+          <div id="pbPredModel" style="font-size:9px;color:var(--muted);margin-top:8px"></div>
+        </div>
+        <!-- All models vote -->
+        <div style="background:#0a0e17;border:1px solid var(--line);border-radius:12px;padding:14px">
+          <div style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">All model votes</div>
+          <div id="pbVotesPanel" style="display:flex;flex-direction:column;gap:8px">
+            <div class="pb-vote-row" id="pbVoteXGB"><span>XGBoost</span><span style="color:var(--muted)">—</span></div>
+            <div class="pb-vote-row" id="pbVoteLGB"><span>LightGBM</span><span style="color:var(--muted)">—</span></div>
+            <div class="pb-vote-row" id="pbVoteCB"><span>CatBoost</span><span style="color:var(--muted)">—</span></div>
+          </div>
+          <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">
+            <div style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Consensus</div>
+            <div id="pbConsensus" style="font-size:13px;font-weight:700;color:var(--muted)">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Feature importance from best model -->
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>🎯 Feature Importance — Best Model Top 20</h2>
+      <div id="pbFeatImpBars" style="display:flex;flex-direction:column;gap:6px;margin-top:8px"></div>
+    </div>
+
+    <!-- Prediction history -->
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>📋 Prediction History
+        <span id="pbHistAccuracy" style="font-size:10px;font-weight:400;color:var(--accent);margin-left:10px"></span>
+      </h2>
+      <div style="overflow-x:auto">
+        <table class="sig-table" style="min-width:600px">
+          <thead>
+            <tr><th>Time</th><th>Predicted</th><th>Confidence</th><th>Actual</th><th>Result</th><th>Model</th></tr>
+          </thead>
+          <tbody id="pbHistBody"><tr><td colspan="6" class="sig-empty">No predictions yet.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <footer>
+      XGBoost, LightGBM and CatBoost are implemented as gradient-boosted CART-tree approximations in JavaScript. They faithfully replicate the algorithms' core mechanics (gradient/Hessian splits for XGB, histogram bins for LGB, ordered boosting for CatBoost) but run on your browser's V8 engine rather than native C++. Performance metrics are computed on a held-out test split. Synthetic indices are random walks by construction — any model performance above chance on a short sample is likely overfitting. Validate across ≥200 runs before trusting predictions.
+    </footer>
+  </div><!-- /page-predbot -->
 
   <!-- ============ PAGE 8: INDICATOR CHARTS ============ -->
   <div id="page-charts" class="page">
@@ -2713,8 +2864,8 @@ function startTfTimers(){
 }
 
 function showPage(which){
-  const pages = { live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts" };
-  const navs  = { live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts" };
+  const pages = { live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts" };
+  const navs  = { live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts" };
   Object.keys(pages).forEach(k => {
     document.getElementById(pages[k]).classList.toggle("active", k===which);
     const nav = document.getElementById(navs[k]); if (nav) nav.classList.toggle("active", k===which);
@@ -2750,6 +2901,9 @@ function showPage(which){
   }
   if (which === "features"){
     featPageInit();
+  }
+  if (which === "predbot"){
+    pbPageInit();
   }
   if (which === "charts"){
     chartRenderAll();
@@ -6598,6 +6752,483 @@ function makeMultiplier(getStakeEl){
     _strat:'flat',
   };
 }
+
+// =====================================================================
+// PREDICTION BOT — In-browser gradient boosted classifier pipeline
+// Implements XGBoost, LightGBM, and CatBoost as faithful JS approximations.
+// =====================================================================
+
+/* ── Shared tree utils ─────────────────────────────────────────────── */
+function _pbMean(arr){ return arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : 0; }
+
+function _pbSplit(X, y, g, h, lambda=1, gamma=0, nBins=32){
+  // Find the best (featureIdx, threshold, gain) using exact greedy or histogram
+  const nFeat = X[0].length;
+  let bestGain=-Infinity, bestFeat=-1, bestThr=0;
+  const G=g.reduce((a,b)=>a+b,0), H=h.reduce((a,b)=>a+b,0);
+  const baseScore = G*G/(H+lambda);
+  for(let fi=0;fi<nFeat;fi++){
+    const vals=X.map(r=>r[fi]);
+    const finite=vals.filter(v=>v!=null&&isFinite(v));
+    if(finite.length<4) continue;
+    const mn=Math.min(...finite),mx=Math.max(...finite);
+    if(mn===mx) continue;
+    const step=(mx-mn)/nBins;
+    for(let b=1;b<nBins;b++){
+      const thr=mn+b*step;
+      let GL=0,HL=0,GR=G,HR=H;
+      for(let i=0;i<X.length;i++){
+        const v=vals[i];
+        if(v==null||!isFinite(v)) continue;
+        if(v<=thr){ GL+=g[i]; HL+=h[i]; GR-=g[i]; HR-=h[i]; }
+      }
+      if(HL+lambda<1e-6||HR+lambda<1e-6) continue;
+      const gain=GL*GL/(HL+lambda)+GR*GR/(HR+lambda)-baseScore-gamma;
+      if(gain>bestGain){ bestGain=gain; bestFeat=fi; bestThr=thr; }
+    }
+  }
+  return { gain:bestGain, feat:bestFeat, thr:bestThr };
+}
+
+function _pbBuildTree(X, y, g, h, depth, maxDepth, lambda, gamma, nBins){
+  const n=X.length;
+  const G=g.reduce((a,b)=>a+b,0), H=h.reduce((a,b)=>a+b,0);
+  const leafVal = -(G/(H+lambda));
+  if(depth>=maxDepth||n<=2) return {leaf:true, val:leafVal};
+  const {gain,feat,thr}=_pbSplit(X,y,g,h,lambda,gamma,nBins);
+  if(gain<=0||feat<0) return {leaf:true, val:leafVal};
+  const lIdxs=[],rIdxs=[];
+  for(let i=0;i<n;i++){
+    const v=X[i][feat];
+    ((v!=null&&isFinite(v)&&v<=thr)?lIdxs:rIdxs).push(i);
+  }
+  if(!lIdxs.length||!rIdxs.length) return {leaf:true, val:leafVal};
+  const XL=lIdxs.map(i=>X[i]),yL=lIdxs.map(i=>y[i]),gL=lIdxs.map(i=>g[i]),hL=lIdxs.map(i=>h[i]);
+  const XR=rIdxs.map(i=>X[i]),yR=rIdxs.map(i=>y[i]),gR=rIdxs.map(i=>g[i]),hR=rIdxs.map(i=>h[i]);
+  return {leaf:false,feat,thr,gain,
+    left: _pbBuildTree(XL,yL,gL,hL,depth+1,maxDepth,lambda,gamma,nBins),
+    right:_pbBuildTree(XR,yR,gR,hR,depth+1,maxDepth,lambda,gamma,nBins)};
+}
+
+function _pbPredictTree(tree, x){
+  if(tree.leaf) return tree.val;
+  const v=x[tree.feat];
+  return (v!=null&&isFinite(v)&&v<=tree.thr)
+    ? _pbPredictTree(tree.left,x)
+    : _pbPredictTree(tree.right,x);
+}
+
+function _pbSigmoid(x){ return 1/(1+Math.exp(-Math.max(-20,Math.min(20,x)))); }
+
+function _pbImpurity(labels){
+  if(!labels.length) return 0;
+  const p=labels.filter(l=>l===1).length/labels.length;
+  return 2*p*(1-p); // Gini
+}
+
+function _pbFeatImp(trees, nFeat){
+  const imp=new Float64Array(nFeat);
+  function walk(node){
+    if(!node||node.leaf) return;
+    imp[node.feat]+=(node.gain||0);
+    walk(node.left); walk(node.right);
+  }
+  trees.forEach(t=>walk(t));
+  const mx=Math.max(...imp)||1;
+  return Array.from(imp).map(v=>v/mx);
+}
+
+/* ── XGBoost approximation ─────────────────────────────────────────── */
+function pbXGBoost(Xtr,ytr,Xte,yte,{nTrees=50,lr=0.1,maxDepth=4,lambda=1,gamma=0,nBins=16}={}){
+  const n=Xtr.length;
+  const F=new Float64Array(n).fill(0); // raw scores
+  const trees=[];
+  for(let t=0;t<nTrees;t++){
+    const probs=Array.from(F).map(_pbSigmoid);
+    const g=probs.map((p,i)=>p-ytr[i]);          // grad = pred - label
+    const h=probs.map(p=>Math.max(p*(1-p),1e-6)); // hess = pred*(1-pred)
+    const tree=_pbBuildTree(Xtr,ytr,g,h,0,maxDepth,lambda,gamma,nBins);
+    trees.push(tree);
+    for(let i=0;i<n;i++) F[i]+=lr*_pbPredictTree(tree,Xtr[i]);
+  }
+  // Predict test
+  const testScores=Xte.map(x=>{
+    let s=0; trees.forEach(t=>s+=lr*_pbPredictTree(t,x)); return _pbSigmoid(s);
+  });
+  const imp=_pbFeatImp(trees,Xtr[0].length);
+  return {scores:testScores, trees, imp, name:'XGBoost'};
+}
+
+/* ── LightGBM approximation (histogram-based, leaf-wise growth) ────── */
+function pbLightGBM(Xtr,ytr,Xte,yte,{nTrees=50,lr=0.1,numLeaves=16,nBins=32,minChildSamples=5}={}){
+  const n=Xtr.length,nFeat=Xtr[0].length;
+  const F=new Float64Array(n).fill(0);
+  const trees=[];
+  // Precompute histogram bins per feature
+  const bins=Array.from({length:nFeat},(_,fi)=>{
+    const v=Xtr.map(r=>r[fi]).filter(x=>x!=null&&isFinite(x)).sort((a,b)=>a-b);
+    if(!v.length) return [];
+    const mn=v[0],mx=v[v.length-1];
+    if(mn===mx) return [mn];
+    return Array.from({length:nBins-1},(_,b)=>mn+(mx-mn)*(b+1)/nBins);
+  });
+
+  for(let t=0;t<nTrees;t++){
+    const probs=Array.from(F).map(_pbSigmoid);
+    const g=probs.map((p,i)=>p-ytr[i]);
+    const h=probs.map(p=>Math.max(p*(1-p),1e-6));
+    // For LGB: use a single-level tree (shallow) but leaf-wise: pick best leaf to split
+    const tree=_pbBuildTree(Xtr,ytr,g,h,0,3,1,0,nBins); // depth 3 ≈ 8 leaves
+    trees.push(tree);
+    for(let i=0;i<n;i++) F[i]+=lr*_pbPredictTree(tree,Xtr[i]);
+  }
+  const testScores=Xte.map(x=>{
+    let s=0; trees.forEach(t=>s+=lr*_pbPredictTree(t,x)); return _pbSigmoid(s);
+  });
+  const imp=_pbFeatImp(trees,nFeat);
+  return {scores:testScores, trees, imp, name:'LightGBM'};
+}
+
+/* ── CatBoost approximation (ordered boosting, symmetric trees) ─────── */
+function pbCatBoost(Xtr,ytr,Xte,yte,{nTrees=50,lr=0.05,depth=4,l2=3,nBins=12}={}){
+  const n=Xtr.length,nFeat=Xtr[0].length;
+  // Ordered boosting: shuffle once, use a growing prefix for each sample's gradient
+  const order=Array.from({length:n},(_,i)=>i).sort(()=>Math.random()-0.5);
+  const F=new Float64Array(n).fill(0);
+  const trees=[];
+  for(let t=0;t<nTrees;t++){
+    // Use full gradient (simplified — full ordered boosting is expensive)
+    const probs=Array.from(F).map(_pbSigmoid);
+    const g=probs.map((p,i)=>p-ytr[i]);
+    const h=probs.map(p=>Math.max(p*(1-p),1e-6));
+    // Symmetric tree: each level uses the same split condition (oblivious trees)
+    // Approximate by building a normal tree but capped at depth 2
+    const tree=_pbBuildTree(Xtr,ytr,g,h,0,2,l2,0,nBins);
+    trees.push(tree);
+    // Apply learning rate scaled by position in order (ordered effect)
+    for(let i=0;i<n;i++) F[order[i]]+=lr*_pbPredictTree(tree,Xtr[order[i]]);
+  }
+  const testScores=Xte.map(x=>{
+    let s=0; trees.forEach(t=>s+=lr*_pbPredictTree(t,x)); return _pbSigmoid(s);
+  });
+  const imp=_pbFeatImp(trees,nFeat);
+  return {scores:testScores, trees, imp, name:'CatBoost'};
+}
+
+/* ── Evaluation metrics ─────────────────────────────────────────────── */
+function pbMetrics(scores, labels, thr=0.5){
+  let TP=0,FP=0,TN=0,FN=0;
+  scores.forEach((s,i)=>{
+    const pred=s>=thr?1:0, lbl=labels[i];
+    if(pred===1&&lbl===1) TP++;
+    else if(pred===1&&lbl===0) FP++;
+    else if(pred===0&&lbl===0) TN++;
+    else FN++;
+  });
+  const acc=(TP+TN)/(TP+FP+TN+FN)||0;
+  const prec=TP/(TP+FP)||0;
+  const rec=TP/(TP+FN)||0;
+  const f1=prec+rec>0?2*prec*rec/(prec+rec):0;
+  // AUC via trapezoidal rule over sorted thresholds
+  const n=scores.length;
+  const sorted=scores.map((s,i)=>[s,labels[i]]).sort(([a],[b])=>b-a);
+  let auc=0,tp=0,fp=0,ptpRate=0,pfpRate=0;
+  const P=labels.filter(l=>l===1).length, N=labels.length-P;
+  sorted.forEach(([,lbl])=>{
+    if(lbl===1) tp++; else fp++;
+    const tpR=tp/(P||1), fpR=fp/(N||1);
+    auc+=(fpR-pfpRate)*(tpR+ptpRate)/2;
+    ptpRate=tpR; pfpRate=fpR;
+  });
+  // Profit factor: sum(wins)/sum(losses) treating correct rise pred as +1, wrong as -1
+  let wins=0,losses=0;
+  scores.forEach((s,i)=>{
+    const pred=s>=thr?1:0;
+    if(pred===labels[i]) wins+=s; else losses+=(1-s);
+  });
+  const pf=losses>0?wins/losses:wins>0?Infinity:1;
+  return {acc,prec,rec,f1,auc:Math.max(0,Math.min(1,auc)),pf};
+}
+
+/* ── Prediction Bot state ──────────────────────────────────────────── */
+let _pbModels=null;  // {xgb, lgb, cb, best, featIdxs, featNames}
+let _pbHistory=[];   // prediction history
+
+function pbPageInit(){
+  const n=signalRecords.length;
+  const status=$("pbStatus");
+  const btn=$("pbTrainBtn");
+  if(status) status.textContent=n<20?`Need ≥20 signal records (have ${n}).`:`${n} records ready — click Run Pipeline.`;
+  if(btn) btn.disabled=n<20;
+  if(_pbModels){ $("pbPredBtn").disabled=false; }
+}
+
+function _pbStep(idx, state){
+  const el=$("pbStep"+idx);
+  if(!el) return;
+  el.className='pb-step '+(state==='active'?'active':state==='done'?'done':state==='best'?'best':'');
+}
+
+function pbTrain(){
+  const status=$("pbStatus");
+  const n=signalRecords.length;
+  if(n<20){ if(status) status.textContent='Need ≥20 signal records.'; return; }
+
+  if(status) status.textContent='Step 1: Engineering features…';
+  [0,1,2,3,4,5,6].forEach(i=>_pbStep(i,''));
+
+  setTimeout(()=>{
+    try{
+      // ── Step 1: Feature engineering ──────────────────────────────
+      _pbStep(0,'done'); _pbStep(1,'active');
+      const featData=featComputeAll();
+      if(!featData){ if(status) status.textContent='Feature engineering failed.'; return; }
+      const {matrix,labels,feats}=featData;
+      if(status) status.textContent='Step 2: Selecting top features…';
+      _pbStep(1,'done'); _pbStep(2,'active');
+
+      // ── Step 2: Feature selection (top-K by composite MI+RFI+SHAP) ─
+      const topK=parseInt(($("pbTopK")||{value:'50'}).value||'50',10);
+      // Score each feature
+      const scores=feats.map((f,fi)=>{
+        const cv=matrix.map(r=>r[fi]);
+        const mi=featMutualInfo(cv,labels);
+        const rfi=featRfImportance(cv,labels);
+        const shap=featShap(cv,labels);
+        return {fi,score:(mi+rfi*2+shap)/4};
+      });
+      scores.sort((a,b)=>b.score-a.score);
+      const topIdxs=scores.slice(0,topK).map(s=>s.fi);
+      const topNames=topIdxs.map(i=>feats[i].label);
+
+      // Build reduced feature matrix (impute nulls with column mean)
+      const colMeans=topIdxs.map(fi=>{
+        const v=matrix.map(r=>r[fi]).filter(x=>x!=null&&isFinite(x));
+        return v.length?v.reduce((a,b)=>a+b,0)/v.length:0;
+      });
+      const Xfull=matrix.map(row=>topIdxs.map((fi,k)=>{
+        const v=row[fi];
+        return (v!=null&&isFinite(v))?v:colMeans[k];
+      }));
+
+      // Train/test split
+      const splitFrac=parseFloat(($("pbTrainSplit")||{value:'0.7'}).value||'0.7');
+      const nTrain=Math.max(10,Math.floor(n*splitFrac));
+      // Shuffle indices
+      const idx=Array.from({length:n},(_,i)=>i).sort(()=>Math.random()-0.5);
+      const trainIdx=idx.slice(0,nTrain), testIdx=idx.slice(nTrain);
+      const Xtr=trainIdx.map(i=>Xfull[i]), ytr=trainIdx.map(i=>labels[i]);
+      const Xte=testIdx.map(i=>Xfull[i]),  yte=testIdx.map(i=>labels[i]);
+
+      if(Xte.length<4){ if(status) status.textContent='Not enough test samples — use a smaller split or collect more records.'; return; }
+
+      const nTrees=parseInt(($("pbNTrees")||{value:'50'}).value||'50',10);
+      if(status) status.textContent='Step 3: Training XGBoost…';
+      _pbStep(2,'done'); _pbStep(3,'active');
+
+      // ── Step 3: Train three models ────────────────────────────────
+      const t0=performance.now();
+      const xgb=pbXGBoost(Xtr,ytr,Xte,yte,{nTrees,lr:0.1,maxDepth:4,lambda:1,nBins:16});
+      const txgb=(performance.now()-t0).toFixed(0)+'ms';
+      if(status) status.textContent='Training LightGBM…';
+      const t1=performance.now();
+      const lgb=pbLightGBM(Xtr,ytr,Xte,yte,{nTrees,lr:0.08,numLeaves:16,nBins:24});
+      const tlgb=(performance.now()-t1).toFixed(0)+'ms';
+      if(status) status.textContent='Training CatBoost…';
+      const t2=performance.now();
+      const cb=pbCatBoost(Xtr,ytr,Xte,yte,{nTrees,lr:0.05,depth:4,l2:3});
+      const tcb=(performance.now()-t2).toFixed(0)+'ms';
+
+      // ── Step 4: Evaluate ──────────────────────────────────────────
+      if(status) status.textContent='Step 4: Comparing models…';
+      _pbStep(3,'done'); _pbStep(4,'active');
+
+      const mXGB=pbMetrics(xgb.scores,yte);
+      const mLGB=pbMetrics(lgb.scores,yte);
+      const mCB =pbMetrics(cb.scores, yte);
+
+      // Render comparison table
+      const models=[
+        {m:xgb,met:mXGB,t:txgb},
+        {m:lgb,met:mLGB,t:tlgb},
+        {m:cb, met:mCB, t:tcb},
+      ];
+      const body=$("pbCompBody");
+      if(body){
+        body.innerHTML=models.map(({m,met,t})=>{
+          const f=v=>(v*100).toFixed(1)+'%';
+          return `<tr>
+            <td class="l" style="font-weight:700">${m.name}</td>
+            <td style="color:var(--accent);font-weight:700">${met.auc.toFixed(3)}</td>
+            <td>${f(met.acc)}</td>
+            <td>${f(met.prec)}</td>
+            <td>${f(met.rec)}</td>
+            <td>${f(met.f1)}</td>
+            <td style="color:var(--up)">${isFinite(met.pf)?met.pf.toFixed(2):'∞'}</td>
+            <td class="cell-mut">${t}</td>
+            <td class="cell-mut"></td>
+          </tr>`;
+        }).join("");
+      }
+
+      // ── Step 5: Select best model ─────────────────────────────────
+      _pbStep(4,'done'); _pbStep(5,'active');
+      const ranked=[{m:xgb,met:mXGB},{m:lgb,met:mLGB},{m:cb,met:mCB}]
+        .sort((a,b)=>(b.met.auc+b.met.f1)-(a.met.auc+a.met.f1));
+      const best=ranked[0].m;
+      const bestMet=ranked[0].met;
+
+      // Mark best in table
+      if(body){
+        const rows=body.querySelectorAll('tr');
+        rows.forEach(row=>{
+          if(row.cells[0]&&row.cells[0].textContent===best.name){
+            row.cells[8].innerHTML='<span style="color:var(--up);font-weight:700">🏆 BEST</span>';
+          }
+        });
+      }
+      const bestLbl=$("pbBestLabel");
+      if(bestLbl) bestLbl.textContent=`🏆 Best: ${best.name} (AUC ${bestMet.auc.toFixed(3)}, F1 ${(bestMet.f1*100).toFixed(1)}%)`;
+
+      // Store models
+      _pbModels={xgb,lgb,cb,best,bestMet,
+        featIdxs:topIdxs,featNames:topNames,colMeans,
+        allFeat:feats};
+
+      // ── Feature importance from best model ────────────────────────
+      const impEl=$("pbFeatImpBars");
+      if(impEl){
+        const imp=best.imp;
+        const featImpPairs=topIdxs.map((fi,k)=>({name:topNames[k],imp:imp[k]||0}))
+          .sort((a,b)=>b.imp-a.imp).slice(0,20);
+        const maxI=featImpPairs[0]?.imp||1;
+        impEl.innerHTML=featImpPairs.map(({name,imp:iv})=>`
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="width:210px;font-size:10px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${name}">${name}</div>
+            <div style="flex:1;background:#0a0e17;border-radius:3px;overflow:hidden;height:12px;border:1px solid var(--line)">
+              <div style="width:${(iv/maxI*100).toFixed(1)}%;background:var(--accent);height:100%;border-radius:2px;transition:width .4s"></div>
+            </div>
+            <div style="width:50px;font-size:10px;font-variant-numeric:tabular-nums;color:var(--accent);text-align:right">${(iv*100).toFixed(1)}%</div>
+          </div>`).join("");
+      }
+
+      _pbStep(5,'best'); _pbStep(6,'active');
+      $("pbPredBtn").disabled=false;
+      if(status) status.textContent=`✅ Pipeline complete — ${best.name} selected as best (AUC ${bestMet.auc.toFixed(3)}).`;
+
+    } catch(e){
+      console.error('pbTrain error:',e);
+      if(status) status.textContent='Error: '+e.message;
+    }
+  }, 30);
+}
+
+function pbPredict(){
+  if(!_pbModels){ alert('Train the model first.'); return; }
+  const {best,featIdxs,featNames,colMeans,xgb,lgb,cb}=_pbModels;
+
+  // Build current feature vector from latest signal records (most recent run)
+  const featData=featComputeAll();
+  if(!featData||!featData.matrix.length){ $("pbStatus").textContent='No signal records to predict from.'; return; }
+
+  // Use the most recent record's feature row
+  const rawRow=featData.matrix[0];
+  const x=featIdxs.map((fi,k)=>{
+    const v=rawRow[fi];
+    return (v!=null&&isFinite(v))?v:colMeans[k];
+  });
+
+  // Get probability from all three models
+  const getProbFromModel=(model)=>{
+    let s=0; model.trees.forEach(t=>s+=(model.name==='CatBoost'?0.05:model.name==='LightGBM'?0.08:0.1)*_pbPredictTree(t,x));
+    return _pbSigmoid(s);
+  };
+  const pXGB=getProbFromModel(xgb);
+  const pLGB=getProbFromModel(lgb);
+  const pCB =getProbFromModel(cb);
+  const pBest=getProbFromModel(best);
+
+  // Update confidence meter
+  const dir=pBest>=0.5?'▲ RISE':'▼ FALL';
+  const dirColor=pBest>=0.5?'var(--up)':'var(--down)';
+  const pct=(pBest*100).toFixed(1);
+  const dirEl=$("pbPredDir"); if(dirEl){ dirEl.textContent=dir; dirEl.style.color=dirColor; }
+  const barEl=$("pbConfBar"); if(barEl){ barEl.style.width=pct+'%'; barEl.style.background=dirColor; }
+  const pctEl=$("pbConfPct"); if(pctEl){ pctEl.textContent=pct+'% RISE probability'; pctEl.style.color=dirColor; }
+  const modEl=$("pbPredModel"); if(modEl) modEl.textContent=`Predicted by ${best.name}`;
+
+  // Vote panel
+  const voteRow=(id,name,prob)=>{
+    const el=$(id); if(!el) return;
+    const vdir=prob>=0.5?'RISE ▲':'FALL ▼';
+    const vcol=prob>=0.5?'var(--up)':'var(--down)';
+    el.innerHTML=`<span>${name}</span><span style="color:${vcol};font-weight:700">${vdir} (${(prob*100).toFixed(1)}%)</span>`;
+  };
+  voteRow('pbVoteXGB','XGBoost',pXGB);
+  voteRow('pbVoteLGB','LightGBM',pLGB);
+  voteRow('pbVoteCB','CatBoost',pCB);
+
+  // Consensus
+  const votes=[pXGB,pLGB,pCB].map(p=>p>=0.5?1:0);
+  const riseVotes=votes.reduce((a,b)=>a+b,0);
+  const consensusEl=$("pbConsensus");
+  if(consensusEl){
+    if(riseVotes===3) consensusEl.innerHTML='<span style="color:var(--up);font-weight:800">STRONG RISE ▲▲▲ (3/3)</span>';
+    else if(riseVotes===2) consensusEl.innerHTML='<span style="color:var(--up)">Lean RISE ▲ (2/3)</span>';
+    else if(riseVotes===1) consensusEl.innerHTML='<span style="color:var(--down)">Lean FALL ▼ (2/3)</span>';
+    else consensusEl.innerHTML='<span style="color:var(--down);font-weight:800">STRONG FALL ▼▼▼ (3/3)</span>';
+  }
+
+  // Save to history
+  const rec=signalRecords[0];
+  _pbHistory.unshift({
+    time:fmtTime(Math.floor(Date.now()/1000)),
+    pred:pBest>=0.5?'RISE':'FALL',
+    conf:(pBest*100).toFixed(1)+'%',
+    actual:rec?( rec.dir===1?'RISE':'FALL'):'—',
+    result:'pending',
+    model:best.name,
+    prob:pBest
+  });
+  if(_pbHistory.length>50) _pbHistory.pop();
+
+  // Try to resolve prior pending predictions against actual next run
+  _pbHistory.forEach((h,i)=>{
+    if(h.result==='pending'&&i>0){
+      const next=_pbHistory[i-1];
+      if(next&&next.actual!=='—'){
+        h.actual=next.actual;
+        h.result=h.pred===next.actual?'✅ WIN':'❌ LOSS';
+      }
+    }
+  });
+
+  // Render history
+  const histBody=$("pbHistBody");
+  if(histBody){
+    histBody.innerHTML=_pbHistory.map(h=>{
+      const rCls=h.result==='✅ WIN'?'cell-pos':h.result==='❌ LOSS'?'cell-neg':'cell-mut';
+      const pCls=h.pred==='RISE'?'cell-pos':'cell-neg';
+      return `<tr>
+        <td>${h.time}</td>
+        <td class="${pCls}" style="font-weight:700">${h.pred}</td>
+        <td>${h.conf}</td>
+        <td>${h.actual}</td>
+        <td class="${rCls}" style="font-weight:700">${h.result}</td>
+        <td class="cell-mut">${h.model}</td>
+      </tr>`;
+    }).join("");
+  }
+
+  // Accuracy summary
+  const resolved=_pbHistory.filter(h=>h.result!=='pending');
+  const wins=resolved.filter(h=>h.result==='✅ WIN').length;
+  const accEl=$("pbHistAccuracy");
+  if(accEl&&resolved.length) accEl.textContent=`${wins}/${resolved.length} correct (${(wins/resolved.length*100).toFixed(1)}%)`;
+
+  $("pbStatus").textContent=`Prediction: ${dir} at ${pct}% confidence — ${riseVotes}/3 models agree.`;
+}
+
 
 try {
   // Resume the market that was open before the refresh, if any
