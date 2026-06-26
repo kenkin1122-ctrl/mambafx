@@ -5045,8 +5045,10 @@ const _FEAT_DEFS = (function(){
   let id = 0;
   const add = (label, family, phase, fn) => defs.push({id:id++, label, family, phase, fn});
 
-  // ── FAMILY 1: SLOPE ────────────────────────────────────────────────
-  // 1-tick slope of each indicator at every window transition
+  // ── FAMILY 1: SLOPE — B-window only ──────────────────────────────
+  // Only reads B-3, B-2, B-1 columns. P1/P5/A* columns are NEVER
+  // accessed here — doing so would constitute data leakage because
+  // those ticks don't exist yet when we predict before a run fires.
   const SLOPE_IND = [
     ['macd','MACD'],['signal','Signal'],['hist','Hist'],
     ['chop','Chop'],['cci','CCI'],['bbPctB','BB%B'],
@@ -5055,41 +5057,35 @@ const _FEAT_DEFS = (function(){
     ['ema5','EMA5'],['ema20','EMA20'],
   ];
   SLOPE_IND.forEach(([k,lbl])=>{
+    add(`${lbl} slope B3→B2`,   'Slope','B', s=>slope(g(s[B3],k),g(s[B2],k)));
     add(`${lbl} slope B2→B1`,   'Slope','B', s=>slope(g(s[B2],k),g(s[B1],k)));
-    add(`${lbl} slope B1→P1`,   'Slope','B', s=>slope(g(s[B1],k),g(s[P1],k)));
-    add(`${lbl} slope P1→P3`,   'Slope','P', s=>slope(g(s[P1],k),g(s[P3],k)));
-    add(`${lbl} slope P3→P5`,   'Slope','P', s=>slope(g(s[P3],k),g(s[P5],k)));
-    add(`${lbl} slope P5→A2`,   'Slope','A', s=>slope(g(s[P5],k),g(s[A2],k)));
-    add(`${lbl} slope A2→A4`,   'Slope','A', s=>slope(g(s[A2],k),g(s[A4],k)));
+    add(`${lbl} slope B3→B1`,   'Slope','B', s=>slope(g(s[B3],k),g(s[B1],k)));
   });
 
-  // ── FAMILY 2: ACCELERATION ────────────────────────────────────────
+  // ── FAMILY 2: ACCELERATION — B-window only ────────────────────────
   const ACCEL_IND = [
-    ['macd','MACD'],['hist','Hist'],['cci','CCI'],['rsi','RSI'],['adx','ADX'],['stochK','Stoch%K']
+    ['macd','MACD'],['hist','Hist'],['cci','CCI'],
+    ['rsi','RSI'],['adx','ADX'],['stochK','Stoch%K']
   ];
   ACCEL_IND.forEach(([k,lbl])=>{
     add(`${lbl} accel B3→B1`,  'Accel','B', s=>accel(g(s[B3],k),g(s[B2],k),g(s[B1],k)));
-    add(`${lbl} accel P1→P3`,  'Accel','P', s=>accel(g(s[P1],k),g(s[P2],k),g(s[P3],k)));
-    add(`${lbl} accel P3→P5`,  'Accel','P', s=>accel(g(s[P3],k),g(s[P4],k),g(s[P5],k)));
-    add(`${lbl} accel A1→A3`,  'Accel','A', s=>accel(g(s[A1],k),g(s[A2],k),g(s[A3],k)));
   });
 
-  // ── FAMILY 3: LEVEL / THRESHOLD ───────────────────────────────────
+  // ── FAMILY 3: LEVEL / THRESHOLD — B-window only ──────────────────
   add('RSI>70 at B1',     'Level','B', s=>{ const v=g(s[B1],'rsi'); return v!=null?+(v>70):null; });
   add('RSI<30 at B1',     'Level','B', s=>{ const v=g(s[B1],'rsi'); return v!=null?+(v<30):null; });
-  add('RSI>70 at P5',     'Level','P', s=>{ const v=g(s[P5],'rsi'); return v!=null?+(v>70):null; });
-  add('RSI<30 at P5',     'Level','P', s=>{ const v=g(s[P5],'rsi'); return v!=null?+(v<30):null; });
+  add('RSI>70 at B2',     'Level','B', s=>{ const v=g(s[B2],'rsi'); return v!=null?+(v>70):null; });
+  add('RSI<30 at B2',     'Level','B', s=>{ const v=g(s[B2],'rsi'); return v!=null?+(v<30):null; });
   add('CCI>100 at B1',    'Level','B', s=>{ const v=g(s[B1],'cci'); return v!=null?+(v>100):null; });
   add('CCI<-100 at B1',   'Level','B', s=>{ const v=g(s[B1],'cci'); return v!=null?+(v<-100):null; });
-  add('CCI>100 at P5',    'Level','P', s=>{ const v=g(s[P5],'cci'); return v!=null?+(v>100):null; });
+  add('CCI>100 at B2',    'Level','B', s=>{ const v=g(s[B2],'cci'); return v!=null?+(v>100):null; });
   add('ADX>25 at B1',     'Level','B', s=>{ const v=g(s[B1],'adx'); return v!=null?+(v>25):null; });
-  add('ADX>25 at P5',     'Level','P', s=>{ const v=g(s[P5],'adx'); return v!=null?+(v>25):null; });
-  add('ADX>40 at P5',     'Level','P', s=>{ const v=g(s[P5],'adx'); return v!=null?+(v>40):null; });
+  add('ADX>40 at B1',     'Level','B', s=>{ const v=g(s[B1],'adx'); return v!=null?+(v>40):null; });
   add('+DI>-DI at B1',    'Level','B', s=>{ const p=g(s[B1],'pdi'),n=g(s[B1],'ndi'); return (p!=null&&n!=null)?+(p>n):null; });
-  add('+DI>-DI at P5',    'Level','P', s=>{ const p=g(s[P5],'pdi'),n=g(s[P5],'ndi'); return (p!=null&&n!=null)?+(p>n):null; });
+  add('+DI>-DI at B2',    'Level','B', s=>{ const p=g(s[B2],'pdi'),n=g(s[B2],'ndi'); return (p!=null&&n!=null)?+(p>n):null; });
   add('Chop>61.8 at B1',  'Level','B', s=>{ const v=g(s[B1],'chop'); return v!=null?+(v>61.8):null; });
   add('Chop<38.2 at B1',  'Level','B', s=>{ const v=g(s[B1],'chop'); return v!=null?+(v<38.2):null; });
-  add('Chop<38.2 at P5',  'Level','P', s=>{ const v=g(s[P5],'chop'); return v!=null?+(v<38.2):null; });
+  add('Chop<38.2 at B2',  'Level','B', s=>{ const v=g(s[B2],'chop'); return v!=null?+(v<38.2):null; });
   add('BB%B>0.8 at B1',   'Level','B', s=>{ const v=g(s[B1],'bbPctB'); return v!=null?+(v>0.8):null; });
   add('BB%B<0.2 at B1',   'Level','B', s=>{ const v=g(s[B1],'bbPctB'); return v!=null?+(v<0.2):null; });
   add('Stoch>80 at B1',   'Level','B', s=>{ const v=g(s[B1],'stochK'); return v!=null?+(v>80):null; });
@@ -5097,162 +5093,148 @@ const _FEAT_DEFS = (function(){
   add('ROC>0 at B1',      'Level','B', s=>{ const v=g(s[B1],'roc'); return v!=null?+(v>0):null; });
   add('MACD>0 at B1',     'Level','B', s=>{ const v=g(s[B1],'macd'); return v!=null?+(v>0):null; });
   add('Hist>0 at B1',     'Level','B', s=>{ const v=g(s[B1],'hist'); return v!=null?+(v>0):null; });
+  add('EMA5>EMA20 at B1', 'Level','B', s=>{ const e5=g(s[B1],'ema5'),e20=g(s[B1],'ema20'); return (e5!=null&&e20!=null)?+(e5>e20):null; });
 
-  // ── FAMILY 4: HISTOGRAM BEHAVIOUR ────────────────────────────────
-  add('Hist mean B-window','Hist','B', s=>mean(bCols.map(i=>g(s[i],'hist'))));
-  add('Hist mean P-window','Hist','P', s=>mean(pCols.map(i=>g(s[i],'hist'))));
-  add('Hist sign changes B','Hist','B', s=>{
+  // ── FAMILIES 4-13: ALL B-WINDOW ONLY — zero P/A column access ────
+  // Every function below reads ONLY s[B3], s[B2], s[B1] (indices 0,1,2).
+  // No access to P1-P5 (indices 3-7) or A1-A4 (indices 8-11).
+
+  // ── FAMILY 4: HISTOGRAM — B-window only ──────────────────────────
+  add('Hist mean B',         'Hist','B', s=>mean(bCols.map(i=>g(s[i],'hist'))));
+  add('Hist sign changes B', 'Hist','B', s=>{
     const vals=bCols.map(i=>sgn(g(s[i],'hist'))).filter(v=>v!=null);
     let ch=0; for(let i=1;i<vals.length;i++) if(vals[i]!==vals[i-1]) ch++;
     return vals.length>1?ch:null;
   });
-  add('Hist sign changes P','Hist','P', s=>{
-    const vals=pCols.map(i=>sgn(g(s[i],'hist'))).filter(v=>v!=null);
-    let ch=0; for(let i=1;i<vals.length;i++) if(vals[i]!==vals[i-1]) ch++;
-    return vals.length>1?ch:null;
-  });
-  add('Hist cumsum P',    'Hist','P', s=>{ const v=pCols.map(i=>g(s[i],'hist')).filter(x=>x!=null); return v.length?v.reduce((a,b)=>a+b,0):null; });
-  add('Hist B→P change',  'Hist','B', s=>slope(mean(bCols.map(i=>g(s[i],'hist'))),mean(pCols.map(i=>g(s[i],'hist')))));
-  add('Hist P→A change',  'Hist','A', s=>slope(mean(pCols.map(i=>g(s[i],'hist'))),mean(aCols.map(i=>g(s[i],'hist')))));
-  add('Hist increasing P','Hist','P', s=>{
-    const v=pCols.map(i=>g(s[i],'hist')).filter(x=>x!=null);
-    if(v.length<2)return null;
-    return +(v.every((x,i)=>i===0||x>=v[i-1]));
-  });
+  add('Hist cumsum B',       'Hist','B', s=>{ const v=bCols.map(i=>g(s[i],'hist')).filter(x=>x!=null); return v.length?v.reduce((a,b)=>a+b,0):null; });
+  add('Hist B3→B1 change',   'Hist','B', s=>slope(g(s[B3],'hist'),g(s[B1],'hist')));
+  add('Hist positive all B', 'Hist','B', s=>+(bCols.every(i=>{ const v=g(s[i],'hist'); return v!=null&&v>0; })));
+  add('Hist negative all B', 'Hist','B', s=>+(bCols.every(i=>{ const v=g(s[i],'hist'); return v!=null&&v<0; })));
 
-  // ── FAMILY 5: CHOPPINESS BEHAVIOUR ────────────────────────────────
-  add('Chop mean B',      'Chop','B', s=>mean(bCols.map(i=>g(s[i],'chop'))));
-  add('Chop mean P',      'Chop','P', s=>mean(pCols.map(i=>g(s[i],'chop'))));
-  add('Chop mean A',      'Chop','A', s=>mean(aCols.map(i=>g(s[i],'chop'))));
-  add('Chop B→P delta',   'Chop','B', s=>slope(mean(bCols.map(i=>g(s[i],'chop'))),mean(pCols.map(i=>g(s[i],'chop')))));
-  add('Chop range P',     'Chop','P', s=>{ const v=pCols.map(i=>g(s[i],'chop')).filter(x=>x!=null); return v.length?Math.max(...v)-Math.min(...v):null; });
-  add('Chop trending at B1','Chop','B', s=>{ const v=g(s[B1],'chop'); return v!=null?+(v<38.2):null; });
-  add('Chop choppy at B1', 'Chop','B', s=>{ const v=g(s[B1],'chop'); return v!=null?+(v>61.8):null; });
-  add('Chop falling P',   'Chop','P', s=>{ const v=slope(g(s[P1],'chop'),g(s[P5],'chop')); return v!=null?+(v<0):null; });
+  // ── FAMILY 5: CHOPPINESS — B-window only ─────────────────────────
+  add('Chop mean B',         'Chop','B', s=>mean(bCols.map(i=>g(s[i],'chop'))));
+  add('Chop B3→B1 delta',    'Chop','B', s=>slope(g(s[B3],'chop'),g(s[B1],'chop')));
+  add('Chop range B',        'Chop','B', s=>{ const v=bCols.map(i=>g(s[i],'chop')).filter(x=>x!=null); return v.length?Math.max(...v)-Math.min(...v):null; });
+  add('Chop trending at B1', 'Chop','B', s=>{ const v=g(s[B1],'chop'); return v!=null?+(v<38.2):null; });
+  add('Chop choppy at B1',   'Chop','B', s=>{ const v=g(s[B1],'chop'); return v!=null?+(v>61.8):null; });
+  add('Chop falling B',      'Chop','B', s=>{ const v=slope(g(s[B3],'chop'),g(s[B1],'chop')); return v!=null?+(v<0):null; });
 
-  // ── FAMILY 6: CCI BEHAVIOUR ───────────────────────────────────────
-  add('CCI mean B',       'CCI','B', s=>mean(bCols.map(i=>g(s[i],'cci'))));
-  add('CCI mean P',       'CCI','P', s=>mean(pCols.map(i=>g(s[i],'cci'))));
-  add('CCI mean A',       'CCI','A', s=>mean(aCols.map(i=>g(s[i],'cci'))));
-  add('CCI B→P delta',    'CCI','B', s=>slope(mean(bCols.map(i=>g(s[i],'cci'))),mean(pCols.map(i=>g(s[i],'cci')))));
-  add('CCI abs max P',    'CCI','P', s=>{ const v=pCols.map(i=>g(s[i],'cci')).filter(x=>x!=null); return v.length?Math.max(...v.map(Math.abs)):null; });
-  add('CCI monotone P',   'CCI','P', s=>{
-    const v=pCols.map(i=>g(s[i],'cci')).filter(x=>x!=null);
-    if(v.length<2)return null;
-    const up=v.every((x,i)=>i===0||x>=v[i-1]),dn=v.every((x,i)=>i===0||x<=v[i-1]);
-    return +(up||dn);
+  // ── FAMILY 6: CCI — B-window only ────────────────────────────────
+  add('CCI mean B',          'CCI','B', s=>mean(bCols.map(i=>g(s[i],'cci'))));
+  add('CCI B3→B1 delta',     'CCI','B', s=>slope(g(s[B3],'cci'),g(s[B1],'cci')));
+  add('CCI abs max B',       'CCI','B', s=>{ const v=bCols.map(i=>g(s[i],'cci')).filter(x=>x!=null); return v.length?Math.max(...v.map(Math.abs)):null; });
+  add('CCI monotone B',      'CCI','B', s=>{
+    const v=bCols.map(i=>g(s[i],'cci')).filter(x=>x!=null);
+    if(v.length<2) return null;
+    return +(v.every((x,i)=>i===0||x>=v[i-1]) || v.every((x,i)=>i===0||x<=v[i-1]));
   });
+  add('CCI at B1',           'CCI','B', s=>g(s[B1],'cci'));
+  add('CCI at B2',           'CCI','B', s=>g(s[B2],'cci'));
 
-  // ── FAMILY 7: BOLLINGER %B & WIDTH ───────────────────────────────
-  add('BB%B mean B',      'BB','B', s=>mean(bCols.map(i=>g(s[i],'bbPctB'))));
-  add('BB%B mean P',      'BB','P', s=>mean(pCols.map(i=>g(s[i],'bbPctB'))));
-  add('BB%B slope B1→P1', 'BB','B', s=>slope(g(s[B1],'bbPctB'),g(s[P1],'bbPctB')));
-  add('BB%B slope P1→P5', 'BB','P', s=>slope(g(s[P1],'bbPctB'),g(s[P5],'bbPctB')));
-  add('BB width at B1',   'BB','B', s=>g(s[B1],'bbUpper')!=null&&g(s[B1],'bbLower')!=null?g(s[B1],'bbUpper')-g(s[B1],'bbLower'):null);
-  add('BB width at P5',   'BB','P', s=>g(s[P5],'bbUpper')!=null&&g(s[P5],'bbLower')!=null?g(s[P5],'bbUpper')-g(s[P5],'bbLower'):null);
-  add('BB width B→P change','BB','B', s=>{
-    const wb=(g(s[B1],'bbUpper')!=null&&g(s[B1],'bbLower')!=null)?g(s[B1],'bbUpper')-g(s[B1],'bbLower'):null;
-    const wp=(g(s[P5],'bbUpper')!=null&&g(s[P5],'bbLower')!=null)?g(s[P5],'bbUpper')-g(s[P5],'bbLower'):null;
-    return slope(wb,wp);
+  // ── FAMILY 7: BOLLINGER %B & WIDTH — B-window only ───────────────
+  add('BB%B mean B',         'BB','B', s=>mean(bCols.map(i=>g(s[i],'bbPctB'))));
+  add('BB%B slope B2→B1',    'BB','B', s=>slope(g(s[B2],'bbPctB'),g(s[B1],'bbPctB')));
+  add('BB%B slope B3→B1',    'BB','B', s=>slope(g(s[B3],'bbPctB'),g(s[B1],'bbPctB')));
+  add('BB width at B1',      'BB','B', s=>{ const u=g(s[B1],'bbUpper'),l=g(s[B1],'bbLower'); return (u!=null&&l!=null)?u-l:null; });
+  add('BB width at B2',      'BB','B', s=>{ const u=g(s[B2],'bbUpper'),l=g(s[B2],'bbLower'); return (u!=null&&l!=null)?u-l:null; });
+  add('BB width B3→B1 chg',  'BB','B', s=>{
+    const w1=((g(s[B1],'bbUpper')!=null&&g(s[B1],'bbLower')!=null))?g(s[B1],'bbUpper')-g(s[B1],'bbLower'):null;
+    const w3=((g(s[B3],'bbUpper')!=null&&g(s[B3],'bbLower')!=null))?g(s[B3],'bbUpper')-g(s[B3],'bbLower'):null;
+    return slope(w3,w1);
   });
-  add('Price above BB mid P1','BB','P', s=>{ const p=g(s[P1],'price'),m=g(s[P1],'bbMid'); return (p!=null&&m!=null)?+(p>m):null; });
-  add('Price above BB mid P5','BB','P', s=>{ const p=g(s[P5],'price'),m=g(s[P5],'bbMid'); return (p!=null&&m!=null)?+(p>m):null; });
-  add('BB squeeze at B1', 'BB','B', s=>{ const wb=(g(s[B1],'bbUpper')!=null&&g(s[B1],'bbLower')!=null&&g(s[B1],'bbMid')!=null)?(g(s[B1],'bbUpper')-g(s[B1],'bbLower'))/g(s[B1],'bbMid')*100:null; return wb!=null?+(wb<0.05):null; });
+  add('Price>BB mid at B1',  'BB','B', s=>{ const p=g(s[B1],'price'),m=g(s[B1],'bbMid'); return (p!=null&&m!=null)?+(p>m):null; });
+  add('BB squeeze at B1',    'BB','B', s=>{ const u=g(s[B1],'bbUpper'),l=g(s[B1],'bbLower'),m=g(s[B1],'bbMid'); return (u!=null&&l!=null&&m!=null&&m!==0)?+((u-l)/m*100<0.05):null; });
+  add('BB%B at B1',          'BB','B', s=>g(s[B1],'bbPctB'));
+  add('BB%B at B2',          'BB','B', s=>g(s[B2],'bbPctB'));
 
-  // ── FAMILY 8: MACD SIGNAL GAP ─────────────────────────────────────
-  add('MACD-Signal gap B1', 'MACD','B', s=>{ const m=g(s[B1],'macd'),sg=g(s[B1],'signal'); return (m!=null&&sg!=null)?m-sg:null; });
-  add('MACD-Signal gap P1', 'MACD','P', s=>{ const m=g(s[P1],'macd'),sg=g(s[P1],'signal'); return (m!=null&&sg!=null)?m-sg:null; });
-  add('MACD-Signal gap P5', 'MACD','P', s=>{ const m=g(s[P5],'macd'),sg=g(s[P5],'signal'); return (m!=null&&sg!=null)?m-sg:null; });
-  add('MACD cross B-window','MACD','B', s=>{
-    // 1 if MACD crosses signal in B window
+  // ── FAMILY 8: MACD SIGNAL GAP — B-window only ────────────────────
+  add('MACD-Signal gap B1',  'MACD','B', s=>{ const m=g(s[B1],'macd'),sg=g(s[B1],'signal'); return (m!=null&&sg!=null)?m-sg:null; });
+  add('MACD-Signal gap B2',  'MACD','B', s=>{ const m=g(s[B2],'macd'),sg=g(s[B2],'signal'); return (m!=null&&sg!=null)?m-sg:null; });
+  add('MACD cross B-window', 'MACD','B', s=>{
     for(let i=1;i<bCols.length;i++){
       const m0=g(s[bCols[i-1]],'macd'),sg0=g(s[bCols[i-1]],'signal');
       const m1=g(s[bCols[i]],'macd'),sg1=g(s[bCols[i]],'signal');
-      if(m0!=null&&sg0!=null&&m1!=null&&sg1!=null)
-        if(Math.sign(m0-sg0)!==Math.sign(m1-sg1)) return 1;
+      if(m0!=null&&sg0!=null&&m1!=null&&sg1!=null&&Math.sign(m0-sg0)!==Math.sign(m1-sg1)) return 1;
     }
     return 0;
   });
-  add('MACD mean B',      'MACD','B', s=>mean(bCols.map(i=>g(s[i],'macd'))));
-  add('MACD mean P',      'MACD','P', s=>mean(pCols.map(i=>g(s[i],'macd'))));
+  add('MACD mean B',         'MACD','B', s=>mean(bCols.map(i=>g(s[i],'macd'))));
+  add('MACD at B1',          'MACD','B', s=>g(s[B1],'macd'));
+  add('MACD at B2',          'MACD','B', s=>g(s[B2],'macd'));
 
-  // ── FAMILY 9: PRICE BEHAVIOUR ─────────────────────────────────────
-  add('Price-EMA5 dev B1','Price','B', s=>{ const p=g(s[B1],'price'),e=g(s[B1],'ema5'); return (p!=null&&e!=null)?p-e:null; });
-  add('Price-EMA20 dev B1','Price','B', s=>{ const p=g(s[B1],'price'),e=g(s[B1],'ema20'); return (p!=null&&e!=null)?p-e:null; });
-  add('Price-EMA5 dev P5','Price','P', s=>{ const p=g(s[P5],'price'),e=g(s[P5],'ema5'); return (p!=null&&e!=null)?p-e:null; });
-  add('Price-EMA20 dev P5','Price','P', s=>{ const p=g(s[P5],'price'),e=g(s[P5],'ema20'); return (p!=null&&e!=null)?p-e:null; });
-  add('EMA5-EMA20 gap B1','Price','B', s=>{ const e5=g(s[B1],'ema5'),e20=g(s[B1],'ema20'); return (e5!=null&&e20!=null)?e5-e20:null; });
-  add('EMA5-EMA20 gap P5','Price','P', s=>{ const e5=g(s[P5],'ema5'),e20=g(s[P5],'ema20'); return (e5!=null&&e20!=null)?e5-e20:null; });
-  add('Price velocity B→P','Price','B', s=>slope(g(s[B1],'price'),g(s[P1],'price')));
-  add('Price velocity P1→P5','Price','P', s=>slope(g(s[P1],'price'),g(s[P5],'price')));
-  add('Price velocity P5→A2','Price','A', s=>slope(g(s[P5],'price'),g(s[A2],'price')));
-  add('Price range P-window','Price','P', s=>{ const v=pCols.map(i=>g(s[i],'price')).filter(x=>x!=null); return v.length?Math.max(...v)-Math.min(...v):null; });
-  add('Price range B-window','Price','B', s=>{ const v=bCols.map(i=>g(s[i],'price')).filter(x=>x!=null); return v.length?Math.max(...v)-Math.min(...v):null; });
-  add('ATR at B1',        'Price','B', s=>g(s[B1],'atr'));
-  add('ATR at P5',        'Price','P', s=>g(s[P5],'atr'));
-  add('ROC at B1',        'Price','B', s=>g(s[B1],'roc'));
-  add('ROC at P5',        'Price','P', s=>g(s[P5],'roc'));
+  // ── FAMILY 9: PRICE — B-window only ──────────────────────────────
+  add('Price-EMA5 dev B1',   'Price','B', s=>{ const p=g(s[B1],'price'),e=g(s[B1],'ema5'); return (p!=null&&e!=null)?p-e:null; });
+  add('Price-EMA20 dev B1',  'Price','B', s=>{ const p=g(s[B1],'price'),e=g(s[B1],'ema20'); return (p!=null&&e!=null)?p-e:null; });
+  add('Price-EMA5 dev B2',   'Price','B', s=>{ const p=g(s[B2],'price'),e=g(s[B2],'ema5'); return (p!=null&&e!=null)?p-e:null; });
+  add('EMA5-EMA20 gap B1',   'Price','B', s=>{ const e5=g(s[B1],'ema5'),e20=g(s[B1],'ema20'); return (e5!=null&&e20!=null)?e5-e20:null; });
+  add('EMA5-EMA20 gap B2',   'Price','B', s=>{ const e5=g(s[B2],'ema5'),e20=g(s[B2],'ema20'); return (e5!=null&&e20!=null)?e5-e20:null; });
+  add('Price velocity B3→B1','Price','B', s=>slope(g(s[B3],'price'),g(s[B1],'price')));
+  add('Price velocity B2→B1','Price','B', s=>slope(g(s[B2],'price'),g(s[B1],'price')));
+  add('Price range B',       'Price','B', s=>{ const v=bCols.map(i=>g(s[i],'price')).filter(x=>x!=null); return v.length?Math.max(...v)-Math.min(...v):null; });
+  add('ATR at B1',           'Price','B', s=>g(s[B1],'atr'));
+  add('ATR at B2',           'Price','B', s=>g(s[B2],'atr'));
+  add('ROC at B1',           'Price','B', s=>g(s[B1],'roc'));
+  add('ROC at B2',           'Price','B', s=>g(s[B2],'roc'));
 
-  // ── FAMILY 10: RSI BEHAVIOUR ──────────────────────────────────────
-  add('RSI mean B',       'RSI','B', s=>mean(bCols.map(i=>g(s[i],'rsi'))));
-  add('RSI mean P',       'RSI','P', s=>mean(pCols.map(i=>g(s[i],'rsi'))));
-  add('RSI slope B1→P1',  'RSI','B', s=>slope(g(s[B1],'rsi'),g(s[P1],'rsi')));
-  add('RSI slope P1→P5',  'RSI','P', s=>slope(g(s[P1],'rsi'),g(s[P5],'rsi')));
-  add('RSI-50 at B1',     'RSI','B', s=>{ const v=g(s[B1],'rsi'); return v!=null?v-50:null; });
-  add('RSI-50 at P5',     'RSI','P', s=>{ const v=g(s[P5],'rsi'); return v!=null?v-50:null; });
+  // ── FAMILY 10: RSI — B-window only ───────────────────────────────
+  add('RSI mean B',          'RSI','B', s=>mean(bCols.map(i=>g(s[i],'rsi'))));
+  add('RSI slope B2→B1',     'RSI','B', s=>slope(g(s[B2],'rsi'),g(s[B1],'rsi')));
+  add('RSI slope B3→B1',     'RSI','B', s=>slope(g(s[B3],'rsi'),g(s[B1],'rsi')));
+  add('RSI-50 at B1',        'RSI','B', s=>{ const v=g(s[B1],'rsi'); return v!=null?v-50:null; });
+  add('RSI-50 at B2',        'RSI','B', s=>{ const v=g(s[B2],'rsi'); return v!=null?v-50:null; });
+  add('RSI at B1',           'RSI','B', s=>g(s[B1],'rsi'));
 
-  // ── FAMILY 11: STOCHASTIC & DMI ───────────────────────────────────
-  add('Stoch%K-D at B1',  'Stoch','B', s=>{ const k=g(s[B1],'stochK'),d=g(s[B1],'stochD'); return (k!=null&&d!=null)?k-d:null; });
-  add('Stoch%K-D at P5',  'Stoch','P', s=>{ const k=g(s[P5],'stochK'),d=g(s[P5],'stochD'); return (k!=null&&d!=null)?k-d:null; });
-  add('DI spread at B1',  'DMI','B', s=>{ const p=g(s[B1],'pdi'),n=g(s[B1],'ndi'); return (p!=null&&n!=null)?p-n:null; });
-  add('DI spread at P5',  'DMI','P', s=>{ const p=g(s[P5],'pdi'),n=g(s[P5],'ndi'); return (p!=null&&n!=null)?p-n:null; });
-  add('ADX mean B',       'DMI','B', s=>mean(bCols.map(i=>g(s[i],'adx'))));
-  add('ADX mean P',       'DMI','P', s=>mean(pCols.map(i=>g(s[i],'adx'))));
-  add('ADX slope B1→P5',  'DMI','B', s=>slope(g(s[B1],'adx'),g(s[P5],'adx')));
+  // ── FAMILY 11: STOCHASTIC & DMI — B-window only ──────────────────
+  add('Stoch%K-D at B1',     'Stoch','B', s=>{ const k=g(s[B1],'stochK'),d=g(s[B1],'stochD'); return (k!=null&&d!=null)?k-d:null; });
+  add('Stoch%K-D at B2',     'Stoch','B', s=>{ const k=g(s[B2],'stochK'),d=g(s[B2],'stochD'); return (k!=null&&d!=null)?k-d:null; });
+  add('DI spread at B1',     'DMI','B', s=>{ const p=g(s[B1],'pdi'),n=g(s[B1],'ndi'); return (p!=null&&n!=null)?p-n:null; });
+  add('DI spread at B2',     'DMI','B', s=>{ const p=g(s[B2],'pdi'),n=g(s[B2],'ndi'); return (p!=null&&n!=null)?p-n:null; });
+  add('ADX mean B',          'DMI','B', s=>mean(bCols.map(i=>g(s[i],'adx'))));
+  add('ADX slope B3→B1',     'DMI','B', s=>slope(g(s[B3],'adx'),g(s[B1],'adx')));
+  add('ADX at B1',           'DMI','B', s=>g(s[B1],'adx'));
 
-  // ── FAMILY 12: INTERACTION / CROSS-TERM ──────────────────────────
-  add('MACD slope × CCI slope (B1→P1)', 'Interact','B', s=>{
-    const ms=slope(g(s[B1],'macd'),g(s[P1],'macd'));
-    const cs=slope(g(s[B1],'cci'),g(s[P1],'cci'));
+  // ── FAMILY 12: INTERACTION — B-window only ────────────────────────
+  add('MACD×CCI slope B3→B1','Interact','B', s=>{
+    const ms=slope(g(s[B3],'macd'),g(s[B1],'macd'));
+    const cs=slope(g(s[B3],'cci'),g(s[B1],'cci'));
     return (ms!=null&&cs!=null)?ms*cs:null;
   });
-  add('CCI × BB%B at B1', 'Interact','B', s=>{ const c=g(s[B1],'cci'),b=g(s[B1],'bbPctB'); return (c!=null&&b!=null)?c*b:null; });
-  add('CCI × BB%B at P5', 'Interact','P', s=>{ const c=g(s[P5],'cci'),b=g(s[P5],'bbPctB'); return (c!=null&&b!=null)?c*b:null; });
-  add('Hist × Chop at B1','Interact','B', s=>{ const h=g(s[B1],'hist'),ch=g(s[B1],'chop'); return (h!=null&&ch!=null)?h*ch:null; });
-  add('Hist × Chop at P5','Interact','P', s=>{ const h=g(s[P5],'hist'),ch=g(s[P5],'chop'); return (h!=null&&ch!=null)?h*ch:null; });
-  add('MACD × Chop at B1','Interact','B', s=>{ const m=g(s[B1],'macd'),ch=g(s[B1],'chop'); return (m!=null&&ch!=null)?m*ch:null; });
-  add('MACD × Chop at P5','Interact','P', s=>{ const m=g(s[P5],'macd'),ch=g(s[P5],'chop'); return (m!=null&&ch!=null)?m*ch:null; });
-  add('RSI × ADX at B1',  'Interact','B', s=>{ const r=g(s[B1],'rsi'),a=g(s[B1],'adx'); return (r!=null&&a!=null)?r*a:null; });
-  add('Stoch%K × RSI at P5','Interact','P', s=>{ const st=g(s[P5],'stochK'),r=g(s[P5],'rsi'); return (st!=null&&r!=null)?st*r:null; });
-  add('EMA5-EMA20 × MACD at B1','Interact','B', s=>{
-    const e=g(s[B1],'ema5')!=null&&g(s[B1],'ema20')!=null?g(s[B1],'ema5')-g(s[B1],'ema20'):null;
-    const m=g(s[B1],'macd');
-    return (e!=null&&m!=null)?e*m:null;
+  add('CCI×BB%B at B1',      'Interact','B', s=>{ const c=g(s[B1],'cci'),b=g(s[B1],'bbPctB'); return (c!=null&&b!=null)?c*b:null; });
+  add('CCI×BB%B at B2',      'Interact','B', s=>{ const c=g(s[B2],'cci'),b=g(s[B2],'bbPctB'); return (c!=null&&b!=null)?c*b:null; });
+  add('Hist×Chop at B1',     'Interact','B', s=>{ const h=g(s[B1],'hist'),ch=g(s[B1],'chop'); return (h!=null&&ch!=null)?h*ch:null; });
+  add('Hist×Chop at B2',     'Interact','B', s=>{ const h=g(s[B2],'hist'),ch=g(s[B2],'chop'); return (h!=null&&ch!=null)?h*ch:null; });
+  add('MACD×Chop at B1',     'Interact','B', s=>{ const m=g(s[B1],'macd'),ch=g(s[B1],'chop'); return (m!=null&&ch!=null)?m*ch:null; });
+  add('RSI×ADX at B1',       'Interact','B', s=>{ const r=g(s[B1],'rsi'),a=g(s[B1],'adx'); return (r!=null&&a!=null)?r*a:null; });
+  add('Stoch×RSI at B1',     'Interact','B', s=>{ const st=g(s[B1],'stochK'),r=g(s[B1],'rsi'); return (st!=null&&r!=null)?st*r:null; });
+  add('EMAGap×MACD at B1',   'Interact','B', s=>{
+    const e=(g(s[B1],'ema5')!=null&&g(s[B1],'ema20')!=null)?g(s[B1],'ema5')-g(s[B1],'ema20'):null;
+    return (e!=null&&g(s[B1],'macd')!=null)?e*g(s[B1],'macd'):null;
   });
-  add('DI-spread × ADX at B1','Interact','B', s=>{
+  add('DIspread×ADX at B1',  'Interact','B', s=>{
     const sp=(g(s[B1],'pdi')!=null&&g(s[B1],'ndi')!=null)?g(s[B1],'pdi')-g(s[B1],'ndi'):null;
-    const a=g(s[B1],'adx');
-    return (sp!=null&&a!=null)?sp*a:null;
+    return (sp!=null&&g(s[B1],'adx')!=null)?sp*g(s[B1],'adx'):null;
   });
-  add('Price-vel × ATR ratio B','Interact','B', s=>{
-    const pv=slope(g(s[B1],'price'),g(s[P1],'price')),at=g(s[B1],'atr');
+  add('PriceVel÷ATR at B',   'Interact','B', s=>{
+    const pv=slope(g(s[B3],'price'),g(s[B1],'price')),at=g(s[B1],'atr');
     return (pv!=null&&at!=null&&at!==0)?pv/at:null;
   });
-  add('BB%B slope × CCI slope B→P','Interact','B', s=>{
-    const bs=slope(g(s[B1],'bbPctB'),g(s[P1],'bbPctB'));
-    const cs=slope(g(s[B1],'cci'),g(s[P1],'cci'));
+  add('BB%BSlope×CCISlope B','Interact','B', s=>{
+    const bs=slope(g(s[B3],'bbPctB'),g(s[B1],'bbPctB'));
+    const cs=slope(g(s[B3],'cci'),g(s[B1],'cci'));
     return (bs!=null&&cs!=null)?bs*cs:null;
   });
-  add('ROC × Chop at B1', 'Interact','B', s=>{ const r=g(s[B1],'roc'),ch=g(s[B1],'chop'); return (r!=null&&ch!=null)?r*ch:null; });
-  add('Hist accel × CCI at P3','Interact','P', s=>{
-    const ha=accel(g(s[P1],'hist'),g(s[P2],'hist'),g(s[P3],'hist'));
-    const cc=g(s[P3],'cci');
-    return (ha!=null&&cc!=null)?ha*cc:null;
+  add('ROC×Chop at B1',      'Interact','B', s=>{ const r=g(s[B1],'roc'),ch=g(s[B1],'chop'); return (r!=null&&ch!=null)?r*ch:null; });
+  add('HistAccel×CCI at B1', 'Interact','B', s=>{
+    const ha=accel(g(s[B3],'hist'),g(s[B2],'hist'),g(s[B1],'hist'));
+    return (ha!=null&&g(s[B1],'cci')!=null)?ha*g(s[B1],'cci'):null;
+  });
+  add('RSISlope×Hist at B1', 'Interact','B', s=>{
+    const rs=slope(g(s[B3],'rsi'),g(s[B1],'rsi'));
+    return (rs!=null&&g(s[B1],'hist')!=null)?rs*g(s[B1],'hist'):null;
   });
 
-  // ── FAMILY 13: PATTERN / ALIGNMENT ───────────────────────────────
-  // Indicator confluence — how many agree on bullish direction
-  add('Bull confluence at B1','Pattern','B', s=>{
+  // ── FAMILY 13: PATTERN / ALIGNMENT — B-window only ───────────────
+  add('Bull confluence B1',  'Pattern','B', s=>{
     const checks=[
       g(s[B1],'rsi')!=null?+(g(s[B1],'rsi')>50):null,
       g(s[B1],'hist')!=null?+(g(s[B1],'hist')>0):null,
@@ -5262,18 +5244,7 @@ const _FEAT_DEFS = (function(){
     ].filter(x=>x!=null);
     return checks.length?checks.reduce((a,b)=>a+b,0)/checks.length:null;
   });
-  add('Bull confluence at P5','Pattern','P', s=>{
-    const checks=[
-      g(s[P5],'rsi')!=null?+(g(s[P5],'rsi')>50):null,
-      g(s[P5],'hist')!=null?+(g(s[P5],'hist')>0):null,
-      (g(s[P5],'pdi')!=null&&g(s[P5],'ndi')!=null)?+(g(s[P5],'pdi')>g(s[P5],'ndi')):null,
-      g(s[P5],'bbPctB')!=null?+(g(s[P5],'bbPctB')>0.5):null,
-      g(s[P5],'roc')!=null?+(g(s[P5],'roc')>0):null,
-    ].filter(x=>x!=null);
-    return checks.length?checks.reduce((a,b)=>a+b,0)/checks.length:null;
-  });
-  add('Trend alignment B1','Pattern','B', s=>{
-    // all of: MACD>0, +DI>-DI, RSI>50, Hist>0
+  add('Trend alignment B1',  'Pattern','B', s=>{
     const all=[
       g(s[B1],'macd')!=null?+(g(s[B1],'macd')>0):null,
       (g(s[B1],'pdi')!=null&&g(s[B1],'ndi')!=null)?+(g(s[B1],'pdi')>g(s[B1],'ndi')):null,
@@ -5282,12 +5253,12 @@ const _FEAT_DEFS = (function(){
     ].filter(x=>x!=null);
     return all.length?+(all.every(x=>x===1)):null;
   });
-  add('MACD-price divergence B','Pattern','B', s=>{
+  add('MACD-price div B',    'Pattern','B', s=>{
     const ps=slope(g(s[B3],'price'),g(s[B1],'price'));
     const ms=slope(g(s[B3],'macd'),g(s[B1],'macd'));
     return (ps!=null&&ms!=null)?+(Math.sign(ps)!==Math.sign(ms)):null;
   });
-  add('RSI-price divergence B','Pattern','B', s=>{
+  add('RSI-price div B',     'Pattern','B', s=>{
     const ps=slope(g(s[B3],'price'),g(s[B1],'price'));
     const rs=slope(g(s[B3],'rsi'),g(s[B1],'rsi'));
     return (ps!=null&&rs!=null)?+(Math.sign(ps)!==Math.sign(rs)):null;
@@ -5295,6 +5266,7 @@ const _FEAT_DEFS = (function(){
 
   return defs;
 })();
+
 
 // ── Feature computation engine ───────────────────────────────────────
 let _featCache = null;  // { features:[], rankings:[], computed:Date }
