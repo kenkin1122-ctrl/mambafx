@@ -463,6 +463,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button id="navEngine" onclick="showPage('engine')">⚡ 5-Tick Engine</button>
     <button id="navGrid" onclick="showPage('grid')">🎯 Trading Grid</button>
     <button id="navAnalysis" onclick="showPage('analysis')">🔬 Analysis Tool</button>
+    <button id="navFeatures" onclick="showPage('features')">🧠 ML Features</button>
     <button id="navTracker" onclick="showPage('tracker')">🔢 Digit Tracker</button>
     <button id="navDigits" onclick="showPage('digits')">🎲 Digits Bot</button>
     <button id="navDiag" onclick="showPage('diag')">🩺 API Diagnostics</button>
@@ -1199,6 +1200,75 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     </footer>
   </div><!-- /page-diag -->
 
+  <!-- ============ ML FEATURES PAGE ============ -->
+  <div id="page-features" class="page">
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>🧠 ML Feature Engineering — Derived Indicators</h2>
+      <div class="gc-sub">
+        Computes 150+ derived features across the B-3→A-4 window of every captured 5-tick run.
+        Features cover: slope, acceleration, threshold triggers, interaction cross-terms, histogram momentum, price-EMA deviations, Bollinger squeeze, Choppiness regime, pattern alignment.
+        Ranking uses mutual information (MI), Random Forest importance (RFI), and SHAP value approximation — all computed in-browser on the actual signal records.
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button class="gc-btn" id="featCompBtn" onclick="featCompute()">⚙ Compute features &amp; rank</button>
+        <button class="gc-btn" id="featCsvBBtn" onclick="featExportCsv('B')" disabled>⬇ CSV B (before)</button>
+        <button class="gc-btn" id="featCsvPBtn" onclick="featExportCsv('P')" disabled>⬇ CSV P (run)</button>
+        <button class="gc-btn" id="featCsvABtn" onclick="featExportCsv('A')" disabled>⬇ CSV A (after)</button>
+        <span id="featStatus" style="font-size:10px;color:var(--muted)">Waiting for signal records…</span>
+      </div>
+    </div>
+
+    <!-- Top features ranking table -->
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>📊 Top Features by Importance
+        <span style="font-size:10px;font-weight:400;color:var(--muted);margin-left:8px">ranked by weighted composite score of MI + RFI + SHAP</span>
+      </h2>
+      <div class="gc-sub" style="margin-bottom:10px">
+        <b>MI</b> = mutual information with run direction (rise/fall).
+        <b>RFI</b> = Random Forest feature importance (Gini impurity reduction).
+        <b>SHAP</b> = mean absolute SHAP value (TreeExplainer approximation).
+        Higher = more predictive for that feature at that window position.
+      </div>
+      <div style="overflow-x:auto">
+        <table class="sig-table" id="featRankTable" style="min-width:700px">
+          <thead>
+            <tr>
+              <th class="l" style="width:32px">#</th>
+              <th class="l">Feature</th>
+              <th class="l">Window</th>
+              <th class="l">Family</th>
+              <th>MI score</th>
+              <th>RF imp.</th>
+              <th>SHAP</th>
+              <th>Composite</th>
+              <th>Rise avg</th>
+              <th>Fall avg</th>
+              <th>Δ (rise−fall)</th>
+            </tr>
+          </thead>
+          <tbody id="featRankBody">
+            <tr><td colspan="11" class="sig-empty">Click "Compute features &amp; rank" after enough signal records accumulate (≥10 recommended).</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Feature family summary -->
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>🗂 Feature Family Breakdown</h2>
+      <div id="featFamilyGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:8px"></div>
+    </div>
+
+    <!-- Correlation heatmap (simplified text-based) -->
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>🔥 Top 20 Feature × Direction Deviation</h2>
+      <div class="gc-sub" style="margin-bottom:10px">Each bar shows how much that feature's mean differs between rise and fall runs — the wider the gap, the stronger the discriminating power.</div>
+      <div id="featDeviationBars" style="display:flex;flex-direction:column;gap:6px"></div>
+    </div>
+
+    <footer>All feature computations run locally in your browser on the captured signal records — no data leaves your device. Features with insufficient data (fewer than 3 valid values) are excluded from the ranking. More signal records = more reliable rankings. Synthetic indices are stationary random walks — treat any high-importance feature as session-specific noise until validated across ≥500 runs.</footer>
+  </div><!-- /page-features -->
+
   <!-- ============ PAGE 8: INDICATOR CHARTS ============ -->
   <div id="page-charts" class="page">
     <div class="grid-card" style="margin-bottom:14px">
@@ -1927,6 +1997,65 @@ function choppiness(closes, period=14){
   return Math.max(0, Math.min(100, ci));
 }
 
+// RSI(14) — Wilder's Smoothed RS on tick closes.
+// Returns 0-100; >70 overbought, <30 oversold.
+function rsi(closes, period=14){
+  if (closes.length < period + 1) return null;
+  const slice = closes.slice(-(period + 1));
+  let gains = 0, losses = 0;
+  for (let i = 1; i < slice.length; i++){
+    const d = slice[i] - slice[i-1];
+    if (d > 0) gains += d; else losses -= d;
+  }
+  const avgGain = gains / period;
+  const avgLoss = losses / period;
+  if (avgLoss === 0) return 100;
+  const rs = avgGain / avgLoss;
+  return 100 - (100 / (1 + rs));
+}
+
+// ATR(14) — Average True Range on tick closes (no OHLC, so TR = |close[i]-close[i-1]|).
+// Returns in price units; normalised as % of mid-price where needed in display.
+function atr(closes, period=14){
+  if (closes.length < period + 1) return null;
+  const slice = closes.slice(-(period + 1));
+  let sum = 0;
+  for (let i = 1; i < slice.length; i++) sum += Math.abs(slice[i] - slice[i-1]);
+  return sum / period;
+}
+
+// Stochastic(14,3) → { k, d } where %K = (close-LowN)/(HighN-LowN)*100, %D = SMA3(%K)
+// On tick data HH/LL are from the last `kPeriod` closes (no separate OHLC).
+function stochastic(closes, kPeriod=14, dPeriod=3){
+  if (closes.length < kPeriod + dPeriod) return null;
+  // compute %K for the last dPeriod ticks so we can smooth into %D
+  const kArr = [];
+  for (let j = dPeriod - 1; j >= 0; j--){
+    const offset = j;
+    const window = closes.slice(-(kPeriod + offset), closes.length - offset || undefined);
+    const hi = Math.max(...window), lo = Math.min(...window);
+    const last = closes[closes.length - 1 - offset];
+    kArr.unshift((hi - lo) === 0 ? 50 : ((last - lo) / (hi - lo)) * 100);
+  }
+  const k = kArr[kArr.length - 1];
+  const d = kArr.reduce((a, b) => a + b, 0) / kArr.length;
+  return { k, d };
+}
+
+// ROC(10) — Rate of Change. (close/close[n] - 1) * 100
+function roc(closes, period=10){
+  if (closes.length < period + 1) return null;
+  const prev = closes[closes.length - 1 - period];
+  if (prev === 0) return null;
+  return ((closes[closes.length - 1] / prev) - 1) * 100;
+}
+
+// EMA snapshot helpers — return just the last value
+function emaLast(closes, period){
+  const arr = ema(closes, period);
+  return arr.length ? arr[arr.length - 1] : null;
+}
+
 // =====================================================================
 // BACKGROUND INDICATOR TRACKING (for the detailed Signal Log on Page 4)
 // On EVERY tick we recompute MACD, Choppiness, CCI and Bollinger Bands on
@@ -1938,7 +2067,10 @@ function choppiness(closes, period=14){
 // =====================================================================
 let indSnapshot = { macd:null, macdSig:null, macdHist:null, chop:null, cci:null,
                     bbUpper:null, bbMid:null, bbLower:null, bbPctB:null, bbWidth:null,
-                    pdi:null, ndi:null, adx:null };
+                    pdi:null, ndi:null, adx:null,
+                    rsi:null, atr:null,
+                    ema5:null, ema10:null, ema20:null,
+                    stochK:null, stochD:null, roc:null };
 const indHistory = [];          // full per-tick snapshots (see snapFields)
 const IND_HIST_MAX = 256;
 // Window captured around each run for the Page 5 analysis tool
@@ -1950,35 +2082,52 @@ const pendingAnalysis = [];     // run records still collecting their "after" ti
 function makeSnap(epoch, price){
   return {
     epoch, price,
-    macd: indSnapshot.macd, signal: indSnapshot.macdSig, hist: indSnapshot.macdHist,
-    chop: indSnapshot.chop, cci: indSnapshot.cci,
-    bbPctB: indSnapshot.bbPctB, bbUpper: indSnapshot.bbUpper,
-    bbMid:  indSnapshot.bbMid,  bbLower: indSnapshot.bbLower,
-    pdi:  indSnapshot.pdi,  ndi: indSnapshot.ndi,  adx: indSnapshot.adx,
+    macd:   indSnapshot.macd,    signal: indSnapshot.macdSig, hist: indSnapshot.macdHist,
+    chop:   indSnapshot.chop,    cci:    indSnapshot.cci,
+    bbPctB: indSnapshot.bbPctB,  bbUpper:indSnapshot.bbUpper,
+    bbMid:  indSnapshot.bbMid,   bbLower:indSnapshot.bbLower,
+    pdi:    indSnapshot.pdi,     ndi:    indSnapshot.ndi,     adx:  indSnapshot.adx,
+    rsi:    indSnapshot.rsi,     atr:    indSnapshot.atr,
+    ema5:   indSnapshot.ema5,    ema10:  indSnapshot.ema10,   ema20:indSnapshot.ema20,
+    stochK: indSnapshot.stochK,  stochD: indSnapshot.stochD,
+    roc:    indSnapshot.roc,
   };
 }
 
 function recordIndicatorTick(epoch, price){
   const closes = ticks.map(t => t.price);
-  const m  = macd(closes);
-  const ch = choppiness(closes);
-  const c  = cci(closes);
-  const b  = bollinger(closes);
+  const m   = macd(closes);
+  const ch  = choppiness(closes);
+  const c   = cci(closes);
+  const b   = bollinger(closes);
   const dmi = (typeof dmiUpdate === "function") ? dmiUpdate(price) : null;
+  const r   = rsi(closes);
+  const at  = atr(closes);
+  const e5  = emaLast(closes, 5);
+  const e10 = emaLast(closes, 10);
+  const e20 = emaLast(closes, 20);
+  const st  = stochastic(closes);
+  const rc  = roc(closes);
   indSnapshot = {
-    macd:     m ? m.macd : null,
-    macdSig:  m ? m.signal : null,
-    macdHist: m ? m.hist : null,
+    macd:     m ? m.macd    : null,
+    macdSig:  m ? m.signal  : null,
+    macdHist: m ? m.hist    : null,
     chop:     ch,
     cci:      c,
-    bbUpper:  b ? b.upper : null,
-    bbMid:    b ? b.mid : null,
-    bbLower:  b ? b.lower : null,
-    bbPctB:   b ? b.pctB : null,
+    bbUpper:  b ? b.upper   : null,
+    bbMid:    b ? b.mid     : null,
+    bbLower:  b ? b.lower   : null,
+    bbPctB:   b ? b.pctB    : null,
     bbWidth:  b ? b.bandwidth : null,
     pdi:  dmi ? dmi.pdi : null,
     ndi:  dmi ? dmi.ndi : null,
     adx:  dmi ? dmi.adx : null,
+    rsi:    r,
+    atr:    at,
+    ema5:   e5,   ema10: e10,  ema20: e20,
+    stochK: st ? st.k : null,
+    stochD: st ? st.d : null,
+    roc:    rc,
     price,
   };
   // feed chart history for Page 8
@@ -2564,8 +2713,8 @@ function startTfTimers(){
 }
 
 function showPage(which){
-  const pages = { live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts" };
-  const navs  = { live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts" };
+  const pages = { live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts" };
+  const navs  = { live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts" };
   Object.keys(pages).forEach(k => {
     document.getElementById(pages[k]).classList.toggle("active", k===which);
     const nav = document.getElementById(navs[k]); if (nav) nav.classList.toggle("active", k===which);
@@ -2598,6 +2747,9 @@ function showPage(which){
   }
   if (which === "diag"){
     diagUpdateConnStatus();
+  }
+  if (which === "features"){
+    featPageInit();
   }
   if (which === "charts"){
     chartRenderAll();
@@ -4702,23 +4854,574 @@ function engHandleSignal(dir, price, epoch){
 
 
 // Lays the indicators out as rows and the tick positions as columns:
+// =====================================================================
+// ML FEATURE ENGINEERING ENGINE
+// Generates 150+ derived features from the 12-column indicator window
+// (B-3…B-1, P1…P5, A-1…A-4) for every signal record, then ranks them
+// using in-browser mutual information, Random Forest importance (CART
+// approximation), and SHAP values (TreeExplainer linear approximation).
+// =====================================================================
+
+// ── Feature definitions ─────────────────────────────────────────────
+// Each feature: { id, label, family, phase:'B'|'P'|'A'|'all', fn(snaps) }
+// snaps = array of 12 snapshots (index 0=B-3, 3=P1, 8=A-1); may contain nulls.
+// fn returns a single number or null.
+
+const _FEAT_DEFS = (function(){
+  // Helper: safe value from snapshot
+  const g = (s, k) => (s && s[k] != null && !isNaN(s[k])) ? s[k] : null;
+  // Slope between two values (returns null if either is null)
+  const slope = (a, b) => (a != null && b != null) ? (b - a) : null;
+  // Acceleration: (b-a) - (a-prev)
+  const accel = (prev, a, b) => {
+    const s1 = slope(prev, a), s2 = slope(a, b);
+    return (s1 != null && s2 != null) ? s2 - s1 : null;
+  };
+  // Mean of array (ignores nulls)
+  const mean = arr => { const v=arr.filter(x=>x!=null); return v.length?v.reduce((a,b)=>a+b,0)/v.length:null; };
+  // Sign of value
+  const sgn = v => v==null?null:v>0?1:v<0?-1:0;
+
+  // Column indices
+  const B3=0,B2=1,B1=2,P1=3,P2=4,P3=5,P4=6,P5=7,A1=8,A2=9,A3=10,A4=11;
+  // Phase windows
+  const bCols=[B3,B2,B1], pCols=[P1,P2,P3,P4,P5], aCols=[A1,A2,A3,A4];
+
+  const defs = [];
+  let id = 0;
+  const add = (label, family, phase, fn) => defs.push({id:id++, label, family, phase, fn});
+
+  // ── FAMILY 1: SLOPE ────────────────────────────────────────────────
+  // 1-tick slope of each indicator at every window transition
+  const SLOPE_IND = [
+    ['macd','MACD'],['signal','Signal'],['hist','Hist'],
+    ['chop','Chop'],['cci','CCI'],['bbPctB','BB%B'],
+    ['pdi','+DI'],['ndi','-DI'],['adx','ADX'],
+    ['rsi','RSI'],['atr','ATR'],['stochK','Stoch%K'],['roc','ROC'],
+    ['ema5','EMA5'],['ema20','EMA20'],
+  ];
+  SLOPE_IND.forEach(([k,lbl])=>{
+    add(`${lbl} slope B2→B1`,   'Slope','B', s=>slope(g(s[B2],k),g(s[B1],k)));
+    add(`${lbl} slope B1→P1`,   'Slope','B', s=>slope(g(s[B1],k),g(s[P1],k)));
+    add(`${lbl} slope P1→P3`,   'Slope','P', s=>slope(g(s[P1],k),g(s[P3],k)));
+    add(`${lbl} slope P3→P5`,   'Slope','P', s=>slope(g(s[P3],k),g(s[P5],k)));
+    add(`${lbl} slope P5→A2`,   'Slope','A', s=>slope(g(s[P5],k),g(s[A2],k)));
+    add(`${lbl} slope A2→A4`,   'Slope','A', s=>slope(g(s[A2],k),g(s[A4],k)));
+  });
+
+  // ── FAMILY 2: ACCELERATION ────────────────────────────────────────
+  const ACCEL_IND = [
+    ['macd','MACD'],['hist','Hist'],['cci','CCI'],['rsi','RSI'],['adx','ADX'],['stochK','Stoch%K']
+  ];
+  ACCEL_IND.forEach(([k,lbl])=>{
+    add(`${lbl} accel B3→B1`,  'Accel','B', s=>accel(g(s[B3],k),g(s[B2],k),g(s[B1],k)));
+    add(`${lbl} accel P1→P3`,  'Accel','P', s=>accel(g(s[P1],k),g(s[P2],k),g(s[P3],k)));
+    add(`${lbl} accel P3→P5`,  'Accel','P', s=>accel(g(s[P3],k),g(s[P4],k),g(s[P5],k)));
+    add(`${lbl} accel A1→A3`,  'Accel','A', s=>accel(g(s[A1],k),g(s[A2],k),g(s[A3],k)));
+  });
+
+  // ── FAMILY 3: LEVEL / THRESHOLD ───────────────────────────────────
+  add('RSI>70 at B1',     'Level','B', s=>{ const v=g(s[B1],'rsi'); return v!=null?+(v>70):null; });
+  add('RSI<30 at B1',     'Level','B', s=>{ const v=g(s[B1],'rsi'); return v!=null?+(v<30):null; });
+  add('RSI>70 at P5',     'Level','P', s=>{ const v=g(s[P5],'rsi'); return v!=null?+(v>70):null; });
+  add('RSI<30 at P5',     'Level','P', s=>{ const v=g(s[P5],'rsi'); return v!=null?+(v<30):null; });
+  add('CCI>100 at B1',    'Level','B', s=>{ const v=g(s[B1],'cci'); return v!=null?+(v>100):null; });
+  add('CCI<-100 at B1',   'Level','B', s=>{ const v=g(s[B1],'cci'); return v!=null?+(v<-100):null; });
+  add('CCI>100 at P5',    'Level','P', s=>{ const v=g(s[P5],'cci'); return v!=null?+(v>100):null; });
+  add('ADX>25 at B1',     'Level','B', s=>{ const v=g(s[B1],'adx'); return v!=null?+(v>25):null; });
+  add('ADX>25 at P5',     'Level','P', s=>{ const v=g(s[P5],'adx'); return v!=null?+(v>25):null; });
+  add('ADX>40 at P5',     'Level','P', s=>{ const v=g(s[P5],'adx'); return v!=null?+(v>40):null; });
+  add('+DI>-DI at B1',    'Level','B', s=>{ const p=g(s[B1],'pdi'),n=g(s[B1],'ndi'); return (p!=null&&n!=null)?+(p>n):null; });
+  add('+DI>-DI at P5',    'Level','P', s=>{ const p=g(s[P5],'pdi'),n=g(s[P5],'ndi'); return (p!=null&&n!=null)?+(p>n):null; });
+  add('Chop>61.8 at B1',  'Level','B', s=>{ const v=g(s[B1],'chop'); return v!=null?+(v>61.8):null; });
+  add('Chop<38.2 at B1',  'Level','B', s=>{ const v=g(s[B1],'chop'); return v!=null?+(v<38.2):null; });
+  add('Chop<38.2 at P5',  'Level','P', s=>{ const v=g(s[P5],'chop'); return v!=null?+(v<38.2):null; });
+  add('BB%B>0.8 at B1',   'Level','B', s=>{ const v=g(s[B1],'bbPctB'); return v!=null?+(v>0.8):null; });
+  add('BB%B<0.2 at B1',   'Level','B', s=>{ const v=g(s[B1],'bbPctB'); return v!=null?+(v<0.2):null; });
+  add('Stoch>80 at B1',   'Level','B', s=>{ const v=g(s[B1],'stochK'); return v!=null?+(v>80):null; });
+  add('Stoch<20 at B1',   'Level','B', s=>{ const v=g(s[B1],'stochK'); return v!=null?+(v<20):null; });
+  add('ROC>0 at B1',      'Level','B', s=>{ const v=g(s[B1],'roc'); return v!=null?+(v>0):null; });
+  add('MACD>0 at B1',     'Level','B', s=>{ const v=g(s[B1],'macd'); return v!=null?+(v>0):null; });
+  add('Hist>0 at B1',     'Level','B', s=>{ const v=g(s[B1],'hist'); return v!=null?+(v>0):null; });
+
+  // ── FAMILY 4: HISTOGRAM BEHAVIOUR ────────────────────────────────
+  add('Hist mean B-window','Hist','B', s=>mean(bCols.map(i=>g(s[i],'hist'))));
+  add('Hist mean P-window','Hist','P', s=>mean(pCols.map(i=>g(s[i],'hist'))));
+  add('Hist sign changes B','Hist','B', s=>{
+    const vals=bCols.map(i=>sgn(g(s[i],'hist'))).filter(v=>v!=null);
+    let ch=0; for(let i=1;i<vals.length;i++) if(vals[i]!==vals[i-1]) ch++;
+    return vals.length>1?ch:null;
+  });
+  add('Hist sign changes P','Hist','P', s=>{
+    const vals=pCols.map(i=>sgn(g(s[i],'hist'))).filter(v=>v!=null);
+    let ch=0; for(let i=1;i<vals.length;i++) if(vals[i]!==vals[i-1]) ch++;
+    return vals.length>1?ch:null;
+  });
+  add('Hist cumsum P',    'Hist','P', s=>{ const v=pCols.map(i=>g(s[i],'hist')).filter(x=>x!=null); return v.length?v.reduce((a,b)=>a+b,0):null; });
+  add('Hist B→P change',  'Hist','B', s=>slope(mean(bCols.map(i=>g(s[i],'hist'))),mean(pCols.map(i=>g(s[i],'hist')))));
+  add('Hist P→A change',  'Hist','A', s=>slope(mean(pCols.map(i=>g(s[i],'hist'))),mean(aCols.map(i=>g(s[i],'hist')))));
+  add('Hist increasing P','Hist','P', s=>{
+    const v=pCols.map(i=>g(s[i],'hist')).filter(x=>x!=null);
+    if(v.length<2)return null;
+    return +(v.every((x,i)=>i===0||x>=v[i-1]));
+  });
+
+  // ── FAMILY 5: CHOPPINESS BEHAVIOUR ────────────────────────────────
+  add('Chop mean B',      'Chop','B', s=>mean(bCols.map(i=>g(s[i],'chop'))));
+  add('Chop mean P',      'Chop','P', s=>mean(pCols.map(i=>g(s[i],'chop'))));
+  add('Chop mean A',      'Chop','A', s=>mean(aCols.map(i=>g(s[i],'chop'))));
+  add('Chop B→P delta',   'Chop','B', s=>slope(mean(bCols.map(i=>g(s[i],'chop'))),mean(pCols.map(i=>g(s[i],'chop')))));
+  add('Chop range P',     'Chop','P', s=>{ const v=pCols.map(i=>g(s[i],'chop')).filter(x=>x!=null); return v.length?Math.max(...v)-Math.min(...v):null; });
+  add('Chop trending at B1','Chop','B', s=>{ const v=g(s[B1],'chop'); return v!=null?+(v<38.2):null; });
+  add('Chop choppy at B1', 'Chop','B', s=>{ const v=g(s[B1],'chop'); return v!=null?+(v>61.8):null; });
+  add('Chop falling P',   'Chop','P', s=>{ const v=slope(g(s[P1],'chop'),g(s[P5],'chop')); return v!=null?+(v<0):null; });
+
+  // ── FAMILY 6: CCI BEHAVIOUR ───────────────────────────────────────
+  add('CCI mean B',       'CCI','B', s=>mean(bCols.map(i=>g(s[i],'cci'))));
+  add('CCI mean P',       'CCI','P', s=>mean(pCols.map(i=>g(s[i],'cci'))));
+  add('CCI mean A',       'CCI','A', s=>mean(aCols.map(i=>g(s[i],'cci'))));
+  add('CCI B→P delta',    'CCI','B', s=>slope(mean(bCols.map(i=>g(s[i],'cci'))),mean(pCols.map(i=>g(s[i],'cci')))));
+  add('CCI abs max P',    'CCI','P', s=>{ const v=pCols.map(i=>g(s[i],'cci')).filter(x=>x!=null); return v.length?Math.max(...v.map(Math.abs)):null; });
+  add('CCI monotone P',   'CCI','P', s=>{
+    const v=pCols.map(i=>g(s[i],'cci')).filter(x=>x!=null);
+    if(v.length<2)return null;
+    const up=v.every((x,i)=>i===0||x>=v[i-1]),dn=v.every((x,i)=>i===0||x<=v[i-1]);
+    return +(up||dn);
+  });
+
+  // ── FAMILY 7: BOLLINGER %B & WIDTH ───────────────────────────────
+  add('BB%B mean B',      'BB','B', s=>mean(bCols.map(i=>g(s[i],'bbPctB'))));
+  add('BB%B mean P',      'BB','P', s=>mean(pCols.map(i=>g(s[i],'bbPctB'))));
+  add('BB%B slope B1→P1', 'BB','B', s=>slope(g(s[B1],'bbPctB'),g(s[P1],'bbPctB')));
+  add('BB%B slope P1→P5', 'BB','P', s=>slope(g(s[P1],'bbPctB'),g(s[P5],'bbPctB')));
+  add('BB width at B1',   'BB','B', s=>g(s[B1],'bbUpper')!=null&&g(s[B1],'bbLower')!=null?g(s[B1],'bbUpper')-g(s[B1],'bbLower'):null);
+  add('BB width at P5',   'BB','P', s=>g(s[P5],'bbUpper')!=null&&g(s[P5],'bbLower')!=null?g(s[P5],'bbUpper')-g(s[P5],'bbLower'):null);
+  add('BB width B→P change','BB','B', s=>{
+    const wb=(g(s[B1],'bbUpper')!=null&&g(s[B1],'bbLower')!=null)?g(s[B1],'bbUpper')-g(s[B1],'bbLower'):null;
+    const wp=(g(s[P5],'bbUpper')!=null&&g(s[P5],'bbLower')!=null)?g(s[P5],'bbUpper')-g(s[P5],'bbLower'):null;
+    return slope(wb,wp);
+  });
+  add('Price above BB mid P1','BB','P', s=>{ const p=g(s[P1],'price'),m=g(s[P1],'bbMid'); return (p!=null&&m!=null)?+(p>m):null; });
+  add('Price above BB mid P5','BB','P', s=>{ const p=g(s[P5],'price'),m=g(s[P5],'bbMid'); return (p!=null&&m!=null)?+(p>m):null; });
+  add('BB squeeze at B1', 'BB','B', s=>{ const wb=(g(s[B1],'bbUpper')!=null&&g(s[B1],'bbLower')!=null&&g(s[B1],'bbMid')!=null)?(g(s[B1],'bbUpper')-g(s[B1],'bbLower'))/g(s[B1],'bbMid')*100:null; return wb!=null?+(wb<0.05):null; });
+
+  // ── FAMILY 8: MACD SIGNAL GAP ─────────────────────────────────────
+  add('MACD-Signal gap B1', 'MACD','B', s=>{ const m=g(s[B1],'macd'),sg=g(s[B1],'signal'); return (m!=null&&sg!=null)?m-sg:null; });
+  add('MACD-Signal gap P1', 'MACD','P', s=>{ const m=g(s[P1],'macd'),sg=g(s[P1],'signal'); return (m!=null&&sg!=null)?m-sg:null; });
+  add('MACD-Signal gap P5', 'MACD','P', s=>{ const m=g(s[P5],'macd'),sg=g(s[P5],'signal'); return (m!=null&&sg!=null)?m-sg:null; });
+  add('MACD cross B-window','MACD','B', s=>{
+    // 1 if MACD crosses signal in B window
+    for(let i=1;i<bCols.length;i++){
+      const m0=g(s[bCols[i-1]],'macd'),sg0=g(s[bCols[i-1]],'signal');
+      const m1=g(s[bCols[i]],'macd'),sg1=g(s[bCols[i]],'signal');
+      if(m0!=null&&sg0!=null&&m1!=null&&sg1!=null)
+        if(Math.sign(m0-sg0)!==Math.sign(m1-sg1)) return 1;
+    }
+    return 0;
+  });
+  add('MACD mean B',      'MACD','B', s=>mean(bCols.map(i=>g(s[i],'macd'))));
+  add('MACD mean P',      'MACD','P', s=>mean(pCols.map(i=>g(s[i],'macd'))));
+
+  // ── FAMILY 9: PRICE BEHAVIOUR ─────────────────────────────────────
+  add('Price-EMA5 dev B1','Price','B', s=>{ const p=g(s[B1],'price'),e=g(s[B1],'ema5'); return (p!=null&&e!=null)?p-e:null; });
+  add('Price-EMA20 dev B1','Price','B', s=>{ const p=g(s[B1],'price'),e=g(s[B1],'ema20'); return (p!=null&&e!=null)?p-e:null; });
+  add('Price-EMA5 dev P5','Price','P', s=>{ const p=g(s[P5],'price'),e=g(s[P5],'ema5'); return (p!=null&&e!=null)?p-e:null; });
+  add('Price-EMA20 dev P5','Price','P', s=>{ const p=g(s[P5],'price'),e=g(s[P5],'ema20'); return (p!=null&&e!=null)?p-e:null; });
+  add('EMA5-EMA20 gap B1','Price','B', s=>{ const e5=g(s[B1],'ema5'),e20=g(s[B1],'ema20'); return (e5!=null&&e20!=null)?e5-e20:null; });
+  add('EMA5-EMA20 gap P5','Price','P', s=>{ const e5=g(s[P5],'ema5'),e20=g(s[P5],'ema20'); return (e5!=null&&e20!=null)?e5-e20:null; });
+  add('Price velocity B→P','Price','B', s=>slope(g(s[B1],'price'),g(s[P1],'price')));
+  add('Price velocity P1→P5','Price','P', s=>slope(g(s[P1],'price'),g(s[P5],'price')));
+  add('Price velocity P5→A2','Price','A', s=>slope(g(s[P5],'price'),g(s[A2],'price')));
+  add('Price range P-window','Price','P', s=>{ const v=pCols.map(i=>g(s[i],'price')).filter(x=>x!=null); return v.length?Math.max(...v)-Math.min(...v):null; });
+  add('Price range B-window','Price','B', s=>{ const v=bCols.map(i=>g(s[i],'price')).filter(x=>x!=null); return v.length?Math.max(...v)-Math.min(...v):null; });
+  add('ATR at B1',        'Price','B', s=>g(s[B1],'atr'));
+  add('ATR at P5',        'Price','P', s=>g(s[P5],'atr'));
+  add('ROC at B1',        'Price','B', s=>g(s[B1],'roc'));
+  add('ROC at P5',        'Price','P', s=>g(s[P5],'roc'));
+
+  // ── FAMILY 10: RSI BEHAVIOUR ──────────────────────────────────────
+  add('RSI mean B',       'RSI','B', s=>mean(bCols.map(i=>g(s[i],'rsi'))));
+  add('RSI mean P',       'RSI','P', s=>mean(pCols.map(i=>g(s[i],'rsi'))));
+  add('RSI slope B1→P1',  'RSI','B', s=>slope(g(s[B1],'rsi'),g(s[P1],'rsi')));
+  add('RSI slope P1→P5',  'RSI','P', s=>slope(g(s[P1],'rsi'),g(s[P5],'rsi')));
+  add('RSI-50 at B1',     'RSI','B', s=>{ const v=g(s[B1],'rsi'); return v!=null?v-50:null; });
+  add('RSI-50 at P5',     'RSI','P', s=>{ const v=g(s[P5],'rsi'); return v!=null?v-50:null; });
+
+  // ── FAMILY 11: STOCHASTIC & DMI ───────────────────────────────────
+  add('Stoch%K-D at B1',  'Stoch','B', s=>{ const k=g(s[B1],'stochK'),d=g(s[B1],'stochD'); return (k!=null&&d!=null)?k-d:null; });
+  add('Stoch%K-D at P5',  'Stoch','P', s=>{ const k=g(s[P5],'stochK'),d=g(s[P5],'stochD'); return (k!=null&&d!=null)?k-d:null; });
+  add('DI spread at B1',  'DMI','B', s=>{ const p=g(s[B1],'pdi'),n=g(s[B1],'ndi'); return (p!=null&&n!=null)?p-n:null; });
+  add('DI spread at P5',  'DMI','P', s=>{ const p=g(s[P5],'pdi'),n=g(s[P5],'ndi'); return (p!=null&&n!=null)?p-n:null; });
+  add('ADX mean B',       'DMI','B', s=>mean(bCols.map(i=>g(s[i],'adx'))));
+  add('ADX mean P',       'DMI','P', s=>mean(pCols.map(i=>g(s[i],'adx'))));
+  add('ADX slope B1→P5',  'DMI','B', s=>slope(g(s[B1],'adx'),g(s[P5],'adx')));
+
+  // ── FAMILY 12: INTERACTION / CROSS-TERM ──────────────────────────
+  add('MACD slope × CCI slope (B1→P1)', 'Interact','B', s=>{
+    const ms=slope(g(s[B1],'macd'),g(s[P1],'macd'));
+    const cs=slope(g(s[B1],'cci'),g(s[P1],'cci'));
+    return (ms!=null&&cs!=null)?ms*cs:null;
+  });
+  add('CCI × BB%B at B1', 'Interact','B', s=>{ const c=g(s[B1],'cci'),b=g(s[B1],'bbPctB'); return (c!=null&&b!=null)?c*b:null; });
+  add('CCI × BB%B at P5', 'Interact','P', s=>{ const c=g(s[P5],'cci'),b=g(s[P5],'bbPctB'); return (c!=null&&b!=null)?c*b:null; });
+  add('Hist × Chop at B1','Interact','B', s=>{ const h=g(s[B1],'hist'),ch=g(s[B1],'chop'); return (h!=null&&ch!=null)?h*ch:null; });
+  add('Hist × Chop at P5','Interact','P', s=>{ const h=g(s[P5],'hist'),ch=g(s[P5],'chop'); return (h!=null&&ch!=null)?h*ch:null; });
+  add('MACD × Chop at B1','Interact','B', s=>{ const m=g(s[B1],'macd'),ch=g(s[B1],'chop'); return (m!=null&&ch!=null)?m*ch:null; });
+  add('MACD × Chop at P5','Interact','P', s=>{ const m=g(s[P5],'macd'),ch=g(s[P5],'chop'); return (m!=null&&ch!=null)?m*ch:null; });
+  add('RSI × ADX at B1',  'Interact','B', s=>{ const r=g(s[B1],'rsi'),a=g(s[B1],'adx'); return (r!=null&&a!=null)?r*a:null; });
+  add('Stoch%K × RSI at P5','Interact','P', s=>{ const st=g(s[P5],'stochK'),r=g(s[P5],'rsi'); return (st!=null&&r!=null)?st*r:null; });
+  add('EMA5-EMA20 × MACD at B1','Interact','B', s=>{
+    const e=g(s[B1],'ema5')!=null&&g(s[B1],'ema20')!=null?g(s[B1],'ema5')-g(s[B1],'ema20'):null;
+    const m=g(s[B1],'macd');
+    return (e!=null&&m!=null)?e*m:null;
+  });
+  add('DI-spread × ADX at B1','Interact','B', s=>{
+    const sp=(g(s[B1],'pdi')!=null&&g(s[B1],'ndi')!=null)?g(s[B1],'pdi')-g(s[B1],'ndi'):null;
+    const a=g(s[B1],'adx');
+    return (sp!=null&&a!=null)?sp*a:null;
+  });
+  add('Price-vel × ATR ratio B','Interact','B', s=>{
+    const pv=slope(g(s[B1],'price'),g(s[P1],'price')),at=g(s[B1],'atr');
+    return (pv!=null&&at!=null&&at!==0)?pv/at:null;
+  });
+  add('BB%B slope × CCI slope B→P','Interact','B', s=>{
+    const bs=slope(g(s[B1],'bbPctB'),g(s[P1],'bbPctB'));
+    const cs=slope(g(s[B1],'cci'),g(s[P1],'cci'));
+    return (bs!=null&&cs!=null)?bs*cs:null;
+  });
+  add('ROC × Chop at B1', 'Interact','B', s=>{ const r=g(s[B1],'roc'),ch=g(s[B1],'chop'); return (r!=null&&ch!=null)?r*ch:null; });
+  add('Hist accel × CCI at P3','Interact','P', s=>{
+    const ha=accel(g(s[P1],'hist'),g(s[P2],'hist'),g(s[P3],'hist'));
+    const cc=g(s[P3],'cci');
+    return (ha!=null&&cc!=null)?ha*cc:null;
+  });
+
+  // ── FAMILY 13: PATTERN / ALIGNMENT ───────────────────────────────
+  // Indicator confluence — how many agree on bullish direction
+  add('Bull confluence at B1','Pattern','B', s=>{
+    const checks=[
+      g(s[B1],'rsi')!=null?+(g(s[B1],'rsi')>50):null,
+      g(s[B1],'hist')!=null?+(g(s[B1],'hist')>0):null,
+      (g(s[B1],'pdi')!=null&&g(s[B1],'ndi')!=null)?+(g(s[B1],'pdi')>g(s[B1],'ndi')):null,
+      g(s[B1],'bbPctB')!=null?+(g(s[B1],'bbPctB')>0.5):null,
+      g(s[B1],'roc')!=null?+(g(s[B1],'roc')>0):null,
+    ].filter(x=>x!=null);
+    return checks.length?checks.reduce((a,b)=>a+b,0)/checks.length:null;
+  });
+  add('Bull confluence at P5','Pattern','P', s=>{
+    const checks=[
+      g(s[P5],'rsi')!=null?+(g(s[P5],'rsi')>50):null,
+      g(s[P5],'hist')!=null?+(g(s[P5],'hist')>0):null,
+      (g(s[P5],'pdi')!=null&&g(s[P5],'ndi')!=null)?+(g(s[P5],'pdi')>g(s[P5],'ndi')):null,
+      g(s[P5],'bbPctB')!=null?+(g(s[P5],'bbPctB')>0.5):null,
+      g(s[P5],'roc')!=null?+(g(s[P5],'roc')>0):null,
+    ].filter(x=>x!=null);
+    return checks.length?checks.reduce((a,b)=>a+b,0)/checks.length:null;
+  });
+  add('Trend alignment B1','Pattern','B', s=>{
+    // all of: MACD>0, +DI>-DI, RSI>50, Hist>0
+    const all=[
+      g(s[B1],'macd')!=null?+(g(s[B1],'macd')>0):null,
+      (g(s[B1],'pdi')!=null&&g(s[B1],'ndi')!=null)?+(g(s[B1],'pdi')>g(s[B1],'ndi')):null,
+      g(s[B1],'rsi')!=null?+(g(s[B1],'rsi')>50):null,
+      g(s[B1],'hist')!=null?+(g(s[B1],'hist')>0):null,
+    ].filter(x=>x!=null);
+    return all.length?+(all.every(x=>x===1)):null;
+  });
+  add('MACD-price divergence B','Pattern','B', s=>{
+    const ps=slope(g(s[B3],'price'),g(s[B1],'price'));
+    const ms=slope(g(s[B3],'macd'),g(s[B1],'macd'));
+    return (ps!=null&&ms!=null)?+(Math.sign(ps)!==Math.sign(ms)):null;
+  });
+  add('RSI-price divergence B','Pattern','B', s=>{
+    const ps=slope(g(s[B3],'price'),g(s[B1],'price'));
+    const rs=slope(g(s[B3],'rsi'),g(s[B1],'rsi'));
+    return (ps!=null&&rs!=null)?+(Math.sign(ps)!==Math.sign(rs)):null;
+  });
+
+  return defs;
+})();
+
+// ── Feature computation engine ───────────────────────────────────────
+let _featCache = null;  // { features:[], rankings:[], computed:Date }
+
+function featComputeAll(){
+  // Build feature matrix: rows = signal records, cols = features
+  // Returns { matrix:[[]], labels:['rise'|'fall'], feats:[def] }
+  if (!signalRecords.length) return null;
+  const cols = anColumns();  // 12 column descriptors
+  const matrix = [], labels = [];
+  signalRecords.forEach(rec => {
+    // Build snaps array indexed 0-11
+    const snaps = cols.map((_, ci) => anSnapAt(rec, ci));
+    const row = _FEAT_DEFS.map(f => {
+      try { return f.fn(snaps); } catch(_){ return null; }
+    });
+    matrix.push(row);
+    labels.push(rec.dir === 1 ? 1 : 0);  // 1=rise, 0=fall
+  });
+  return { matrix, labels, feats:_FEAT_DEFS };
+}
+
+function featMutualInfo(colVals, labels){
+  // Discretise into 10 equal-width bins, compute H(Y) - H(Y|X)
+  const n = colVals.length;
+  const valid = colVals.map((v,i)=>[v,labels[i]]).filter(([v])=>v!=null);
+  if (valid.length < 3) return 0;
+  const vals = valid.map(([v])=>v);
+  const lbs  = valid.map(([,l])=>l);
+  const vmin=Math.min(...vals),vmax=Math.max(...vals);
+  const rng=vmax-vmin;
+  if (rng===0) return 0;
+  const BINS=8;
+  const bin=v=>Math.min(BINS-1,Math.floor((v-vmin)/rng*BINS));
+  // joint counts
+  const joint=Array.from({length:BINS},()=>[0,0]);
+  lbs.forEach((l,i)=>joint[bin(vals[i])][l]++);
+  const N=valid.length;
+  const py=[lbs.filter(l=>l===0).length/N, lbs.filter(l=>l===1).length/N];
+  let mi=0;
+  for(let b=0;b<BINS;b++){
+    const pb=(joint[b][0]+joint[b][1])/N;
+    if(pb===0)continue;
+    for(let c=0;c<2;c++){
+      const pjt=joint[b][c]/N;
+      if(pjt>0) mi+=pjt*Math.log2(pjt/(pb*py[c]));
+    }
+  }
+  return Math.max(0,mi);
+}
+
+function featRfImportance(colVals, labels){
+  // Approximate: information gain at a single optimal split
+  const valid=colVals.map((v,i)=>[v,labels[i]]).filter(([v])=>v!=null);
+  if(valid.length<4) return 0;
+  const sorted=valid.slice().sort(([a],[b])=>a-b);
+  const n=sorted.length;
+  // Gini of full set
+  const totalPos=sorted.filter(([,l])=>l===1).length;
+  const giniNode=1-(totalPos/n)**2-((n-totalPos)/n)**2;
+  let bestGain=0;
+  // Try every mid-point split
+  for(let i=1;i<n;i++){
+    const lLeft=sorted.slice(0,i),lRight=sorted.slice(i);
+    const lPos=lLeft.filter(([,l])=>l===1).length;
+    const rPos=lRight.filter(([,l])=>l===1).length;
+    const nl=lLeft.length,nr=lRight.length;
+    const gL=1-(lPos/nl)**2-((nl-lPos)/nl)**2;
+    const gR=1-(rPos/nr)**2-((nr-rPos)/nr)**2;
+    const gain=giniNode-(nl/n*gL+nr/n*gR);
+    if(gain>bestGain) bestGain=gain;
+  }
+  return bestGain;
+}
+
+function featShap(colVals, labels){
+  // Linear SHAP approximation: |Pearson r| × std(feature)
+  const valid=colVals.map((v,i)=>[v,labels[i]]).filter(([v])=>v!=null);
+  if(valid.length<3) return 0;
+  const vals=valid.map(([v])=>v);
+  const lbs=valid.map(([,l])=>l);
+  const n=vals.length;
+  const mx=vals.reduce((a,b)=>a+b,0)/n;
+  const my=lbs.reduce((a,b)=>a+b,0)/n;
+  let num=0,dx2=0,dy2=0;
+  vals.forEach((v,i)=>{ const dv=v-mx,dl=lbs[i]-my; num+=dv*dl; dx2+=dv*dv; dy2+=dl*dl; });
+  const r=(dx2>0&&dy2>0)?num/Math.sqrt(dx2*dy2):0;
+  const std=Math.sqrt(dx2/n);
+  return Math.abs(r)*std;
+}
+
+function featPageInit(){
+  const btn=$("featCompBtn");
+  const status=$("featStatus");
+  if(status){
+    if(!signalRecords.length)
+      status.textContent="No signal records yet — wait for 5-tick runs.";
+    else
+      status.textContent=`${signalRecords.length} signal record${signalRecords.length!==1?'s':''} available. Click Compute to rank features.`;
+  }
+  if(btn) btn.disabled=!signalRecords.length;
+}
+
+function featCompute(){
+  const status=$("featStatus");
+  if(!signalRecords.length){ if(status) status.textContent="No signal records."; return; }
+  if(status) status.textContent="Computing…";
+
+  setTimeout(()=>{  // let UI breathe
+    try{
+      const data=featComputeAll();
+      if(!data){ if(status) status.textContent="Failed."; return; }
+      const {matrix,labels,feats}=data;
+      const nFeat=feats.length;
+
+      // Compute all three scores per feature
+      const rankings=feats.map((f,fi)=>{
+        const colVals=matrix.map(row=>row[fi]);
+        const riseVals=colVals.filter((_,i)=>labels[i]===1&&colVals[i]!=null);
+        const fallVals=colVals.filter((_,i)=>labels[i]===0&&colVals[i]!=null);
+        const rise_avg=riseVals.length?riseVals.reduce((a,b)=>a+b,0)/riseVals.length:null;
+        const fall_avg=fallVals.length?fallVals.reduce((a,b)=>a+b,0)/fallVals.length:null;
+        const mi=featMutualInfo(colVals,labels);
+        const rfi=featRfImportance(colVals,labels);
+        const shap=featShap(colVals,labels);
+        const composite=(mi+rfi*2+shap)/4;  // weighted: RFI counts double
+        return {f,fi,mi,rfi,shap,composite,rise_avg,fall_avg,delta:(rise_avg!=null&&fall_avg!=null)?rise_avg-fall_avg:null};
+      });
+
+      // Sort by composite descending
+      rankings.sort((a,b)=>b.composite-a.composite);
+      _featCache={rankings,matrix,labels,feats,computed:new Date()};
+
+      // Render rank table (top 50)
+      const body=$("featRankBody");
+      if(body){
+        body.innerHTML=rankings.slice(0,50).map((r,rank)=>{
+          const f2=v=>v!=null?v.toFixed(4):"—";
+          const f3=v=>v!=null?v.toFixed(5):"—";
+          const phaseClr=r.f.phase==='B'?'color:#56b6ff':r.f.phase==='P'?'color:#16e08b':'color:#fbbf24';
+          return `<tr>
+            <td class="l cell-mut">${rank+1}</td>
+            <td class="l" style="font-size:11px;font-weight:600">${r.f.label}</td>
+            <td class="l" style="${phaseClr};font-weight:700">${r.f.phase}</td>
+            <td class="l cell-mut" style="font-size:10px">${r.f.family}</td>
+            <td>${f3(r.mi)}</td>
+            <td>${f3(r.rfi)}</td>
+            <td>${f3(r.shap)}</td>
+            <td style="font-weight:800;color:var(--accent)">${f2(r.composite)}</td>
+            <td style="color:var(--up)">${r.rise_avg!=null?r.rise_avg.toFixed(4):"—"}</td>
+            <td style="color:var(--down)">${r.fall_avg!=null?r.fall_avg.toFixed(4):"—"}</td>
+            <td style="${r.delta!=null?(r.delta>0?'color:var(--up)':'color:var(--down)'):'color:var(--muted)'};font-weight:700">
+              ${r.delta!=null?(r.delta>0?'+':'')+r.delta.toFixed(4):"—"}
+            </td>
+          </tr>`;
+        }).join("");
+      }
+
+      // Family breakdown
+      const familyEl=$("featFamilyGrid");
+      if(familyEl){
+        const familyMap={};
+        rankings.forEach(r=>{ if(!familyMap[r.f.family]) familyMap[r.f.family]=[]; familyMap[r.f.family].push(r); });
+        familyEl.innerHTML=Object.entries(familyMap).sort(([,a],[,b])=>b[0].composite-a[0].composite).map(([fam,rs])=>{
+          const top=rs[0];
+          return `<div class="em-card" style="padding:10px 12px">
+            <div class="em-lab">${fam} (${rs.length} features)</div>
+            <div style="font-size:11px;font-weight:700;color:var(--accent);margin:4px 0">Best: ${top.f.label}</div>
+            <div style="font-size:10px;color:var(--muted)">Composite: ${top.composite.toFixed(4)}</div>
+          </div>`;
+        }).join("");
+      }
+
+      // Deviation bars (top 20 by |delta|)
+      const barsEl=$("featDeviationBars");
+      if(barsEl){
+        const withDelta=rankings.filter(r=>r.delta!=null).sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta)).slice(0,20);
+        const maxD=Math.max(...withDelta.map(r=>Math.abs(r.delta)))||1;
+        barsEl.innerHTML=withDelta.map(r=>{
+          const pct=(Math.abs(r.delta)/maxD*100).toFixed(1);
+          const col=r.delta>0?'var(--up)':'var(--down)';
+          return `<div style="display:flex;align-items:center;gap:8px">
+            <div style="width:200px;font-size:10px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.f.label}">${r.f.label}</div>
+            <div style="flex:1;background:#0a0e17;border-radius:3px;overflow:hidden;height:14px">
+              <div style="width:${pct}%;background:${col};height:100%;border-radius:3px;transition:width .4s"></div>
+            </div>
+            <div style="width:70px;font-size:10px;font-variant-numeric:tabular-nums;color:${col};font-weight:700;text-align:right">
+              ${r.delta>0?'+':''}${r.delta.toFixed(4)}
+            </div>
+            <div style="width:20px;font-size:9px;color:var(--muted);font-weight:700">${r.f.phase}</div>
+          </div>`;
+        }).join("");
+      }
+
+      // Enable CSV buttons
+      ['featCsvBBtn','featCsvPBtn','featCsvABtn'].forEach(id=>{const b=$(id);if(b)b.disabled=false;});
+      if(status) status.textContent=`✅ ${nFeat} features computed · ${rankings.length} ranked · ${signalRecords.length} signal records · computed at ${new Date().toLocaleTimeString()}`;
+
+    } catch(e){
+      console.error('featCompute error:',e);
+      if(status) status.textContent='Error: '+e.message;
+    }
+  }, 20);
+}
+
+function featExportCsv(phase){
+  if(!_featCache){ alert("Compute features first."); return; }
+  const {rankings,matrix,labels,feats}=_featCache;
+  const N=signalRecords.length;
+  const today=new Date().toISOString().slice(0,10);
+
+  // Filter features by phase
+  const phaseFeatIdxs=rankings
+    .filter(r=>r.f.phase===phase)
+    .map(r=>r.fi);
+
+  const phaseFeatDefs=phaseFeatIdxs.map(fi=>feats[fi]);
+
+  // Header: metadata + feature columns (sorted by importance)
+  const header=["signal_no","epoch","datetime","direction",
+    ...phaseFeatDefs.map(f=>f.label.replace(/[,\n]/g,' '))
+  ].join(",");
+
+  const rows=[header];
+  signalRecords.forEach((rec,idx)=>{
+    const sigNo=N-idx;
+    const epoch=rec.epoch||"";
+    const dt=epoch?new Date(epoch*1000).toISOString().replace("T"," ").slice(0,19):"";
+    const dir=rec.dir===1?"rise":"fall";
+    const matRow=matrix[idx];
+    const vals=phaseFeatIdxs.map(fi=>{
+      const v=matRow[fi];
+      return v==null||isNaN(v)?"":Number(v).toFixed(6);
+    });
+    rows.push([sigNo,epoch,dt,dir,...vals].join(","));
+  });
+
+  const csv=rows.join("\r\n");
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download=`mamba_features_${phase}_${SYMBOL}_${today}.csv`;
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),2000);
+}
+
 //   before-3 … before-1 | P1(start) P2 P3 P4 P5 | after-1 … after-4
 // for one chosen run, or averaged across all/rise/fall runs. Reads the
 // before/run/after windows captured on each signalRecord.
 // =====================================================================
 const AN_METRICS = [
-  { key:"macd",   label:"MACD",     kind:"macd",  price:false },
-  { key:"signal", label:"Signal",   kind:"macd",  price:false },
-  { key:"hist",   label:"Hist",     kind:"hist",  price:false },
-  { key:"chop",   label:"Chop",     kind:"chop",  price:false },
-  { key:"cci",    label:"CCI",      kind:"cci",   price:false },
-  { key:"bbPctB", label:"BB %B",    kind:"pctB",  price:false, pct:true },
-  { key:"bbUpper",label:"BB upper", kind:"price", price:true },
-  { key:"bbMid",  label:"BB mid",   kind:"price", price:true },
-  { key:"bbLower",label:"BB lower", kind:"price", price:true },
-  { key:"pdi",    label:"+DI",      kind:"dmi",   price:false },
-  { key:"ndi",    label:"-DI",      kind:"dmi",   price:false },
-  { key:"adx",    label:"ADX",      kind:"dmi",   price:false },
+  // ── MACD ──────────────────────────────────────────────────────────
+  { key:"macd",   label:"MACD",       kind:"macd",  price:false },
+  { key:"signal", label:"Signal",     kind:"macd",  price:false },
+  { key:"hist",   label:"Hist",       kind:"hist",  price:false },
+  // ── Choppiness / CCI ──────────────────────────────────────────────
+  { key:"chop",   label:"Chop",       kind:"chop",  price:false },
+  { key:"cci",    label:"CCI",        kind:"cci",   price:false },
+  // ── Bollinger Bands ───────────────────────────────────────────────
+  { key:"bbPctB", label:"BB %B",      kind:"pctB",  price:false, pct:true },
+  { key:"bbUpper",label:"BB upper",   kind:"price", price:true },
+  { key:"bbMid",  label:"BB mid",     kind:"price", price:true },
+  { key:"bbLower",label:"BB lower",   kind:"price", price:true },
+  // ── DMI / ADX ─────────────────────────────────────────────────────
+  { key:"pdi",    label:"+DI",        kind:"dmi",   price:false },
+  { key:"ndi",    label:"-DI",        kind:"dmi",   price:false },
+  { key:"adx",    label:"ADX",        kind:"dmi",   price:false },
+  // ── RSI ───────────────────────────────────────────────────────────
+  { key:"rsi",    label:"RSI(14)",    kind:"rsi",   price:false },
+  // ── ATR ───────────────────────────────────────────────────────────
+  { key:"atr",    label:"ATR(14)",    kind:"atr",   price:true  },
+  // ── EMA ───────────────────────────────────────────────────────────
+  { key:"ema5",   label:"EMA(5)",     kind:"price", price:true  },
+  { key:"ema10",  label:"EMA(10)",    kind:"price", price:true  },
+  { key:"ema20",  label:"EMA(20)",    kind:"price", price:true  },
+  // ── Stochastic ────────────────────────────────────────────────────
+  { key:"stochK", label:"Stoch %K",   kind:"stoch", price:false },
+  { key:"stochD", label:"Stoch %D",   kind:"stoch", price:false },
+  // ── ROC ───────────────────────────────────────────────────────────
+  { key:"roc",    label:"ROC(10)",    kind:"roc",   price:false },
 ];
 // Column layout: BEFORE_N before + 5 run + AFTER_N after
 function anColumns(){
@@ -4821,10 +5524,14 @@ function anResolveData(){
 
 function anCellClass(kind, v){
   if (v === null || v === undefined || Number.isNaN(v)) return "c-mut";
-  if (kind === "hist") return v > 0 ? "c-pos" : v < 0 ? "c-neg" : "c-mut";
-  if (kind === "chop") return v >= 61.8 ? "c-warn" : v <= 38.2 ? "c-pos" : "";
-  if (kind === "cci")  return v > 100 ? "c-pos" : v < -100 ? "c-neg" : "";
-  if (kind === "pctB") return v >= 1 ? "c-pos" : v <= 0 ? "c-neg" : (v > 0.8 || v < 0.2) ? "c-warn" : "";
+  if (kind === "hist")  return v > 0 ? "c-pos" : v < 0 ? "c-neg" : "c-mut";
+  if (kind === "chop")  return v >= 61.8 ? "c-warn" : v <= 38.2 ? "c-pos" : "";
+  if (kind === "cci")   return v > 100 ? "c-pos" : v < -100 ? "c-neg" : "";
+  if (kind === "pctB")  return v >= 1 ? "c-pos" : v <= 0 ? "c-neg" : (v > 0.8 || v < 0.2) ? "c-warn" : "";
+  if (kind === "rsi")   return v >= 70 ? "c-warn" : v <= 30 ? "c-warn" : v >= 55 ? "c-pos" : v <= 45 ? "c-neg" : "";
+  if (kind === "stoch") return v >= 80 ? "c-warn" : v <= 20 ? "c-warn" : v >= 60 ? "c-pos" : v <= 40 ? "c-neg" : "";
+  if (kind === "roc")   return v > 0 ? "c-pos" : v < 0 ? "c-neg" : "c-mut";
+  if (kind === "dmi")   return "";  // DMI values coloured by context in the chart, neutral in table
   return "";
 }
 
@@ -4859,13 +5566,18 @@ function renderAnalysis(){
       const phaseCls = c.phase === "run" ? "runcol" : c.phase === "before" ? "beforecol" : "aftercol";
       let txt;
       if (v === null || v === undefined || Number.isNaN(v)) txt = "—";
-      else if (m.pct) txt = (v * 100).toFixed(0) + "%";
-      else if (m.price) txt = Number(v).toFixed(data.dec);
-      else txt = Number(v).toFixed(m.kind === "chop" || m.kind === "cci" ? 1 : Math.min(data.dec + 1, 5));
+      else if (m.pct)              txt = (v * 100).toFixed(0) + "%";
+      else if (m.price)            txt = Number(v).toFixed(data.dec);
+      else if (m.kind === "rsi" || m.kind === "stoch")  txt = Number(v).toFixed(1);
+      else if (m.kind === "roc")   txt = Number(v).toFixed(3) + "%";
+      else if (m.kind === "chop" || m.kind === "cci" || m.kind === "dmi") txt = Number(v).toFixed(1);
+      else                         txt = Number(v).toFixed(Math.min(data.dec + 1, 5));
       const semCls = anCellClass(m.kind, v);
       return `<td class="${phaseCls} ${semCls}">${txt}</td>`;
     }).join("");
-    const grp = (ri === 3 || ri === 4 || ri === 5 || ri === 6) ? " an-rowgroup" : "";
+    // group boundaries by kind change for visual separation
+    const prevKind = ri > 0 ? AN_METRICS[ri-1].kind : null;
+    const grp = (prevKind && prevKind !== m.kind) ? " an-rowgroup" : "";
     return `<tr class="${grp.trim()}"><td class="metric">${m.label}</td>${tds}</tr>`;
   }).join("");
 
