@@ -228,7 +228,7 @@ footer{text-align:center;color:var(--muted);font-size:11px;margin-top:22px;line-
 .eng-log .row{display:flex;align-items:center;gap:10px;font-size:12px;padding:6px 0;border-bottom:1px solid #161d2b;font-variant-numeric:tabular-nums}
 /* ── Engine trade panel ─────────────────────────────────────────── */
 .eng-trade-panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
-/* ── Prediction Bot ────────────────────────────────────────────── */
+/* ── Prediction Bot pipeline steps ────────────────────────────────── */
 .pb-step{background:#0a0e17;border:1px solid var(--line);border-radius:8px;padding:7px 12px;
   font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--muted);white-space:nowrap;
   transition:all .3s;}
@@ -241,6 +241,12 @@ footer{text-align:center;color:var(--muted);font-size:11px;margin-top:22px;line-
 .pb-vote-row{display:flex;align-items:center;justify-content:space-between;
   background:#131c2e;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:600;}
 .pb-vote-rise{color:var(--up)!important;}.pb-vote-fall{color:var(--down)!important;}
+/* ── Only Ups/Downs Bot ────────────────────────────────────────────── */
+.ou-fp-row{display:flex;align-items:center;justify-content:space-between;
+  background:#0a0e17;border:1px solid var(--line);border-radius:8px;
+  padding:7px 12px;font-size:11px;}
+.ou-fp-val{font-weight:800;font-size:12px;min-width:60px;text-align:right;}
+.ou-fp-ok{color:var(--up)}.ou-fp-fail{color:var(--down)}.ou-fp-muted{color:var(--muted)}
 .eng-trade-panel h3{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
 .eng-trade-top{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
 @media(max-width:680px){.eng-trade-top{grid-template-columns:1fr}}
@@ -478,6 +484,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button id="navAnalysis" onclick="showPage('analysis')">🔬 Analysis Tool</button>
     <button id="navFeatures" onclick="showPage('features')">🧠 ML Features</button>
     <button id="navPredBot" onclick="showPage('predbot')">🤖 Prediction Bot</button>
+    <button id="navOuBot" onclick="showPage('oubot')">⬆⬇ Only Ups/Downs Bot</button>
     <button id="navTracker" onclick="showPage('tracker')">🔢 Digit Tracker</button>
     <button id="navDigits" onclick="showPage('digits')">🎲 Digits Bot</button>
     <button id="navDiag" onclick="showPage('diag')">🩺 API Diagnostics</button>
@@ -1482,6 +1489,195 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     </footer>
   </div><!-- /page-predbot -->
 
+  <!-- ============ ONLY UPS / ONLY DOWNS BOT PAGE ============ -->
+  <div id="page-oubot" class="page">
+
+    <!-- Header & fingerprint explanation -->
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>⬆⬇ Only Ups / Only Downs Bot</h2>
+      <div class="gc-sub" style="margin-bottom:10px">
+        Trades <b>RUNHIGH</b> (Only Ups) and <b>RUNLOW</b> (Only Downs) contracts on the live Deriv WebSocket.
+        Before placing any trade the bot checks a five-factor <b>fingerprint</b> (adapted from the attached Blockly strategy):
+        MACD histogram flip · DI bias aligned · Bollinger edge · Choppiness trending down · PriceVelocity/ATR &gt; 1.
+        Only when all five agree does the bot fire. Uses <b>Martingale progression</b> (×2 stake on loss, reset on win).
+        <br><br>
+        <b>Six-price-point rule:</b> a valid 5-run requires six price points:
+        <code style="background:#0a0e17;padding:2px 6px;border-radius:4px;color:var(--accent)">B1 → P1 → P2 → P3 → P4 → P5</code> each strictly higher (RUNHIGH) or lower (RUNLOW) than the previous. Any flat or reversal resets the count.
+      </div>
+      <!-- Connection status -->
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="gc-conn-pill"><span id="ouConnDot" class="d off"></span><span id="ouConnText">not connected — connect on Trading Grid first</span></span>
+      </div>
+    </div>
+
+    <!-- Settings grid -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+
+      <!-- Left: trade config -->
+      <div class="grid-card">
+        <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:14px">Trade Configuration</h3>
+
+        <div class="gc-field">
+          <label for="ouSymbol">Market (symbol)</label>
+          <select id="ouSymbol"></select>
+        </div>
+        <div class="gc-row">
+          <div class="gc-field">
+            <label for="ouStake">Base stake</label>
+            <input type="number" id="ouStake" min="0.35" step="0.01" value="1.00">
+          </div>
+          <div class="gc-field">
+            <label for="ouCurrency">Currency</label>
+            <input type="text" id="ouCurrency" value="USD" readonly>
+          </div>
+        </div>
+        <div class="gc-row">
+          <div class="gc-field">
+            <label for="ouDuration">Duration (ticks)</label>
+            <select id="ouDuration">
+              <option value="2">2 ticks</option>
+              <option value="3">3 ticks</option>
+              <option value="4">4 ticks</option>
+              <option value="5" selected>5 ticks</option>
+            </select>
+          </div>
+          <div class="gc-field">
+            <label for="ouMaxLoss">Stop after N losses (0=∞)</label>
+            <input type="number" id="ouMaxLoss" min="0" step="1" value="3">
+          </div>
+        </div>
+        <div class="gc-field">
+          <label for="ouDirection">Direction filter</label>
+          <select id="ouDirection">
+            <option value="both" selected>Both (auto from run)</option>
+            <option value="up">Only Ups (RUNHIGH) only</option>
+            <option value="down">Only Downs (RUNLOW) only</option>
+          </select>
+        </div>
+        <div class="gc-field">
+          <label for="ouMartingale">Martingale strategy</label>
+          <select id="ouMartingale">
+            <option value="martingale" selected>Martingale (×2 on loss)</option>
+            <option value="flat">Flat (no progression)</option>
+            <option value="anti_martin">Reverse Martingale (×2 on win)</option>
+            <option value="dalembert">D'Alembert (+1 unit on loss)</option>
+            <option value="one_3_2_6">1-3-2-6 sequence</option>
+          </select>
+        </div>
+
+        <!-- Fingerprint thresholds -->
+        <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;margin-top:14px">Fingerprint Thresholds</h3>
+        <div class="gc-sub" style="margin-bottom:10px">All five must be satisfied for the bot to fire. Loosen any to make the bot trade more frequently.</div>
+        <div class="gc-row">
+          <div class="gc-field">
+            <label for="ouChopMax">Chop Index ≤ (trending)</label>
+            <input type="number" id="ouChopMax" min="20" max="80" step="0.5" value="50">
+          </div>
+          <div class="gc-field">
+            <label for="ouAtrRatioMin">PriceVel/ATR ≥</label>
+            <input type="number" id="ouAtrRatioMin" min="0" max="5" step="0.1" value="0.8">
+          </div>
+        </div>
+        <div class="gc-row">
+          <div class="gc-field">
+            <label for="ouBBEdge">BB %B ≥ (for up) / ≤ (for down)</label>
+            <input type="number" id="ouBBEdge" min="0" max="1" step="0.05" value="0.6">
+          </div>
+          <div class="gc-field">
+            <label for="ouAdxMin">ADX ≥ (trend strength)</label>
+            <input type="number" id="ouAdxMin" min="10" max="60" step="1" value="20">
+          </div>
+        </div>
+        <div class="gc-field">
+          <label style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" id="ouRequireHistFlip" checked>
+            Require MACD histogram sign flip in last 3 ticks
+          </label>
+        </div>
+      </div>
+
+      <!-- Right: status + controls -->
+      <div style="display:flex;flex-direction:column;gap:12px">
+
+        <!-- Fingerprint live readout -->
+        <div class="grid-card">
+          <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:12px">Live Fingerprint Status</h3>
+          <div id="ouFpGrid" style="display:flex;flex-direction:column;gap:6px">
+            <div class="ou-fp-row" id="ouFp1"><span>MACD histogram flip</span><span class="ou-fp-val" id="ouFpV1">—</span></div>
+            <div class="ou-fp-row" id="ouFp2"><span>+DI &gt; −DI (DI bias aligned)</span><span class="ou-fp-val" id="ouFpV2">—</span></div>
+            <div class="ou-fp-row" id="ouFp3"><span>BB edge (BB%B threshold)</span><span class="ou-fp-val" id="ouFpV3">—</span></div>
+            <div class="ou-fp-row" id="ouFp4"><span>Choppiness trending down</span><span class="ou-fp-val" id="ouFpV4">—</span></div>
+            <div class="ou-fp-row" id="ouFp5"><span>PriceVel / ATR ≥ threshold</span><span class="ou-fp-val" id="ouFpV5">—</span></div>
+          </div>
+          <div id="ouFpScore" style="margin-top:10px;padding:8px 12px;border-radius:8px;background:#0a0e17;border:1px solid var(--line);font-size:12px;font-weight:700;color:var(--muted);text-align:center">
+            Fingerprint: 0 / 5 — not confirmed
+          </div>
+        </div>
+
+        <!-- Payout preview -->
+        <div class="grid-card" id="ouPayoutCard" style="display:none">
+          <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Live Payout Preview</h3>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div class="em-card"><div class="em-lab">Contract</div><div id="ouPayContract" class="em-val acc">—</div></div>
+            <div class="em-card"><div class="em-lab">Stake</div><div id="ouPayStake" class="em-val">—</div></div>
+            <div class="em-card"><div class="em-lab">Payout</div><div id="ouPayPayout" class="em-val up">—</div></div>
+            <div class="em-card"><div class="em-lab">Return</div><div id="ouPayReturn" class="em-val up">—</div></div>
+          </div>
+        </div>
+
+        <!-- Arm / disarm + current state -->
+        <div class="grid-card">
+          <div class="dig-auto-bar" style="margin-bottom:10px">
+            <label class="auto-toggle">
+              <input type="checkbox" id="ouArm" onchange="ouToggleArm()">
+              <span class="track"></span>
+              <span id="ouArmLabel">Bot: OFF</span>
+            </label>
+            <div class="auto-status" id="ouArmStatus">Disarmed. Connect on Trading Grid first.</div>
+          </div>
+          <button class="gc-btn danger" onclick="ouManualFire()" id="ouManualBtn" disabled style="width:100%;margin-bottom:8px">🔫 Manual Fire (ignore fingerprint)</button>
+          <div style="font-size:9px;color:var(--muted)">Manual fire uses the current direction setting and current stake level without checking the fingerprint conditions.</div>
+        </div>
+
+        <!-- Stats -->
+        <div class="grid-card">
+          <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Session Stats</h3>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+            <div class="em-card"><div class="em-lab">Won</div><div id="ouWon" class="em-val up">0</div></div>
+            <div class="em-card"><div class="em-lab">Lost</div><div id="ouLost" class="em-val dn">0</div></div>
+            <div class="em-card"><div class="em-lab">Win Rate</div><div id="ouRate" class="em-val acc">—</div></div>
+            <div class="em-card"><div class="em-lab">P/L</div><div id="ouPnL" class="em-val">—</div></div>
+            <div class="em-card"><div class="em-lab">Martingale Step</div><div id="ouMStep" class="em-val neu">0</div></div>
+            <div class="em-card"><div class="em-lab">Current Stake</div><div id="ouCurStake" class="em-val neu">—</div></div>
+          </div>
+          <div style="margin-top:8px;font-size:10px;color:var(--muted)" id="ouSkipLog">Fingerprint skips: 0</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Trade log -->
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>📋 Trade Log</h2>
+      <div style="overflow-x:auto">
+        <table class="sig-table" style="min-width:780px">
+          <thead>
+            <tr>
+              <th class="l">Time</th><th class="l">Contract</th><th class="l">Dir</th>
+              <th>Stake</th><th>Duration</th><th>Entry</th><th>Exit</th>
+              <th>Payout</th><th>P/L</th><th class="l">Status</th>
+              <th class="l">Fingerprint</th><th class="l">M-Step</th>
+            </tr>
+          </thead>
+          <tbody id="ouTradeBody"><tr><td colspan="12" class="sig-empty">No trades yet.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <footer>
+      RUNHIGH (Only Ups) and RUNLOW (Only Downs) contracts require every single tick to move in the same direction. A 5-tick RUNHIGH needs six strictly-increasing price points B1→P1→P2→P3→P4→P5. The Martingale doubles stake after each loss and resets after each win. Use a <b>demo account</b> while testing — real accounts are subject to actual financial loss. All trades are placed through the connected Deriv account on the Trading Grid page.
+    </footer>
+  </div><!-- /page-oubot -->
+
   <!-- ============ PAGE 8: INDICATOR CHARTS ============ -->
   <div id="page-charts" class="page">
     <div class="grid-card" style="margin-bottom:14px">
@@ -1863,6 +2059,11 @@ function handleTick(price, epoch){
   }
   // Live model validation — always runs when active regardless of which page is shown
   if (typeof lmvOnTick === "function") lmvOnTick(price, epoch, dir);
+  // Only Ups/Downs Bot — refresh fingerprint on every tick
+  if (typeof ouRefreshFingerprint === "function"){
+    if(document.getElementById("page-oubot")&&document.getElementById("page-oubot").classList.contains("active"))
+      ouRefreshFingerprint();
+  }
 
   // Persist the last 100 ticks (throttled: every 3rd tick, plus always on a signal)
   _saveThrottle++;
@@ -2928,8 +3129,8 @@ function startTfTimers(){
 }
 
 function showPage(which){
-  const pages = { live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts" };
-  const navs  = { live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts" };
+  const pages = { live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts" };
+  const navs  = { live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts" };
   Object.keys(pages).forEach(k => {
     document.getElementById(pages[k]).classList.toggle("active", k===which);
     const nav = document.getElementById(navs[k]); if (nav) nav.classList.toggle("active", k===which);
@@ -2968,6 +3169,9 @@ function showPage(which){
   }
   if (which === "predbot"){
     pbPageInit();  // also calls lmvPageInit
+  }
+  if (which === "oubot"){
+    ouPageInit();
   }
   if (which === "charts"){
     chartRenderAll();
@@ -4444,6 +4648,7 @@ async function gridConnect(){
     if (typeof digUpdateConnStatus === "function") digUpdateConnStatus();
     if (typeof diagUpdateConnStatus === "function") diagUpdateConnStatus();
     if (typeof engUpdateConnStatus === "function") engUpdateConnStatus();
+    if (typeof ouUpdateConnStatus === "function"){ ouUpdateConnStatus(); ouRefreshFingerprint(); }
   };
   gridWs.onmessage = ev => {
     let msg; try { msg = JSON.parse(ev.data); } catch(_) { return; }
@@ -4486,6 +4691,7 @@ function gridDisconnect(){
   if (typeof digUpdateConnStatus === "function") digUpdateConnStatus();
   if (typeof diagUpdateConnStatus === "function") diagUpdateConnStatus();
   if (typeof engUpdateConnStatus === "function") engUpdateConnStatus();
+  if (typeof ouUpdateConnStatus === "function") ouUpdateConnStatus();
 }
 
 function gridHandleMsg(msg){
@@ -4748,7 +4954,8 @@ function gridUpdateContract(c){
     || gridTrades.find(t => t.id === id)
     || digTrades.find(t => t.id === id)
     || (typeof engTrades !== 'undefined' ? engTrades.find(t => t.id === id) : null)
-    || (typeof window._dabTrades !== 'undefined' ? window._dabTrades.find(t => t.id === id) : null);
+    || (typeof window._dabTrades !== 'undefined' ? window._dabTrades.find(t => t.id === id) : null)
+    || (typeof ouTrades !== 'undefined' ? ouTrades.find(t => t.id === id) : null);
   if (!row) return;
   if (c.buy_price != null) row.stake = Number(c.buy_price);
   if (c.entry_tick_display_value != null) row.entry = Number(c.entry_tick_display_value);
@@ -4775,6 +4982,9 @@ function gridUpdateContract(c){
       engMult().record(stk, won);
     // Mamba FX bot and Deriv Auto Bot multipliers are handled inside their own IIFEs
     if (typeof window._multRecord === 'function') window._multRecord(id, stk, won);
+    // Only Ups/Downs Bot settlement
+    if (typeof ouOpenContracts !== 'undefined' && ouOpenContracts[id])
+      if (typeof ouSettleContract === 'function') ouSettleContract(id, won);
   } else {
     row.status = "open";
   }
@@ -4898,6 +5108,8 @@ function onSignalFired(dir, price, epoch){
   }
   // Engine auto-bot also listens to the same signal
   if (typeof engHandleSignal === "function") engHandleSignal(dir, price, epoch);
+  // Only Ups/Downs Bot
+  if (typeof ouHandleSignal === "function") ouHandleSignal(dir, price, epoch);
 }
 
 // =====================================================================
@@ -7632,6 +7844,338 @@ function lmvPageInit(){
   if(btn) btn.disabled=!_pbModels;
   lmvRenderStats();
   lmvRenderTable();
+}
+
+// =====================================================================
+// ONLY UPS / ONLY DOWNS BOT
+// Trades RUNHIGH (Only Ups) and RUNLOW (Only Downs) contracts.
+// Uses a five-factor fingerprint before firing (adapted from Blockly XML):
+//   1. MACD histogram sign flip in last 3 ticks
+//   2. +DI > −DI (directional bias aligned with trade direction)
+//   3. BB%B above/below edge threshold
+//   4. Choppiness Index trending down (trending market, not choppy)
+//   5. PriceVelocity / ATR >= threshold (momentum confirmed)
+// Martingale: ×2 stake on loss, reset on win (configurable).
+// Six-price-point rule: B1→P1→P2→P3→P4→P5 strictly up (RUNHIGH)
+//   or strictly down (RUNLOW). Same logic as the dashboard's own runLen.
+// =====================================================================
+let ouTrades = [];
+let ouArmed  = false;
+let ouSkips  = 0;
+let ouMartStep = 0;
+let ouCurrentStake = null;
+let ouOpenContracts = {};  // contractId → trade row
+
+// Multiplier instance for the OU bot
+let _ouMult = null;
+function ouMult(){ return _ouMult||(_ouMult=makeMultiplier(()=>$("ouStake"))); }
+
+// ── Connection status ─────────────────────────────────────────────────
+function ouUpdateConnStatus(){
+  const dot=$("ouConnDot"), txt=$("ouConnText"), btn=$("ouManualBtn");
+  if(!dot) return;
+  const ok=typeof gridWs!=='undefined'&&gridWs&&gridWs.readyState===1&&(typeof gridAuthed!=='undefined'&&gridAuthed);
+  dot.className='d'+(ok?' on':' off');
+  if(txt) txt.textContent=ok?`connected (${gridLoginId||'—'}) · ${gridIsVirtual?'DEMO':'REAL'}`:'not connected — connect on Trading Grid first';
+  if(btn) btn.disabled=!ok;
+  const ccy=$("ouCurrency"); if(ccy&&typeof gridCurrency!=='undefined') ccy.value=gridCurrency;
+}
+
+// ── Page init ─────────────────────────────────────────────────────────
+function ouPageInit(){
+  ouUpdateConnStatus();
+  ouRenderTrades();
+  ouRenderStats();
+  // Populate market selector
+  const sel=$("ouSymbol");
+  if(sel&&sel.childElementCount===0&&typeof MARKETS!=='undefined'){
+    Object.entries(MARKETS).forEach(([k,v])=>{
+      const o=document.createElement('option');
+      o.value=k; o.textContent=v;
+      if(k===SYMBOL) o.selected=true;
+      sel.appendChild(o);
+    });
+  }
+  ouRefreshFingerprint();
+  if(ouCurrentStake===null) ouCurrentStake=Math.max(0.35,parseFloat(($("ouStake")||{value:'1'}).value||'1'));
+}
+
+// ── Fingerprint evaluation ─────────────────────────────────────────────
+// Returns {pass:bool, factors:[{label,pass,val}], score:0-5, dirHint:1|-1}
+function ouEvalFingerprint(dir){
+  const s=indSnapshot||{};
+  const f2=v=>v!=null?Number(v).toFixed(2):'n/a';
+  const chopMax=parseFloat(($("ouChopMax")||{value:'50'}).value||'50');
+  const atrRMin=parseFloat(($("ouAtrRatioMin")||{value:'0.8'}).value||'0.8');
+  const bbEdge =parseFloat(($("ouBBEdge")||{value:'0.6'}).value||'0.6');
+  const adxMin =parseFloat(($("ouAdxMin")||{value:'20'}).value||'20');
+  const reqFlip=($("ouRequireHistFlip")||{checked:true}).checked;
+
+  // Factor 1: MACD histogram flip (sign changed in last 3 ticks of indHistory)
+  let histFlip=false;
+  if(typeof indHistory!=='undefined'&&indHistory.length>=2){
+    const recent=indHistory.slice(-3);
+    for(let i=1;i<recent.length;i++){
+      const h0=recent[i-1].hist, h1=recent[i].hist;
+      if(h0!=null&&h1!=null&&Math.sign(h0)!==Math.sign(h1)){ histFlip=true; break; }
+    }
+  }
+  const f1pass=reqFlip?histFlip:true;
+
+  // Factor 2: +DI > −DI for RISE direction, −DI > +DI for FALL
+  const pdi=s.pdi, ndi=s.ndi;
+  const diAligned=dir===1?(pdi!=null&&ndi!=null&&pdi>ndi):(pdi!=null&&ndi!=null&&ndi>pdi);
+
+  // Factor 3: BB edge — for RISE: BB%B >= threshold; for FALL: BB%B <= (1-threshold)
+  const bbPctB=s.bbPctB;
+  const bbOk=dir===1?(bbPctB!=null&&bbPctB>=bbEdge):(bbPctB!=null&&bbPctB<=(1-bbEdge));
+
+  // Factor 4: Choppiness ≤ chopMax (trending market)
+  const chop=s.chop;
+  const chopOk=chop!=null&&chop<=chopMax;
+
+  // Factor 5: PriceVelocity/ATR ≥ threshold
+  // PriceVelocity = |price change over last 2 ticks| / ATR
+  let pvAtrOk=false;
+  if(typeof ticks!=='undefined'&&ticks.length>=2&&s.atr!=null&&s.atr>0){
+    const pv=Math.abs(ticks[ticks.length-1].price-(ticks[ticks.length-2]||{price:ticks[ticks.length-1].price}).price);
+    pvAtrOk=(pv/s.atr)>=atrRMin;
+  }
+
+  // ADX bonus check (shown in fingerprint as part of DI factor)
+  const adxOk=s.adx!=null&&s.adx>=adxMin;
+
+  const factors=[
+    {label:'MACD histogram flip',    pass:f1pass, val:histFlip?'flipped':'no flip'},
+    {label:'+DI/−DI bias (ADX≥'+adxMin+')', pass:diAligned&&adxOk, val:`+DI=${f2(pdi)} −DI=${f2(ndi)} ADX=${f2(s.adx)}`},
+    {label:'BB edge (BB%B)',         pass:bbOk,  val:`BB%B=${f2(bbPctB)}`},
+    {label:'Chop trending (≤'+chopMax+')', pass:chopOk, val:`Chop=${f2(chop)}`},
+    {label:'PriceVel/ATR≥'+atrRMin, pass:pvAtrOk, val:`ATR=${f2(s.atr)}`},
+  ];
+  const score=factors.filter(f=>f.pass).length;
+  return {pass:score===5, factors, score};
+}
+
+function ouRefreshFingerprint(){
+  const dir=($("ouDirection")||{value:'both'}).value==='down'?-1:1;
+  const fp=ouEvalFingerprint(dir);
+  fp.factors.forEach((f,i)=>{
+    const row=$("ouFp"+(i+1)), val=$("ouFpV"+(i+1));
+    if(!row||!val) return;
+    row.className='ou-fp-row';
+    val.className='ou-fp-val '+(f.pass?'ou-fp-ok':'ou-fp-fail');
+    val.textContent=f.pass?'✅ '+f.val:'❌ '+f.val;
+  });
+  const scoreEl=$("ouFpScore");
+  if(scoreEl){
+    const all=fp.score===5;
+    scoreEl.textContent=`Fingerprint: ${fp.score} / 5 — ${all?'✅ CONFIRMED — ready to fire':'not confirmed'}`;
+    scoreEl.style.color=all?'var(--up)':'var(--muted)';
+    scoreEl.style.borderColor=all?'var(--up)':'var(--line)';
+  }
+}
+
+// ── Proposal → buy flow ───────────────────────────────────────────────
+function ouPlaceTrade(dir, source){
+  if(typeof gridWs==='undefined'||!gridWs||gridWs.readyState!==1||!gridAuthed){
+    alert('Connect on Trading Grid first.'); return;
+  }
+  const strat=($("ouMartingale")||{value:'martingale'}).value;
+  ouMult()._strat=strat;
+  const stake=Math.max(0.35, ouCurrentStake!=null?ouCurrentStake:ouMult().getNext(strat));
+  const dur=parseInt(($("ouDuration")||{value:'5'}).value||'5',10);
+  const sym=($("ouSymbol")||{value:SYMBOL}).value||SYMBOL;
+  const contractType=dir===1?'RUNHIGH':'RUNLOW';
+  const reqId=++gridReqId;
+
+  // Step 1: proposal
+  const proposalMsg={
+    proposal:1, req_id:reqId,
+    amount:stake, basis:'stake',
+    contract_type:contractType,
+    currency:gridCurrency,
+    duration:dur, duration_unit:'t',
+    underlying_symbol:sym,
+  };
+
+  const row={
+    id:'pending-'+reqId, dir, source, contractType, stake,
+    currency:gridCurrency, isVirtual:!!gridIsVirtual,
+    time:Math.floor(Date.now()/1000),
+    entry:null, exit:null, payout:null, pnl:null,
+    status:'pricing…', mStep:ouMartStep,
+    fp:ouEvalFingerprint(dir).score,
+  };
+  ouTrades.unshift(row);
+  if(ouTrades.length>100) ouTrades.pop();
+  ouRenderTrades();
+
+  // Show payout preview card
+  const card=$("ouPayoutCard");
+  if(card) card.style.display='block';
+  gridSet('ouPayContract',contractType);
+  gridSet('ouPayStake',stake.toFixed(2)+' '+gridCurrency);
+  gridSet('ouPayPayout','…');
+  gridSet('ouPayReturn','…');
+
+  gridPending[reqId]=(proposal,err)=>{
+    if(err){
+      row.status='rejected: '+(err.message||err.code||'error')+(err.details?` [${err.details.field||'?'}]`:'');
+      ouRenderTrades(); return;
+    }
+    if(!proposal||!proposal.id||proposal.ask_price==null){
+      row.status='rejected: no price'; ouRenderTrades(); return;
+    }
+    // Show payout preview
+    const payout=Number(proposal.payout||0);
+    const askPrice=Number(proposal.ask_price||stake);
+    const profit=payout-askPrice;
+    const ret=askPrice>0?(profit/askPrice*100).toFixed(1)+'%':'—';
+    gridSet('ouPayPayout',payout.toFixed(2)+' '+gridCurrency);
+    gridSet('ouPayReturn',ret);
+
+    // Step 2: buy immediately
+    const buyReqId=++gridReqId;
+    const buyMsg={buy:proposal.id, price:proposal.ask_price, req_id:buyReqId};
+    row.status='open'; ouRenderTrades();
+    gridPending[buyReqId]=(buy,buyErr)=>{
+      if(buyErr){
+        row.status='buy failed: '+(buyErr.message||buyErr.code||'error');
+        ouRenderTrades(); return;
+      }
+      if(buy){
+        row.id=String(buy.contract_id);
+        row.buyPrice=buy.buy_price;
+        row.status='open';
+        gridOpenContracts[row.id]=row;
+        ouOpenContracts[row.id]=row;
+        ouRenderTrades();
+        console.log('[OU Bot]',contractType,'opened:',buy.contract_id,'payout:',proposal.payout);
+      }
+    };
+    gridWs.send(JSON.stringify(buyMsg));
+  };
+  gridWs.send(JSON.stringify(proposalMsg));
+}
+
+// ── Auto-arm ──────────────────────────────────────────────────────────
+function ouToggleArm(){
+  const cb=$("ouArm");
+  ouArmed=cb?cb.checked:!ouArmed;
+  const lbl=$("ouArmLabel"), sts=$("ouArmStatus");
+  if(ouArmed){
+    if(!gridAuthed){ if(cb) cb.checked=false; ouArmed=false; alert('Connect first.'); return; }
+    if(lbl) lbl.textContent='Bot: ON';
+    if(sts) sts.textContent='Armed — watching for fingerprint + 5-tick run signal…';
+    ouCurrentStake=Math.max(0.35,parseFloat(($("ouStake")||{value:'1'}).value||'1'));
+  } else {
+    if(lbl) lbl.textContent='Bot: OFF';
+    if(sts) sts.textContent='Disarmed.';
+  }
+}
+
+function ouManualFire(){
+  const dir=($("ouDirection")||{value:'both'}).value==='down'?-1:1;
+  ouPlaceTrade(dir,'manual');
+}
+
+// ── Signal hook — fires when 5-tick run confirmed ────────────────────
+// This is called by onSignalFired: dir = 1 (rise) or -1 (fall)
+function ouHandleSignal(dir, price, epoch){
+  if(!ouArmed||!gridAuthed) return;
+  const dirSetting=($("ouDirection")||{value:'both'}).value;
+  if(dirSetting==='up'&&dir!==-1) {} // Only Ups fires on rise signal
+  if(dirSetting==='down'&&dir!==1) {} // Only Downs fires on fall signal
+  if(dirSetting==='up'&&dir===-1) return;
+  if(dirSetting==='down'&&dir===1) return;
+
+  // Check max-loss stop
+  const maxLoss=parseInt(($("ouMaxLoss")||{value:'3'}).value||'3',10);
+  if(maxLoss&&ouMartStep>=maxLoss){
+    const lbl=$("ouArmStatus");
+    if(lbl) lbl.textContent=`Stopped: reached ${maxLoss} consecutive loss limit.`;
+    const cb=$("ouArm"); if(cb) cb.checked=false;
+    ouArmed=false; return;
+  }
+
+  // Check fingerprint
+  const fp=ouEvalFingerprint(dir);
+  if(!fp.pass){
+    ouSkips++;
+    const sl=$("ouSkipLog"); if(sl) sl.textContent=`Fingerprint skips: ${ouSkips} (last: ${fp.score}/5)`;
+    const sts=$("ouArmStatus"); if(sts) sts.textContent=`Signal skipped — fingerprint ${fp.score}/5 (need 5/5)`;
+    return;
+  }
+
+  ouPlaceTrade(dir,'auto');
+  const sts=$("ouArmStatus"); if(sts) sts.textContent=`Fired ${dir===1?'RUNHIGH':'RUNLOW'} at ${price.toFixed(decimals)} · M-step ${ouMartStep}`;
+}
+
+// ── Settlement (called by gridUpdateContract) ─────────────────────────
+function ouSettleContract(id, won){
+  const row=ouOpenContracts[id]; if(!row) return;
+  const strat=($("ouMartingale")||{value:'martingale'}).value;
+  ouMult()._strat=strat;
+  ouMult().record(row.stake||1, won);
+  if(won){
+    ouMartStep=0;
+    ouCurrentStake=Math.max(0.35,parseFloat(($("ouStake")||{value:'1'}).value||'1'));
+  } else {
+    ouMartStep++;
+    ouCurrentStake=Math.max(0.35, ouMult().getNext(strat));
+  }
+  delete ouOpenContracts[id];
+  gridSet('ouMStep',ouMartStep);
+  gridSet('ouCurStake',ouCurrentStake.toFixed(2));
+  ouRenderTrades(); ouRenderStats();
+}
+
+// ── Render ─────────────────────────────────────────────────────────────
+function ouRenderTrades(){
+  const body=$("ouTradeBody"); if(!body) return;
+  if(!ouTrades.length){
+    body.innerHTML='<tr><td colspan="12" class="sig-empty">No trades yet.</td></tr>'; return;
+  }
+  const dec=decimals;
+  body.innerHTML=ouTrades.map(t=>{
+    const dirTxt=t.dir===1?'⬆ UP':'⬇ DOWN';
+    const dirCls=t.dir===1?'cell-pos':'cell-neg';
+    const pCls=t.pnl==null?'cell-mut':t.pnl>=0?'cell-pos':'cell-neg';
+    const sCls=t.status==='won'?'cell-pos':t.status==='lost'?'cell-neg':/reject/.test(t.status)?'cell-warn':'cell-mut';
+    return `<tr>
+      <td class="l">${fmtTime(t.time)}</td>
+      <td class="l" style="color:var(--accent)">${t.contractType}</td>
+      <td class="${dirCls}" style="font-weight:700">${dirTxt}</td>
+      <td>${t.stake!=null?Number(t.stake).toFixed(2):'—'}</td>
+      <td>5 ticks</td>
+      <td>${t.entry!=null?fmtPrice(t.entry,dec):'—'}</td>
+      <td>${t.exit!=null?fmtPrice(t.exit,dec):'—'}</td>
+      <td>${t.payout!=null?Number(t.payout).toFixed(2):'—'}</td>
+      <td class="${pCls}">${t.pnl!=null?(t.pnl>=0?'+':'')+t.pnl.toFixed(2):'—'}</td>
+      <td class="${sCls} l">${t.status}</td>
+      <td class="cell-mut" style="font-size:10px">${t.fp!=null?t.fp+'/5':'—'}</td>
+      <td class="cell-mut">${t.mStep!=null?t.mStep:'0'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function ouRenderStats(){
+  let won=0,lost=0,net=0,any=false;
+  ouTrades.forEach(t=>{
+    if(t.status==='won'){ won++; if(t.pnl!=null){net+=t.pnl;any=true;} }
+    if(t.status==='lost'){ lost++; if(t.pnl!=null){net+=t.pnl;any=true;} }
+  });
+  const total=won+lost;
+  gridSet('ouWon',won); gridSet('ouLost',lost);
+  gridSet('ouRate',total>0?(won/total*100).toFixed(1)+'%':'—');
+  const pEl=$("ouPnL");
+  if(pEl){
+    pEl.textContent=any?(net>=0?'+':'')+net.toFixed(2)+' '+(typeof gridCurrency!=='undefined'?gridCurrency:'USD'):'—';
+    pEl.className='em-val '+(any?(net>=0?'up':'dn'):'');
+  }
+  const msEl=$("ouMStep"); if(msEl) msEl.textContent=ouMartStep;
+  const csEl=$("ouCurStake");
+  if(csEl) csEl.textContent=ouCurrentStake!=null?ouCurrentStake.toFixed(2):'—';
 }
 
 try {
