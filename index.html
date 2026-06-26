@@ -740,7 +740,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
         </div>
         <div id="gridAcctPickBlock" style="display:none;margin-top:13px">
           <div class="gc-field">
-            <label for="gridAcctPick">Account to trade on</label>
+            <label for="gridAcctPick">Account to trade on <span style="color:var(--muted);font-weight:400">(🔴 REAL = live money · 🟢 DEMO = virtual)</span></label>
             <select id="gridAcctPick" onchange="gridSelectAccountFromPicker()"></select>
           </div>
           <div class="gc-row">
@@ -2059,7 +2059,9 @@ function handleTick(price, epoch){
   }
   // Live model validation — always runs when active regardless of which page is shown
   if (typeof lmvOnTick === "function") lmvOnTick(price, epoch, dir);
-  // Only Ups/Downs Bot — refresh fingerprint on every tick
+  // Only Ups/Downs Bot — fires on every tick based on fingerprint (NOT on 5-tick run signal)
+  if (typeof ouHandleSignal === "function") ouHandleSignal(dir, price, epoch);
+  // Refresh fingerprint display when on the OU bot page
   if (typeof ouRefreshFingerprint === "function"){
     if(document.getElementById("page-oubot")&&document.getElementById("page-oubot").classList.contains("active"))
       ouRefreshFingerprint();
@@ -4560,21 +4562,56 @@ async function gridLoadAccounts(){
     return;
   }
 
+  gridPopulateAccountPicker();
+}
+
+// Populate the account picker — called after loading accounts or after
+// receiving additional accounts from a WebSocket authorize response.
+function gridPopulateAccountPicker(){
   const pickBlock = $("gridAcctPickBlock"), loginBlock = $("gridLoginBlock");
   if (loginBlock) loginBlock.style.display = "none";
   if (pickBlock) pickBlock.style.display = "block";
   const sel = $("gridAcctPick");
   if (sel){
-    sel.innerHTML = gridAccounts.map(a =>
-      `<option value="${a.account_id}">${a.account_id} · ${(a.account_type||"").toUpperCase()} · ${a.currency||""}</option>`
-    ).join("");
+    // Sort: demo accounts last so real accounts appear first
+    const sorted = [...gridAccounts].sort((a,b)=>{
+      const aDemo = (a.account_type||'').toLowerCase().includes('virtual') || (a.is_virtual===1) ? 1 : 0;
+      const bDemo = (b.account_type||'').toLowerCase().includes('virtual') || (b.is_virtual===1) ? 1 : 0;
+      return aDemo - bDemo;
+    });
+    const prev = sel.value;
+    sel.innerHTML = sorted.map(a => {
+      const isDemo = (a.account_type||'').toLowerCase().includes('virtual') || a.is_virtual===1;
+      const label = `${a.account_id} · ${isDemo ? '🟢 DEMO' : '🔴 REAL'} · ${a.currency||''}`;
+      return `<option value="${a.account_id}">${label}</option>`;
+    }).join("");
     try {
       const last = localStorage.getItem(ACCTID_KEY);
       if (last && gridAccounts.some(a => a.account_id === last)) sel.value = last;
+      else if (prev && gridAccounts.some(a => a.account_id === prev)) sel.value = prev;
     } catch(_){}
   }
   gridConnState("off"); // accounts loaded, not yet connected to a WS
   const connBtn = $("gridConnectBtn"); if (connBtn) connBtn.disabled = false;
+}
+
+// Merge additional accounts discovered from WebSocket authorize/account_list
+function gridMergeAccounts(newAccounts){
+  if (!newAccounts || !newAccounts.length) return;
+  let changed = false;
+  newAccounts.forEach(na => {
+    if (!gridAccounts.some(a => a.account_id === na.account_id)){
+      gridAccounts.push({
+        account_id: na.account_id || na.loginid,
+        account_type: na.is_virtual ? 'virtual' : 'real',
+        currency: na.currency,
+        is_virtual: na.is_virtual,
+        balance: na.balance,
+      });
+      changed = true;
+    }
+  });
+  if (changed) gridPopulateAccountPicker();
 }
 
 function gridSelectAccountFromPicker(){
@@ -4715,6 +4752,8 @@ function gridHandleMsg(msg){
         gridCurrency = msg.balance.currency || gridCurrency;
         gridSet("gridBal", gridBalance.toFixed(2) + " " + gridCurrency);
         const cur = $("gridCurrency"); if (cur) cur.value = gridCurrency;
+        // balance message sometimes carries account_list — merge to show all accounts
+        if (msg.balance.accounts) gridMergeAccounts(Object.values(msg.balance.accounts));
       }
       break;
     }
@@ -5108,8 +5147,6 @@ function onSignalFired(dir, price, epoch){
   }
   // Engine auto-bot also listens to the same signal
   if (typeof engHandleSignal === "function") engHandleSignal(dir, price, epoch);
-  // Only Ups/Downs Bot
-  if (typeof ouHandleSignal === "function") ouHandleSignal(dir, price, epoch);
 }
 
 // =====================================================================
@@ -7865,6 +7902,7 @@ let ouSkips  = 0;
 let ouMartStep = 0;
 let ouCurrentStake = null;
 let ouOpenContracts = {};  // contractId → trade row
+let ouLastFireTick = -99;  // tick count when last trade fired (cooldown)
 
 // Multiplier instance for the OU bot
 let _ouMult = null;
@@ -8080,14 +8118,19 @@ function ouManualFire(){
 }
 
 // ── Signal hook — fires when 5-tick run confirmed ────────────────────
-// This is called by onSignalFired: dir = 1 (rise) or -1 (fall)
+// This is called from handleTick on EVERY tick (not just on 5-tick signals)
 function ouHandleSignal(dir, price, epoch){
   if(!ouArmed||!gridAuthed) return;
+
+  // Direction filter
   const dirSetting=($("ouDirection")||{value:'both'}).value;
-  if(dirSetting==='up'&&dir!==-1) {} // Only Ups fires on rise signal
-  if(dirSetting==='down'&&dir!==1) {} // Only Downs fires on fall signal
-  if(dirSetting==='up'&&dir===-1) return;
-  if(dirSetting==='down'&&dir===1) return;
+  if(dirSetting==='up'   && dir===-1) return;  // Only Ups: only fire on rising tick
+  if(dirSetting==='down' && dir===1)  return;  // Only Downs: only fire on falling tick
+  if(dir===0) return; // flat tick — skip
+
+  // Cooldown: don't fire on consecutive ticks, only when fingerprint passes
+  // and at least 5 ticks have passed since the last trade
+  if(typeof ouLastFireTick!=='undefined'&&typeof tickCount!=='undefined'&&tickCount-ouLastFireTick<5) return;
 
   // Check max-loss stop
   const maxLoss=parseInt(($("ouMaxLoss")||{value:'3'}).value||'3',10);
@@ -8098,17 +8141,19 @@ function ouHandleSignal(dir, price, epoch){
     ouArmed=false; return;
   }
 
-  // Check fingerprint
+  // Check fingerprint — all 5 must pass
   const fp=ouEvalFingerprint(dir);
   if(!fp.pass){
     ouSkips++;
-    const sl=$("ouSkipLog"); if(sl) sl.textContent=`Fingerprint skips: ${ouSkips} (last: ${fp.score}/5)`;
-    const sts=$("ouArmStatus"); if(sts) sts.textContent=`Signal skipped — fingerprint ${fp.score}/5 (need 5/5)`;
+    const sl=$("ouSkipLog"); if(sl) sl.textContent=`Fingerprint skips: ${ouSkips} (last: ${fp.score}/5 factors met)`;
+    const sts=$("ouArmStatus"); if(sts) sts.textContent=`Tick skipped — fingerprint ${fp.score}/5 (need 5/5)`;
     return;
   }
 
+  // All conditions met — fire
+  ouLastFireTick=typeof tickCount!=='undefined'?tickCount:0;
   ouPlaceTrade(dir,'auto');
-  const sts=$("ouArmStatus"); if(sts) sts.textContent=`Fired ${dir===1?'RUNHIGH':'RUNLOW'} at ${price.toFixed(decimals)} · M-step ${ouMartStep}`;
+  const sts=$("ouArmStatus"); if(sts) sts.textContent=`Fired ${dir===1?'RUNHIGH':'RUNLOW'} at ${price.toFixed(decimals)} · M-step ${ouMartStep} · fingerprint 5/5`;
 }
 
 // ── Settlement (called by gridUpdateContract) ─────────────────────────
