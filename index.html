@@ -4537,19 +4537,16 @@ function gridStartLogin(){
   window.location.assign(BACKEND_URL + "/auth/start");
 }
 
-// ── Step 2: ask the backend whether this browser has a valid session.
-// Called on page load and after returning from Deriv login.
+// ── Step 2: check session and load accounts ───────────────────────────
 async function gridCheckSession(){
   try {
     const resp = await fetch(BACKEND_URL + "/me/session", { credentials: "include" });
-    const body = await resp.json().catch(() => null);
+    const body = await resp.json().catch(()=>null);
     gridLoggedIn = !!(body && body.logged_in);
-  } catch (e) {
+  } catch(e){
     gridLoggedIn = false;
-    const isNetErr = e instanceof TypeError;
-    if (isNetErr){
-      gridDiag(`<b>Could not reach the backend.</b> Checked <code>${BACKEND_URL}/me/session</code> — confirm the Worker is deployed and its ALLOWED_ORIGIN matches this page's origin.`, true);
-    }
+    if (e instanceof TypeError)
+      gridDiag(`<b>Cannot reach backend.</b> <code>${BACKEND_URL}/me/session</code> — check Worker is deployed.`, true);
     return;
   }
   if (gridLoggedIn){
@@ -4587,37 +4584,46 @@ async function gridLoadAccounts(){
   let raw = [];
   try {
     const resp = await fetch(BACKEND_URL + "/me/accounts", { credentials: "include" });
-    let body = null;
-    try { body = await resp.json(); } catch(_){}
+    const body = await resp.json().catch(()=>null);
     if (!resp.ok) throw new Error((body && body.message) || `HTTP ${resp.status}`);
-    if (body && body.error) throw new Error(body.message || "Account fetch error — log out and back in.");
+    if (body && body.error && body.error !== "no_accounts")
+      throw new Error(body.message || "Account error — log out and back in.");
     raw = (body && body.data) || [];
     if (!raw.length) throw new Error("No accounts returned — log out and log back in.");
-  } catch (e) {
-    gridDiag(
-      `<b>Could not list accounts.</b> ${
-        e instanceof TypeError
-          ? "Could not reach <code>" + BACKEND_URL + "/me/accounts</code>."
-          : "Backend: <b>" + (e.message||"unknown") + "</b>."
-      }`, true
-    );
+  } catch(e){
+    gridDiag(`<b>Could not list accounts.</b> ${
+      e instanceof TypeError
+        ? `Cannot reach <code>${BACKEND_URL}/me/accounts</code>.`
+        : `Backend: <b>${e.message||"unknown"}</b>.`
+    }`, true);
     gridConnState("off");
     return;
   }
 
-  // Normalise every account to a consistent shape.
-  // account_type from backend: "virtual" (demo) or "trading" (real).
-  // Also detect demo by loginid prefix: VR... or VRTC...
+  // Normalise: Deriv returns account_type "demo" or "real" from REST API.
+  // Also set is_virtual based on account_type OR loginid prefix (VR...)
   gridAccounts = raw.map(a => {
-    const id   = String(a.account_id || a.loginid || "");
-    const type = String(a.account_type || "").toLowerCase();
-    const virt = (
-      a.is_virtual === 1 || a.is_virtual === true ||
-      type.includes("virtual") ||
-      /^VR/i.test(id)
-    );
-    return { account_id: id, account_type: virt ? "virtual" : "trading", currency: String(a.currency || "USD"), is_virtual: virt ? 1 : 0 };
+    const id     = String(a.account_id || a.loginid || "");
+    const type   = String(a.account_type || "").toLowerCase();
+    const isDemo = type === "demo" || type === "virtual" || /^VR/i.test(id);
+    return {
+      account_id:   id,
+      account_type: isDemo ? "virtual" : "trading",
+      currency:     String(a.currency || "USD"),
+      is_virtual:   isDemo ? 1 : 0,
+      balance:      a.balance != null ? Number(a.balance) : null,
+    };
   }).filter(a => a.account_id);
+
+  // Pre-populate _acctData with balances from the REST response
+  // so the Accounts page shows balances immediately before WS connects
+  gridAccounts.forEach(a => {
+    if (a.balance != null && !(_acctData[a.account_id]?.balance != null)){
+      if (!_acctData[a.account_id]) _acctData[a.account_id] = { pnl:0, trades:0 };
+      _acctData[a.account_id].balance  = a.balance;
+      _acctData[a.account_id].currency = a.currency;
+    }
+  });
 
   gridBuildPicker();
 }
@@ -4667,77 +4673,78 @@ function gridSelectAccountFromPicker(){
   if (sel && sel.value){ try { localStorage.setItem(ACCTID_KEY, sel.value); } catch(_){} }
 }
 
-// ── Step 4: request an OTP for the chosen account, open the WS ────────
+// ── Step 4: get OTP for chosen account, open WS, subscribe balance ──────
+// Flow:
+//   1. POST /ws/otp {account_id} → { url }  (Deriv returns /ws/real or /ws/demo)
+//   2. new WebSocket(url)
+//   3. onopen: send { balance:1, subscribe:1 } for live updates
+//   4. onopen: send { proposal_open_contract:1, subscribe:1 }
 async function gridConnect(){
   if (gridConnecting) return;
   if (!gridLoggedIn){ alert("Login with Deriv first."); return; }
-  const sel = $("gridAcctPick");
+  const sel    = $("gridAcctPick");
   const acctId = sel && sel.value;
-  if (!acctId){ alert("Pick an account to trade on first."); return; }
+  if (!acctId){ alert("Pick an account first."); return; }
+
   gridDiag(null);
   gridConnecting = true;
   gridConnState("connecting");
-  let otpUrl;
+
+  // Step 1: get one-time WS URL from backend
+  let wsUrl;
   try {
     const resp = await fetch(BACKEND_URL + "/ws/otp", {
-      method: "POST",
+      method:      "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ account_id: acctId }),
+      headers:     { "Content-Type": "application/json" },
+      body:        JSON.stringify({ account_id: acctId }),
     });
-    let body = null;
-    try { body = await resp.json(); } catch(_){}
-    if (!resp.ok){
-      const m = (body && body.message) || `HTTP ${resp.status}`;
-      throw new Error(m);
-    }
-    otpUrl = body && body.url;
-    if (!otpUrl) throw new Error("Backend response did not include a WebSocket URL.");
-  } catch (e) {
+    const body = await resp.json().catch(()=>null);
+    if (!resp.ok) throw new Error((body && body.message) || `HTTP ${resp.status}`);
+    wsUrl = body && body.url;
+    if (!wsUrl) throw new Error("No WebSocket URL returned by backend.");
+  } catch(e){
     gridConnecting = false;
     gridConnState("off");
-    const isNetErr = e instanceof TypeError;
-    gridDiag(
-      `<b>Could not get an authenticated WebSocket URL.</b> ${isNetErr
-        ? "Could not reach <code>" + BACKEND_URL + "/ws/otp</code>."
-        : "Backend reported: <b>" + (e.message || "unknown error") + "</b>. Your session may have expired — log in again."}`,
-      true
-    );
+    gridDiag(`<b>Could not get WS URL for ${acctId}.</b> ${
+      e instanceof TypeError
+        ? `Cannot reach <code>${BACKEND_URL}/ws/otp</code>.`
+        : `Backend: <b>${e.message||"unknown"}</b>. Try logging out and in again.`
+    }`, true);
     return;
   }
 
-  try { gridWs = new WebSocket(otpUrl); }
+  // Step 2: open the WebSocket
+  try { gridWs = new WebSocket(wsUrl); }
   catch(e){
-    gridConnecting = false;
-    gridConnState("off");
-    gridDiag("<b>Could not open the WebSocket.</b> " + (e.message || ""), true);
+    gridConnecting = false; gridConnState("off");
+    gridDiag("<b>Could not open WebSocket:</b> " + (e.message||""), true);
     return;
   }
 
+  // Step 3: on open, subscribe to balance + open contracts
   gridWs.onopen = () => {
     gridConnecting = false;
     gridAuthed = true;
     gridConnState("on");
     gridDiag(null);
 
-    // Subscribe to live balance updates (subscribe:1 = push on every change)
+    // Subscribe to live balance updates (pushes on every balance change)
     gridWs.send(JSON.stringify({ balance: 1, subscribe: 1 }));
-    // Subscribe to open contract updates
+    // Subscribe to open contract lifecycle events
     gridWs.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 }));
 
-    // Determine demo/real and currency from our normalised account list
-    const meta = gridAccounts.find(a => a.account_id === acctId);
+    // Set account metadata
+    const meta    = gridAccounts.find(a => a.account_id === acctId);
     gridLoginId   = acctId;
     gridIsVirtual = meta ? meta.is_virtual === 1 : /^VR/i.test(acctId);
     gridCurrency  = (meta && meta.currency) || gridCurrency;
 
-    // Persist the selection
     try { localStorage.setItem(ACCTID_KEY, acctId); } catch(_){}
 
-    // Update UI labels
     gridSet("gridAcct", acctId);
     gridSet("gridType", gridIsVirtual ? "🟢 Virtual / Demo" : "🔴 Real");
-    const curEl = $("gridCurrency"); if (curEl) curEl.value = gridCurrency;
+    const cur = $("gridCurrency"); if (cur) cur.value = gridCurrency;
 
     if (gridPing) clearInterval(gridPing);
     gridPing = setInterval(() => {
@@ -4750,22 +4757,22 @@ async function gridConnect(){
     if (typeof engUpdateConnStatus  === "function") engUpdateConnStatus();
     if (typeof ouUpdateConnStatus   === "function"){ ouUpdateConnStatus(); ouRefreshFingerprint(); }
   };
+
   gridWs.onmessage = ev => {
-    let msg; try { msg = JSON.parse(ev.data); } catch(_) { return; }
+    let msg; try { msg = JSON.parse(ev.data); } catch(_){ return; }
     gridHandleMsg(msg);
   };
   gridWs.onerror = () => {};
-  gridWs.onclose = (ev) => {
-    gridConnecting = false;
-    gridAuthed = false;
+  gridWs.onclose = ev => {
+    gridConnecting = false; gridAuthed = false;
     if (gridPing){ clearInterval(gridPing); gridPing = null; }
     gridConnState("off");
     if (gridArmed) gridDisarm("connection closed");
-    if (ev && ev.code && ev.code !== 1000){
-      gridDiag(`<b>WebSocket closed</b> (code ${ev.code}${ev.reason ? ": " + ev.reason : ""}). The OTP is short-lived — click Connect to this account again for a fresh one.`, true);
-    }
+    if (ev && ev.code && ev.code !== 1000)
+      gridDiag(`<b>WebSocket closed</b> (code ${ev.code}). Click Connect again.`, true);
   };
 }
+
 
 // ── Logout: ask the backend to clear the session, then reset local UI ─
 async function gridLogout(){
