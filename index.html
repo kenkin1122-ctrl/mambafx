@@ -4600,17 +4600,21 @@ async function gridLoadAccounts(){
     return;
   }
 
-  // Normalise: Deriv returns account_type "demo" or "real" from REST API.
-  // Also set is_virtual based on account_type OR loginid prefix (VR...)
+  // Normalise accounts from the backend.
+  // IMPORTANT: The backend's normaliseAccount() already sets is_virtual correctly
+  // using loginid prefix (VR* = virtual) + the WS authorize account_list field.
+  // We use is_virtual from the server as authoritative.
+  // We do NOT trust account_type string (REST sometimes mislabels accounts).
   gridAccounts = raw.map(a => {
-    const id     = String(a.account_id || a.loginid || "");
-    const type   = String(a.account_type || "").toLowerCase();
-    const isDemo = type === "demo" || type === "virtual" || /^VR/i.test(id);
+    const id       = String(a.account_id || a.loginid || "");
+    // Use server-set is_virtual as primary signal
+    // Cross-check: loginid starting with VR is always virtual regardless
+    const isVirtual = (a.is_virtual === 1) || /^VR/i.test(id);
     return {
       account_id:   id,
-      account_type: isDemo ? "virtual" : "trading",
+      account_type: isVirtual ? "virtual" : "trading",
       currency:     String(a.currency || "USD"),
-      is_virtual:   isDemo ? 1 : 0,
+      is_virtual:   isVirtual ? 1 : 0,
       balance:      a.balance != null ? Number(a.balance) : null,
     };
   }).filter(a => a.account_id);
@@ -4673,12 +4677,11 @@ function gridSelectAccountFromPicker(){
   if (sel && sel.value){ try { localStorage.setItem(ACCTID_KEY, sel.value); } catch(_){} }
 }
 
-// ── Step 4: get OTP for chosen account, open WS, subscribe balance ──────
-// Flow:
-//   1. POST /ws/otp {account_id} → { url }  (Deriv returns /ws/real or /ws/demo)
-//   2. new WebSocket(url)
-//   3. onopen: send { balance:1, subscribe:1 } for live updates
-//   4. onopen: send { proposal_open_contract:1, subscribe:1 }
+// ── Step 4: get WS credentials, open WS, authorize, subscribe ────────
+// POST /ws/otp → { url, token }
+//   token present: open WS at url, send { authorize: token } on open
+//   token null:    url is a one-time OTP URL, already authorized on open
+// This works for BOTH real (DOT...) and virtual/demo (VRTC...) accounts.
 async function gridConnect(){
   if (gridConnecting) return;
   if (!gridLoggedIn){ alert("Login with Deriv first."); return; }
@@ -4690,74 +4693,59 @@ async function gridConnect(){
   gridConnecting = true;
   gridConnState("connecting");
 
-  // Step 1: get one-time WS URL from backend
-  let wsUrl;
+  let wsUrl, wsToken;
   try {
     const resp = await fetch(BACKEND_URL + "/ws/otp", {
-      method:      "POST",
-      credentials: "include",
-      headers:     { "Content-Type": "application/json" },
-      body:        JSON.stringify({ account_id: acctId }),
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ account_id: acctId }),
     });
     const body = await resp.json().catch(()=>null);
     if (!resp.ok) throw new Error((body && body.message) || `HTTP ${resp.status}`);
-    wsUrl = body && body.url;
+    wsUrl   = body && body.url;
+    wsToken = body && body.token;   // present for per-account-token flow; null for OTP-URL flow
     if (!wsUrl) throw new Error("No WebSocket URL returned by backend.");
   } catch(e){
     gridConnecting = false;
     gridConnState("off");
-    gridDiag(`<b>Could not get WS URL for ${acctId}.</b> ${
+    gridDiag(`<b>Could not get WS credentials for ${acctId}.</b> ${
       e instanceof TypeError
         ? `Cannot reach <code>${BACKEND_URL}/ws/otp</code>.`
-        : `Backend: <b>${e.message||"unknown"}</b>. Try logging out and in again.`
+        : `Backend: <b>${e.message||"unknown"}</b>. Log out and log in again.`
     }`, true);
     return;
   }
 
-  // Step 2: open the WebSocket
   try { gridWs = new WebSocket(wsUrl); }
   catch(e){
     gridConnecting = false; gridConnState("off");
-    gridDiag("<b>Could not open WebSocket:</b> " + (e.message||""), true);
+    gridDiag("<b>Cannot open WebSocket:</b> " + (e.message||""), true);
     return;
   }
 
-  // Step 3: on open, subscribe to balance + open contracts
   gridWs.onopen = () => {
-    gridConnecting = false;
-    gridAuthed = true;
-    gridConnState("on");
-    gridDiag(null);
-
-    // Subscribe to live balance updates (pushes on every balance change)
-    gridWs.send(JSON.stringify({ balance: 1, subscribe: 1 }));
-    // Subscribe to open contract lifecycle events
-    gridWs.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 }));
-
-    // Set account metadata
-    const meta    = gridAccounts.find(a => a.account_id === acctId);
-    gridLoginId   = acctId;
-    gridIsVirtual = meta ? meta.is_virtual === 1 : /^VR/i.test(acctId);
-    gridCurrency  = (meta && meta.currency) || gridCurrency;
-
-    try { localStorage.setItem(ACCTID_KEY, acctId); } catch(_){}
-
-    gridSet("gridAcct", acctId);
-    gridSet("gridType", gridIsVirtual ? "🟢 Virtual / Demo" : "🔴 Real");
-    const cur = $("gridCurrency"); if (cur) cur.value = gridCurrency;
-
-    if (gridPing) clearInterval(gridPing);
-    gridPing = setInterval(() => {
-      if (gridWs && gridWs.readyState === WebSocket.OPEN)
-        gridWs.send(JSON.stringify({ ping: 1 }));
-    }, 20000);
-
-    if (typeof digUpdateConnStatus  === "function") digUpdateConnStatus();
-    if (typeof diagUpdateConnStatus === "function") diagUpdateConnStatus();
-    if (typeof engUpdateConnStatus  === "function") engUpdateConnStatus();
-    if (typeof ouUpdateConnStatus   === "function"){ ouUpdateConnStatus(); ouRefreshFingerprint(); }
+    if (wsToken){
+      // Per-account token flow: send authorize first, then subscribe after confirmation
+      gridWs.send(JSON.stringify({ authorize: wsToken, req_id: 1 }));
+      // Temporary handler to wait for authorize response
+      const waitAuth = ev => {
+        let m; try { m = JSON.parse(ev.data); } catch(_){ return; }
+        if (m.req_id !== 1 || m.msg_type !== "authorize") return;
+        gridWs.removeEventListener("message", waitAuth);
+        if (m.error){
+          gridDiag(`<b>Account authorize failed:</b> ${m.error.message||"unknown"} — log out and in again.`, true);
+          gridWs.close();
+          return;
+        }
+        // Authorized — now subscribe and set up UI
+        gridWsSubscribeAndInit(acctId);
+      };
+      gridWs.addEventListener("message", waitAuth);
+    } else {
+      // OTP URL flow: already authorized on open, subscribe immediately
+      gridWsSubscribeAndInit(acctId);
+    }
   };
-
   gridWs.onmessage = ev => {
     let msg; try { msg = JSON.parse(ev.data); } catch(_){ return; }
     gridHandleMsg(msg);
@@ -4771,6 +4759,43 @@ async function gridConnect(){
     if (ev && ev.code && ev.code !== 1000)
       gridDiag(`<b>WebSocket closed</b> (code ${ev.code}). Click Connect again.`, true);
   };
+}
+
+// Called once WS is open AND authorized — subscribe and update UI
+function gridWsSubscribeAndInit(acctId){
+  gridConnecting = false;
+  gridAuthed = true;
+  gridConnState("on");
+  gridDiag(null);
+
+  gridWs.send(JSON.stringify({ balance: 1, subscribe: 1 }));
+  gridWs.send(JSON.stringify({ proposal_open_contract: 1, subscribe: 1 }));
+
+  const meta    = gridAccounts.find(a => a.account_id === acctId);
+  gridLoginId   = acctId;
+  // is_virtual: use the flag from gridAccounts (set by normaliseAccount on the server)
+  // NEVER derive from account_type string; use loginid prefix as tie-breaker
+  gridIsVirtual = meta
+    ? meta.is_virtual === 1
+    : /^VR/i.test(acctId);
+  gridCurrency  = (meta && meta.currency) || gridCurrency;
+
+  try { localStorage.setItem(ACCTID_KEY, acctId); } catch(_){}
+
+  gridSet("gridAcct", acctId);
+  gridSet("gridType", gridIsVirtual ? "🟢 Virtual / Demo" : "🔴 Real");
+  const cur = $("gridCurrency"); if (cur) cur.value = gridCurrency;
+
+  if (gridPing) clearInterval(gridPing);
+  gridPing = setInterval(() => {
+    if (gridWs && gridWs.readyState === WebSocket.OPEN)
+      gridWs.send(JSON.stringify({ ping: 1 }));
+  }, 20000);
+
+  if (typeof digUpdateConnStatus  === "function") digUpdateConnStatus();
+  if (typeof diagUpdateConnStatus === "function") diagUpdateConnStatus();
+  if (typeof engUpdateConnStatus  === "function") engUpdateConnStatus();
+  if (typeof ouUpdateConnStatus   === "function"){ ouUpdateConnStatus(); ouRefreshFingerprint(); }
 }
 
 
