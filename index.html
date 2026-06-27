@@ -1336,7 +1336,50 @@ table.an-table tbody tr:last-child td{border-bottom:none}
         </div>
         <button class="gc-btn" id="pbTrainBtn" onclick="pbTrain()">🚀 Run Pipeline</button>
         <button class="gc-btn" id="pbPredBtn" onclick="pbPredict()" disabled>⚡ Predict Next</button>
+        <button class="gc-btn" id="pbAutoBtn" onclick="pbToggleAutoLoop()" style="background:rgba(251,191,36,.08);border-color:#fbbf24;color:#fbbf24">▶ Auto Loop</button>
+        <button class="gc-btn" onclick="pbSaveModel()" id="pbSaveBtn" disabled title="Save trained model to localStorage">💾 Save Model</button>
+        <button class="gc-btn" onclick="pbLoadModel()" title="Load previously saved model">📂 Load Model</button>
         <span id="pbStatus" style="font-size:10px;color:var(--muted)">Need ≥20 signal records to train.</span>
+      </div>
+
+      <!-- Auto-loop config -->
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-top:10px;padding:10px 12px;background:#0a0e17;border:1px solid rgba(251,191,36,.15);border-radius:10px">
+        <div style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:#fbbf24;font-weight:700;white-space:nowrap;align-self:center">⚙ Auto Loop</div>
+        <div class="gc-field" style="margin:0">
+          <label for="pbAutoRetrain">Retrain every N new runs</label>
+          <input id="pbAutoRetrain" type="number" min="5" max="500" value="20" style="padding:5px 8px;width:80px">
+        </div>
+        <div class="gc-field" style="margin:0">
+          <label for="pbAutoMinRecs">Min records to train</label>
+          <input id="pbAutoMinRecs" type="number" min="20" max="2000" value="30" style="padding:5px 8px;width:80px">
+        </div>
+        <div class="gc-field" style="margin:0;display:flex;align-items:center;gap:6px">
+          <input type="checkbox" id="pbAutoPredict" checked style="width:14px;height:14px">
+          <label for="pbAutoPredict" style="margin:0;font-size:10px;color:var(--muted);cursor:pointer">Predict after each train</label>
+        </div>
+        <div class="gc-field" style="margin:0;display:flex;align-items:center;gap:6px">
+          <input type="checkbox" id="pbPredOnSignal" checked style="width:14px;height:14px">
+          <label for="pbPredOnSignal" style="margin:0;font-size:10px;color:var(--muted);cursor:pointer">Predict on every new signal</label>
+        </div>
+        <div class="gc-field" style="margin:0;display:flex;align-items:center;gap:6px">
+          <input type="checkbox" id="pbAutoSave" checked style="width:14px;height:14px">
+          <label for="pbAutoSave" style="margin:0;font-size:10px;color:var(--muted);cursor:pointer">Auto-save after retrain</label>
+        </div>
+        <div id="pbAutoStatus" style="font-size:10px;color:var(--muted);margin-left:auto;align-self:center">loop inactive</div>
+      </div>
+
+      <!-- Saved model status -->
+      <div id="pbModelHealthCard" style="display:none;margin-top:10px;padding:10px 12px;background:#0a0e17;border:1px solid var(--line);border-radius:10px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">
+          <div class="em-card"><div class="em-lab">Best Model</div><div id="pbHlModel" class="em-val acc">—</div></div>
+          <div class="em-card"><div class="em-lab">AUC</div><div id="pbHlAuc" class="em-val acc">—</div></div>
+          <div class="em-card"><div class="em-lab">F1</div><div id="pbHlF1" class="em-val acc">—</div></div>
+          <div class="em-card"><div class="em-lab">Train / Test</div><div id="pbHlSplit" class="em-val neu">—</div></div>
+          <div class="em-card"><div class="em-lab">Features</div><div id="pbHlFeats" class="em-val neu">—</div></div>
+          <div class="em-card"><div class="em-lab">Trained at</div><div id="pbHlTime" class="em-val neu">—</div></div>
+          <div class="em-card"><div class="em-lab">Loop cycles</div><div id="pbHlCycles" class="em-val neu">0</div></div>
+          <div class="em-card"><div class="em-lab">Saved</div><div id="pbHlSaved" class="em-val neu">—</div></div>
+        </div>
       </div>
     </div>
 
@@ -5110,6 +5153,12 @@ function onSignalFired(dir, price, epoch){
   }
   // Engine auto-bot also listens to the same signal
   if (typeof engHandleSignal === "function") engHandleSignal(dir, price, epoch);
+  // Auto-predict on every new signal if models are loaded and setting enabled
+  if (typeof _pbModels !== 'undefined' && _pbModels &&
+      document.getElementById("pbPredOnSignal") &&
+      document.getElementById("pbPredOnSignal").checked){
+    if (typeof pbAutoPredict === 'function') pbAutoPredict();
+  }
 }
 
 // =====================================================================
@@ -7151,13 +7200,259 @@ function pbMetrics(scores, labels, thr=0.5){
 let _pbModels=null;  // {xgb, lgb, cb, best, featIdxs, featNames}
 let _pbHistory=[];   // prediction history
 
+// ── Auto-loop state ───────────────────────────────────────────────────
+let _pbAutoRunning  = false;
+let _pbAutoTimer    = null;
+let _pbLastTrainN   = 0;    // signalRecords.length at last train
+let _pbLoopCycles   = 0;
+const PB_MODEL_KEY  = 'mambafx_pb_model_v1';  // localStorage key
+
+// ── Model serialisation ───────────────────────────────────────────────
+// Trees are plain nested objects — fully JSON-serialisable.
+// We save: trees for all 3 models + all metadata needed to predict.
+function pbSerialiseModel(m){
+  if(!m) return null;
+  return {
+    v:1,
+    savedAt: Date.now(),
+    bestName: m.best.name,
+    xgbTrees: m.xgb.trees, xgbImp: m.xgb.imp,
+    lgbTrees: m.lgb.trees, lgbImp: m.lgb.imp,
+    cbTrees:  m.cb.trees,  cbImp:  m.cb.imp,
+    bestMet:  m.bestMet,
+    selK:     m.selK,
+    topNames: m.topNames,
+    colMeans: m.colMeans,
+    bFeatIdxs:m.bFeatIdxs,
+    nTrain:   m.nTrain,
+    nTest:    m.nTest,
+    splitFrac:m.splitFrac,
+    symbol:   SYMBOL,
+  };
+}
+
+function pbDeserialisedModel(saved){
+  if(!saved||saved.v!==1) return null;
+  // Reconstruct model objects — trees are already plain objects,
+  // just need to attach name + imp so prediction functions work.
+  const xgb={name:'XGBoost', trees:saved.xgbTrees, imp:saved.xgbImp, scores:[]};
+  const lgb={name:'LightGBM',trees:saved.lgbTrees, imp:saved.lgbImp, scores:[]};
+  const cb ={name:'CatBoost', trees:saved.cbTrees,  imp:saved.cbImp,  scores:[]};
+  const best={XGBoost:xgb, LightGBM:lgb, CatBoost:cb}[saved.bestName]||xgb;
+  return {
+    xgb,lgb,cb,best,
+    bestMet:  saved.bestMet,
+    selK:     saved.selK,
+    topNames: saved.topNames,
+    colMeans: saved.colMeans,
+    bFeatIdxs:saved.bFeatIdxs,
+    nTrain:   saved.nTrain,
+    nTest:    saved.nTest,
+    splitFrac:saved.splitFrac,
+    _savedAt: saved.savedAt,
+    _symbol:  saved.symbol,
+  };
+}
+
+function pbSaveModel(){
+  if(!_pbModels){ alert('No trained model to save yet.'); return; }
+  try{
+    const payload=JSON.stringify(pbSerialiseModel(_pbModels));
+    localStorage.setItem(PB_MODEL_KEY, payload);
+    const kb=(payload.length/1024).toFixed(1);
+    const ts=new Date().toLocaleTimeString();
+    const btn=$("pbSaveBtn");
+    if(btn) btn.textContent=`✅ Saved (${kb}kB)`;
+    setTimeout(()=>{ if(btn) btn.textContent='💾 Save Model'; },3000);
+    const hl=$("pbHlSaved"); if(hl) hl.textContent=ts;
+    console.log(`[PB] Model saved — ${kb}kB at ${ts}`);
+  }catch(e){
+    alert('Save failed: '+e.message+' (localStorage may be full — model size can be large)');
+  }
+}
+
+function pbLoadModel(){
+  try{
+    const raw=localStorage.getItem(PB_MODEL_KEY);
+    if(!raw){ alert('No saved model found in localStorage.'); return; }
+    const saved=JSON.parse(raw);
+    const m=pbDeserialisedModel(saved);
+    if(!m){ alert('Saved model format is outdated — retrain to create a new one.'); return; }
+    _pbModels=m;
+    pbUpdateModelHealth();
+    // Enable predict + LMV
+    const predBtn=$("pbPredBtn"); if(predBtn) predBtn.disabled=false;
+    const lmvBtn=$("lmvToggleBtn"); if(lmvBtn) lmvBtn.disabled=false;
+    const saveBtn=$("pbSaveBtn"); if(saveBtn) saveBtn.disabled=false;
+    const ts=saved.savedAt?new Date(saved.savedAt).toLocaleString():'unknown';
+    const sym=saved.symbol||'?';
+    const status=$("pbStatus");
+    if(status) status.textContent=`📂 Model loaded — ${saved.bestName}, AUC ${(saved.bestMet.auc||0).toFixed(3)}, saved ${ts} on ${sym}`;
+    console.log('[PB] Model loaded from localStorage');
+  }catch(e){
+    alert('Load failed: '+e.message);
+  }
+}
+
+function pbUpdateModelHealth(){
+  if(!_pbModels) return;
+  const m=_pbModels;
+  const card=$("pbModelHealthCard"); if(card) card.style.display='block';
+  function set(id,v){ const e=$(id); if(e) e.textContent=v; }
+  set('pbHlModel',  m.best.name);
+  set('pbHlAuc',    m.bestMet?(m.bestMet.auc||0).toFixed(3):'—');
+  set('pbHlF1',     m.bestMet?(m.bestMet.f1*100||0).toFixed(1)+'%':'—');
+  set('pbHlSplit',  (m.nTrain||'?')+' / '+(m.nTest||'?'));
+  set('pbHlFeats',  (m.selK?m.selK.length:'?')+' B-features');
+  set('pbHlTime',   m._savedAt?new Date(m._savedAt).toLocaleTimeString():new Date().toLocaleTimeString());
+  set('pbHlCycles', _pbLoopCycles);
+}
+
+// ── Auto-loop ─────────────────────────────────────────────────────────
+function pbToggleAutoLoop(){
+  _pbAutoRunning=!_pbAutoRunning;
+  const btn=$("pbAutoBtn");
+  if(_pbAutoRunning){
+    if(btn){ btn.textContent='⏹ Stop Loop'; btn.style.background='rgba(255,77,94,.1)'; btn.style.borderColor='#ff4d5e'; btn.style.color='#ff4d5e'; }
+    _pbLastTrainN=signalRecords.length;
+    pbAutoLoopTick();
+    const sts=$("pbAutoStatus"); if(sts) sts.textContent='loop running…';
+  } else {
+    if(_pbAutoTimer){ clearTimeout(_pbAutoTimer); _pbAutoTimer=null; }
+    if(btn){ btn.textContent='▶ Auto Loop'; btn.style.background='rgba(251,191,36,.08)'; btn.style.borderColor='#fbbf24'; btn.style.color='#fbbf24'; }
+    const sts=$("pbAutoStatus"); if(sts) sts.textContent='loop stopped';
+  }
+}
+
+function pbAutoLoopTick(){
+  if(!_pbAutoRunning) return;
+
+  const minRecs=Math.max(20,parseInt(($("pbAutoMinRecs")||{value:'30'}).value||'30',10));
+  const retrainEvery=Math.max(5,parseInt(($("pbAutoRetrain")||{value:'20'}).value||'20',10));
+  const autoPred=($("pbAutoPredict")||{checked:true}).checked;
+  const autoSave=($("pbAutoSave")||{checked:true}).checked;
+  const n=signalRecords.length;
+
+  const sts=$("pbAutoStatus");
+
+  // Conditions to retrain:
+  // 1. Enough records exist
+  // 2. At least `retrainEvery` new records since last train
+  const newSinceLastTrain=n-_pbLastTrainN;
+  const shouldRetrain=n>=minRecs&&(newSinceLastTrain>=retrainEvery||_pbModels===null);
+
+  if(shouldRetrain){
+    if(sts) sts.textContent=`🔄 Retraining… (${n} records, +${newSinceLastTrain} new)`;
+    _pbLastTrainN=n;
+    _pbLoopCycles++;
+
+    // pbTrain is async (uses setTimeout internally) — we chain prediction
+    // by patching a one-shot post-train callback
+    _pbPostTrainCallback=()=>{
+      pbUpdateModelHealth();
+      if(autoSave) pbSaveModel();
+      if(autoPred&&n>=minRecs) pbAutoPredict();
+      if(sts) sts.textContent=`✅ Cycle ${_pbLoopCycles} done — next check in 5s`;
+      // Schedule next tick
+      _pbAutoTimer=setTimeout(pbAutoLoopTick, 5000);
+    };
+    pbTrain();
+  } else {
+    // Not enough new data yet — predict with existing model if available
+    if(_pbModels&&autoPred&&n>=minRecs){
+      pbAutoPredict();
+    }
+    const need=Math.max(0,retrainEvery-newSinceLastTrain);
+    const needRecs=Math.max(0,minRecs-n);
+    if(sts) sts.textContent=needRecs>0
+      ? `waiting for ${needRecs} more records (have ${n})`
+      : `${n} records · next retrain in ${need} more signals`;
+    _pbAutoTimer=setTimeout(pbAutoLoopTick, 5000);
+  }
+}
+
+// Silent prediction — runs without touching the UI confirmation flow
+function pbAutoPredict(){
+  if(!_pbModels) return;
+  const {best,selK,colMeans,bFeatIdxs,xgb,lgb,cb}=_pbModels;
+  const featData=featComputeAll();
+  if(!featData||!featData.matrix.length) return;
+  const rawRow=featData.matrix[0];
+  const bRow=bFeatIdxs.map(fi=>rawRow[fi]);
+  const x=selK.map((k,j)=>{ const v=bRow[k]; return (v!=null&&isFinite(v))?v:colMeans[j]; });
+  const getProb=(model,lrV)=>{ let s=0; model.trees.forEach(t=>s+=lrV*_pbPredictTree(t,x)); return _pbSigmoid(s); };
+  const pXGB=getProb(xgb,0.1), pLGB=getProb(lgb,0.08), pCB=getProb(cb,0.05);
+  const pBest=getProb(best,best.name==='XGBoost'?0.1:best.name==='LightGBM'?0.08:0.05);
+  const avgP=(pXGB+pLGB+pCB)/3;
+  const votes=[pXGB,pLGB,pCB].map(p=>p>=0.5?1:0);
+  const riseVotes=votes.reduce((a,b)=>a+b,0);
+  const pred=pBest>=0.5?'RISE':'FALL';
+  let consensus;
+  if(riseVotes===3)       consensus='STRONG RISE (3/3)';
+  else if(riseVotes===2)  consensus='LEAN RISE (2/3)';
+  else if(riseVotes===1)  consensus='LEAN FALL (2/3)';
+  else                    consensus='STRONG FALL (3/3)';
+
+  // Update confidence meter
+  const pct=(pBest*100).toFixed(1);
+  const dirColor=pBest>=0.5?'var(--up)':'var(--down)';
+  const dirEl=$("pbPredDir"); if(dirEl){ dirEl.textContent=pred==='RISE'?'▲ RISE':'▼ FALL'; dirEl.style.color=dirColor; }
+  const barEl=$("pbConfBar"); if(barEl){ barEl.style.width=pct+'%'; barEl.style.background=dirColor; }
+  const pctEl=$("pbConfPct"); if(pctEl){ pctEl.textContent=pct+'% RISE probability'; pctEl.style.color=dirColor; }
+  const modEl=$("pbPredModel"); if(modEl) modEl.textContent=`Auto-predicted by ${best.name} (loop cycle ${_pbLoopCycles})`;
+
+  // Update vote panel
+  const vRow=(id,name,prob)=>{ const el=$(id); if(!el) return; const vdir=prob>=0.5?'RISE ▲':'FALL ▼'; const vcol=prob>=0.5?'var(--up)':'var(--down)'; el.innerHTML=`<span>${name}</span><span style="color:${vcol};font-weight:700">${vdir} (${(prob*100).toFixed(1)}%)</span>`; };
+  vRow('pbVoteXGB','XGBoost',pXGB); vRow('pbVoteLGB','LightGBM',pLGB); vRow('pbVoteCB','CatBoost',pCB);
+  const consEl=$("pbConsensus"); if(consEl){ const c=riseVotes>=2?'var(--up)':'var(--down)'; consEl.innerHTML=`<span style="color:${c};font-weight:800">${consensus}</span>`; }
+
+  // Add to history
+  const rec=signalRecords[0];
+  _pbHistory.unshift({ time:fmtTime(Math.floor(Date.now()/1000)), pred, conf:pct+'%', actual:rec?(rec.dir===1?'RISE':'FALL'):'—', result:'pending', model:best.name, prob:pBest });
+  if(_pbHistory.length>50) _pbHistory.pop();
+  // Resolve older pending
+  for(let i=1;i<_pbHistory.length;i++){
+    const h=_pbHistory[i]; if(h.result==='pending'&&_pbHistory[i-1]&&_pbHistory[i-1].actual!=='—'){ h.actual=_pbHistory[i-1].actual; h.result=h.pred===h.actual?'✅ WIN':'❌ LOSS'; }
+  }
+  const histBody=$("pbHistBody");
+  if(histBody) histBody.innerHTML=_pbHistory.map(h=>{ const rCls=h.result==='✅ WIN'?'cell-pos':h.result==='❌ LOSS'?'cell-neg':'cell-mut'; const pCls=h.pred==='RISE'?'cell-pos':'cell-neg'; return `<tr><td>${h.time}</td><td class="${pCls}" style="font-weight:700">${h.pred}</td><td>${h.conf}</td><td>${h.actual}</td><td class="${rCls}" style="font-weight:700">${h.result}</td><td class="cell-mut">${h.model}</td></tr>`; }).join('');
+  const res=_pbHistory.filter(h=>h.result!=='pending'); const wins=res.filter(h=>h.result==='✅ WIN').length;
+  const accEl=$("pbHistAccuracy"); if(accEl&&res.length) accEl.textContent=`${wins}/${res.length} correct (${(wins/res.length*100).toFixed(1)}%)`;
+}
+
+// Post-train callback slot (set by auto-loop, called at end of pbTrain)
+let _pbPostTrainCallback=null;
+
+
+
 function pbPageInit(){
   const n=signalRecords.length;
   const status=$("pbStatus");
   const btn=$("pbTrainBtn");
   if(status) status.textContent=n<20?`Need ≥20 signal records (have ${n}).`:`${n} records ready — click Run Pipeline.`;
   if(btn) btn.disabled=n<20;
-  if(_pbModels){ $("pbPredBtn").disabled=false; }
+  // Try to load a previously saved model on first page visit
+  if(!_pbModels){
+    try{
+      const raw=localStorage.getItem(PB_MODEL_KEY);
+      if(raw){
+        const saved=JSON.parse(raw);
+        const m=pbDeserialisedModel(saved);
+        if(m){
+          _pbModels=m;
+          const saveBtn=$("pbSaveBtn"); if(saveBtn) saveBtn.disabled=false;
+          const predBtn=$("pbPredBtn"); if(predBtn) predBtn.disabled=false;
+          const lmvBtn=$("lmvToggleBtn"); if(lmvBtn) lmvBtn.disabled=false;
+          const ts=saved.savedAt?new Date(saved.savedAt).toLocaleString():'?';
+          if(status) status.textContent=`📂 Saved model loaded automatically (${saved.bestName}, AUC ${(saved.bestMet.auc||0).toFixed(3)}, saved ${ts})`;
+        }
+      }
+    }catch(_){}
+  }
+  if(_pbModels){
+    $("pbPredBtn").disabled=false;
+    pbUpdateModelHealth();
+  }
   lmvPageInit();
 }
 
@@ -7358,7 +7653,14 @@ function pbTrain(){
       _pbStep(5,'best'); _pbStep(6,'active');
       $("pbPredBtn").disabled=false;
       const lmvBtn=$("lmvToggleBtn"); if(lmvBtn) lmvBtn.disabled=false;
+      const saveBtn=$("pbSaveBtn"); if(saveBtn) saveBtn.disabled=false;
+      pbUpdateModelHealth();
       if(status) status.textContent=`✅ Pipeline complete — ${best.name} selected (AUC ${bestMet.auc.toFixed(3)}) · no leakage: B-only features, chronological split, feature selection on training set only.`;
+
+      // Fire auto-loop callback if set
+      if(typeof _pbPostTrainCallback==='function'){
+        const cb=_pbPostTrainCallback; _pbPostTrainCallback=null; cb();
+      }
 
     } catch(e){
       console.error('pbTrain error:',e);
