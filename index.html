@@ -490,6 +490,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button id="navDigits" onclick="showPage('digits')">🎲 Digits Bot</button>
     <button id="navDiag" onclick="showPage('diag')">🩺 API Diagnostics</button>
     <button id="navCharts" onclick="showPage('charts')">📈 Indicator Charts</button>
+    <button id="navAdxBot" onclick="showPage('adxbot')">📐 ADX Bot</button>
   </nav>
 
   <!-- ============ PAGE 1: LIVE TRACKER ============ -->
@@ -1758,8 +1759,8 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   <!-- ============ PAGE 8: INDICATOR CHARTS ============ -->
   <div id="page-charts" class="page">
     <div class="grid-card" style="margin-bottom:14px">
-      <h2>📈 Indicator charts — live line graphs</h2>
-      <div class="gc-sub">Real-time price chart, 1-min candles with order flow, 5-min candles, 10-tick candles, and all indicator line graphs — all on one page. Each chart scrolls with the last <b id="chartWindowLabel">200</b> ticks. <button class="gc-btn" style="margin-left:auto" onclick="chartClearHistory()">Clear history</button></div>
+      <h2>📈 Indicator Charts — live candles &amp; indicators</h2>
+      <div class="gc-sub">5-min · 1-min · 10-tick candles, then DMI/ADX · MACD · CCI · Choppiness line charts, then continuous price line, and technical indicators summary at the bottom. Each line chart scrolls the last <b id="chartWindowLabel">200</b> ticks. <button class="gc-btn" style="margin-left:auto" onclick="chartClearHistory()">Clear history</button></div>
       <div class="gc-row" style="gap:12px;align-items:center;flex-wrap:wrap">
         <div class="gc-field" style="margin:0;flex:0 0 auto">
           <label for="chartWindow">Window (ticks)</label>
@@ -1773,7 +1774,85 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       </div>
     </div>
 
-    <!-- Continuous price line -->
+    <!-- 1. 5-minute candles -->
+    <div class="chart-card" style="margin-bottom:14px">
+      <div class="chart-head">
+        <h2>🕯️ Live 5-min candles</h2>
+        <div class="legend" style="font-size:10px;color:var(--muted)">
+          <span id="c5minInfo">Waiting for first 5-min candle…</span>
+        </div>
+      </div>
+      <svg id="chart5min" viewBox="0 0 1000 260" preserveAspectRatio="none" style="width:100%;height:260px;display:block;background:#0d121d;border:1px solid var(--line);border-radius:10px;margin-top:4px"></svg>
+      <div class="sub-note">Each candle = 5 minutes of ticks aggregated in the browser. OHLC coloured green (bullish) / red (bearish). Wick = high/low. Volume bar height = tick count per candle.</div>
+    </div>
+
+    <!-- 2. 1-min candles + order flow -->
+    <div class="chart-card" style="margin-bottom:14px">
+      <div class="chart-head">
+        <h2>🕯️ Live 1-min candles — order flow &amp; volume profile</h2>
+        <div class="legend">
+          <label class="toggle-chip"><input type="checkbox" id="lcVP" checked>Volume Profile</label>
+          <label class="toggle-chip"><input type="checkbox" id="lcVol" checked>Tick Volume</label>
+          <label class="toggle-chip"><input type="checkbox" id="lcOF" checked>Order Flow</label>
+        </div>
+      </div>
+      <svg id="liveCandleChart" viewBox="0 0 1000 320" preserveAspectRatio="none" role="img" aria-label="Live one-minute candlestick chart with volume profile"></svg>
+      <div class="tf-of" id="live-of" style="grid-template-columns:repeat(5,1fr)">
+        <div class="of-cell"><div class="of-label">Tick &Delta; (last)</div><div id="lof-delta" class="of-val of-neutral">&mdash;</div></div>
+        <div class="of-cell"><div class="of-label">CVD (tick)</div><div id="lof-cvd" class="of-val of-neutral">&mdash;</div></div>
+        <div class="of-cell"><div class="of-label">Imbalance</div><div id="lof-imb" class="of-val of-neutral">&mdash;</div></div>
+        <div class="of-cell"><div class="of-label">Tick Vol (last)</div><div id="lof-vol" class="of-val of-neutral">&mdash;</div></div>
+        <div class="of-cell"><div class="of-label">Absorption</div><div id="lof-abs" class="of-val of-neutral">&mdash;</div></div>
+      </div>
+      <div class="sub-note">Candles are built live from the tick stream. <b>Tick &Delta;</b> = up-ticks minus down-ticks (real tick-rule delta), <b>tick volume</b> = ticks per candle, <b>volume profile</b> = tick-weighted time-at-price (POC in amber). <b style="color:#ffc44d">⚠ Note:</b> synthetic indices have no real order book — these are tick-rule proxies, not institutional footprint.</div>
+    </div>
+
+    <!-- 3. 10-tick candles -->
+    <div class="chart-card" style="margin-bottom:14px">
+      <div class="chart-head">
+        <h2>🕯️ Live 10-tick candles</h2>
+        <div class="legend" style="font-size:10px;color:var(--muted)">
+          <span id="c10tickInfo">Waiting for ticks…</span>
+        </div>
+      </div>
+      <svg id="chart10tick" viewBox="0 0 1000 260" preserveAspectRatio="none" style="width:100%;height:260px;display:block;background:#0d121d;border:1px solid var(--line);border-radius:10px;margin-top:4px"></svg>
+      <div class="sub-note">Each candle = exactly 10 consecutive ticks. Useful for very short-term momentum: fast moves appear as long-bodied candles; consolidation produces doji-like candles.</div>
+    </div>
+
+    <!-- 4. DMI / ADX -->
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>📐 DMI / ADX <span style="font-size:10px;font-weight:400;color:var(--muted);margin-left:8px"><span style="color:#16e08b">■ +DI</span> &nbsp; <span style="color:#ff4d5e">■ −DI</span> &nbsp; <span style="color:#e6ebf5">■ ADX</span></span>
+        <span id="chartAdxVal" style="font-size:11px;font-weight:700;color:var(--accent);margin-left:auto">—</span>
+      </h2>
+      <div class="gc-sub">+DI rising and crossing above −DI signals upward momentum; ADX &gt; 25 confirms trend strength.</div>
+      <svg id="chartDMI" class="ind-chart" viewBox="0 0 1000 160" preserveAspectRatio="none"></svg>
+      <div class="chart-axis-y" id="chartDMIAxis"></div>
+    </div>
+
+    <!-- 5. MACD line chart -->
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>📊 MACD (12,26,9) <span style="font-size:10px;font-weight:400;color:var(--muted);margin-left:8px"><span style="color:#56b6ff">■ MACD</span> &nbsp; <span style="color:#fbbf24">■ Signal</span> &nbsp; <span style="color:#475569">▮ Hist</span></span>
+        <span id="chartMacdVal" style="font-size:11px;font-weight:700;color:var(--accent);margin-left:auto">—</span>
+      </h2>
+      <div class="gc-sub">MACD line crossing above signal line = bullish momentum. Histogram bars show the difference (MACD − Signal).</div>
+      <svg id="chartMACD" class="ind-chart" viewBox="0 0 1000 160" preserveAspectRatio="none"></svg>
+    </div>
+
+    <!-- 6. CCI line chart -->
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>🎯 CCI (20) <span id="chartCciVal" style="font-size:11px;font-weight:700;margin-left:auto">—</span></h2>
+      <div class="gc-sub">Commodity Channel Index. Above +100 = overbought (look for reversal). Below −100 = oversold. Between = neutral.</div>
+      <svg id="chartCCI" class="ind-chart" viewBox="0 0 1000 160" preserveAspectRatio="none"></svg>
+    </div>
+
+    <!-- 7. Choppiness line chart -->
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>〰️ Choppiness Index (14) <span id="chartChopVal" style="font-size:11px;font-weight:700;margin-left:auto">—</span></h2>
+      <div class="gc-sub">≥ 61.8 = choppy/range-bound (avoid trend trades). ≤ 38.2 = strongly trending. Dashed lines mark the two thresholds.</div>
+      <svg id="chartChop" class="ind-chart" viewBox="0 0 1000 160" preserveAspectRatio="none"></svg>
+    </div>
+
+    <!-- 8. Continuous price line -->
     <div class="chart-card" style="margin-bottom:14px">
       <div id="banner" class="banner"></div>
       <div class="chart-head">
@@ -1822,52 +1901,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       </div>
     </div>
 
-    <!-- Live 1-min candles + order flow -->
-    <div class="chart-card" style="margin-bottom:14px">
-      <div class="chart-head">
-        <h2>🕯️ Live 1-min candles — order flow &amp; volume profile</h2>
-        <div class="legend">
-          <label class="toggle-chip"><input type="checkbox" id="lcVP" checked>Volume Profile</label>
-          <label class="toggle-chip"><input type="checkbox" id="lcVol" checked>Tick Volume</label>
-          <label class="toggle-chip"><input type="checkbox" id="lcOF" checked>Order Flow</label>
-        </div>
-      </div>
-      <svg id="liveCandleChart" viewBox="0 0 1000 320" preserveAspectRatio="none" role="img" aria-label="Live one-minute candlestick chart with volume profile"></svg>
-      <div class="tf-of" id="live-of" style="grid-template-columns:repeat(5,1fr)">
-        <div class="of-cell"><div class="of-label">Tick &Delta; (last)</div><div id="lof-delta" class="of-val of-neutral">&mdash;</div></div>
-        <div class="of-cell"><div class="of-label">CVD (tick)</div><div id="lof-cvd" class="of-val of-neutral">&mdash;</div></div>
-        <div class="of-cell"><div class="of-label">Imbalance</div><div id="lof-imb" class="of-val of-neutral">&mdash;</div></div>
-        <div class="of-cell"><div class="of-label">Tick Vol (last)</div><div id="lof-vol" class="of-val of-neutral">&mdash;</div></div>
-        <div class="of-cell"><div class="of-label">Absorption</div><div id="lof-abs" class="of-val of-neutral">&mdash;</div></div>
-      </div>
-      <div class="sub-note">Candles are built live from the tick stream. <b>Tick &Delta;</b> = up-ticks minus down-ticks (real tick-rule delta), <b>tick volume</b> = ticks per candle, <b>volume profile</b> = tick-weighted time-at-price (POC in amber). <b style="color:#ffc44d">⚠ Note:</b> synthetic indices have no real order book — these are tick-rule proxies, not institutional footprint.</div>
-    </div>
-
-    <!-- 5-minute candles -->
-    <div class="chart-card" style="margin-bottom:14px">
-      <div class="chart-head">
-        <h2>🕯️ Live 5-min candles</h2>
-        <div class="legend" id="c5minLegend" style="font-size:10px;color:var(--muted)">
-          <span id="c5minInfo">Waiting for first 5-min candle…</span>
-        </div>
-      </div>
-      <svg id="chart5min" viewBox="0 0 1000 260" preserveAspectRatio="none" style="width:100%;height:260px;display:block;background:#0d121d;border:1px solid var(--line);border-radius:10px;margin-top:4px"></svg>
-      <div class="sub-note">Each candle = 5 minutes of ticks aggregated in the browser. OHLC coloured green (bullish) / red (bearish). Wick = high/low. Volume bar height = tick count per candle.</div>
-    </div>
-
-    <!-- 10-tick candles -->
-    <div class="chart-card" style="margin-bottom:14px">
-      <div class="chart-head">
-        <h2>🕯️ Live 10-tick candles</h2>
-        <div class="legend" style="font-size:10px;color:var(--muted)">
-          <span id="c10tickInfo">Waiting for ticks…</span>
-        </div>
-      </div>
-      <svg id="chart10tick" viewBox="0 0 1000 260" preserveAspectRatio="none" style="width:100%;height:260px;display:block;background:#0d121d;border:1px solid var(--line);border-radius:10px;margin-top:4px"></svg>
-      <div class="sub-note">Each candle = exactly 10 consecutive ticks. Useful for very short-term momentum: fast moves appear as long-bodied candles; consolidation produces doji-like candles.</div>
-    </div>
-
-    <!-- Technical indicators panel — MOVED TO BOTTOM -->
+    <!-- 9. Technical indicators panel — BOTTOM -->
     <div class="ind-card" style="margin-bottom:14px">
       <h2>Technical indicators</h2>
       <div class="sub-note">Computed live on the tick price series. MACD(12,26,9) · Choppiness(14) · CCI(20) · Bollinger(20, 2σ). Need ~30 ticks to populate.</div>
@@ -1898,41 +1932,153 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       </div>
     </div>
 
-    <!-- DMI / ADX -->
-    <div class="grid-card" style="margin-bottom:14px">
-      <h2>📐 DMI / ADX <span style="font-size:10px;font-weight:400;color:var(--muted);margin-left:8px"><span style="color:#16e08b">■ +DI</span> &nbsp; <span style="color:#ff4d5e">■ −DI</span> &nbsp; <span style="color:#e6ebf5">■ ADX</span></span>
-        <span id="chartAdxVal" style="font-size:11px;font-weight:700;color:var(--accent);margin-left:auto">—</span>
-      </h2>
-      <div class="gc-sub">+DI rising and crossing above −DI signals upward momentum; ADX &gt; 25 confirms trend strength.</div>
-      <svg id="chartDMI" class="ind-chart" viewBox="0 0 1000 160" preserveAspectRatio="none"></svg>
-      <div class="chart-axis-y" id="chartDMIAxis"></div>
-    </div>
-
-    <!-- MACD line chart -->
-    <div class="grid-card" style="margin-bottom:14px">
-      <h2>📊 MACD (12,26,9) <span style="font-size:10px;font-weight:400;color:var(--muted);margin-left:8px"><span style="color:#56b6ff">■ MACD</span> &nbsp; <span style="color:#fbbf24">■ Signal</span> &nbsp; <span style="color:#475569">▮ Hist</span></span>
-        <span id="chartMacdVal" style="font-size:11px;font-weight:700;color:var(--accent);margin-left:auto">—</span>
-      </h2>
-      <div class="gc-sub">MACD line crossing above signal line = bullish momentum. Histogram bars show the difference (MACD − Signal).</div>
-      <svg id="chartMACD" class="ind-chart" viewBox="0 0 1000 160" preserveAspectRatio="none"></svg>
-    </div>
-
-    <!-- CCI line chart -->
-    <div class="grid-card" style="margin-bottom:14px">
-      <h2>🎯 CCI (20) <span id="chartCciVal" style="font-size:11px;font-weight:700;margin-left:auto">—</span></h2>
-      <div class="gc-sub">Commodity Channel Index. Above +100 = overbought (look for reversal). Below −100 = oversold. Between = neutral.</div>
-      <svg id="chartCCI" class="ind-chart" viewBox="0 0 1000 160" preserveAspectRatio="none"></svg>
-    </div>
-
-    <!-- Choppiness line chart -->
-    <div class="grid-card" style="margin-bottom:14px">
-      <h2>〰️ Choppiness Index (14) <span id="chartChopVal" style="font-size:11px;font-weight:700;margin-left:auto">—</span></h2>
-      <div class="gc-sub">≥ 61.8 = choppy/range-bound (avoid trend trades). ≤ 38.2 = strongly trending. Dashed lines mark the two thresholds.</div>
-      <svg id="chartChop" class="ind-chart" viewBox="0 0 1000 160" preserveAspectRatio="none"></svg>
-    </div>
-
-    <footer>All indicators are computed on the same live tick series as the rest of the dashboard. DMI/ADX uses a 14-period smoothed true-range calculation. MACD uses EMA(12,26) with a 9-period signal line. 5-min and 10-tick candles are aggregated in the browser from the live tick stream. Charts update on every tick.</footer>
+    <footer>All indicators computed on the live tick series. 5-min and 10-tick candles aggregated in the browser. DMI/ADX 14-period smoothed. MACD EMA(12,26) with 9-period signal. Charts update on every tick.</footer>
   </div><!-- /page-charts -->
+
+  <!-- ============ ADX BOT PAGE ============ -->
+  <div id="page-adxbot" class="page">
+
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>📐 ADX Bot — Only Ups on Rising ADX + Rising +DI</h2>
+      <div class="gc-sub">
+        Fires a <b>RUNHIGH (Only Ups)</b> contract automatically when <b>both ADX and +DI have risen for at least N consecutive ticks</b>.
+        The bot reads the live indicator stream computed on every tick — no delay, no candle close needed.
+        <br><br>
+        <b>Entry rule:</b> ADX[t-2] &lt; ADX[t-1] &lt; ADX[t] <b>AND</b> +DI[t-2] &lt; +DI[t-1] &lt; +DI[t] (3 consecutive rising values = 2 increasing steps).
+        Both must be rising simultaneously. You can require more consecutive steps in the threshold below.
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span class="gc-conn-pill"><span id="adxConnDot" class="d off"></span><span id="adxConnText">not connected — connect on Trading Grid first</span></span>
+        <span id="adxLiveTag" style="font-size:10px;color:var(--muted);margin-left:8px"></span>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+
+      <!-- Config -->
+      <div class="grid-card">
+        <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:14px">Configuration</h3>
+        <div class="gc-field">
+          <label for="adxSymbol">Market</label>
+          <select id="adxSymbol"></select>
+        </div>
+        <div class="gc-row">
+          <div class="gc-field">
+            <label for="adxStake">Stake</label>
+            <input type="number" id="adxStake" min="0.35" step="0.01" value="1.00">
+          </div>
+          <div class="gc-field">
+            <label for="adxDuration">Duration (ticks)</label>
+            <select id="adxDuration">
+              <option value="3">3</option>
+              <option value="5" selected>5</option>
+              <option value="7">7</option>
+              <option value="10">10</option>
+            </select>
+          </div>
+        </div>
+        <div class="gc-row">
+          <div class="gc-field">
+            <label for="adxConsecSteps">Consecutive rising steps required</label>
+            <select id="adxConsecSteps">
+              <option value="2" selected>2 steps (3 ticks)</option>
+              <option value="3">3 steps (4 ticks)</option>
+              <option value="4">4 steps (5 ticks)</option>
+            </select>
+          </div>
+          <div class="gc-field">
+            <label for="adxMinAdx">Minimum ADX value</label>
+            <input type="number" id="adxMinAdx" min="0" max="100" step="0.5" value="15" title="Only fire when ADX is above this value (trend strength floor)">
+          </div>
+        </div>
+        <div class="gc-row">
+          <div class="gc-field">
+            <label for="adxMaxLoss">Stop after N losses (0=∞)</label>
+            <input type="number" id="adxMaxLoss" min="0" step="1" value="3">
+          </div>
+          <div class="gc-field">
+            <label for="adxCooldown">Cooldown ticks after trade</label>
+            <input type="number" id="adxCooldown" min="0" step="1" value="5" title="Wait this many ticks before checking conditions again after a trade fires">
+          </div>
+        </div>
+        <div class="gc-field">
+          <label for="adxMartingale">Stake progression</label>
+          <select id="adxMartingale">
+            <option value="flat" selected>Flat (no progression)</option>
+            <option value="martingale">Martingale (×2 on loss)</option>
+            <option value="dalembert">D'Alembert (+1 unit on loss)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Live signal + arm -->
+      <div style="display:flex;flex-direction:column;gap:12px">
+
+        <!-- Live ADX / DI readout -->
+        <div class="grid-card">
+          <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:12px">Live DMI/ADX Signal</h3>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+            <div class="em-card">
+              <div class="em-lab">ADX (now)</div>
+              <div id="adxNow" class="em-val acc">—</div>
+            </div>
+            <div class="em-card">
+              <div class="em-lab">+DI (now)</div>
+              <div id="adxPdiNow" class="em-val up">—</div>
+            </div>
+          </div>
+          <!-- ADX trend bars -->
+          <div style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">ADX last 5 ticks</div>
+          <div id="adxTrendBars" style="display:flex;gap:3px;align-items:flex-end;height:36px;margin-bottom:10px"></div>
+          <div style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">+DI last 5 ticks</div>
+          <div id="adxDiTrendBars" style="display:flex;gap:3px;align-items:flex-end;height:36px;margin-bottom:10px"></div>
+          <!-- Signal status -->
+          <div id="adxSignalBox" style="padding:8px 12px;border-radius:8px;background:#0a0e17;border:1px solid var(--line);font-size:12px;font-weight:700;color:var(--muted);text-align:center">
+            Signal: watching…
+          </div>
+        </div>
+
+        <!-- Arm / stats -->
+        <div class="grid-card">
+          <div class="dig-auto-bar" style="margin-bottom:10px">
+            <label class="auto-toggle">
+              <input type="checkbox" id="adxArm" onchange="adxToggleArm()">
+              <span class="track"></span>
+              <span id="adxArmLabel">Bot: OFF</span>
+            </label>
+            <div class="auto-status" id="adxArmStatus">Disarmed.</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+            <div class="em-card"><div class="em-lab">Won</div><div id="adxWon" class="em-val up">0</div></div>
+            <div class="em-card"><div class="em-lab">Lost</div><div id="adxLost" class="em-val dn">0</div></div>
+            <div class="em-card"><div class="em-lab">Win %</div><div id="adxRate" class="em-val acc">—</div></div>
+            <div class="em-card"><div class="em-lab">P/L</div><div id="adxPnL" class="em-val">—</div></div>
+            <div class="em-card"><div class="em-lab">Fires</div><div id="adxFires" class="em-val neu">0</div></div>
+            <div class="em-card"><div class="em-lab">Current Stake</div><div id="adxCurStake" class="em-val neu">—</div></div>
+          </div>
+          <div style="margin-top:8px;font-size:10px;color:var(--muted)" id="adxSkipLog">Skipped: 0</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Trade log -->
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2>📋 Trade Log</h2>
+      <div style="overflow-x:auto">
+        <table class="sig-table" style="min-width:700px">
+          <thead>
+            <tr>
+              <th class="l">Time</th><th>Contract</th><th>Stake</th><th>ADX@entry</th>
+              <th>+DI@entry</th><th>Steps</th><th>Payout</th><th>P/L</th><th class="l">Status</th>
+            </tr>
+          </thead>
+          <tbody id="adxTradeBody"><tr><td colspan="9" class="sig-empty">No trades yet.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <footer>RUNHIGH (Only Ups) contracts require every tick during the contract duration to move strictly upward. The bot fires when both ADX and +DI have risen for the specified number of consecutive ticks on the <i>live tick stream</i> — not on candle closes. A minimum ADX value ensures the bot only fires in trending markets. Use a demo account while calibrating.</footer>
+  </div><!-- /page-adxbot -->
 </div>
 
 <script>
@@ -2227,6 +2373,8 @@ function aggregate5mCandle(price, epoch, dir){
     live5mCandles.push(cur5mCandle);
     if (live5mCandles.length > LIVE5M_MAX) live5mCandles.shift();
     cur5mCandle = { start:bucket, open:price, high:price, low:price, close:price, ticks:1, up:0, down:0 };
+    // New 5-min candle formed — update prediction overlay
+    if (typeof predUpdateActuals === 'function') predUpdateActuals();
   } else {
     cur5mCandle.high  = Math.max(cur5mCandle.high, price);
     cur5mCandle.low   = Math.min(cur5mCandle.low,  price);
@@ -2818,6 +2966,8 @@ function recordIndicatorTick(epoch, price){
   const snap = makeSnap(epoch, price);
   indHistory.push(snap);
   if (indHistory.length > IND_HIST_MAX) indHistory.shift();
+  // ADX Bot — feed every indicator snapshot
+  if (typeof adxOnTick === 'function') adxOnTick(indSnapshot);
 }
 
 // Persistent store of every 5-tick run — B-window (before) only.
@@ -3260,6 +3410,28 @@ function buildTfCards(){
         <div class="of-cell"><div class="of-label">Absorption</div><div id="tf-abs-${tf.g}" class="of-val of-neutral">—</div></div>
       </div>
     </div>`).join("");
+  // Append the "Predicted 5-min" card
+  grid.innerHTML += `<div class="tf-card" id="predCard" style="border:1.5px solid rgba(86,182,255,0.35);background:rgba(86,182,255,0.04)">
+    <div class="tf-head">
+      <div class="tf-name" style="color:var(--accent)">⚡ <b>Predicted</b> 5 min</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span id="pred-regime-badge" style="font-size:10px;font-weight:700;padding:2px 10px;border-radius:6px;background:#131c2e;color:var(--muted)">computing…</span>
+        <span id="pred-confidence" style="font-size:9px;color:var(--muted)"></span>
+      </div>
+    </div>
+    <div id="pred-meta" style="font-size:9px;color:var(--muted);padding:0 4px 6px;min-height:18px;line-height:1.5"></div>
+    <div class="tf-chart-wrap">
+      <svg id="pred-chart" class="tf-chart" viewBox="0 0 600 240" preserveAspectRatio="none"></svg>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;padding:8px 4px 4px">
+      ${[1,2,3,4,5].map(i=>`<div style="text-align:center;background:#0a0e17;border-radius:6px;padding:4px 2px">
+        <div style="color:var(--muted);font-size:9px;margin-bottom:2px">C${i}</div>
+        <div id="pred-c${i}-dir" style="font-size:13px;line-height:1">—</div>
+        <div id="pred-c${i}-rng" style="color:var(--muted);font-size:8px;margin-top:2px;font-variant-numeric:tabular-nums">—</div>
+      </div>`).join("")}
+    </div>
+    <div style="padding:4px 4px 0;font-size:9px;color:var(--muted);line-height:1.6" id="pred-scores"></div>
+  </div>`;
   grid.dataset.built = "1";
   attachTfNav();
 }
@@ -3349,6 +3521,7 @@ function attachTfNav(){
 // Per-timeframe countdown to the current candle's close, ticking every second
 function startTfTimers(){
   if (tfTimerInterval) clearInterval(tfTimerInterval);
+  let _predTick = 0;
   const update = () => {
     const now = Date.now() / 1000;
     TIMEFRAMES.forEach(tf => {
@@ -3361,17 +3534,19 @@ function startTfTimers(){
       let rem = Math.max(0, Math.floor(closeAt - now));
       const h = Math.floor(rem / 3600), m = Math.floor((rem % 3600) / 60), s = rem % 60;
       el.textContent = (h > 0 ? String(h).padStart(2,"0")+":" : "") + String(m).padStart(2,"0") + ":" + String(s).padStart(2,"0");
-      // colour urgency on the last 10% of the candle
       el.style.color = rem <= tf.g * 0.1 ? "#ffc44d" : "var(--accent)";
     });
+    // Refresh prediction every 30 seconds (not every tick for performance)
+    _predTick++;
+    if (_predTick % 30 === 0 && typeof predRender === 'function') predRender();
   };
   update();
   tfTimerInterval = setInterval(update, 1000);
 }
 
 function showPage(which){
-  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts" };
-  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts" };
+  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot" };
+  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot" };
   Object.keys(pages).forEach(k => {
     document.getElementById(pages[k]).classList.toggle("active", k===which);
     const nav = document.getElementById(navs[k]); if (nav) nav.classList.toggle("active", k===which);
@@ -3379,6 +3554,8 @@ function showPage(which){
   if (which === "candles"){
     if (!candlesPageReady){ candlesPageReady = true; buildTfCards(); connectTfWs(); startTfTimers(); }
     TIMEFRAMES.forEach(tf => drawTfCandles(tf.g));
+    // Recompute prediction every time candle page updates
+    if (typeof predRender === 'function') setTimeout(predRender, 50);
   }
   if (which === "engine"){
     engPageReady = true;
@@ -3419,6 +3596,9 @@ function showPage(which){
   }
   if (which === "charts"){
     chartRenderAll();
+  }
+  if (which === "adxbot"){
+    adxPageInit();
   }
 }
 
@@ -3869,6 +4049,425 @@ function updateOrderFlowReadout(g){
   // absorption: low ratio (<0.15) = strong absorption (lots of range, little progress)
   const absLabel = of.absorptionRatio < 0.15 ? "HIGH" : of.absorptionRatio < 0.35 ? "MILD" : "LOW";
   set("tf-abs-"+g, absLabel, absLabel==="HIGH"?"of-warn":"of-neutral");
+}
+
+// =====================================================================
+// MULTI-TIMEFRAME PRICE-ACTION PREDICTION MODEL
+// =====================================================================
+// Algorithm: 5 independently scored components, each [-1..+1]:
+//
+//   1. HTF Bias       (30-min tfData): trend structure, swing HH/HL or LL/LH
+//   2. MTF Momentum   (5-min tfData):  EMA20 slope, recent 5 candles' close>open
+//   3. LTF Pressure   (1-min tfData):  last 3 candles delta, CVD direction
+//   4. Indicator Confluence (live):    RSI-50, MACD hist sign, ADX+DI, BB%B-0.5
+//   5. Volatility Regime (live):       Choppiness (≤38.2→trending), ATR expansion
+//
+// Weighted composite: w1=0.30, w2=0.25, w3=0.20, w4=0.15, w5=0.10
+// Regime: score > 0.25 → UPTREND, < -0.25 → DOWNTREND, else RANGE
+//
+// Projection: generate 5 predicted 5-min candles using:
+//   - ATR from live indicators (volatility envelope)
+//   - Bias strength scales candle body size
+//   - Each candle: small random walk inside the trend channel
+//   - Uptrend: candles with higher closes, blue
+//   - Downtrend: lower closes, grey
+//   - Range: alternating small bodies, mid-grey
+
+let _predLastScore  = null;   // last computed composite score
+let _predLastEpoch  = 0;      // epoch of last prediction compute
+let _predActuals    = {};     // {candleIdx: {open,high,low,close}} - actual 5-min candles as they form
+let _predGenerated  = null;   // last generated prediction state
+const PRED_COOLDOWN = 12;     // seconds between prediction recomputes
+
+// ── Component 1: HTF Bias from 30-min candles ─────────────────────────
+// Looks at swing highs/lows to determine HTF trend direction.
+// Returns score [-1, +1]
+function predHTFBias(){
+  const candles = tfData[1800] || [];
+  if (candles.length < 5) return 0;
+  const c = candles.slice(-10);
+  // Find last 3 swing highs and 3 swing lows
+  const highs = c.map(x => x.high);
+  const lows  = c.map(x => x.low);
+  const n = highs.length;
+  // Simple: compare last 3 sequential highs and lows
+  let score = 0;
+  // Higher highs = bullish structure
+  if (highs[n-1] > highs[n-3] && highs[n-3] > highs[n-5 < 0 ? 0 : n-5]) score += 0.5;
+  else if (highs[n-1] < highs[n-3]) score -= 0.5;
+  // Higher lows = bullish
+  if (lows[n-1] > lows[n-3] && lows[n-3] > (lows[n-5 < 0 ? 0 : n-5])) score += 0.5;
+  else if (lows[n-1] < lows[n-3]) score -= 0.5;
+  // EMA20 on closing prices
+  const closes = c.map(x => x.close);
+  if (closes.length >= 5){
+    const ema5  = closes.slice(-5).reduce((a,b)=>a+b,0)/5;
+    const ema10 = closes.slice(-Math.min(10,closes.length)).reduce((a,b)=>a+b,0)/Math.min(10,closes.length);
+    if (ema5 > ema10) score += 0.3; else score -= 0.3;
+  }
+  // Price above/below midpoint of recent range
+  const rangeHi = Math.max(...highs.slice(-5));
+  const rangeLo = Math.min(...lows.slice(-5));
+  const mid     = (rangeHi + rangeLo) / 2;
+  const lastC   = closes[closes.length-1];
+  score += (lastC - mid) / (rangeHi - rangeLo + 1e-9) * 0.4;
+  return Math.max(-1, Math.min(1, score));
+}
+
+// ── Component 2: MTF Momentum from 5-min candles ──────────────────────
+function predMTFMomentum(){
+  const candles = (tfData[300] && tfData[300].length >= 4)
+    ? tfData[300]
+    : live5mCandles;                         // fallback to in-browser aggregated
+  if (candles.length < 4) return 0;
+  const c   = candles.slice(-8);
+  const n   = c.length;
+  let score = 0;
+  // Count bullish vs bearish candles (close>open) in last 5
+  let bulls = 0, bears = 0;
+  for (let i = Math.max(0,n-5); i < n; i++){
+    if (c[i].close > c[i].open) bulls++; else if (c[i].close < c[i].open) bears++;
+  }
+  score += (bulls - bears) / 5 * 0.6;
+  // Recent 3-candle slope of close prices
+  if (n >= 3){
+    const slope = c[n-1].close - c[n-3].close;
+    const range = Math.max(...c.map(x=>x.high)) - Math.min(...c.map(x=>x.low));
+    score += Math.max(-1, Math.min(1, slope / (range + 1e-9))) * 0.5;
+  }
+  // Body size relative to range (strong bodies = conviction)
+  const lastBody = Math.abs(c[n-1].close - c[n-1].open);
+  const lastRng  = c[n-1].high - c[n-1].low;
+  const bodyRatio = lastRng > 0 ? lastBody / lastRng : 0;
+  score += (c[n-1].close > c[n-1].open ? 1 : -1) * bodyRatio * 0.3;
+  return Math.max(-1, Math.min(1, score));
+}
+
+// ── Component 3: LTF Pressure from 1-min candles + live ticks ──────────
+function predLTFPressure(){
+  const candles = (tfData[60] && tfData[60].length >= 3)
+    ? tfData[60]
+    : liveCandles;
+  if (candles.length < 3) return 0;
+  const c   = candles.slice(-6);
+  const n   = c.length;
+  let score = 0;
+  // Last 3 candles: direction weighted by recency
+  const w   = [0.5, 0.3, 0.2];
+  for (let j = 0; j < 3; j++){
+    const ci = c[n - 1 - j];
+    if (!ci) continue;
+    const dir = ci.close > ci.open ? 1 : ci.close < ci.open ? -1 : 0;
+    score += dir * w[j] * 0.6;
+  }
+  // Tick-rule delta from live candles (up - down ticks)
+  const lc = c[n-1];
+  if (lc && lc.ticks > 0){
+    const delta = ((lc.up || 0) - (lc.down || 0)) / lc.ticks;
+    score += delta * 0.5;
+  }
+  // Consecutive candles in same direction
+  if (n >= 3){
+    const d1 = c[n-1].close > c[n-1].open ? 1 : -1;
+    const d2 = c[n-2].close > c[n-2].open ? 1 : -1;
+    const d3 = c[n-3].close > c[n-3].open ? 1 : -1;
+    if (d1 === d2 && d2 === d3) score += d1 * 0.4;
+  }
+  return Math.max(-1, Math.min(1, score));
+}
+
+// ── Component 4: Indicator Confluence ─────────────────────────────────
+function predIndicatorConfluence(){
+  const s = indSnapshot || {};
+  if (s.rsi == null && s.macd == null) return 0;
+  let score = 0, n = 0;
+  // RSI: (value - 50) / 50 gives [-1..+1] continuously
+  if (s.rsi != null){ score += (s.rsi - 50) / 50; n++; }
+  // MACD histogram sign and magnitude (normalised)
+  if (s.macdHist != null){
+    const v = Math.tanh(s.macdHist * 10000);   // tanh squashes to [-1..+1]
+    score += v; n++;
+  }
+  // DMI: (+DI - -DI) / ADX gives direction with strength weighting
+  if (s.pdi != null && s.ndi != null && s.adx != null && s.adx > 0){
+    const diScore = (s.pdi - s.ndi) / Math.max(s.adx, 1);
+    score += Math.max(-1, Math.min(1, diScore / 2)); n++;
+  }
+  // BB%B: (value - 0.5) * 2 → [-1..+1]
+  if (s.bbPctB != null){ score += (s.bbPctB - 0.5) * 2; n++; }
+  // CCI normalised
+  if (s.cci != null){ score += Math.max(-1, Math.min(1, s.cci / 100)); n++; }
+  return n > 0 ? Math.max(-1, Math.min(1, score / n)) : 0;
+}
+
+// ── Component 5: Volatility / Regime ──────────────────────────────────
+// Determines if market IS trending (amplifier) or choppy (dampener).
+// Returns: multiplier value, not a bias direction.
+// Low chop + high ADX = signal is reliable → amplify
+// High chop = uncertain → return near 0 (range)
+function predVolatilityRegime(){
+  const s = indSnapshot || {};
+  let score = 0;
+  // Choppiness: ≤ 38.2 = strongly trending, ≥ 61.8 = choppy
+  if (s.chop != null){
+    score = 1 - (s.chop - 38.2) / (61.8 - 38.2);  // 1.0 when trend, 0.0 when choppy
+    score = Math.max(0, Math.min(1, score));
+  } else {
+    score = 0.5; // neutral if no data
+  }
+  // ATR expansion: if ATR is rising we have expanding volatility (good for trends)
+  const hist = indHistory || [];
+  if (hist.length >= 5){
+    const atrNow  = hist[hist.length-1].atr;
+    const atrPrev = hist[hist.length-5].atr;
+    if (atrNow != null && atrPrev != null && atrPrev > 0){
+      const atrRatio = atrNow / atrPrev;
+      score += (atrRatio > 1.05) ? 0.2 : (atrRatio < 0.95) ? -0.1 : 0;
+    }
+  }
+  // Return value is range [0,1] used as a signal multiplier, mapped to [-1..+1] here
+  return Math.max(-1, Math.min(1, score * 2 - 1));   // 0=choppy → -1, 1=trending → +1
+}
+
+// ── Master prediction function ─────────────────────────────────────────
+// Returns { score, regime, confidence, components, atr }
+function predCompute(){
+  const w = [0.30, 0.25, 0.20, 0.15, 0.10];
+  const components = [
+    { label: 'HTF Bias(30m)',  score: predHTFBias()           },
+    { label: 'MTF Mom(5m)',    score: predMTFMomentum()       },
+    { label: 'LTF Press(1m)', score: predLTFPressure()       },
+    { label: 'Ind.Conf.',      score: predIndicatorConfluence()},
+    { label: 'Vol.Regime',     score: predVolatilityRegime()  },
+  ];
+
+  // Volatility regime acts as a soft multiplier: when choppy, push score toward 0
+  const volFactor = (components[4].score + 1) / 2;   // 0=very choppy, 1=very trending
+  const rawScore  = components.slice(0,-1).reduce((s,c,i) =>
+    s + c.score * w[i] / w.slice(0,-1).reduce((a,b)=>a+b,0), 0);
+  // Blend: choppy markets pull toward range
+  const score = rawScore * (0.4 + 0.6 * volFactor);
+
+  const threshold = 0.18;
+  let regime = 'RANGE';
+  if (score >  threshold) regime = 'UPTREND';
+  if (score < -threshold) regime = 'DOWNTREND';
+
+  // Confidence: 0-100%, based on absolute score and volatility clarity
+  const confidence = Math.min(100, Math.round(Math.abs(score) / 1.0 * 100 * (0.5 + 0.5*volFactor)));
+
+  // ATR for candle sizing
+  const atr = (indSnapshot && indSnapshot.atr) ? indSnapshot.atr : null;
+
+  return { score, regime, confidence, components, atr };
+}
+
+// ── Project 5 predicted 5-min candles ──────────────────────────────────
+// Returns array of 5 candles: { open, high, low, close, isPredicted:true, regime }
+function predProject(result){
+  const s = indSnapshot || {};
+  // Current price anchor
+  const lastClose = (() => {
+    // Try live candles first, then tfData
+    if (cur5mCandle) return cur5mCandle.close;
+    const c5 = live5mCandles;
+    if (c5.length) return c5[c5.length-1].close;
+    const tf5 = tfData[300];
+    if (tf5 && tf5.length) return tf5[tf5.length-1].close;
+    if (ticks && ticks.length) return ticks[ticks.length-1].price;
+    return 0;
+  })();
+  if (!lastClose) return [];
+
+  // ATR-based candle sizing (1 5-min candle ≈ 5× tick ATR as a rough proxy)
+  const atr = result.atr || (lastClose * 0.0003);
+  const stepSize = atr * (2 + Math.abs(result.score) * 3);  // stronger bias = bigger step
+  const { score, regime } = result;
+
+  const candles = [];
+  let price = lastClose;
+
+  // Pseudo-random but deterministic per epoch (reproducible)
+  const seed = Math.floor(Date.now() / 300000);  // changes every 5 min
+  const rng  = (i, j) => { const x = Math.sin(seed * 31.7 + i * 11.3 + j * 7.1) * 43758.5453; return x - Math.floor(x); };
+
+  for (let i = 0; i < 5; i++){
+    const r1 = rng(i,0), r2 = rng(i,1), r3 = rng(i,2);
+    // Trend component: in direction of bias
+    const trendMove = score * stepSize * (1 + i * 0.1);  // increasing momentum
+    // Noise component: random walk within volatility envelope
+    const noise     = (r1 - 0.5) * stepSize * 0.8;
+    const bodyMove  = trendMove + noise;
+
+    const open  = price;
+    const close = price + bodyMove;
+    // Wicks: larger for range, tighter for trends
+    const wickMult = regime === 'RANGE' ? 1.2 : 0.5;
+    const hi    = Math.max(open, close) + r2 * stepSize * wickMult;
+    const lo    = Math.min(open, close) - r3 * stepSize * wickMult;
+
+    candles.push({ open, high: hi, low: lo, close, isPredicted: true, regime });
+    price = close;
+  }
+  return candles;
+}
+
+// ── Render the predicted chart ─────────────────────────────────────────
+function predRender(){
+  const svg     = $("pred-chart");
+  const badge   = $("pred-regime-badge");
+  const confEl  = $("pred-confidence");
+  const metaEl  = $("pred-meta");
+  const scoresEl= $("pred-scores");
+  if (!svg) return;
+
+  const result = predCompute();
+  _predLastScore = result;
+
+  // Regime badge styling
+  const BADGE = {
+    UPTREND:   { text:'▲ UPTREND',  bg:'rgba(22,224,139,.15)',  color:'#16e08b', border:'1px solid #16e08b' },
+    DOWNTREND: { text:'▼ DOWNTREND',bg:'rgba(255,77,94,.15)',    color:'#ff4d5e', border:'1px solid #ff4d5e' },
+    RANGE:     { text:'⟺ RANGE',    bg:'rgba(120,144,180,.12)', color:'#9aa6bd', border:'1px solid #475569' },
+  };
+  const b = BADGE[result.regime];
+  if (badge){
+    badge.textContent  = b.text;
+    badge.style.background = b.bg;
+    badge.style.color      = b.color;
+    badge.style.border     = b.border;
+  }
+  if (confEl) confEl.textContent = `${result.confidence}% confidence`;
+  if (metaEl){
+    const compLine = result.components.map(c =>
+      `${c.label}: ${c.score >= 0 ? '+' : ''}${c.score.toFixed(2)}`).join('  ·  ');
+    metaEl.textContent = compLine;
+  }
+
+  // Generate or reuse predicted candles
+  const predicted = predProject(result);
+  if (!predicted.length){
+    svg.innerHTML = '<text x="300" y="120" fill="#475569" font-size="12" text-anchor="middle" font-family="monospace">Need market data…</text>';
+    return;
+  }
+
+  // Lookup actual 5-min candles that have formed since last prediction
+  // Actual candles come from live5mCandles (most recent = last entry)
+  const actualsArr = live5mCandles.slice(-5);
+
+  // Build combined view: overlay actual on predicted positions
+  // Use the predicted as "ghost" and actual as solid (if exists)
+  const dec   = decimals || 2;
+  const W     = 600, H = 240, padT = 14, padB = 16, padL = 6, padR = 56;
+  const allC  = [...predicted];
+  if (!allC.length) return;
+
+  let hi = Math.max(...allC.map(c=>c.high));
+  let lo = Math.min(...allC.map(c=>c.low));
+  // Also include actuals in scale
+  if (actualsArr.length){
+    hi = Math.max(hi, ...actualsArr.map(c=>c.high));
+    lo = Math.min(lo, ...actualsArr.map(c=>c.low));
+  }
+  if (hi===lo){ hi+=1; lo-=1; }
+  const pad = (hi-lo)*0.1; hi+=pad; lo-=pad;
+  const range = hi-lo;
+  const y  = v => padT + (H-padT-padB)*(1-(v-lo)/range);
+  const n  = allC.length;
+  const slot = (W-padL-padR)/n;
+  const bw   = Math.max(6, slot*0.65);
+  let out    = '';
+
+  // Gridlines
+  for (let i=0;i<=4;i++){
+    const gy = padT+(H-padT-padB)/4*i;
+    const gp = hi - range/4*i;
+    out += `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${W-padR}" y2="${gy.toFixed(1)}" stroke="#1a2130" stroke-width="1"/>`;
+    out += `<text x="${W-padR+4}" y="${(gy+3).toFixed(1)}" fill="#475569" font-size="9" font-family="monospace">${gp.toFixed(dec)}</text>`;
+  }
+
+  // Label: "PREDICTED NEXT 5 CANDLES"
+  out += `<text x="${padL+4}" y="${padT+10}" fill="rgba(86,182,255,0.6)" font-size="9" font-family="monospace" font-style="italic">predicted next 5 candles</text>`;
+
+  // Candle loop
+  allC.forEach((c, i) => {
+    const cx   = padL + i*slot + slot/2;
+    const xi   = cx - bw/2;
+    const actual = actualsArr[i];  // may be undefined if not yet formed
+
+    // Predicted candle colour
+    const predColor = result.regime === 'UPTREND'   ? 'rgba(86,182,255,0.55)'
+                    : result.regime === 'DOWNTREND' ? 'rgba(140,148,165,0.50)'
+                    : 'rgba(100,120,150,0.40)';
+    const predStroke= result.regime === 'UPTREND'   ? 'rgba(86,182,255,0.80)'
+                    : result.regime === 'DOWNTREND' ? 'rgba(140,148,165,0.75)'
+                    : 'rgba(100,120,150,0.55)';
+
+    // Draw predicted (faded, ghost)
+    const pt = y(Math.max(c.open,c.close));
+    const pb = y(Math.min(c.open,c.close));
+    const ph = y(c.high), pl = y(c.low);
+    out += `<line x1="${cx.toFixed(1)}" y1="${ph.toFixed(1)}" x2="${cx.toFixed(1)}" y2="${pl.toFixed(1)}" stroke="${predStroke}" stroke-width="1.2" stroke-dasharray="3,2"/>`;
+    out += `<rect x="${xi.toFixed(1)}" y="${pt.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1.5,pb-pt).toFixed(1)}" fill="${predColor}" stroke="${predStroke}" stroke-width="1" rx="1"/>`;
+
+    // If actual candle exists, draw it over the predicted (solid, original colours)
+    if (actual){
+      const bull  = actual.close >= actual.open;
+      const acol  = bull ? '#16e08b' : '#ff4d5e';
+      const at    = y(Math.max(actual.open,actual.close));
+      const ab    = y(Math.min(actual.open,actual.close));
+      const ah    = y(actual.high), al = y(actual.low);
+      out += `<line x1="${cx.toFixed(1)}" y1="${ah.toFixed(1)}" x2="${cx.toFixed(1)}" y2="${al.toFixed(1)}" stroke="${acol}" stroke-width="1.2"/>`;
+      out += `<rect x="${xi.toFixed(1)}" y="${at.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1.5,ab-at).toFixed(1)}" fill="${acol}" rx="1"/>`;
+      // Faded predicted ghost still visible behind
+      // Label: "actual" small tag
+      out += `<text x="${cx.toFixed(1)}" y="${(al+11).toFixed(1)}" fill="rgba(255,255,255,0.35)" font-size="7" text-anchor="middle" font-family="monospace">actual</text>`;
+    } else {
+      // Candle index label
+      out += `<text x="${cx.toFixed(1)}" y="${(pl+11).toFixed(1)}" fill="${predStroke}" font-size="8" text-anchor="middle" font-family="monospace">C${i+1}</text>`;
+    }
+
+    // Update per-candle info cells
+    const dirEl = $(`pred-c${i+1}-dir`);
+    const rngEl = $(`pred-c${i+1}-rng`);
+    if (dirEl){
+      if (actual){
+        dirEl.textContent = actual.close >= actual.open ? '✅' : '❌';
+        dirEl.style.color = actual.close >= actual.open ? 'var(--up)' : 'var(--down)';
+      } else {
+        dirEl.textContent = c.close > c.open ? '▲' : c.close < c.open ? '▼' : '—';
+        dirEl.style.color = c.close > c.open ? 'rgba(86,182,255,0.9)' : result.regime==='DOWNTREND'?'rgba(140,148,165,0.9)':'var(--muted)';
+      }
+    }
+    if (rngEl){
+      if (actual){
+        rngEl.textContent = `${actual.low.toFixed(dec)}–${actual.high.toFixed(dec)}`;
+        rngEl.style.color = 'var(--text)';
+      } else {
+        rngEl.textContent = `${c.low.toFixed(dec)}–${c.high.toFixed(dec)}`;
+        rngEl.style.color = 'var(--muted)';
+      }
+    }
+  });
+
+  // Score breakdown display
+  if (scoresEl){
+    scoresEl.innerHTML = result.components.map(c => {
+      const bar = Math.round((c.score+1)/2*10);
+      const col = c.score>0.1?'var(--up)':c.score<-0.1?'var(--down)':'var(--muted)';
+      return `<span style="color:${col}">${c.score>=0?'▲':'▼'} ${c.label}: ${Math.abs(c.score*100).toFixed(0)}%</span>`;
+    }).join('  ');
+  }
+
+  svg.innerHTML = out;
+}
+
+// ── Update predicted actuals from live 5-min candles ──────────────────
+// Called every time a new 5-min candle forms — checks whether the
+// actual candle matches or overrides the predicted position.
+function predUpdateActuals(){
+  if (!$("pred-chart")) return;
+  predRender();   // full redraw — includes overlaying actuals
 }
 
 function drawTfCandles(g){
@@ -4988,6 +5587,7 @@ function gridWsSubscribeAndInit(acctId){
   if (typeof diagUpdateConnStatus === "function") diagUpdateConnStatus();
   if (typeof engUpdateConnStatus  === "function") engUpdateConnStatus();
   if (typeof ouUpdateConnStatus   === "function"){ ouUpdateConnStatus(); ouRefreshFingerprint(); }
+  if (typeof adxUpdateConn === "function") adxUpdateConn();
 }
 
 
@@ -5291,7 +5891,8 @@ function gridUpdateContract(c){
     || digTrades.find(t => t.id === id)
     || (typeof engTrades !== 'undefined' ? engTrades.find(t => t.id === id) : null)
     || (typeof window._dabTrades !== 'undefined' ? window._dabTrades.find(t => t.id === id) : null)
-    || (typeof ouTrades !== 'undefined' ? ouTrades.find(t => t.id === id) : null);
+    || (typeof ouTrades !== 'undefined' ? ouTrades.find(t => t.id === id) : null)
+    || (typeof adxTrades !== 'undefined' ? adxTrades.find(t => t.id === id) : null);
   if (!row) return;
   if (c.buy_price != null) row.stake = Number(c.buy_price);
   if (c.entry_tick_display_value != null) row.entry = Number(c.entry_tick_display_value);
@@ -5321,6 +5922,9 @@ function gridUpdateContract(c){
     // Only Ups/Downs Bot settlement
     if (typeof ouOpenContracts !== 'undefined' && ouOpenContracts[id])
       if (typeof ouSettleContract === 'function') ouSettleContract(id, won);
+    // ADX Bot settlement
+    if (typeof adxOpenContracts !== 'undefined' && adxOpenContracts[id])
+      if (typeof adxSettle === 'function') adxSettle(id, won);
     // Accounts page P/L tracking
     if (typeof acctOnTrade === 'function'){
       const tradePnl = row.pnl != null ? row.pnl : (won ? (row.payout||0) - (row.stake||0) : -(row.stake||0));
@@ -9130,6 +9734,321 @@ async function acctConnectTo(accountId){
   // Disconnect any existing connection then connect
   if (gridWs && gridWs.readyState === WebSocket.OPEN) gridDisconnect();
   setTimeout(() => gridConnect(), 300);
+}
+
+// =====================================================================
+// ADX BOT ENGINE
+// Fires RUNHIGH (Only Ups) when BOTH ADX and +DI have risen for N
+// consecutive ticks on the live indicator stream.
+//
+// Entry rule (N=2 steps = 3 ticks):
+//   ADX[t-2] < ADX[t-1] < ADX[t]   AND
+//   +DI[t-2] < +DI[t-1] < +DI[t]
+//
+// Both must be simultaneously rising. ADX must also be above minAdx.
+// Cooldown prevents re-entry on consecutive ticks.
+// =====================================================================
+
+// Circular buffer of last 10 DMI snapshots for trend detection
+const ADX_HIST_MAX = 10;
+let _adxHist = [];           // [{adx, pdi, ndi, epoch}]
+let adxArmed = false;
+let adxTrades = [];
+let adxOpenContracts = {};
+let adxWon = 0, adxLost = 0, adxFires = 0, adxSkips = 0;
+let adxCurrentStake = null;
+let adxLossStreak = 0;
+let _adxCooldownTicks = 0;   // ticks remaining in cooldown
+
+// ── Multiplier ────────────────────────────────────────────────────────
+let _adxMult = null;
+function adxMult(){ return _adxMult||(_adxMult=makeMultiplier(()=>$("adxStake"))); }
+
+// ── Connection status ─────────────────────────────────────────────────
+function adxUpdateConn(){
+  const dot=$("adxConnDot"), txt=$("adxConnText");
+  if(!dot) return;
+  const ok=typeof gridWs!=='undefined'&&gridWs&&gridWs.readyState===1&&(typeof gridAuthed!=='undefined'&&gridAuthed);
+  dot.className='d'+(ok?' on':' off');
+  if(txt) txt.textContent=ok?`connected · ${gridIsVirtual?'DEMO':'REAL'} · ${gridLoginId||'—'}`:'not connected — connect on Trading Grid first';
+}
+
+// ── Page init ─────────────────────────────────────────────────────────
+function adxPageInit(){
+  adxUpdateConn();
+  adxRenderTrades();
+  adxRenderStats();
+  adxRenderLive();
+  // Populate market selector
+  const sel=$("adxSymbol");
+  if(sel&&sel.childElementCount===0&&typeof MARKETS!=='undefined'){
+    Object.entries(MARKETS).forEach(([k,v])=>{
+      const o=document.createElement('option');
+      o.value=k; o.textContent=v;
+      if(k===SYMBOL) o.selected=true;
+      sel.appendChild(o);
+    });
+  }
+  if(adxCurrentStake===null)
+    adxCurrentStake=Math.max(0.35,parseFloat(($("adxStake")||{value:'1'}).value||'1'));
+}
+
+// ── Arm toggle ────────────────────────────────────────────────────────
+function adxToggleArm(){
+  const cb=$("adxArm");
+  adxArmed=cb?cb.checked:!adxArmed;
+  const lbl=$("adxArmLabel"), sts=$("adxArmStatus");
+  if(adxArmed){
+    if(typeof gridWs==='undefined'||!gridAuthed){
+      if(cb) cb.checked=false; adxArmed=false;
+      alert('Connect on Trading Grid first.'); return;
+    }
+    if(lbl) lbl.textContent='Bot: ON';
+    if(sts) sts.textContent='Armed — watching for ADX + +DI rising pattern…';
+    adxCurrentStake=Math.max(0.35,parseFloat(($("adxStake")||{value:'1'}).value||'1'));
+    _adxCooldownTicks=0;
+  } else {
+    if(lbl) lbl.textContent='Bot: OFF';
+    if(sts) sts.textContent='Disarmed.';
+  }
+}
+
+// ── Core tick hook — called from recordIndicatorTick on every tick ────
+function adxOnTick(snap){
+  if(!snap||snap.adx==null||snap.pdi==null) return;
+
+  // Keep rolling history
+  _adxHist.push({ adx:snap.adx, pdi:snap.pdi, ndi:snap.ndi, epoch:snap.epoch });
+  if(_adxHist.length>ADX_HIST_MAX) _adxHist.shift();
+
+  // Always update the live display when on adxbot page
+  if(document.getElementById('page-adxbot')&&
+     document.getElementById('page-adxbot').classList.contains('active')){
+    adxRenderLive();
+  }
+
+  if(!adxArmed||!gridAuthed) return;
+
+  // Cooldown check
+  if(_adxCooldownTicks>0){ _adxCooldownTicks--; return; }
+
+  // Check max-loss stop
+  const maxLoss=parseInt(($("adxMaxLoss")||{value:'3'}).value||'3',10);
+  if(maxLoss>0&&adxLossStreak>=maxLoss){
+    const cb=$("adxArm"); if(cb) cb.checked=false;
+    adxArmed=false;
+    const sts=$("adxArmStatus");
+    if(sts) sts.textContent=`Stopped: ${maxLoss} consecutive losses reached.`;
+    return;
+  }
+
+  // Need N+1 ticks in history for N steps
+  const N=parseInt(($("adxConsecSteps")||{value:'2'}).value||'2',10);
+  if(_adxHist.length<N+1) return;
+
+  const minAdx=parseFloat(($("adxMinAdx")||{value:'15'}).value||'15');
+
+  // Check the last N+1 history entries (most recent at the end)
+  const window=_adxHist.slice(-(N+1));
+
+  // ADX must strictly increase across all N steps
+  let adxRising=true;
+  for(let i=1;i<window.length;i++){
+    if(window[i].adx<=window[i-1].adx){ adxRising=false; break; }
+  }
+
+  // +DI must strictly increase across all N steps
+  let diRising=true;
+  for(let i=1;i<window.length;i++){
+    if(window[i].pdi<=window[i-1].pdi){ diRising=false; break; }
+  }
+
+  // ADX floor check
+  const adxAboveFloor=snap.adx>=minAdx;
+
+  if(!adxRising||!diRising||!adxAboveFloor){
+    adxSkips++;
+    const sl=$("adxSkipLog");
+    if(sl) sl.textContent=`Skipped: ${adxSkips} (last: ADX${adxRising?'✅':'❌'} +DI${diRising?'✅':'❌'} floor${adxAboveFloor?'✅':'❌'})`;
+    return;
+  }
+
+  // All conditions met — fire RUNHIGH
+  adxFire(snap);
+}
+
+// ── Place trade ───────────────────────────────────────────────────────
+function adxFire(snap){
+  if(!gridWs||gridWs.readyState!==1||!gridAuthed) return;
+
+  const strat=($("adxMartingale")||{value:'flat'}).value;
+  adxMult()._strat=strat;
+  const stake=Math.max(0.35, adxCurrentStake!=null?adxCurrentStake:1);
+  const dur=parseInt(($("adxDuration")||{value:'5'}).value||'5',10);
+  const sym=($("adxSymbol")||{value:SYMBOL}).value||SYMBOL;
+  const reqId=++gridReqId;
+
+  const row={
+    id:'pending-'+reqId, stake, adxVal:snap.adx, pdiVal:snap.pdi,
+    steps:parseInt(($("adxConsecSteps")||{value:'2'}).value||'2',10),
+    time:Math.floor(Date.now()/1000), payout:null, pnl:null, status:'pricing…',
+  };
+  adxTrades.unshift(row);
+  if(adxTrades.length>100) adxTrades.pop();
+  adxFires++;
+  adxRenderTrades();
+  adxRenderStats();
+
+  // Cooldown
+  const cd=parseInt(($("adxCooldown")||{value:'5'}).value||'5',10);
+  _adxCooldownTicks=cd;
+
+  const sts=$("adxArmStatus");
+  if(sts) sts.textContent=`Fired RUNHIGH · ADX ${snap.adx.toFixed(2)} · +DI ${snap.pdi.toFixed(2)} · stake ${stake.toFixed(2)}`;
+
+  gridPending[reqId]=(proposal,err)=>{
+    if(err||!proposal||!proposal.id||proposal.ask_price==null){
+      row.status='rejected: '+(err&&err.message||'no price');
+      adxRenderTrades(); return;
+    }
+    const buyReqId=++gridReqId;
+    gridPending[buyReqId]=(buy,buyErr)=>{
+      if(buyErr||!buy){ row.status='buy failed: '+(buyErr&&buyErr.message||'error'); adxRenderTrades(); return; }
+      if(buy){
+        row.id=String(buy.contract_id);
+        row.status='open';
+        gridOpenContracts[row.id]=row;
+        adxOpenContracts[row.id]=row;
+        adxRenderTrades();
+      }
+    };
+    gridWs.send(JSON.stringify({ buy:proposal.id, price:proposal.ask_price, req_id:buyReqId }));
+    row.status='open';
+  };
+  gridWs.send(JSON.stringify({
+    proposal:1, req_id:reqId,
+    amount:stake, basis:'stake',
+    contract_type:'RUNHIGH',
+    currency:gridCurrency,
+    duration:dur, duration_unit:'t',
+    underlying_symbol:sym,
+  }));
+}
+
+// ── Settlement ────────────────────────────────────────────────────────
+function adxSettle(id, won){
+  const row=adxOpenContracts[id]; if(!row) return;
+  const strat=($("adxMartingale")||{value:'flat'}).value;
+  adxMult()._strat=strat;
+  adxMult().record(row.stake||1, won);
+  if(won){
+    adxWon++;
+    adxLossStreak=0;
+    adxCurrentStake=Math.max(0.35,parseFloat(($("adxStake")||{value:'1'}).value||'1'));
+  } else {
+    adxLost++;
+    adxLossStreak++;
+    adxCurrentStake=Math.max(0.35, adxMult().getNext(strat));
+  }
+  delete adxOpenContracts[id];
+  adxRenderTrades();
+  adxRenderStats();
+}
+
+// ── Live display ──────────────────────────────────────────────────────
+function adxRenderLive(){
+  const snap=indSnapshot||{};
+  const adxV=snap.adx, pdiV=snap.pdi, ndiV=snap.ndi;
+  const fv=v=>v!=null?Number(v).toFixed(2):'—';
+
+  const adxEl=$("adxNow"); if(adxEl) adxEl.textContent=fv(adxV);
+  const pdiEl=$("adxPdiNow"); if(pdiEl) pdiEl.textContent=fv(pdiV);
+
+  // Mini bar charts for ADX and +DI history
+  const renderBars=(containerId,key)=>{
+    const el=$(containerId); if(!el) return;
+    const vals=_adxHist.slice(-5).map(h=>h[key]).filter(v=>v!=null);
+    if(!vals.length){ el.innerHTML=''; return; }
+    const mx=Math.max(...vals)||1;
+    el.innerHTML=vals.map((v,i)=>{
+      const isLast=i===vals.length-1;
+      const rising=i>0&&v>vals[i-1];
+      const col=rising?'var(--up)':'var(--down)';
+      const h=Math.max(4,Math.round((v/mx)*34));
+      return `<div style="flex:1;height:${h}px;background:${col};border-radius:2px;opacity:${isLast?1:0.5};position:relative;">
+        <span style="position:absolute;bottom:-14px;left:50%;transform:translateX(-50%);font-size:8px;color:var(--muted);white-space:nowrap">${v.toFixed(1)}</span>
+      </div>`;
+    }).join('');
+  };
+  renderBars('adxTrendBars','adx');
+  renderBars('adxDiTrendBars','pdi');
+
+  // Signal status box
+  const N=parseInt(($("adxConsecSteps")||{value:'2'}).value||'2',10);
+  const minAdx=parseFloat(($("adxMinAdx")||{value:'15'}).value||'15');
+  const box=$("adxSignalBox"); if(!box) return;
+
+  if(_adxHist.length<N+1){
+    box.textContent=`Collecting history… (${_adxHist.length}/${N+1} ticks)`;
+    box.style.color='var(--muted)'; box.style.borderColor='var(--line)';
+    return;
+  }
+  const win=_adxHist.slice(-(N+1));
+  let adxR=true,diR=true;
+  for(let i=1;i<win.length;i++){
+    if(win[i].adx<=win[i-1].adx) adxR=false;
+    if(win[i].pdi<=win[i-1].pdi) diR=false;
+  }
+  const floor=adxV!=null&&adxV>=minAdx;
+  const allPass=adxR&&diR&&floor;
+  const parts=[
+    `ADX rising: ${adxR?'✅':'❌'}`,
+    `+DI rising: ${diR?'✅':'❌'}`,
+    `ADX≥${minAdx}: ${floor?'✅':'❌'}`,
+  ];
+  box.textContent=allPass?'🔥 SIGNAL CONFIRMED — ready to fire':parts.join('  ·  ');
+  box.style.color=allPass?'var(--up)':'var(--muted)';
+  box.style.borderColor=allPass?'var(--up)':'var(--line)';
+}
+
+// ── Render trades table ───────────────────────────────────────────────
+function adxRenderTrades(){
+  const body=$("adxTradeBody"); if(!body) return;
+  if(!adxTrades.length){
+    body.innerHTML='<tr><td colspan="9" class="sig-empty">No trades yet.</td></tr>'; return;
+  }
+  const dec=decimals||2;
+  body.innerHTML=adxTrades.map(t=>{
+    const pCls=t.pnl==null?'cell-mut':t.pnl>=0?'cell-pos':'cell-neg';
+    const sCls=t.status==='won'?'cell-pos':t.status==='lost'?'cell-neg':/reject|fail/.test(t.status)?'cell-warn':'cell-mut';
+    return `<tr>
+      <td class="l">${fmtTime(t.time)}</td>
+      <td style="color:var(--up);font-weight:700">RUNHIGH</td>
+      <td>${t.stake!=null?t.stake.toFixed(2):'—'}</td>
+      <td style="color:var(--accent)">${t.adxVal!=null?t.adxVal.toFixed(2):'—'}</td>
+      <td style="color:var(--up)">${t.pdiVal!=null?t.pdiVal.toFixed(2):'—'}</td>
+      <td class="cell-mut">${t.steps||'—'}</td>
+      <td>${t.payout!=null?t.payout.toFixed(2):'—'}</td>
+      <td class="${pCls}">${t.pnl!=null?(t.pnl>=0?'+':'')+t.pnl.toFixed(2):'—'}</td>
+      <td class="${sCls} l">${t.status}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Render stats ──────────────────────────────────────────────────────
+function adxRenderStats(){
+  const tot=adxWon+adxLost;
+  function set(id,v){ const e=$(id); if(e) e.textContent=v; }
+  set('adxWon',adxWon); set('adxLost',adxLost);
+  set('adxRate',tot>0?(adxWon/tot*100).toFixed(1)+'%':'—');
+  set('adxFires',adxFires);
+  set('adxCurStake',adxCurrentStake!=null?adxCurrentStake.toFixed(2):'—');
+  const net=adxTrades.filter(t=>t.pnl!=null).reduce((s,t)=>s+t.pnl,0);
+  const pEl=$("adxPnL");
+  if(pEl){
+    pEl.textContent=adxTrades.some(t=>t.pnl!=null)?(net>=0?'+':'')+net.toFixed(2)+' '+(typeof gridCurrency!=='undefined'?gridCurrency:'USD'):'—';
+    pEl.className='em-val '+(adxTrades.some(t=>t.pnl!=null)?(net>=0?'up':'dn'):'');
+  }
 }
 
 try {
