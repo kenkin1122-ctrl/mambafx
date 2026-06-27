@@ -1759,7 +1759,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   <div id="page-charts" class="page">
     <div class="grid-card" style="margin-bottom:14px">
       <h2>📈 Indicator charts — live line graphs</h2>
-      <div class="gc-sub">Real-time price chart, 1-min candles with order flow, and all four indicator line graphs — all on one page. Each chart scrolls with the last <b id="chartWindowLabel">200</b> ticks. <button class="gc-btn" style="margin-left:auto" onclick="chartClearHistory()">Clear history</button></div>
+      <div class="gc-sub">Real-time price chart, 1-min candles with order flow, 5-min candles, 10-tick candles, and all indicator line graphs — all on one page. Each chart scrolls with the last <b id="chartWindowLabel">200</b> ticks. <button class="gc-btn" style="margin-left:auto" onclick="chartClearHistory()">Clear history</button></div>
       <div class="gc-row" style="gap:12px;align-items:center;flex-wrap:wrap">
         <div class="gc-field" style="margin:0;flex:0 0 auto">
           <label for="chartWindow">Window (ticks)</label>
@@ -1843,7 +1843,31 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       <div class="sub-note">Candles are built live from the tick stream. <b>Tick &Delta;</b> = up-ticks minus down-ticks (real tick-rule delta), <b>tick volume</b> = ticks per candle, <b>volume profile</b> = tick-weighted time-at-price (POC in amber). <b style="color:#ffc44d">⚠ Note:</b> synthetic indices have no real order book — these are tick-rule proxies, not institutional footprint.</div>
     </div>
 
-    <!-- Technical indicators panel -->
+    <!-- 5-minute candles -->
+    <div class="chart-card" style="margin-bottom:14px">
+      <div class="chart-head">
+        <h2>🕯️ Live 5-min candles</h2>
+        <div class="legend" id="c5minLegend" style="font-size:10px;color:var(--muted)">
+          <span id="c5minInfo">Waiting for first 5-min candle…</span>
+        </div>
+      </div>
+      <svg id="chart5min" viewBox="0 0 1000 260" preserveAspectRatio="none" style="width:100%;height:260px;display:block;background:#0d121d;border:1px solid var(--line);border-radius:10px;margin-top:4px"></svg>
+      <div class="sub-note">Each candle = 5 minutes of ticks aggregated in the browser. OHLC coloured green (bullish) / red (bearish). Wick = high/low. Volume bar height = tick count per candle.</div>
+    </div>
+
+    <!-- 10-tick candles -->
+    <div class="chart-card" style="margin-bottom:14px">
+      <div class="chart-head">
+        <h2>🕯️ Live 10-tick candles</h2>
+        <div class="legend" style="font-size:10px;color:var(--muted)">
+          <span id="c10tickInfo">Waiting for ticks…</span>
+        </div>
+      </div>
+      <svg id="chart10tick" viewBox="0 0 1000 260" preserveAspectRatio="none" style="width:100%;height:260px;display:block;background:#0d121d;border:1px solid var(--line);border-radius:10px;margin-top:4px"></svg>
+      <div class="sub-note">Each candle = exactly 10 consecutive ticks. Useful for very short-term momentum: fast moves appear as long-bodied candles; consolidation produces doji-like candles.</div>
+    </div>
+
+    <!-- Technical indicators panel — MOVED TO BOTTOM -->
     <div class="ind-card" style="margin-bottom:14px">
       <h2>Technical indicators</h2>
       <div class="sub-note">Computed live on the tick price series. MACD(12,26,9) · Choppiness(14) · CCI(20) · Bollinger(20, 2σ). Need ~30 ticks to populate.</div>
@@ -1907,7 +1931,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       <svg id="chartChop" class="ind-chart" viewBox="0 0 1000 160" preserveAspectRatio="none"></svg>
     </div>
 
-    <footer>All indicators are computed on the same live tick series as the rest of the dashboard. DMI/ADX uses a 14-period smoothed true-range calculation. MACD uses EMA(12,26) with a 9-period signal line. Charts update on every tick.</footer>
+    <footer>All indicators are computed on the same live tick series as the rest of the dashboard. DMI/ADX uses a 14-period smoothed true-range calculation. MACD uses EMA(12,26) with a 9-period signal line. 5-min and 10-tick candles are aggregated in the browser from the live tick stream. Charts update on every tick.</footer>
   </div><!-- /page-charts -->
 </div>
 
@@ -2121,12 +2145,19 @@ function handleTick(price, epoch){
   }
 
   aggregateCandle(price, epoch, dir);
+  aggregate5mCandle(price, epoch, dir);
+  aggregate10tCandle(price, epoch, dir);
 
   updateReadout(price, dir);
   drawChart();
   updateIndicators();
   drawCandles();
   drawLiveCandles();
+  // Only draw 5-min and 10-tick charts when the indicator page is active
+  if (document.getElementById("page-charts")&&document.getElementById("page-charts").classList.contains("active")){
+    draw5mCandles();
+    draw10tCandles();
+  }
   engineOnTick(price, epoch, dir);
   digOnTick(price, epoch);
   if (document.getElementById("page-tracker") &&
@@ -2180,7 +2211,164 @@ function aggregateCandle(price, epoch, dir){
   }
 }
 
-// ── Candlestick renderer ─────────────────────────────────────────────
+// ── 5-minute candle aggregation ───────────────────────────────────────
+const CANDLE_5M   = 300;      // 5 minutes in seconds
+const LIVE5M_MAX  = 80;       // keep up to 80 completed 5-min candles
+let cur5mCandle   = null;     // { start, open, high, low, close, ticks, up, down }
+let live5mCandles = [];       // completed 5-min candles
+
+function aggregate5mCandle(price, epoch, dir){
+  const bucket = Math.floor(epoch / CANDLE_5M) * CANDLE_5M;
+  if (!cur5mCandle){
+    cur5mCandle = { start:bucket, open:price, high:price, low:price, close:price, ticks:1, up:0, down:0 };
+    return;
+  }
+  if (bucket > cur5mCandle.start){
+    live5mCandles.push(cur5mCandle);
+    if (live5mCandles.length > LIVE5M_MAX) live5mCandles.shift();
+    cur5mCandle = { start:bucket, open:price, high:price, low:price, close:price, ticks:1, up:0, down:0 };
+  } else {
+    cur5mCandle.high  = Math.max(cur5mCandle.high, price);
+    cur5mCandle.low   = Math.min(cur5mCandle.low,  price);
+    cur5mCandle.close = price;
+    cur5mCandle.ticks++;
+    if (dir===1) cur5mCandle.up++; else if (dir===-1) cur5mCandle.down++;
+  }
+}
+
+// ── 10-tick candle aggregation ────────────────────────────────────────
+const TICKS_PER_CANDLE = 10;
+const LIVE10T_MAX      = 120;
+let cur10tCandle   = null;   // { ticksIn, open, high, low, close, up, down }
+let live10tCandles = [];     // completed 10-tick candles
+let _tickCounter   = 0;      // ticks into current 10-tick candle
+
+function aggregate10tCandle(price, epoch, dir){
+  if (!cur10tCandle){
+    cur10tCandle = { open:price, high:price, low:price, close:price, ticks:1, up:0, down:0, epoch };
+    _tickCounter = 1;
+    return;
+  }
+  cur10tCandle.high  = Math.max(cur10tCandle.high, price);
+  cur10tCandle.low   = Math.min(cur10tCandle.low,  price);
+  cur10tCandle.close = price;
+  cur10tCandle.ticks++;
+  if (dir===1) cur10tCandle.up++; else if (dir===-1) cur10tCandle.down++;
+  _tickCounter++;
+  if (_tickCounter >= TICKS_PER_CANDLE){
+    live10tCandles.push(cur10tCandle);
+    if (live10tCandles.length > LIVE10T_MAX) live10tCandles.shift();
+    cur10tCandle = null;
+    _tickCounter = 0;
+  }
+}
+
+// ── Shared candle SVG renderer ────────────────────────────────────────
+// Draws a full OHLC candle chart into any SVG element.
+// candles = array of { open, high, low, close, ticks }
+// curCandle = the forming candle (optional, drawn last with opacity)
+function drawCandleChart(svgId, candles, formingCandle, opts={}){
+  const svg = $(svgId);
+  if (!svg) return;
+  const W=1000, H=260, padT=14, padB=40, padL=8, padR=8;
+  const innerW=W-padL-padR, innerH=H-padT-padB;
+
+  const all = formingCandle ? [...candles, formingCandle] : [...candles];
+  if (!all.length){
+    svg.innerHTML = `<text x="${W/2}" y="${H/2}" fill="#475569" font-size="13" text-anchor="middle" font-family="monospace">waiting for data…</text>`;
+    return;
+  }
+
+  // y-scale
+  const hi = Math.max(...all.map(c=>c.high));
+  const lo = Math.min(...all.map(c=>c.low));
+  const pad = (hi-lo)*0.08 || 0.5;
+  const yHi = hi+pad, yLo = lo-pad, yRng = yHi-yLo;
+  const yp = v => padT + innerH*(1-(v-yLo)/yRng);
+
+  // x layout: max 60 candles shown
+  const MAX_SHOW = opts.maxCandles || 60;
+  const shown = all.slice(-MAX_SHOW);
+  const n = shown.length;
+  const cw = Math.max(4, Math.floor(innerW/Math.max(n,1)*0.72));
+  const gap = Math.max(1, Math.floor(innerW/Math.max(n,1)*0.28));
+  const x0 = i => padL + i*(cw+gap) + gap/2;
+
+  // vol scale (height = 30px max)
+  const maxTicks = Math.max(...shown.map(c=>c.ticks||1));
+  const volH = 28;
+  const vH = t => Math.max(2, (t/maxTicks)*volH);
+
+  // dec
+  const dec = decimals || 2;
+  const fP  = v => v.toFixed(dec);
+
+  let out = "";
+
+  // gridlines
+  const ySteps = 4;
+  for(let i=0;i<=ySteps;i++){
+    const v  = yLo + (yHi-yLo)*i/ySteps;
+    const gy = yp(v);
+    out += `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${W-padR}" y2="${gy.toFixed(1)}" stroke="#1a2130" stroke-width="1"/>`;
+    out += `<text x="${padL+4}" y="${(gy-3).toFixed(1)}" fill="#475569" font-size="9" font-family="monospace">${fP(v)}</text>`;
+  }
+
+  // candles
+  shown.forEach((c, i) => {
+    const isForming = formingCandle && i === shown.length-1;
+    const bull   = c.close >= c.open;
+    const col    = bull ? "#16e08b" : "#ff4d5e";
+    const opacity= isForming ? "0.55" : "1";
+    const xi     = x0(i);
+    const cx     = xi + cw/2;
+
+    // Wick
+    const wickHi = yp(c.high), wickLo = yp(c.low);
+    out += `<line x1="${cx.toFixed(1)}" y1="${wickHi.toFixed(1)}" x2="${cx.toFixed(1)}" y2="${wickLo.toFixed(1)}" stroke="${col}" stroke-width="1.2" opacity="${opacity}"/>`;
+
+    // Body
+    const bodyT = yp(Math.max(c.open, c.close));
+    const bodyB = yp(Math.min(c.open, c.close));
+    const bH    = Math.max(1.5, bodyB-bodyT);
+    out += `<rect x="${xi.toFixed(1)}" y="${bodyT.toFixed(1)}" width="${cw}" height="${bH.toFixed(1)}" fill="${col}" opacity="${opacity}"/>`;
+
+    // Volume bar at bottom
+    const vh = vH(c.ticks||1);
+    out += `<rect x="${xi.toFixed(1)}" y="${(H-padB+6).toFixed(1)}" width="${cw}" height="${vh.toFixed(1)}" fill="${col}" opacity="${(opacity==="1"?0.5:0.3)}"/>`;
+  });
+
+  // Forming candle label
+  if(formingCandle){
+    const fc=formingCandle, i=shown.length-1;
+    const lx=(x0(i)+cw+4).toFixed(1), ly=yp(fc.close).toFixed(1);
+    out+=`<text x="${lx}" y="${ly}" fill="#56b6ff" font-size="9" font-family="monospace" font-weight="700">${fP(fc.close)}</text>`;
+  }
+
+  svg.innerHTML = out;
+}
+
+function draw5mCandles(){
+  drawCandleChart("chart5min", live5mCandles, cur5mCandle, { maxCandles: 40 });
+  const info = $("c5minInfo");
+  if (info){
+    const n = live5mCandles.length;
+    const forming = cur5mCandle ? ` · forming: O${cur5mCandle.open.toFixed(decimals||2)} C${cur5mCandle.close.toFixed(decimals||2)} (${cur5mCandle.ticks}t)` : "";
+    info.textContent = `${n} completed 5-min candle${n!==1?"s":""}${forming}`;
+  }
+}
+
+function draw10tCandles(){
+  drawCandleChart("chart10tick", live10tCandles, cur10tCandle, { maxCandles: 60 });
+  const info = $("c10tickInfo");
+  if (info){
+    const n = live10tCandles.length;
+    const rem = cur10tCandle ? `${cur10tCandle.ticks}/${TICKS_PER_CANDLE} ticks in forming candle` : "waiting for first tick";
+    info.textContent = `${n} completed 10-tick candle${n!==1?"s":""}${cur10tCandle?" · "+rem:""}`;
+  }
+}
+
+
 // Draws the previous + current candle to scale, Deriv-style: green when
 // close >= open, red otherwise, with high/low wicks. Auto-scales the y
 // axis to both candles' full range.
@@ -2982,6 +3170,10 @@ function switchMarket(code){
   // Page 4/5: reload this market's signal log, refresh labels, and disarm auto
   // (the selected symbol changed, so don't keep auto-firing on the old basis).
   indHistory.length = 0;
+  // Reset all candle aggregators
+  curCandle = null; prevCandle = null; liveCandles.length = 0;
+  cur5mCandle = null; live5mCandles.length = 0;
+  cur10tCandle = null; live10tCandles.length = 0; _tickCounter = 0;
   // Page 6: reset digit analysis for the new market
   digRing.length = 0;
   digTransitions = Array.from({length:10}, () => new Array(10).fill(0));
@@ -7191,6 +7383,8 @@ function chartPoints(arr,acc,sc,W){
   return pts;
 }
 function chartRenderAll(){
+  draw5mCandles();
+  draw10tCandles();
   const data=chartHistory.slice(-chartWindow);
   const W=1000,H=160;
   if(!data.length){["chartDMI","chartMACD","chartCCI","chartChop"].forEach(id=>{const s=$(id);if(s)s.innerHTML="<text x='500' y='90' text-anchor='middle' fill='#475569' font-size='28' font-family='IBM Plex Mono'>No data yet — connect and wait for ticks</text>";});return;}
