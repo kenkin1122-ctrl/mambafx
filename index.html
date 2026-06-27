@@ -477,6 +477,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   </header>
 
   <nav class="pagenav">
+    <button id="navAccounts" onclick="showPage('accounts')">👤 Accounts</button>
     <button id="navLive" class="active" onclick="showPage('live')">📈 Live Tracker</button>
     <button id="navCandles" onclick="showPage('candles')">🕯️ Candle Charts</button>
     <button id="navEngine" onclick="showPage('engine')">⚡ 5-Tick Engine</button>
@@ -492,6 +493,43 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   </nav>
 
   <!-- ============ PAGE 1: LIVE TRACKER ============ -->
+  <!-- ============ ACCOUNTS PAGE ============ -->
+  <div id="page-accounts" class="page">
+
+    <!-- Login / session panel -->
+    <div class="grid-card" style="margin-bottom:14px" id="acctLoginCard">
+      <h2>🔐 Deriv Session</h2>
+      <div class="gc-sub" style="margin-bottom:12px">
+        Login via OAuth2 (PKCE). The backend exchanges the code for tokens server-side — this page never sees your access token. Login state lives in an HttpOnly cookie.
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+        <span id="acctSessionDot" style="width:10px;height:10px;border-radius:50%;background:var(--muted);display:inline-block;flex-shrink:0"></span>
+        <span id="acctSessionLbl" style="font-size:12px;color:var(--muted)">Checking session…</span>
+      </div>
+      <div id="acctLoginBlock">
+        <button class="gc-btn connect" onclick="gridStartLogin()" style="min-width:200px">🔑 Login with Deriv</button>
+      </div>
+      <div id="acctLoggedBlock" style="display:none">
+        <button class="gc-btn" onclick="gridLogout()" style="background:rgba(255,77,94,.1);border-color:#ff4d5e;color:#ff4d5e">🚪 Log out (clear session)</button>
+      </div>
+      <div id="acctDiag" style="margin-top:10px;display:none;font-size:11px;color:var(--down);background:rgba(255,77,94,.07);border:1px solid rgba(255,77,94,.2);border-radius:8px;padding:10px 12px"></div>
+    </div>
+
+    <!-- Account panels — one per account -->
+    <div id="acctPanelsGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;margin-bottom:14px">
+      <!-- populated by acctRenderPanels() -->
+    </div>
+
+    <!-- Trade P/L summary per account -->
+    <div class="grid-card" id="acctPLCard" style="display:none;margin-bottom:14px">
+      <h2>📊 Session P/L by Account</h2>
+      <div class="gc-sub" style="margin-bottom:10px">Profit and loss from trades placed in the current browser session.</div>
+      <div id="acctPLGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px"></div>
+    </div>
+
+    <footer>Account balances update in real-time via the Deriv WebSocket subscribe:balance stream when an account is connected on the Trading Grid. P/L figures reflect trades placed in this browser session only and reset on page reload.</footer>
+  </div><!-- /page-accounts -->
+
   <div id="page-live" class="page active">
 
   <div class="readout">
@@ -3140,8 +3178,8 @@ function startTfTimers(){
 }
 
 function showPage(which){
-  const pages = { live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts" };
-  const navs  = { live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts" };
+  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts" };
+  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts" };
   Object.keys(pages).forEach(k => {
     document.getElementById(pages[k]).classList.toggle("active", k===which);
     const nav = document.getElementById(navs[k]); if (nav) nav.classList.toggle("active", k===which);
@@ -3174,6 +3212,9 @@ function showPage(which){
   }
   if (which === "diag"){
     diagUpdateConnStatus();
+  }
+  if (which === "accounts"){
+    acctPageInit();
   }
   if (which === "features"){
     featPageInit();
@@ -4736,6 +4777,8 @@ async function gridLogout(){
   if (pickBlock) pickBlock.style.display = "none";
   if (loginBlock) loginBlock.style.display = "block";
   const sel = $("gridAcctPick"); if (sel) sel.innerHTML = "";
+  // Refresh accounts page
+  if (typeof acctRefreshSession === 'function') acctRefreshSession();
 }
 
 function gridDisconnect(){
@@ -4771,18 +4814,16 @@ function gridHandleMsg(msg){
     case "balance": {
       const b = msg.balance;
       if (b){
-        // Update the active account's balance and currency
         gridBalance  = Number(b.balance);
         gridCurrency = b.currency || gridCurrency;
         gridSet("gridBal", gridBalance.toFixed(2) + " " + gridCurrency);
         const curEl = $("gridCurrency"); if (curEl) curEl.value = gridCurrency;
-        // Deriv sometimes sends an `accounts` map: { "DOT123": { balance, currency }, "VRTC456": {...} }
-        // Use it to discover any additional accounts not yet in our picker.
+        // Update accounts page live balance for the connected account
+        if (typeof acctOnBalance === 'function') acctOnBalance(gridLoginId, gridBalance, gridCurrency);
+        // Discover additional accounts from balance.accounts map
         if (b.accounts && typeof b.accounts === "object"){
           const discovered = Object.entries(b.accounts).map(([id, info]) => ({
-            account_id: id,
-            currency:   info.currency || "USD",
-            is_virtual: /^VR/i.test(id) ? 1 : 0,
+            account_id: id, currency: info.currency || "USD", is_virtual: /^VR/i.test(id) ? 1 : 0,
           }));
           gridMergeAccounts(discovered);
         }
@@ -5056,6 +5097,11 @@ function gridUpdateContract(c){
     // Only Ups/Downs Bot settlement
     if (typeof ouOpenContracts !== 'undefined' && ouOpenContracts[id])
       if (typeof ouSettleContract === 'function') ouSettleContract(id, won);
+    // Accounts page P/L tracking
+    if (typeof acctOnTrade === 'function'){
+      const tradePnl = row.pnl != null ? row.pnl : (won ? (row.payout||0) - (row.stake||0) : -(row.stake||0));
+      acctOnTrade(gridLoginId, tradePnl);
+    }
   } else {
     row.status = "open";
   }
@@ -8687,6 +8733,179 @@ function ouRenderStats(){
   if(csEl) csEl.textContent=ouCurrentStake!=null?ouCurrentStake.toFixed(2):'—';
 }
 
+// =====================================================================
+// ACCOUNTS PAGE ENGINE
+// Completely separate from the Trading Grid's internal state.
+// Shows session status, one panel per account (real + demo), live
+// balances, and per-account session P/L.
+// =====================================================================
+
+// Per-account live data store
+// Keyed by account_id. Populated from gridAccounts (fetched by backend)
+// and updated whenever gridHandleMsg fires a balance message.
+const _acctData = {};  // { [account_id]: { balance, currency, is_virtual, pnl, trades } }
+
+// Called by gridHandleMsg whenever a balance update arrives
+// (already subscribed in gridConnect onopen)
+function acctOnBalance(accountId, balance, currency){
+  if (!accountId) return;
+  if (!_acctData[accountId]) _acctData[accountId] = { balance:null, currency:'USD', pnl:0, trades:0 };
+  _acctData[accountId].balance  = balance;
+  _acctData[accountId].currency = currency;
+  // Refresh panels if accounts page is visible
+  if (document.getElementById('page-accounts')?.classList.contains('active')){
+    acctRenderPanels();
+  }
+}
+
+// Called by gridUpdateContract when a trade settles — update P/L for the account
+function acctOnTrade(accountId, pnl){
+  if (!accountId || pnl == null) return;
+  if (!_acctData[accountId]) _acctData[accountId] = { balance:null, currency:'USD', pnl:0, trades:0 };
+  _acctData[accountId].pnl    = (_acctData[accountId].pnl || 0) + pnl;
+  _acctData[accountId].trades = (_acctData[accountId].trades || 0) + 1;
+  if (document.getElementById('page-accounts')?.classList.contains('active')){
+    acctRenderPL();
+  }
+}
+
+function acctPageInit(){
+  acctRefreshSession();
+}
+
+async function acctRefreshSession(){
+  const dot = $('acctSessionDot'), lbl = $('acctSessionLbl');
+  const loginBlock = $('acctLoginBlock'), loggedBlock = $('acctLoggedBlock');
+
+  // Check session via backend
+  try {
+    const resp = await fetch(BACKEND_URL + '/me/session', { credentials: 'include' });
+    const body = await resp.json().catch(() => null);
+    const loggedIn = !!(body && body.logged_in);
+
+    if (dot)  dot.style.background  = loggedIn ? '#16e08b' : 'var(--muted)';
+    if (lbl)  lbl.style.color       = loggedIn ? 'var(--up)' : 'var(--muted)';
+    if (lbl)  lbl.textContent       = loggedIn ? '✅ Logged in to Deriv' : '⚪ Not logged in';
+    if (loginBlock)  loginBlock.style.display  = loggedIn ? 'none'  : 'block';
+    if (loggedBlock) loggedBlock.style.display = loggedIn ? 'block' : 'none';
+
+    if (loggedIn){
+      // Populate gridAccounts if not already loaded
+      if (!gridAccounts.length) await gridLoadAccounts();
+      acctRenderPanels();
+    } else {
+      const grid = $('acctPanelsGrid'); if (grid) grid.innerHTML = '';
+    }
+  } catch(e){
+    if (dot)  dot.style.background = 'var(--down)';
+    if (lbl){ lbl.textContent = 'Cannot reach backend'; lbl.style.color = 'var(--down)'; }
+    acctShowDiag(`Cannot reach backend at <code>${BACKEND_URL}</code>. Check Worker is deployed.`);
+  }
+}
+
+function acctShowDiag(msg){
+  const el = $('acctDiag');
+  if (!el) return;
+  el.innerHTML = msg;
+  el.style.display = msg ? 'block' : 'none';
+}
+
+function acctRenderPanels(){
+  const grid = $('acctPanelsGrid');
+  if (!grid) return;
+
+  if (!gridAccounts.length){
+    grid.innerHTML = '<div class="grid-card" style="opacity:.6">No accounts found — log in first.</div>';
+    return;
+  }
+
+  // Sort: real first, demo second
+  const sorted = [...gridAccounts].sort((a,b) => a.is_virtual - b.is_virtual);
+
+  grid.innerHTML = sorted.map(acct => {
+    const id       = acct.account_id;
+    const isDemo   = acct.is_virtual === 1;
+    const typeTag  = isDemo ? '🟢 DEMO' : '🔴 REAL';
+    const typeLbl  = isDemo ? 'Virtual / Demo' : 'Real Money';
+    const typeClr  = isDemo ? 'var(--up)' : '#ff4d5e';
+    const live     = _acctData[id] || {};
+    const balance  = live.balance  != null ? live.balance.toFixed(2)  : '—';
+    const currency = live.currency || acct.currency || 'USD';
+    const pnl      = live.pnl      != null ? live.pnl : null;
+    const trades   = live.trades   || 0;
+    const pnlStr   = pnl != null ? (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + ' ' + currency : '—';
+    const pnlClr   = pnl == null ? 'var(--muted)' : pnl >= 0 ? 'var(--up)' : 'var(--down)';
+
+    // Is this the currently connected account?
+    const isActive = (id === gridLoginId);
+
+    return `<div class="grid-card" style="border:1px solid ${isActive ? typeClr : 'var(--line)'};position:relative">
+      <div style="position:absolute;top:10px;right:12px;font-size:9px;font-weight:700;color:${typeClr};letter-spacing:.1em;text-transform:uppercase">${typeTag}</div>
+      <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px">${typeLbl}</div>
+      <div style="font-size:18px;font-weight:900;color:var(--text);margin-bottom:2px">${id}</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:14px">${currency} · ${isActive ? '<span style="color:var(--up)">● connected</span>' : '○ not connected'}</div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+        <div class="em-card">
+          <div class="em-lab">Live Balance</div>
+          <div style="font-size:20px;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums">
+            ${balance}
+          </div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">${currency}</div>
+        </div>
+        <div class="em-card">
+          <div class="em-lab">Session P/L</div>
+          <div style="font-size:18px;font-weight:800;color:${pnlClr};font-variant-numeric:tabular-nums">${pnlStr}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">${trades} trade${trades !== 1 ? 's' : ''} this session</div>
+        </div>
+      </div>
+
+      <button class="gc-btn${isActive ? '' : ' connect'}"
+              onclick="acctConnectTo('${id}')"
+              style="${isActive ? 'opacity:.4;cursor:default' : ''}"
+              ${isActive ? 'disabled' : ''}>
+        ${isActive ? '✅ Currently connected' : '⚡ Connect to this account'}
+      </button>
+    </div>`;
+  }).join('');
+
+  acctRenderPL();
+}
+
+function acctRenderPL(){
+  const card = $('acctPLCard'), grid = $('acctPLGrid');
+  if (!card || !grid) return;
+  const hasAny = Object.values(_acctData).some(d => d.trades > 0);
+  card.style.display = hasAny ? 'block' : 'none';
+  if (!hasAny) return;
+
+  grid.innerHTML = gridAccounts.map(acct => {
+    const d = _acctData[acct.account_id] || {};
+    if (!d.trades) return '';
+    const pnl = d.pnl || 0;
+    const clr = pnl >= 0 ? 'var(--up)' : 'var(--down)';
+    const isDemo = acct.is_virtual === 1;
+    return `<div class="em-card">
+      <div class="em-lab">${acct.account_id} ${isDemo ? '🟢' : '🔴'}</div>
+      <div class="em-val" style="color:${clr};font-size:18px">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)} ${d.currency || acct.currency}</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:4px">${d.trades} trade${d.trades !== 1 ? 's' : ''}</div>
+    </div>`;
+  }).filter(Boolean).join('');
+}
+
+// Connect to an account directly from the Accounts page
+async function acctConnectTo(accountId){
+  if (!gridLoggedIn){ alert('Log in first.'); return; }
+  // Switch to Trading Grid and trigger connect for this account
+  showPage('grid');
+  // Set the picker to this account
+  const sel = $('gridAcctPick');
+  if (sel) sel.value = accountId;
+  // Disconnect any existing connection then connect
+  if (gridWs && gridWs.readyState === WebSocket.OPEN) gridDisconnect();
+  setTimeout(() => gridConnect(), 300);
+}
+
 try {
   // Resume the market that was open before the refresh, if any
   const savedMarket = localStorage.getItem(LAST_MARKET_KEY);
@@ -8734,9 +8953,9 @@ try {
   connect();
 
   // If Deriv just redirected back here with ?code=&state=, finish the login.
-  // This is the entire single-page OAuth handoff — no popup, no separate
-  // callback file in the loop.
   gridHandleRedirectReturn();
+  // Refresh accounts page session state on load
+  setTimeout(() => { if (typeof acctRefreshSession === 'function') acctRefreshSession(); }, 500);
 } catch (err) {
   const txt = $("connText");
   if (txt) txt.textContent = "Boot failed";
