@@ -503,8 +503,13 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <div class="grid-card" style="margin-bottom:14px" id="la-login-card">
       <h2>🔐 Login / Account</h2>
       <div class="gc-sub" style="margin-bottom:14px">
-        Login via Deriv OAuth2. The App ID <code>33BoT5hHIzs1muGu7qhww</code> is used.
-        Tokens are stored in <code>sessionStorage</code> only — cleared when you close the tab. Demo and Real account tokens are kept separate.
+        Login via Deriv OAuth2 with App ID <code>33BoT5hHIzs1muGu7qhww</code>.
+        Tokens are stored in <code>sessionStorage</code> only — cleared when you close the tab.
+        <br><br>
+        <b style="color:var(--accent)">⚠ One-time setup required:</b> Your Deriv app's redirect URL must be set to
+        <code style="background:#0a0e17;padding:2px 6px;border-radius:4px;color:#16e08b">https://kenlin1122-ctrl.github.io/mambafx/</code>
+        <br>
+        Go to <a href="https://app.deriv.com/account/api-token" target="_blank" style="color:var(--accent)">app.deriv.com → API Token → My Apps → Manage</a> and set the redirect URL to the above address. After that, login will work.
       </div>
 
       <!-- Session status indicator -->
@@ -6123,26 +6128,21 @@ function gridLogout(){
 }
 
 async function gridCheckSession(){
-  // Use LA engine accounts (from sessionStorage, no backend needed)
-  try {
-    const stored = JSON.parse(sessionStorage.getItem("mfx_la_accounts")||"[]");
-    if (stored.length){
-      gridLoggedIn = true;
-      gridAccounts = stored.map(a=>({account_id:a.loginid, account_type:a.is_virtual?'virtual':'trading', currency:a.currency||'USD', is_virtual:a.is_virtual||0}));
-      gridBuildPicker();
-    } else {
-      gridLoggedIn = false;
-    }
-  } catch(_){ gridLoggedIn = false; }
+  // Sync accounts from backend session (set by laPageInit on login page)
+  if (typeof _laAccounts !== 'undefined' && _laAccounts.length){
+    gridLoggedIn = true;
+    gridAccounts = _laAccounts.map(a=>({account_id:a.loginid,account_type:a.is_virtual?'virtual':'trading',currency:a.currency||'USD',is_virtual:a.is_virtual||0}));
+    gridBuildPicker();
+  } else {
+    gridLoggedIn = false;
+  }
 }
 
 async function gridLoadAccounts(){
-  // Sync from LA accounts — no backend call
-  try {
-    const stored = JSON.parse(sessionStorage.getItem("mfx_la_accounts")||"[]");
-    gridAccounts = stored.map(a=>({account_id:a.loginid, account_type:a.is_virtual?'virtual':'trading', currency:a.currency||'USD', is_virtual:a.is_virtual||0}));
-    if(gridAccounts.length) gridBuildPicker();
-  } catch(_){}
+  if (typeof _laAccounts !== 'undefined' && _laAccounts.length){
+    gridAccounts = _laAccounts.map(a=>({account_id:a.loginid,account_type:a.is_virtual?'virtual':'trading',currency:a.currency||'USD',is_virtual:a.is_virtual||0}));
+    gridBuildPicker();
+  }
 }
 
 function gridBuildPicker(){
@@ -6291,8 +6291,9 @@ function gridHandleRedirectReturn(){
 
 const LA_APP_ID  = "33BoT5hHIzs1muGu7qhww";
 const LA_WS_URL  = `wss://ws.derivws.com/websockets/v3?app_id=${LA_APP_ID}`;
-// After login Deriv redirects back to this page with tokens in the URL
-const LA_REDIRECT= "https://kenlin1122-ctrl.github.io/mambafx/";
+// Redirect URL is configured in the Deriv app dashboard — NOT passed in the URL
+// Dashboard: https://app.deriv.com → Account → API Token → My Apps → Manage
+// Set redirect URL to: https://kenlin1122-ctrl.github.io/mambafx/
 const LA_OAUTH   = `https://oauth.deriv.com/oauth2/authorize?app_id=${LA_APP_ID}`;
 const LA_KEY     = "mfx_la_accounts";
 
@@ -6314,18 +6315,62 @@ function laSet(id,v){ const e=$(id); if(e) e.textContent=v; }
 function laSaveAccounts(list){ try{ sessionStorage.setItem(LA_KEY,JSON.stringify(list)); }catch(_){} }
 function laLoadAccounts(){ try{ return JSON.parse(sessionStorage.getItem(LA_KEY)||"[]"); }catch(_){ return []; } }
 
-function laPageInit(){
-  _laAccounts=laLoadAccounts();
-  if(_laAccounts.length){
-    laRenderLoggedIn(); laRenderAccounts();
-  } else {
-    const parsed=laParseRedirectUrl();
-    if(parsed.length){
-      _laAccounts=parsed; laSaveAccounts(_laAccounts);
-      try{ window.history.replaceState({},"",window.location.pathname); }catch(_){}
-      laRenderLoggedIn(); laRenderAccounts();
-      laLog("Parsed "+parsed.length+" account(s) from redirect URL");
-    } else { laRenderLoggedOut(); }
+async function laPageInit(){
+  laDot("la-status-dot", false);
+  laSet("la-status-lbl", "Checking session…");
+
+  // Check login_error from backend redirect
+  const params = new URLSearchParams(window.location.search);
+  const err = params.get("login_error");
+  if (err){
+    const el = $("la-login-err");
+    if (el){ el.textContent = "Login error: " + err; el.style.display = "block"; }
+    try { window.history.replaceState({}, document.title, window.location.pathname); } catch(_){}
+  }
+
+  try {
+    // Ask backend if we have a valid session (HttpOnly cookie)
+    const r = await fetch(BACKEND_URL + "/me/session", { credentials: "include" });
+    const b = await r.json().catch(() => null);
+
+    if (b && b.logged_in){
+      // Load accounts from backend (tokens stay server-side)
+      await laLoadAccountsFromBackend();
+    } else {
+      laRenderLoggedOut();
+    }
+  } catch(e){
+    laRenderLoggedOut();
+    const el = $("la-login-err");
+    if (el){
+      el.textContent = "Cannot reach backend: " + BACKEND_URL + " — deploy the Worker first.";
+      el.style.display = "block";
+    }
+  }
+}
+
+async function laLoadAccountsFromBackend(){
+  try {
+    const r = await fetch(BACKEND_URL + "/me/accounts", { credentials: "include" });
+    const b = await r.json().catch(() => null);
+    const raw = (b && b.data) || [];
+
+    // Store locally (no tokens — just IDs/currencies for display)
+    _laAccounts = raw.map(a => ({
+      loginid:    a.account_id,
+      currency:   a.currency || "USD",
+      is_virtual: a.is_virtual || 0,
+      balance:    null,
+    }));
+
+    if (_laAccounts.length){
+      laRenderLoggedIn();
+      laRenderAccounts();
+    } else {
+      laRenderLoggedOut();
+    }
+  } catch(e){
+    laRenderLoggedOut();
   }
 }
 
@@ -6388,51 +6433,95 @@ function laRenderAccounts(){
 }
 
 function laLogin(){
-  // Direct redirect to Deriv OAuth — no backend needed.
-  // Deriv will redirect back to the SPA with tokens in the URL:
-  // ?acct1=DOT...&token1=a1-xxx&cur1=usd&acct2=VRTC...&token2=a1-yyy&cur2=usd
-  const redirectUri = encodeURIComponent(LA_REDIRECT);
-  const url = `${LA_OAUTH}&redirect_uri=${redirectUri}`;
-  laLog("Redirecting to: " + url.split("?")[0]);
-  window.location.assign(url);
+  // Go to backend /auth/start which redirects to Deriv OAuth.
+  // After login, Deriv sends tokens to /auth/callback on the backend.
+  // The backend stores tokens in KV, sets a session cookie, then
+  // redirects the browser back to this SPA.
+  laLog("Redirecting via backend auth/start…");
+  window.location.assign(BACKEND_URL + "/auth/start");
 }
 
 function laLogout(){
   laLog("Logging out...");
-  if(_laWs&&_laWs.readyState===WebSocket.OPEN){
-    try{ _laWs.send(JSON.stringify({logout:1})); }catch(_){}
-    try{ _laWs.close(); }catch(_){} 
+  if (_laWs && _laWs.readyState === WebSocket.OPEN){
+    try { _laWs.send(JSON.stringify({ logout: 1 })); } catch(_){}
+    try { _laWs.close(); } catch(_){}
   }
-  _laWs=null; _laActiveId=null;
-  if(_laPing){ clearInterval(_laPing); _laPing=null; }
-  // Clear tokens from sessionStorage — this is the key hygiene step
-  try{ sessionStorage.removeItem(LA_KEY); }catch(_){}
-  _laAccounts=[];
+  _laWs = null; _laActiveId = null;
+  if (_laPing){ clearInterval(_laPing); _laPing = null; }
+  _laAccounts = [];
   gridDisconnect();
+  // Clear the HttpOnly session cookie via backend
+  fetch(BACKEND_URL + "/logout", { method: "POST", credentials: "include" }).catch(() => {});
   laRenderLoggedOut();
-  laLog("Logged out — all tokens cleared from sessionStorage");
+  laLog("Logged out — session cleared");
 }
 
 async function laConnectAccount(loginid){
-  const acct=_laAccounts.find(a=>a.loginid===loginid);
-  if(!acct){ laLog("Account not found: "+loginid); return; }
-  // Per spec: drop socket, re-authorize with chosen account's token
-  if(_laWs&&_laWs.readyState===WebSocket.OPEN){
-    laLog("Dropping existing socket before switch to "+loginid);
-    try{ _laWs.close(); }catch(_){} _laWs=null;
+  const acct = _laAccounts.find(a => a.loginid === loginid);
+  if (!acct){ laLog("Account not found: " + loginid); return; }
+
+  // Drop existing socket
+  if (_laWs && _laWs.readyState === WebSocket.OPEN){
+    laLog("Dropping existing socket before switch to " + loginid);
+    try { _laWs.close(); } catch(_){} _laWs = null;
   }
-  if(_laPing){ clearInterval(_laPing); _laPing=null; }
-  _laActiveId=null;
-  laDot("la-ws-dot",false); laSet("la-ws-lbl","Connecting to "+loginid+"…");
-  // Debug log per spec
-  laLog("app_id: "+LA_APP_ID);
-  laLog("endpoint: "+LA_WS_URL);
-  laLog("token: "+acct.token.slice(0,8)+"… (virtual="+acct.is_virtual+")");
-  _laWs=new WebSocket(LA_WS_URL);
-  _laWs.onopen=()=>{ laLog("WS open — authorizing"); _laWs.send(JSON.stringify({authorize:acct.token})); };
-  _laWs.onmessage=ev=>{ let m; try{m=JSON.parse(ev.data);}catch(_){return;} laHandleMsg(m,acct); };
-  _laWs.onerror=()=>{ laLog("WS error"); laDot("la-ws-dot",false); laSet("la-ws-lbl","Connection error"); };
-  _laWs.onclose=()=>{ laLog("WS closed"); laDot("la-ws-dot",false); laSet("la-ws-lbl","Disconnected"); if(_laPing){clearInterval(_laPing);_laPing=null;} laRenderAccounts(); };
+  if (_laPing){ clearInterval(_laPing); _laPing = null; }
+  _laActiveId = null;
+  laDot("la-ws-dot", false);
+  laSet("la-ws-lbl", "Getting WS URL for " + loginid + "…");
+
+  // Ask backend for WS URL + account token
+  // Backend returns { url, token } — token is the per-account API token
+  let wsUrl, wsToken;
+  try {
+    const r = await fetch(BACKEND_URL + "/ws/otp", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ account_id: loginid }),
+    });
+    const b = await r.json().catch(() => null);
+    if (!r.ok) throw new Error((b && b.message) || `HTTP ${r.status}`);
+    wsUrl   = b && b.url;
+    wsToken = b && b.token;
+    if (!wsUrl || !wsToken) throw new Error("Backend did not return url or token");
+  } catch(e){
+    laLog("Failed to get WS credentials: " + e.message);
+    laSet("la-ws-lbl", "Error: " + e.message);
+    return;
+  }
+
+  laLog("app_id: " + LA_APP_ID);
+  laLog("endpoint: " + wsUrl.split("?")[0]);
+  laLog("token: " + wsToken.slice(0, 8) + "… (virtual=" + acct.is_virtual + ")");
+
+  _laWs = new WebSocket(wsUrl);
+
+  _laWs.onopen = () => {
+    laLog("WS open — sending { authorize: token }");
+    // Per Deriv docs: authorize with the account-specific token
+    _laWs.send(JSON.stringify({ authorize: wsToken }));
+  };
+
+  _laWs.onmessage = ev => {
+    let m; try { m = JSON.parse(ev.data); } catch(_){ return; }
+    laHandleMsg(m, acct);
+  };
+
+  _laWs.onerror = () => {
+    laLog("WS error");
+    laDot("la-ws-dot", false);
+    laSet("la-ws-lbl", "Connection error");
+  };
+
+  _laWs.onclose = () => {
+    laLog("WS closed");
+    laDot("la-ws-dot", false);
+    laSet("la-ws-lbl", "Disconnected");
+    if (_laPing){ clearInterval(_laPing); _laPing = null; }
+    laRenderAccounts();
+  };
 }
 
 function laHandleMsg(msg,acct){
@@ -6516,15 +6605,7 @@ function laRenderHistory(stmt){
   }).join("");
 }
 
-// Parse tokens on every load (handles direct Deriv redirect to SPA root)
-(function(){
-  const p=new URLSearchParams(window.location.search);
-  if(p.get("acct1")&&p.get("token1")){
-    const list=[]; let i=1;
-    while(true){ const l=p.get("acct"+i),t=p.get("token"+i),c=p.get("cur"+i); if(!l||!t)break; list.push({loginid:l,token:t,currency:(c||"USD").toUpperCase(),is_virtual:/^VR/i.test(l)?1:0,balance:null}); i++; }
-    if(list.length){ laSaveAccounts(list); _laAccounts=list; try{window.history.replaceState({},"",window.location.pathname);}catch(_){} }
-  }
-})();
+// Tokens are now handled server-side by /auth/callback — no URL parsing needed here.
 
 try {
   // Resume the market that was open before the refresh, if any
