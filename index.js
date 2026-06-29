@@ -1,52 +1,43 @@
 /**
  * Mamba FX — Deriv OAuth backend (Cloudflare Worker)
  *
- * CORRECT DERIV OAUTH FLOW (per official docs):
- * ─────────────────────────────────────────────────────────────────────
- * Deriv does NOT use standard PKCE code exchange. Instead:
+ * HOW DERIV OAUTH WORKS (simple token flow, not PKCE):
+ * ─────────────────────────────────────────────────────
+ * 1. Redirect browser to:
+ *      https://oauth.deriv.com/oauth2/authorize?app_id=CLIENT_ID
  *
- * 1. Redirect user to:
- *    https://oauth.deriv.com/oauth2/authorize?app_id=YOUR_APP_ID
+ * 2. Deriv shows login screen. After login, Deriv redirects to the
+ *    URL registered in your Deriv app dashboard — which must be:
+ *      https://mambafx-backend.kenlin1122.workers.dev/auth/callback
  *
- * 2. Deriv redirects back to your REDIRECT_URI with account tokens
- *    DIRECTLY in the query string:
- *    https://your-app.com/callback?
- *      acct1=cr799393&token1=a1-xxxx&cur1=usd&
- *      acct2=vrtc1859315&token2=a1-yyyy&cur2=usd
+ *    The redirect URL contains tokens directly:
+ *      /auth/callback?acct1=DOT91449066&token1=a1-xxx&cur1=usd
+ *                    &acct2=VRTC1234567&token2=a1-yyy&cur2=usd
  *
- * 3. Parse acct1..N, token1..N, cur1..N from the query string.
- *    Real accounts: CR* or DOT* prefix
- *    Virtual/demo:  VRTC* prefix
+ * 3. /auth/callback parses all acct+token+cur pairs pairs, stores them
+ *    in KV under a session ID, sets an HttpOnly cookie, then redirects
+ *    the browser back to the SPA (GitHub Pages).
  *
- * 4. Store all account+token pairs in KV session.
+ * 4. The SPA calls /me/session → logged_in true/false.
+ *    Then /me/accounts → list of accounts (no tokens exposed).
+ *    Then /ws/otp { account_id } → WS URL for that account.
  *
- * 5. For WS connection to any account:
- *    POST /ws/otp { account_id } → use that account's token as Bearer
- *    in the REST OTP call → returns authenticated WS URL
- *    OR: open wss://api.derivws.com/trading/v1/options/ws/demo (or /real)
- *        passing the token in the OTP query param.
+ * REQUIRED secrets (wrangler secret put NAME):
+ *   CLIENT_ID   = 33BoT5hHIzs1muGu7qhww
  *
- * Key insight: each account has its OWN token from the redirect URL.
- * We use the DEMO account token for the demo OTP call and the REAL
- * account token for the real OTP call. That is why only one account
- * was showing — we were always using the PRIMARY (real) account token.
+ * REQUIRED in wrangler.jsonc vars:
+ *   SPA_URL     = https://kenlin1122-ctrl.github.io/mambafx/
+ *   ALLOWED_ORIGIN = https://kenlin1122-ctrl.github.io
  *
- * Routes:
- *   GET  /auth/start        → redirect to Deriv OAuth
- *   GET  /auth/callback     → parse acct+token pairs from query string
- *                             → store all accounts+tokens → redirect SPA
- *   GET  /me/session        → { logged_in }
- *   GET  /me/accounts       → all accounts (no tokens exposed)
- *   POST /ws/otp            → { account_id } → { url } via REST OTP
- *   POST /logout            → clear session
- *   GET  /debug/session     → what's stored (no tokens) for debugging
+ * REQUIRED in Deriv app dashboard:
+ *   Redirect URL = https://mambafx-backend.kenlin1122.workers.dev/auth/callback
  */
 
-const DERIV_OAUTH_URL  = "https://oauth.deriv.com/oauth2/authorize";
-const DERIV_OTP_BASE   = "https://api.derivws.com/trading/v1/options/accounts";
+const DERIV_OAUTH_URL = "https://oauth.deriv.com/oauth2/authorize";
+const DERIV_WS_BASE   = "wss://ws.derivws.com/websockets/v3";
 
-const SESSION_COOKIE   = "mfx_session";
-const SESSION_TTL      = 60 * 60 * 8;   // 8 hours
+const SESSION_COOKIE  = "mfx_session";
+const SESSION_TTL     = 60 * 60 * 8;   // 8 hours
 
 // ── CORS ──────────────────────────────────────────────────────────────
 function cors(env){
@@ -61,28 +52,30 @@ function cors(env){
 const J = (data, env, status=200, extra={}) =>
   new Response(JSON.stringify(data, null, 2), {
     status,
-    headers: { ...cors(env), "Content-Type":"application/json", ...extra },
+    headers: { ...cors(env), "Content-Type": "application/json", ...extra },
   });
 
-// ── Cookie helpers ────────────────────────────────────────────────────
-const mkCookie = (id, age) => `${SESSION_COOKIE}=${id}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=${age}`;
-const rmCookie = ()        => `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=0`;
+// ── Cookies ───────────────────────────────────────────────────────────
+const mkCookie = (id, age) =>
+  `${SESSION_COOKIE}=${id}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=${age}`;
+const rmCookie = () =>
+  `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=0`;
 function getCookie(req, name){
-  for (const p of (req.headers.get("Cookie")||"").split(/;\s*/)){
+  for (const p of (req.headers.get("Cookie") || "").split(/;\s*/)){
     const i = p.indexOf("=");
     if (i > -1 && p.slice(0, i) === name) return p.slice(i + 1);
   }
   return null;
 }
 
-// ── Misc ──────────────────────────────────────────────────────────────
+// ── Random hex ────────────────────────────────────────────────────────
 const randHex = n => {
   const a = new Uint8Array(n);
   crypto.getRandomValues(a);
-  return [...a].map(b => b.toString(16).padStart(2,"0")).join("");
+  return [...a].map(b => b.toString(16).padStart(2, "0")).join("");
 };
 
-// ── KV session ────────────────────────────────────────────────────────
+// ── KV session helpers ────────────────────────────────────────────────
 async function loadSession(req, env){
   const sid = getCookie(req, SESSION_COOKIE);
   if (!sid) return null;
@@ -93,9 +86,8 @@ async function loadSession(req, env){
 const saveSession = (env, sid, data) =>
   env.SESSION.put("s:" + sid, JSON.stringify(data), { expirationTtl: SESSION_TTL });
 
-// ── Normalise account from Deriv redirect params ───────────────────────
-// acct=cr799393 OR acct=vrtc1859315 OR acct=DOT91449066
-// Virtual/demo: loginid starts with VR (case-insensitive)
+// ── Normalise one account entry from the Deriv redirect URL ───────────
+// Deriv loginid prefixes: VR* or VRTC* = virtual/demo, else = real
 function normalise(loginid, token, currency){
   const id   = String(loginid || "").trim();
   const virt = /^VR/i.test(id);
@@ -104,51 +96,46 @@ function normalise(loginid, token, currency){
     account_type: virt ? "virtual" : "trading",
     currency:     String(currency || "USD").toUpperCase(),
     is_virtual:   virt ? 1 : 0,
-    token:        String(token || ""),   // stored in KV, NEVER sent to browser
+    token:        String(token || ""),  // kept server-side only, never sent to browser
   };
 }
 
 // ══════════════════════════════════════════════════════════════════════
 // GET /auth/start
-// Redirect to Deriv OAuth. Deriv will redirect back to REDIRECT_URI
-// with ?acct1=...&token1=...&cur1=...&acct2=...&token2=...&cur2=...
+// Redirect to Deriv OAuth. Deriv will send the browser to the
+// registered redirect URL (/auth/callback) with tokens in the query.
 // ══════════════════════════════════════════════════════════════════════
 async function handleAuthStart(req, env){
-  const state = randHex(16);
-  // Store state in KV for CSRF protection
-  await env.SESSION.put("state:" + state, "1", { expirationTtl: 600 });
-  const url = `${DERIV_OAUTH_URL}?app_id=${encodeURIComponent(env.CLIENT_ID)}&state=${state}`;
+  // Simple redirect — Deriv's token flow needs only app_id.
+  // The redirect target is configured in the Deriv dashboard, not here.
+  const url = `${DERIV_OAUTH_URL}?app_id=${encodeURIComponent(env.CLIENT_ID)}`;
+  console.log("[auth/start] redirecting to:", url);
   return Response.redirect(url, 302);
 }
 
 // ══════════════════════════════════════════════════════════════════════
 // GET /auth/callback
-// Deriv redirects here with:
-//   ?acct1=cr799393&token1=a1-xxx&cur1=usd
-//   &acct2=vrtc1859315&token2=a1-yyy&cur2=usd
-//   &state=...
+// Deriv redirects here with tokens in the query string:
+//   ?acct1=DOT91449066&token1=a1-xxx&cur1=usd
+//   &acct2=VRTC1234567&token2=a1-yyy&cur2=usd
 //
-// Parse all acct*/token*/cur* pairs and store in session.
+// We parse all pairs, store them in a KV session, set an HttpOnly
+// cookie, then redirect the browser back to the SPA.
 // ══════════════════════════════════════════════════════════════════════
 async function handleAuthCallback(req, env){
   const spa  = env.SPA_URL || "https://kenlin1122-ctrl.github.io/mambafx/";
-  const fail = msg => Response.redirect(`${spa}?login_error=${encodeURIComponent(msg)}`, 302);
-  const u    = new URL(req.url);
+  const fail = msg => Response.redirect(
+    `${spa}?login_error=${encodeURIComponent(msg)}`, 302
+  );
 
-  // CSRF check
-  const state = u.searchParams.get("state");
-  if (state){
-    const stored = await env.SESSION.get("state:" + state);
-    if (!stored) return fail("Invalid state parameter — possible CSRF. Please try again.");
-    await env.SESSION.delete("state:" + state);
-  }
+  const u = new URL(req.url);
 
-  // Check for error param
+  // Check for error from Deriv
   const errParam = u.searchParams.get("error");
-  if (errParam) return fail(u.searchParams.get("error_description") || errParam);
+  if (errParam)
+    return fail(u.searchParams.get("error_description") || errParam);
 
-  // Parse all acct*/token*/cur* pairs
-  // Deriv uses acct1, acct2, ... token1, token2, ... cur1, cur2, ...
+  // Parse all acct+token+cur pairs pairs
   const accounts = [];
   let i = 1;
   while (true){
@@ -160,27 +147,36 @@ async function handleAuthCallback(req, env){
     i++;
   }
 
-  console.log(`[callback] parsed ${accounts.length} account(s): ${
-    accounts.map(a => `${a.account_id}(virt=${a.is_virtual},hasTok=${!!a.token})`).join(", ")
+  console.log(`[callback] received ${accounts.length} account(s): ${
+    accounts.map(a => `${a.account_id}(virt=${a.is_virtual},tok=${a.token?a.token.slice(0,8)+"…":"MISSING"})`).join(", ")
   }`);
 
   if (!accounts.length)
-    return fail("No accounts returned by Deriv. Check your app_id and OAuth settings.");
+    return fail(
+      "No accounts in the callback URL. " +
+      "Make sure the redirect URL in your Deriv app dashboard is set to: " +
+      "https://mambafx-backend.kenlin1122.workers.dev/auth/callback"
+    );
 
+  // Store session in KV — tokens stay server-side
   const sid = randHex(32);
   await saveSession(env, sid, {
-    accounts,          // [{ account_id, account_type, currency, is_virtual, token }]
+    accounts,           // [{ account_id, account_type, currency, is_virtual, token }]
     created_at: Date.now(),
   });
 
+  // Redirect browser back to SPA with session cookie set
   return new Response(null, {
     status:  302,
-    headers: { "Location": spa, "Set-Cookie": mkCookie(sid, SESSION_TTL) },
+    headers: {
+      "Location":   spa,
+      "Set-Cookie": mkCookie(sid, SESSION_TTL),
+    },
   });
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// GET /me/session
+// GET /me/session  →  { logged_in: true|false }
 // ══════════════════════════════════════════════════════════════════════
 async function handleMeSession(req, env){
   const s = await loadSession(req, env);
@@ -188,8 +184,8 @@ async function handleMeSession(req, env){
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// GET /me/accounts
-// Returns all accounts — NEVER returns tokens to the browser.
+// GET /me/accounts  →  { data: [{ account_id, account_type, currency, is_virtual }] }
+// Tokens are NEVER sent to the browser.
 // ══════════════════════════════════════════════════════════════════════
 async function handleMeAccounts(req, env){
   const s = await loadSession(req, env);
@@ -197,85 +193,68 @@ async function handleMeAccounts(req, env){
 
   const accounts = (s.accounts || []).filter(a => a.account_id);
   if (!accounts.length)
-    return J({ error:"no_accounts", message:"No accounts in session. Log out and log in again." }, env, 200);
+    return J({ error: "no_accounts", message: "No accounts in session. Log out and log in again." }, env, 200);
 
-  return J({
-    data: accounts.map(({ token:_, ...rest }) => rest)
-  }, env);
+  return J({ data: accounts.map(({ token: _, ...rest }) => rest) }, env);
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// POST /ws/otp  { account_id } → { url }
+// POST /ws/otp  { account_id }  →  { url, token }
 //
-// Uses each account's OWN token (from the OAuth redirect) to call the
-// REST OTP endpoint. This returns an authenticated WS URL specific to
-// that account (demo URL for virtual, real URL for real accounts).
+// Returns the WS base URL + the account's OWN token so the browser
+// can open the WS and send { authorize: token } on open.
 //
-// Demo WS URL: wss://api.derivws.com/trading/v1/options/ws/demo?otp=...
-// Real WS URL: wss://api.derivws.com/trading/v1/options/ws/real?otp=...
+// Each account has its own token from the OAuth redirect:
+//   real  account token → authorizes a real-money WS session
+//   demo  account token → authorizes a virtual/demo WS session
 // ══════════════════════════════════════════════════════════════════════
 async function handleWsOtp(req, env){
   const s = await loadSession(req, env);
   if (!s) return J({ error: "not_logged_in" }, env, 401);
 
-  const body = await req.json().catch(() => ({}));
+  const body       = await req.json().catch(() => ({}));
   const account_id = body.account_id;
   if (!account_id) return J({ error: "missing_account_id" }, env, 400);
 
-  // Find this account's token
   const acct = (s.accounts || []).find(a => a.account_id === account_id);
   if (!acct)
-    return J({ error:"account_not_found", message:`Account ${account_id} not in session. Log out and log in again.` }, env, 404);
+    return J({
+      error:   "account_not_found",
+      message: `${account_id} is not in your session. Log out and log in again.`,
+    }, env, 404);
+
   if (!acct.token)
-    return J({ error:"no_token", message:`No token stored for ${account_id}.` }, env, 500);
+    return J({
+      error:   "no_token",
+      message: `No token stored for ${account_id}. Log out and log in again.`,
+    }, env, 500);
 
-  // Call the REST OTP endpoint using THIS account's own token
-  // This is what gets the correct demo or real WS URL
-  let otpResp, otpBody;
-  try {
-    otpResp = await fetch(`${DERIV_OTP_BASE}/${encodeURIComponent(account_id)}/otp`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${acct.token}`,
-        "Deriv-App-ID":  env.CLIENT_ID,
-        "Content-Type":  "application/json",
-      },
-    });
-    otpBody = await otpResp.json().catch(() => null);
-  } catch(e){
-    return J({ error:"upstream_unreachable", message: String(e.message) }, env, 502);
-  }
-
-  if (!otpResp.ok){
-    const msg = (otpBody?.errors?.[0]?.message) || (otpBody?.error) || `HTTP ${otpResp.status}`;
-    return J({ error:"otp_failed", message: msg, account_id, status: otpResp.status }, env, otpResp.status);
-  }
-
-  const wsUrl = otpBody?.data?.url;
-  if (!wsUrl)
-    return J({ error:"no_url", message:"OTP response had no url field.", raw: otpBody }, env, 502);
-
-  console.log(`[ws/otp] ${account_id}(virt=${acct.is_virtual}) → ${wsUrl.split("?")[0]}?otp=***`);
-  return J({ url: wsUrl, account_id, is_virtual: acct.is_virtual }, env);
+  // Return WS URL + token. Browser will:
+  //   ws = new WebSocket(url)
+  //   ws.onopen → ws.send({ authorize: token })
+  // This authorizes the WS for exactly this account (real or demo).
+  const url = `${DERIV_WS_BASE}?app_id=${encodeURIComponent(env.CLIENT_ID)}`;
+  console.log(`[ws/otp] ${account_id}(virt=${acct.is_virtual}) → token ${acct.token.slice(0,8)}…`);
+  return J({ url, token: acct.token, account_id, is_virtual: acct.is_virtual }, env);
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// GET /debug/session — inspect session contents (no tokens)
+// GET /debug/session  →  session info (no tokens)
 // ══════════════════════════════════════════════════════════════════════
 async function handleDebugSession(req, env){
   const s = await loadSession(req, env);
-  if (!s) return J({ logged_in:false, message:"No valid session cookie." }, env, 200);
+  if (!s) return J({ logged_in: false, message: "No session cookie found." }, env, 200);
   return J({
-    logged_in:    true,
-    session_age:  s.created_at ? Math.round((Date.now()-s.created_at)/1000) + "s ago" : "?",
-    account_count:(s.accounts||[]).length,
-    accounts:     (s.accounts||[]).map(a => ({
+    logged_in:     true,
+    created:       s.created_at ? new Date(s.created_at).toISOString() : "?",
+    account_count: (s.accounts || []).length,
+    accounts:      (s.accounts || []).map(a => ({
       account_id:   a.account_id,
       account_type: a.account_type,
       currency:     a.currency,
       is_virtual:   a.is_virtual,
       has_token:    !!(a.token),
-      token_prefix: a.token ? a.token.slice(0,6)+"…" : "MISSING",
+      token_prefix: a.token ? a.token.slice(0, 8) + "…" : "MISSING",
     })),
   }, env);
 }
@@ -297,39 +276,38 @@ export default {
     const path = new URL(req.url).pathname;
 
     if (req.method === "OPTIONS")
-      return new Response(null, { status:204, headers:cors(env) });
+      return new Response(null, { status: 204, headers: cors(env) });
 
-    const missing = [];
-    if (!env.SESSION?.get) missing.push("SESSION (KV binding)");
-    if (!env.CLIENT_ID)    missing.push("CLIENT_ID");
-    if (!env.REDIRECT_URI) missing.push("REDIRECT_URI");
-    if (missing.length && path !== "/" && path !== "/health")
-      return J({ error:"misconfigured", missing }, env, 500);
+    // Config check — only CLIENT_ID is required (REDIRECT_URI not needed)
+    if (!env.SESSION?.get && path !== "/" && path !== "/health")
+      return J({ error: "misconfigured", message: "SESSION KV binding missing" }, env, 500);
+    if (!env.CLIENT_ID && path !== "/" && path !== "/health")
+      return J({ error: "misconfigured", message: "CLIENT_ID secret missing" }, env, 500);
 
     try {
-      if (path==="/auth/start"                               && req.method==="GET")  return await handleAuthStart(req,env);
-      if (path==="/auth/callback"                            && req.method==="GET")  return await handleAuthCallback(req,env);
-      if (path==="/me/session"                               && req.method==="GET")  return await handleMeSession(req,env);
-      if (path==="/me/accounts"                              && req.method==="GET")  return await handleMeAccounts(req,env);
-      if ((path==="/ws/otp"||path==="/ws/connect")           && req.method==="POST") return await handleWsOtp(req,env);
-      if (path==="/logout"                                   && req.method==="POST") return await handleLogout(req,env);
-      if (path==="/debug/session"                            && req.method==="GET")  return await handleDebugSession(req,env);
+      if (path === "/auth/start"    && req.method === "GET")  return await handleAuthStart(req, env);
+      if (path === "/auth/callback" && req.method === "GET")  return await handleAuthCallback(req, env);
+      if (path === "/me/session"    && req.method === "GET")  return await handleMeSession(req, env);
+      if (path === "/me/accounts"   && req.method === "GET")  return await handleMeAccounts(req, env);
+      if ((path === "/ws/otp" || path === "/ws/connect") && req.method === "POST")
+                                                              return await handleWsOtp(req, env);
+      if (path === "/logout"        && req.method === "POST") return await handleLogout(req, env);
+      if (path === "/debug/session" && req.method === "GET")  return await handleDebugSession(req, env);
 
-      if (path==="/" || path==="/health")
+      if (path === "/" || path === "/health")
         return J({
           ok: true, service: "mambafx-backend",
-          config:{
+          config: {
             kv:       !!(env.SESSION?.get),
             clientId: !!env.CLIENT_ID,
-            redirect: env.REDIRECT_URI || null,
             spa:      env.SPA_URL || null,
             origin:   env.ALLOWED_ORIGIN || null,
           },
         }, env);
 
-      return J({ error:"not_found", path }, env, 404);
+      return J({ error: "not_found", path }, env, 404);
     } catch(e){
-      return J({ error:"internal", message:String(e?.message||e), stack:String(e?.stack||"") }, env, 500);
+      return J({ error: "internal", message: String(e?.message || e), stack: String(e?.stack || "") }, env, 500);
     }
   }
 };
