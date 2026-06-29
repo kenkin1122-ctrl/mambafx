@@ -477,6 +477,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   </header>
 
   <nav class="pagenav">
+    <button id="navLogin" onclick="showPage('login')">🔐 Login / Account</button>
     <button id="navLive" class="active" onclick="showPage('live')">📈 Live Tracker</button>
     <button id="navCandles" onclick="showPage('candles')">🕯️ Candle Charts</button>
     <button id="navEngine" onclick="showPage('engine')">⚡ 5-Tick Engine</button>
@@ -492,6 +493,107 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   </nav>
 
   <!-- ============ PAGE 1: LIVE TRACKER ============ -->
+
+  <!-- ============================================================== -->
+  <!-- LOGIN / ACCOUNT PAGE                                           -->
+  <!-- ============================================================== -->
+  <div id="page-login" class="page">
+
+    <!-- Step 1: Login -->
+    <div class="grid-card" style="margin-bottom:14px" id="la-login-card">
+      <h2>🔐 Login / Account</h2>
+      <div class="gc-sub" style="margin-bottom:14px">
+        Login via Deriv OAuth2. The App ID <code>33BoT5hHIzs1muGu7qhww</code> is used.
+        Tokens are stored in <code>sessionStorage</code> only — cleared when you close the tab. Demo and Real account tokens are kept separate.
+      </div>
+
+      <!-- Session status indicator -->
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+        <span style="width:10px;height:10px;border-radius:50%;background:var(--muted);display:inline-block;flex-shrink:0" id="la-status-dot"></span>
+        <span id="la-status-lbl" style="font-size:12px;color:var(--muted);font-weight:600">Checking session…</span>
+      </div>
+
+      <!-- Login buttons (shown when logged out) -->
+      <div id="la-logged-out" style="display:none">
+        <div class="gc-sub" style="margin-bottom:12px">
+          Click the button below. Deriv will ask you to log in and approve access. You'll be redirected back here with your account tokens.
+        </div>
+        <button class="gc-btn connect" onclick="laLogin()" style="min-width:220px;font-size:13px;padding:10px 24px">
+          🔑 Login with Deriv
+        </button>
+        <div id="la-login-err" style="display:none;margin-top:10px;font-size:11px;color:var(--down);background:rgba(255,77,94,.07);border:1px solid rgba(255,77,94,.2);border-radius:8px;padding:10px 12px"></div>
+      </div>
+
+      <!-- Logged-in header (shown when logged in) -->
+      <div id="la-logged-in" style="display:none">
+        <button onclick="laLogout()" style="background:rgba(255,77,94,.1);border:1px solid #ff4d5e;color:#ff4d5e;padding:6px 16px;border-radius:8px;font-size:11px;cursor:pointer;font-weight:700">
+          🚪 Logout — clear session
+        </button>
+        <span style="font-size:10px;color:var(--muted);margin-left:14px">Clears all stored tokens and closes the WebSocket</span>
+      </div>
+    </div>
+
+    <!-- Step 2: Account panels (real + demo) — shown after login -->
+    <div id="la-accounts-grid" style="display:none;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px;margin-bottom:14px">
+      <!-- populated by laRenderAccounts() -->
+    </div>
+
+    <!-- Step 3: Active connection + balance -->
+    <div id="la-connection-card" style="display:none;margin-bottom:14px" class="grid-card">
+      <h2>📡 Live Connection</h2>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <span id="la-ws-dot" style="width:10px;height:10px;border-radius:50%;background:var(--muted);display:inline-block"></span>
+        <span id="la-ws-lbl" style="font-size:12px;color:var(--muted)">Not connected</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:12px">
+        <div class="em-card">
+          <div class="em-lab">Account</div>
+          <div id="la-bal-acct" class="em-val neu" style="font-size:14px">—</div>
+        </div>
+        <div class="em-card">
+          <div class="em-lab">Type</div>
+          <div id="la-bal-type" class="em-val neu">—</div>
+        </div>
+        <div class="em-card">
+          <div class="em-lab">Live Balance</div>
+          <div id="la-bal-amount" class="em-val acc" style="font-size:20px;font-weight:900">—</div>
+        </div>
+        <div class="em-card">
+          <div class="em-lab">Currency</div>
+          <div id="la-bal-cur" class="em-val neu">—</div>
+        </div>
+      </div>
+      <div style="font-size:9px;color:var(--muted)">Balance updates in real-time via <code>balance: 1, subscribe: 1</code> on the authorized WebSocket. MT5/cTrader balances are separate and not returned here.</div>
+    </div>
+
+    <!-- Step 4: Transaction history -->
+    <div id="la-history-card" style="display:none;margin-bottom:14px" class="grid-card">
+      <h2>📋 Recent Transactions <button onclick="laFetchHistory()" style="font-size:10px;margin-left:12px;padding:3px 10px;background:#131c2e;border:1px solid var(--line);border-radius:6px;color:var(--muted);cursor:pointer">↻ Refresh</button></h2>
+      <div class="gc-sub" style="margin-bottom:10px">Last 10 transactions via <code>statement</code>. Includes deposits, withdrawals, and trade P/L.</div>
+      <div style="overflow-x:auto">
+        <table class="sig-table" style="min-width:560px">
+          <thead>
+            <tr>
+              <th class="l">Date</th><th>Type</th><th>Amount</th><th>Balance after</th><th class="l">Description</th>
+            </tr>
+          </thead>
+          <tbody id="la-history-body">
+            <tr><td colspan="5" class="sig-empty">Connect to an account to load history.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Debug panel -->
+    <div class="grid-card" style="margin-bottom:14px">
+      <h2 style="cursor:pointer" onclick="laToggleDebug()">🔍 Debug Info <span style="font-size:11px;font-weight:400;color:var(--muted)">(click to expand)</span></h2>
+      <div id="la-debug-panel" style="display:none;margin-top:10px;font-size:10px;font-family:monospace;color:var(--muted);background:#0a0e17;border-radius:8px;padding:12px;line-height:1.8;white-space:pre-wrap" id="la-debug"></div>
+    </div>
+
+    <footer>
+      Authentication uses Deriv OAuth2 with App ID <code>33BoT5hHIzs1muGu7qhww</code>. Tokens are stored in <code>sessionStorage</code> and cleared when you close the tab. Demo and Real tokens are kept separate — switching accounts closes the current socket and re-authorizes with the new token. Balance uses the Deriv WebSocket <code>balance</code> call with <code>subscribe:1</code>. Transaction history uses <code>statement</code>. Full API docs: <a href="https://developers.deriv.com/" target="_blank" style="color:var(--accent)">developers.deriv.com</a>
+    </footer>
+  </div><!-- /page-login -->
 
   <div id="page-live" class="page active">
 
@@ -3322,8 +3424,8 @@ function startTfTimers(){
 }
 
 function showPage(which){
-  const pages = { live:"page-live", candles:"page-candles", engine:"page-engine", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot" };
-  const navs  = { live:"navLive",  candles:"navCandles", engine:"navEngine", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot" };
+  const pages = { login:"page-login", live:"page-live", candles:"page-candles", engine:"page-engine", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot" };
+  const navs  = { login:"navLogin", live:"navLive",  candles:"navCandles", engine:"navEngine", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot" };
   Object.keys(pages).forEach(k => {
     document.getElementById(pages[k]).classList.toggle("active", k===which);
     const nav = document.getElementById(navs[k]); if (nav) nav.classList.toggle("active", k===which);
@@ -3361,6 +3463,9 @@ function showPage(which){
   }
   if (which === "accounts"){
     acctPageInit();
+  }
+  if (which === "login"){
+    laPageInit();
   }
   if (which === "features"){
     featPageInit();
@@ -6196,6 +6301,252 @@ function gridHandleRedirectReturn(){
   gridCheckSession();
 }
 
+// ======================================================================
+// LOGIN / ACCOUNT ENGINE
+// ======================================================================
+// Follows the official Deriv OAuth + WebSocket flow exactly:
+//
+// 1. LOGIN: redirect to oauth.deriv.com with app_id.
+//    Deriv returns tokens in the URL: ?acct1=...&token1=...&cur1=...
+//
+// 2. AUTHORIZE: open wss://ws.derivws.com/websockets/v3?app_id=APP_ID
+//    send { authorize: token } — response gives account_list.
+//
+// 3. PICK ACCOUNT: read account_list. is_virtual=1 → demo, 0 → real.
+//
+// 4. BALANCE: send { balance:1, subscribe:1 } — real-time Deriv Wallet.
+//
+// 5. HISTORY: send { statement:1, limit:10 } — transactions.
+//
+// 6. LOGOUT: send { logout:1 }, close socket, clear sessionStorage.
+// ======================================================================
+
+const LA_APP_ID = "33BoT5hHIzs1muGu7qhww";
+const LA_WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${LA_APP_ID}`;
+const LA_KEY    = "mfx_la_accounts";
+
+let _laAccounts = [];
+let _laWs       = null;
+let _laActiveId = null;
+let _laPing     = null;
+
+function laLog(msg){
+  const el=$("la-debug-panel"); if(!el)return;
+  el.textContent+="["+new Date().toLocaleTimeString()+"] "+msg+"\n";
+  el.scrollTop=el.scrollHeight;
+}
+function laDebug(data){ const el=$("la-debug-panel"); if(el) el.textContent=JSON.stringify(data,null,2); }
+function laToggleDebug(){ const el=$("la-debug-panel"); if(el) el.style.display=el.style.display==="none"?"block":"none"; }
+function laDot(id,on){ const e=$(id); if(e) e.style.background=on?"#16e08b":"var(--muted)"; }
+function laSet(id,v){ const e=$(id); if(e) e.textContent=v; }
+
+function laSaveAccounts(list){ try{ sessionStorage.setItem(LA_KEY,JSON.stringify(list)); }catch(_){} }
+function laLoadAccounts(){ try{ return JSON.parse(sessionStorage.getItem(LA_KEY)||"[]"); }catch(_){ return []; } }
+
+function laPageInit(){
+  _laAccounts=laLoadAccounts();
+  if(_laAccounts.length){
+    laRenderLoggedIn(); laRenderAccounts();
+  } else {
+    const parsed=laParseRedirectUrl();
+    if(parsed.length){
+      _laAccounts=parsed; laSaveAccounts(_laAccounts);
+      try{ window.history.replaceState({},"",window.location.pathname); }catch(_){}
+      laRenderLoggedIn(); laRenderAccounts();
+      laLog("Parsed "+parsed.length+" account(s) from redirect URL");
+    } else { laRenderLoggedOut(); }
+  }
+}
+
+function laParseRedirectUrl(){
+  const p=new URLSearchParams(window.location.search);
+  const accounts=[]; let i=1;
+  while(true){
+    const loginid=p.get("acct"+i), token=p.get("token"+i), cur=p.get("cur"+i);
+    if(!loginid||!token) break;
+    accounts.push({ loginid, token, currency:(cur||"USD").toUpperCase(), is_virtual:/^VR/i.test(loginid)?1:0, balance:null });
+    i++;
+  }
+  const err=p.get("login_error");
+  if(err){
+    const el=$("la-login-err"); if(el){ el.textContent="Login error: "+err; el.style.display="block"; }
+    try{ window.history.replaceState({},"",window.location.pathname); }catch(_){}
+  }
+  return accounts;
+}
+
+function laRenderLoggedOut(){
+  laDot("la-status-dot",false); laSet("la-status-lbl","⚪ Not logged in");
+  const lo=$("la-logged-out"); if(lo) lo.style.display="block";
+  const li=$("la-logged-in"); if(li) li.style.display="none";
+  const ag=$("la-accounts-grid"); if(ag){ ag.style.display="none"; ag.innerHTML=""; }
+  const cc=$("la-connection-card"); if(cc) cc.style.display="none";
+  const hc=$("la-history-card"); if(hc) hc.style.display="none";
+}
+
+function laRenderLoggedIn(){
+  laDot("la-status-dot",true);
+  laSet("la-status-lbl","✅ Logged in — "+_laAccounts.length+" account(s) found");
+  const lo=$("la-logged-out"); if(lo) lo.style.display="none";
+  const li=$("la-logged-in"); if(li) li.style.display="block";
+}
+
+function laRenderAccounts(){
+  const grid=$("la-accounts-grid"); if(!grid) return;
+  grid.style.display="grid";
+  grid.innerHTML=_laAccounts.sort((a,b)=>a.is_virtual-b.is_virtual).map(acct=>{
+    const isDemo=acct.is_virtual===1;
+    const typeClr=isDemo?"var(--up)":"#ff4d5e";
+    const bal=acct.balance!=null?Number(acct.balance).toFixed(2):"—";
+    const isActive=_laActiveId===acct.loginid;
+    return `<div class="grid-card" style="border:1px solid ${isActive?typeClr:"var(--line)"};position:relative">
+      <div style="position:absolute;top:10px;right:12px;font-size:9px;font-weight:700;letter-spacing:.1em;color:${typeClr}">${isDemo?"🟢 DEMO":"🔴 REAL"}</div>
+      <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px">${isDemo?"Virtual / Demo":"Real Money"}</div>
+      <div style="font-size:18px;font-weight:900;color:var(--text);margin-bottom:2px">${acct.loginid}</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:14px">${acct.currency}${isActive?' · <span style="color:var(--up)">● connected</span>':''}</div>
+      <div class="em-card" style="margin-bottom:14px">
+        <div class="em-lab">Balance</div>
+        <div id="la-acct-bal-${acct.loginid}" style="font-size:22px;font-weight:900;color:var(--text);font-variant-numeric:tabular-nums">${bal}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">${acct.currency}</div>
+      </div>
+      <button class="gc-btn${isActive?"":" connect"}" onclick="laConnectAccount('${acct.loginid}')" ${isActive?"disabled style=\"opacity:.45;cursor:default\"":" "}>
+        ${isActive?"✅ Connected — active":"⚡ Connect to this account"}
+      </button>
+    </div>`;
+  }).join("");
+}
+
+function laLogin(){ window.location.assign(BACKEND_URL+"/auth/start"); }
+
+function laLogout(){
+  laLog("Logging out...");
+  if(_laWs&&_laWs.readyState===WebSocket.OPEN){
+    try{ _laWs.send(JSON.stringify({logout:1})); }catch(_){}
+    try{ _laWs.close(); }catch(_){}
+  }
+  _laWs=null; _laActiveId=null;
+  if(_laPing){ clearInterval(_laPing); _laPing=null; }
+  try{ sessionStorage.removeItem(LA_KEY); }catch(_){}
+  _laAccounts=[];
+  gridDisconnect();
+  fetch(BACKEND_URL+"/logout",{method:"POST",credentials:"include"}).catch(()=>{});
+  laRenderLoggedOut();
+  laLog("Logged out — tokens cleared from sessionStorage");
+}
+
+async function laConnectAccount(loginid){
+  const acct=_laAccounts.find(a=>a.loginid===loginid);
+  if(!acct){ laLog("Account not found: "+loginid); return; }
+  // Per spec: drop socket, re-authorize with chosen account's token
+  if(_laWs&&_laWs.readyState===WebSocket.OPEN){
+    laLog("Dropping existing socket before switch to "+loginid);
+    try{ _laWs.close(); }catch(_){} _laWs=null;
+  }
+  if(_laPing){ clearInterval(_laPing); _laPing=null; }
+  _laActiveId=null;
+  laDot("la-ws-dot",false); laSet("la-ws-lbl","Connecting to "+loginid+"…");
+  // Debug log per spec
+  laLog("app_id: "+LA_APP_ID);
+  laLog("endpoint: "+LA_WS_URL);
+  laLog("token: "+acct.token.slice(0,8)+"… (virtual="+acct.is_virtual+")");
+  _laWs=new WebSocket(LA_WS_URL);
+  _laWs.onopen=()=>{ laLog("WS open — authorizing"); _laWs.send(JSON.stringify({authorize:acct.token})); };
+  _laWs.onmessage=ev=>{ let m; try{m=JSON.parse(ev.data);}catch(_){return;} laHandleMsg(m,acct); };
+  _laWs.onerror=()=>{ laLog("WS error"); laDot("la-ws-dot",false); laSet("la-ws-lbl","Connection error"); };
+  _laWs.onclose=()=>{ laLog("WS closed"); laDot("la-ws-dot",false); laSet("la-ws-lbl","Disconnected"); if(_laPing){clearInterval(_laPing);_laPing=null;} laRenderAccounts(); };
+}
+
+function laHandleMsg(msg,acct){
+  if(!msg||!msg.msg_type) return;
+  switch(msg.msg_type){
+    case "authorize":{
+      if(msg.error){ laLog("Auth error: "+msg.error.message); laLog("Tip: ensure token has Read+Trade scope"); laDot("la-ws-dot",false); laSet("la-ws-lbl","Auth error: "+msg.error.message); return; }
+      _laActiveId=msg.authorize.loginid;
+      laLog("Authorized: "+_laActiveId+" ("+(acct.is_virtual?"demo":"real")+")");
+      laDot("la-ws-dot",true);
+      laSet("la-ws-lbl","Connected · "+_laActiveId+" · "+(acct.is_virtual?"🟢 DEMO":"🔴 REAL"));
+      // Enrich account list from authorize account_list
+      (msg.authorize.account_list||[]).forEach(entry=>{
+        if(entry.token&&!_laAccounts.find(a=>a.loginid===entry.loginid))
+          _laAccounts.push({loginid:entry.loginid,token:entry.token,currency:entry.currency||"USD",is_virtual:entry.is_virtual?1:0,balance:null});
+      });
+      laSaveAccounts(_laAccounts);
+      // Step 4: subscribe to balance
+      _laWs.send(JSON.stringify({balance:1,subscribe:1}));
+      // Wire into global grid state so all bots can trade
+      gridWs=_laWs; gridAuthed=true; gridLoginId=_laActiveId;
+      gridIsVirtual=acct.is_virtual===1; gridCurrency=acct.currency||"USD";
+      const cc=$("la-connection-card"); if(cc) cc.style.display="block";
+      laSet("la-bal-acct",_laActiveId);
+      laSet("la-bal-type",acct.is_virtual?"🟢 Virtual / Demo":"🔴 Real Money");
+      laSet("la-bal-cur",acct.currency);
+      if(_laPing) clearInterval(_laPing);
+      _laPing=setInterval(()=>{ if(_laWs&&_laWs.readyState===1) _laWs.send(JSON.stringify({ping:1})); },25000);
+      laFetchHistory();
+      if(typeof ouUpdateConnStatus==="function"){ ouUpdateConnStatus(); ouRefreshFingerprint(); }
+      if(typeof adxUpdateConn==="function") adxUpdateConn();
+      if(typeof digUpdateConnStatus==="function") digUpdateConnStatus();
+      if(typeof engUpdateConnStatus==="function") engUpdateConnStatus();
+      if(typeof diagUpdateConnStatus==="function") diagUpdateConnStatus();
+      laRenderAccounts(); laRenderLoggedIn();
+      laDebug({authorized_as:_laActiveId,is_virtual:acct.is_virtual,currency:acct.currency,balance:msg.authorize.balance,scopes:msg.authorize.scopes,account_list:(msg.authorize.account_list||[]).map(a=>({loginid:a.loginid,is_virtual:a.is_virtual,has_token:!!a.token}))});
+      break;
+    }
+    case "balance":{
+      const b=msg.balance; if(!b) break;
+      const bal=Number(b.balance).toFixed(2), cur=b.currency||acct.currency;
+      const stored=_laAccounts.find(a=>a.loginid===_laActiveId);
+      if(stored){ stored.balance=Number(b.balance); laSaveAccounts(_laAccounts); }
+      laSet("la-bal-amount",bal); laSet("la-bal-cur",cur);
+      const balEl=$("la-acct-bal-"+_laActiveId);
+      if(balEl){ balEl.textContent=bal; balEl.style.color="var(--up)"; setTimeout(()=>{if(balEl)balEl.style.color="var(--text)";},600); }
+      gridBalance=Number(b.balance); gridCurrency=cur;
+      if(b.accounts) Object.entries(b.accounts).forEach(([id,info])=>{
+        const a=_laAccounts.find(x=>x.loginid===id); if(a) a.balance=Number(info.balance);
+        const el=$("la-acct-bal-"+id); if(el) el.textContent=Number(info.balance).toFixed(2);
+      });
+      laSaveAccounts(_laAccounts);
+      break;
+    }
+    case "statement": laRenderHistory(msg.statement); break;
+    case "logout": laLog("Logout acknowledged by Deriv"); break;
+    case "ping": break;
+    default: if(typeof gridHandleMsg==="function") gridHandleMsg(msg);
+  }
+}
+
+function laFetchHistory(){
+  if(!_laWs||_laWs.readyState!==WebSocket.OPEN){ laLog("Not connected — cannot fetch history"); return; }
+  _laWs.send(JSON.stringify({statement:1,limit:10,description:1}));
+  laLog("Fetching statement (last 10 transactions)");
+}
+
+function laRenderHistory(stmt){
+  const hc=$("la-history-card"); if(hc) hc.style.display="block";
+  const body=$("la-history-body"); if(!body) return;
+  const rows=(stmt&&stmt.transactions)||[];
+  if(!rows.length){ body.innerHTML='<tr><td colspan="5" class="sig-empty">No transactions found.</td></tr>'; return; }
+  body.innerHTML=rows.map(r=>{
+    const dt=r.transaction_time?new Date(r.transaction_time*1000).toLocaleString():"—";
+    const typ=String(r.action_type||r.action||"—");
+    const amt=r.amount!=null?(r.amount>=0?"+":"")+Number(r.amount).toFixed(2):"—";
+    const amtClr=r.amount>0?"var(--up)":r.amount<0?"var(--down)":"var(--muted)";
+    const balAfter=r.balance_after!=null?Number(r.balance_after).toFixed(2):"—";
+    const desc=r.longcode||r.shortcode||r.reference_id||"—";
+    return `<tr><td class="l" style="font-size:10px;white-space:nowrap">${dt}</td><td style="font-weight:700;text-transform:capitalize">${typ}</td><td style="color:${amtClr};font-weight:700">${amt}</td><td>${balAfter}</td><td class="l" style="font-size:9px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${desc}">${desc}</td></tr>`;
+  }).join("");
+}
+
+// Parse tokens on every load (handles direct Deriv redirect to SPA root)
+(function(){
+  const p=new URLSearchParams(window.location.search);
+  if(p.get("acct1")&&p.get("token1")){
+    const list=[]; let i=1;
+    while(true){ const l=p.get("acct"+i),t=p.get("token"+i),c=p.get("cur"+i); if(!l||!t)break; list.push({loginid:l,token:t,currency:(c||"USD").toUpperCase(),is_virtual:/^VR/i.test(l)?1:0,balance:null}); i++; }
+    if(list.length){ laSaveAccounts(list); _laAccounts=list; try{window.history.replaceState({},"",window.location.pathname);}catch(_){} }
+  }
+})();
+
 try {
   // Resume the market that was open before the refresh, if any
   const savedMarket = localStorage.getItem(LAST_MARKET_KEY);
@@ -6244,6 +6595,8 @@ try {
 
   // If Deriv just redirected back here with ?code=&state=, finish the login.
   gridHandleRedirectReturn();
+  // Init login/account page state on load
+  if (typeof laPageInit === "function") setTimeout(laPageInit, 100);
 } catch (err) {
   const txt = $("connText");
   if (txt) txt.textContent = "Boot failed";
