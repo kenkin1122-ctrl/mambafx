@@ -611,8 +611,8 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       <button class="gc-btn" onclick="gridDisconnect()" style="padding:5px 10px;font-size:11px">✕</button>
       <span id="gridBal" style="font-size:11px;color:var(--muted);margin-left:4px">—</span>
       <span style="flex:1"></span>
-      <button class="gc-btn" onclick="gridStartLogin()" style="padding:5px 12px;font-size:11px;background:rgba(86,182,255,.08);border-color:#56b6ff;color:#56b6ff">🔑 Login</button>
-      <button class="gc-btn" onclick="gridLogout()" style="padding:5px 10px;font-size:11px;background:rgba(255,77,94,.06);border-color:#ff4d5e;color:#ff4d5e">🚪 Logout</button>
+      <button class="gc-btn" onclick="showPage('login')" style="padding:5px 12px;font-size:11px;background:rgba(86,182,255,.08);border-color:#56b6ff;color:#56b6ff">🔑 Login</button>
+      <button class="gc-btn" onclick="laLogout&&laLogout()" style="padding:5px 10px;font-size:11px;background:rgba(255,77,94,.06);border-color:#ff4d5e;color:#ff4d5e">🚪 Logout</button>
     </div>
     <div id="connAcctLbl" style="font-size:9px;color:var(--muted);margin-top:4px;padding-left:4px"></div>
   </div>
@@ -6123,44 +6123,45 @@ function gridLogout(){
 }
 
 async function gridCheckSession(){
+  // Use LA engine accounts (from sessionStorage, no backend needed)
   try {
-    const r = await fetch(BACKEND_URL+"/me/session",{credentials:"include"});
-    const b = await r.json().catch(()=>null);
-    gridLoggedIn = !!(b&&b.logged_in);
-    if (gridLoggedIn) await gridLoadAccounts();
-  } catch(_){ gridLoggedIn=false; }
+    const stored = JSON.parse(sessionStorage.getItem("mfx_la_accounts")||"[]");
+    if (stored.length){
+      gridLoggedIn = true;
+      gridAccounts = stored.map(a=>({account_id:a.loginid, account_type:a.is_virtual?'virtual':'trading', currency:a.currency||'USD', is_virtual:a.is_virtual||0}));
+      gridBuildPicker();
+    } else {
+      gridLoggedIn = false;
+    }
+  } catch(_){ gridLoggedIn = false; }
 }
 
 async function gridLoadAccounts(){
+  // Sync from LA accounts — no backend call
   try {
-    const r = await fetch(BACKEND_URL+"/me/accounts",{credentials:"include"});
-    const b = await r.json().catch(()=>null);
-    const raw = (b&&b.data)||[];
-    gridAccounts = raw.map(a=>{
-      const id=String(a.account_id||'');
-      const virt=a.is_virtual===1||/^VR/i.test(id);
-      return {account_id:id,account_type:virt?'virtual':'trading',currency:String(a.currency||'USD'),is_virtual:virt?1:0};
-    }).filter(a=>a.account_id);
-    gridBuildPicker();
+    const stored = JSON.parse(sessionStorage.getItem("mfx_la_accounts")||"[]");
+    gridAccounts = stored.map(a=>({account_id:a.loginid, account_type:a.is_virtual?'virtual':'trading', currency:a.currency||'USD', is_virtual:a.is_virtual||0}));
+    if(gridAccounts.length) gridBuildPicker();
   } catch(_){}
 }
 
 function gridBuildPicker(){
-  // Populate any account selector elements that exist
-  ['gridAcctPick','adxSymbolAcct','digAcctPick','ouAcctPick'].forEach(id=>{
-    const sel=$(id); if(!sel||sel.tagName!=='SELECT') return;
-    if(sel.dataset.ismarket) return; // don't overwrite market selectors
+  // Build from LA accounts if available, otherwise from gridAccounts
+  const source = (typeof _laAccounts!=='undefined' && _laAccounts.length)
+    ? _laAccounts.map(a=>({account_id:a.loginid,is_virtual:a.is_virtual,currency:a.currency}))
+    : gridAccounts;
+  ['liveAcctPick'].forEach(id=>{
+    const sel=$(id); if(!sel) return;
     const prev=sel.value;
-    sel.innerHTML=gridAccounts.sort((a,b)=>a.is_virtual-b.is_virtual).map(a=>
+    sel.innerHTML=source.sort((a,b)=>a.is_virtual-b.is_virtual).map(a=>
       `<option value="${a.account_id}">${a.account_id} · ${a.is_virtual?'🟢 DEMO':'🔴 REAL'} · ${a.currency}</option>`
     ).join('');
-    try { const s=localStorage.getItem(ACCTID_KEY); if(s) sel.value=s; else if(prev) sel.value=prev; } catch(_){}
+    try { if(prev) sel.value=prev; } catch(_){}
   });
-  // Show a connect panel status
   const lbl=$('connAcctLbl');
-  if(lbl) lbl.textContent=gridAccounts.length
-    ? gridAccounts.map(a=>`${a.account_id}(${a.is_virtual?'demo':'real'})`).join(' · ')
-    : 'No accounts — log in';
+  if(lbl) lbl.textContent=source.length
+    ? source.map(a=>`${a.account_id}(${a.is_virtual?'demo':'real'})`).join(' · ')
+    : 'No accounts — login via Login/Account page';
 }
 
 function gridMergeAccounts(newList){
@@ -6176,48 +6177,15 @@ function gridMergeAccounts(newList){
 }
 
 async function gridConnect(acctIdOverride){
-  const acctId = acctIdOverride || (() => {
-    const s=$('gridAcctPick')||$('liveAcctPick');
-    return s&&s.value ? s.value : (gridAccounts[0]&&gridAccounts[0].account_id);
-  })();
-  if(!acctId){ console.warn('No account selected'); return; }
-  if(!gridLoggedIn){ console.warn('Not logged in'); return; }
-  gridConnState('connecting');
-  try {
-    const r=await fetch(BACKEND_URL+"/ws/otp",{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({account_id:acctId})});
-    const b=await r.json().catch(()=>null);
-    if(!r.ok) throw new Error((b&&b.message)||`HTTP ${r.status}`);
-    const wsUrl=b&&b.url;
-    if(!wsUrl) throw new Error("No WS URL returned");
-    gridWs=new WebSocket(wsUrl);
-    gridWs.onopen=()=>{
-      gridConnecting=false; gridAuthed=true; gridConnState('on');
-      gridWs.send(JSON.stringify({balance:1,subscribe:1}));
-      gridWs.send(JSON.stringify({proposal_open_contract:1,subscribe:1}));
-      const meta=gridAccounts.find(a=>a.account_id===acctId);
-      gridLoginId=acctId;
-      gridIsVirtual=meta?meta.is_virtual===1:/^VR/i.test(acctId);
-      gridCurrency=(meta&&meta.currency)||gridCurrency;
-      try{localStorage.setItem(ACCTID_KEY,acctId);}catch(_){}
-      gridConnState('on');
-      if(gridPing) clearInterval(gridPing);
-      gridPing=setInterval(()=>{if(gridWs&&gridWs.readyState===1) gridWs.send(JSON.stringify({ping:1}));},20000);
-      if(typeof digUpdateConnStatus==='function') digUpdateConnStatus();
-      if(typeof diagUpdateConnStatus==='function') diagUpdateConnStatus();
-      if(typeof engUpdateConnStatus==='function') engUpdateConnStatus();
-      if(typeof ouUpdateConnStatus==='function'){ouUpdateConnStatus();ouRefreshFingerprint();}
-      if(typeof adxUpdateConn==='function') adxUpdateConn();
-    };
-    gridWs.onmessage=ev=>{let m;try{m=JSON.parse(ev.data);}catch(_){return;} gridHandleMsg(m);};
-    gridWs.onerror=()=>{};
-    gridWs.onclose=()=>{
-      gridAuthed=false; gridConnState('off');
-      if(gridPing){clearInterval(gridPing);gridPing=null;}
-    };
-  } catch(e){
-    gridConnState('off');
-    console.error('[gridConnect]',e.message);
+  // Primary path: use the LA (Login/Account) engine which works
+  // without the backend. Simply call laConnectAccount with the loginid.
+  if (typeof _laAccounts !== 'undefined' && _laAccounts.length){
+    const acctId = acctIdOverride || (() => {
+      const s=$('liveAcctPick'); return s&&s.value?s.value:(_laAccounts[0]&&_laAccounts[0].loginid);
+    })();
+    if (acctId && typeof laConnectAccount==='function'){ laConnectAccount(acctId); return; }
   }
+  console.warn('[gridConnect] No LA accounts — login via Login/Account page first');
 }
 
 let gridConnecting=false;
@@ -6321,9 +6289,12 @@ function gridHandleRedirectReturn(){
 // 6. LOGOUT: send { logout:1 }, close socket, clear sessionStorage.
 // ======================================================================
 
-const LA_APP_ID = "33BoT5hHIzs1muGu7qhww";
-const LA_WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${LA_APP_ID}`;
-const LA_KEY    = "mfx_la_accounts";
+const LA_APP_ID  = "33BoT5hHIzs1muGu7qhww";
+const LA_WS_URL  = `wss://ws.derivws.com/websockets/v3?app_id=${LA_APP_ID}`;
+// After login Deriv redirects back to this page with tokens in the URL
+const LA_REDIRECT= "https://kenlin1122-ctrl.github.io/mambafx/";
+const LA_OAUTH   = `https://oauth.deriv.com/oauth2/authorize?app_id=${LA_APP_ID}`;
+const LA_KEY     = "mfx_la_accounts";
 
 let _laAccounts = [];
 let _laWs       = null;
@@ -6416,22 +6387,30 @@ function laRenderAccounts(){
   }).join("");
 }
 
-function laLogin(){ window.location.assign(BACKEND_URL+"/auth/start"); }
+function laLogin(){
+  // Direct redirect to Deriv OAuth — no backend needed.
+  // Deriv will redirect back to the SPA with tokens in the URL:
+  // ?acct1=DOT...&token1=a1-xxx&cur1=usd&acct2=VRTC...&token2=a1-yyy&cur2=usd
+  const redirectUri = encodeURIComponent(LA_REDIRECT);
+  const url = `${LA_OAUTH}&redirect_uri=${redirectUri}`;
+  laLog("Redirecting to: " + url.split("?")[0]);
+  window.location.assign(url);
+}
 
 function laLogout(){
   laLog("Logging out...");
   if(_laWs&&_laWs.readyState===WebSocket.OPEN){
     try{ _laWs.send(JSON.stringify({logout:1})); }catch(_){}
-    try{ _laWs.close(); }catch(_){}
+    try{ _laWs.close(); }catch(_){} 
   }
   _laWs=null; _laActiveId=null;
   if(_laPing){ clearInterval(_laPing); _laPing=null; }
+  // Clear tokens from sessionStorage — this is the key hygiene step
   try{ sessionStorage.removeItem(LA_KEY); }catch(_){}
   _laAccounts=[];
   gridDisconnect();
-  fetch(BACKEND_URL+"/logout",{method:"POST",credentials:"include"}).catch(()=>{});
   laRenderLoggedOut();
-  laLog("Logged out — tokens cleared from sessionStorage");
+  laLog("Logged out — all tokens cleared from sessionStorage");
 }
 
 async function laConnectAccount(loginid){
