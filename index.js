@@ -1,52 +1,34 @@
 /**
- * Mamba FX — Deriv OAuth backend (Cloudflare Worker)
+ * Mamba FX — Deriv OAuth2 backend (Cloudflare Worker)
  *
- * CORRECT DERIV OAUTH FLOW (per official docs):
- * ─────────────────────────────────────────────────────────────────────
- * Deriv does NOT use standard PKCE code exchange. Instead:
+ * Uses the NEW Deriv OAuth2 PKCE flow (auth.deriv.com):
+ *   client_id   = CLIENT_ID secret  (e.g. 33BoT5hHIzs1muGu7qhww)
+ *   redirect_uri = https://mambafx-backend.kenkin1122.workers.dev/auth/callback
  *
- * 1. Redirect user to:
- *    https://oauth.deriv.com/oauth2/authorize?app_id=YOUR_APP_ID
+ * Flow:
+ *   1. GET /auth/start → redirect to auth.deriv.com with PKCE
+ *   2. GET /auth/callback → exchange code for access_token
+ *   3. Use access_token to call WS authorize → get account_list with tokens
+ *   4. Store all accounts + per-account tokens in KV session
+ *   5. GET /me/session, GET /me/accounts, POST /ws/otp for the SPA
  *
- * 2. Deriv redirects back to your REDIRECT_URI with account tokens
- *    DIRECTLY in the query string:
- *    https://your-app.com/callback?
- *      acct1=cr799393&token1=a1-xxxx&cur1=usd&
- *      acct2=vrtc1859315&token2=a1-yyyy&cur2=usd
+ * Required secrets (wrangler secret put NAME):
+ *   CLIENT_ID       = 33BoT5hHIzs1muGu7qhww
+ *   CLIENT_SECRET   = (if Deriv issued one — try without first)
  *
- * 3. Parse acct1..N, token1..N, cur1..N from the query string.
- *    Real accounts: CR* or DOT* prefix
- *    Virtual/demo:  VRTC* prefix
- *
- * 4. Store all account+token pairs in KV session.
- *
- * 5. For WS connection to any account:
- *    POST /ws/otp { account_id } → use that account's token as Bearer
- *    in the REST OTP call → returns authenticated WS URL
- *    OR: open wss://api.derivws.com/trading/v1/options/ws/demo (or /real)
- *        passing the token in the OTP query param.
- *
- * Key insight: each account has its OWN token from the redirect URL.
- * We use the DEMO account token for the demo OTP call and the REAL
- * account token for the real OTP call. That is why only one account
- * was showing — we were always using the PRIMARY (real) account token.
- *
- * Routes:
- *   GET  /auth/start        → redirect to Deriv OAuth
- *   GET  /auth/callback     → parse acct+token pairs from query string
- *                             → store all accounts+tokens → redirect SPA
- *   GET  /me/session        → { logged_in }
- *   GET  /me/accounts       → all accounts (no tokens exposed)
- *   POST /ws/otp            → { account_id } → { url } via REST OTP
- *   POST /logout            → clear session
- *   GET  /debug/session     → what's stored (no tokens) for debugging
+ * Required vars in wrangler.jsonc:
+ *   REDIRECT_URI    = https://mambafx-backend.kenkin1122.workers.dev/auth/callback
+ *   SPA_URL         = https://kenkin1122-ctrl.github.io/mambafx/
+ *   ALLOWED_ORIGIN  = https://kenkin1122-ctrl.github.io
  */
 
-const DERIV_OAUTH_URL  = "https://oauth.deriv.com/oauth2/authorize";
-const DERIV_OTP_BASE   = "https://api.derivws.com/trading/v1/options/accounts";
+const DERIV_AUTH_URL  = "https://auth.deriv.com/oauth2/auth";
+const DERIV_TOKEN_URL = "https://auth.deriv.com/oauth2/token";
+const DERIV_WS_URL    = "wss://ws.derivws.com/websockets/v3";
 
-const SESSION_COOKIE   = "mfx_session";
-const SESSION_TTL      = 60 * 60 * 8;   // 8 hours
+const SESSION_COOKIE  = "mfx_session";
+const SESSION_TTL     = 60 * 60 * 8;
+const PKCE_TTL        = 60 * 10;
 
 // ── CORS ──────────────────────────────────────────────────────────────
 function cors(env){
@@ -61,26 +43,33 @@ function cors(env){
 const J = (data, env, status=200, extra={}) =>
   new Response(JSON.stringify(data, null, 2), {
     status,
-    headers: { ...cors(env), "Content-Type":"application/json", ...extra },
+    headers: { ...cors(env), "Content-Type": "application/json", ...extra },
   });
 
-// ── Cookie helpers ────────────────────────────────────────────────────
-const mkCookie = (id, age) => `${SESSION_COOKIE}=${id}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=${age}`;
-const rmCookie = ()        => `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=0`;
+// ── Cookies ───────────────────────────────────────────────────────────
+const mkCookie = (id, age) =>
+  `${SESSION_COOKIE}=${id}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=${age}`;
+const rmCookie = () =>
+  `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=0`;
 function getCookie(req, name){
   for (const p of (req.headers.get("Cookie")||"").split(/;\s*/)){
     const i = p.indexOf("=");
-    if (i > -1 && p.slice(0, i) === name) return p.slice(i + 1);
+    if (i > -1 && p.slice(0,i) === name) return p.slice(i+1);
   }
   return null;
 }
 
-// ── Misc ──────────────────────────────────────────────────────────────
+// ── Crypto helpers ────────────────────────────────────────────────────
 const randHex = n => {
-  const a = new Uint8Array(n);
-  crypto.getRandomValues(a);
+  const a = new Uint8Array(n); crypto.getRandomValues(a);
   return [...a].map(b => b.toString(16).padStart(2,"0")).join("");
 };
+const b64u = buf => {
+  let s = ""; new Uint8Array(buf).forEach(b => s += String.fromCharCode(b));
+  return btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+};
+const sha256 = async s =>
+  b64u(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)));
 
 // ── KV session ────────────────────────────────────────────────────────
 async function loadSession(req, env){
@@ -93,84 +82,129 @@ async function loadSession(req, env){
 const saveSession = (env, sid, data) =>
   env.SESSION.put("s:" + sid, JSON.stringify(data), { expirationTtl: SESSION_TTL });
 
-// ── Normalise account from Deriv redirect params ───────────────────────
-// acct=cr799393 OR acct=vrtc1859315 OR acct=DOT91449066
-// Virtual/demo: loginid starts with VR (case-insensitive)
-function normalise(loginid, token, currency){
-  const id   = String(loginid || "").trim();
-  const virt = /^VR/i.test(id);
+// ── WS authorize → get account_list with per-account tokens ───────────
+async function wsAuthorize(accessToken, clientId){
+  const wsResp = await fetch(`${DERIV_WS_URL}?app_id=${encodeURIComponent(clientId)}`, {
+    headers: { "Upgrade": "websocket", "Connection": "Upgrade" },
+  });
+  const ws = wsResp.webSocket;
+  if (!ws) throw new Error("WebSocket upgrade failed");
+  ws.accept();
+  ws.send(JSON.stringify({ authorize: accessToken }));
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => { try{ws.close();}catch(_){} reject(new Error("timeout")); }, 10000);
+    ws.addEventListener("message", ev => {
+      let msg; try { msg = JSON.parse(ev.data); } catch(_){ return; }
+      if (msg.msg_type !== "authorize") return;
+      clearTimeout(t); try{ws.close();}catch(_){}
+      if (msg.error) return reject(new Error(msg.error.message || msg.error.code));
+      resolve(msg.authorize || {});
+    });
+    ws.addEventListener("error", () => { clearTimeout(t); reject(new Error("WS error")); });
+    ws.addEventListener("close", () => { clearTimeout(t); reject(new Error("WS closed early")); });
+  });
+}
+
+// ── Normalise account_list entry ──────────────────────────────────────
+function normalise(a){
+  const id   = String(a.loginid || "");
+  const virt = /^VR/i.test(id) || a.is_virtual === 1 || a.is_virtual === true;
   return {
     account_id:   id,
     account_type: virt ? "virtual" : "trading",
-    currency:     String(currency || "USD").toUpperCase(),
+    currency:     a.currency || "USD",
     is_virtual:   virt ? 1 : 0,
-    token:        String(token || ""),   // stored in KV, NEVER sent to browser
+    token:        a.token || null,   // per-account token — never sent to browser
   };
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// GET /auth/start
-// Redirect to Deriv OAuth. Deriv will redirect back to REDIRECT_URI
-// with ?acct1=...&token1=...&cur1=...&acct2=...&token2=...&cur2=...
+// GET /auth/start — begin PKCE login
 // ══════════════════════════════════════════════════════════════════════
 async function handleAuthStart(req, env){
-  const state = randHex(16);
-  // Store state in KV for CSRF protection
-  await env.SESSION.put("state:" + state, "1", { expirationTtl: 600 });
-  const url = `${DERIV_OAUTH_URL}?app_id=${encodeURIComponent(env.CLIENT_ID)}&state=${state}`;
+  const verifier  = randHex(48);
+  const state     = randHex(16);
+  const challenge = await sha256(verifier);
+
+  // Store verifier under state key — retrieved in callback
+  await env.SESSION.put("pkce:" + state, verifier, { expirationTtl: PKCE_TTL });
+
+  const params = new URLSearchParams({
+    response_type:         "code",
+    client_id:             env.CLIENT_ID,
+    redirect_uri:          env.REDIRECT_URI,
+    scope:                 "trade",
+    state,
+    code_challenge:        challenge,
+    code_challenge_method: "S256",
+  });
+
+  const url = DERIV_AUTH_URL + "?" + params.toString();
+  console.log("[auth/start] →", url);
   return Response.redirect(url, 302);
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// GET /auth/callback
-// Deriv redirects here with:
-//   ?acct1=cr799393&token1=a1-xxx&cur1=usd
-//   &acct2=vrtc1859315&token2=a1-yyy&cur2=usd
-//   &state=...
-//
-// Parse all acct*/token*/cur* pairs and store in session.
+// GET /auth/callback — exchange code, get tokens, store session
 // ══════════════════════════════════════════════════════════════════════
 async function handleAuthCallback(req, env){
   const spa  = env.SPA_URL || "https://kenkin1122-ctrl.github.io/mambafx/";
   const fail = msg => Response.redirect(`${spa}?login_error=${encodeURIComponent(msg)}`, 302);
   const u    = new URL(req.url);
 
-  // CSRF check
-  const state = u.searchParams.get("state");
-  if (state){
-    const stored = await env.SESSION.get("state:" + state);
-    if (!stored) return fail("Invalid state parameter — possible CSRF. Please try again.");
-    await env.SESSION.delete("state:" + state);
-  }
-
-  // Check for error param
   const errParam = u.searchParams.get("error");
   if (errParam) return fail(u.searchParams.get("error_description") || errParam);
 
-  // Parse all acct*/token*/cur* pairs
-  // Deriv uses acct1, acct2, ... token1, token2, ... cur1, cur2, ...
-  const accounts = [];
-  let i = 1;
-  while (true){
-    const acct  = u.searchParams.get(`acct${i}`);
-    const token = u.searchParams.get(`token${i}`);
-    const cur   = u.searchParams.get(`cur${i}`);
-    if (!acct || !token) break;
-    accounts.push(normalise(acct, token, cur));
-    i++;
+  const code  = u.searchParams.get("code");
+  const state = u.searchParams.get("state");
+  if (!code || !state) return fail("Missing code or state");
+
+  // Recover PKCE verifier
+  const verifier = await env.SESSION.get("pkce:" + state);
+  if (!verifier) return fail("Login session expired — try again");
+  await env.SESSION.delete("pkce:" + state);
+
+  // Exchange code for access_token
+  const form = new URLSearchParams({
+    grant_type:    "authorization_code",
+    client_id:     env.CLIENT_ID,
+    code,
+    code_verifier: verifier,
+    redirect_uri:  env.REDIRECT_URI,
+  });
+  if (env.CLIENT_SECRET) form.set("client_secret", env.CLIENT_SECRET);
+
+  let tokenBody;
+  try {
+    const r = await fetch(DERIV_TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: form.toString(),
+    });
+    tokenBody = await r.json().catch(() => null);
+    if (!r.ok || !tokenBody?.access_token)
+      return fail("Token exchange failed: " + (tokenBody?.error_description || tokenBody?.error || `HTTP ${r.status}`));
+  } catch(e){ return fail("Cannot reach Deriv token endpoint"); }
+
+  // WS authorize → get account_list with per-account tokens
+  let accounts = [];
+  try {
+    const auth = await wsAuthorize(tokenBody.access_token, env.CLIENT_ID);
+    const list = auth.account_list || [];
+    accounts = list.map(normalise).filter(a => a.account_id);
+    console.log(`[callback] ${accounts.length} account(s): ${
+      accounts.map(a => `${a.account_id}(virt=${a.is_virtual},tok=${a.token ? a.token.slice(0,8)+"…" : "NONE"})`).join(", ")
+    }`);
+  } catch(e){
+    console.error("[callback] wsAuthorize failed:", e.message);
+    // Store access_token anyway so /me/accounts can retry
   }
-
-  console.log(`[callback] parsed ${accounts.length} account(s): ${
-    accounts.map(a => `${a.account_id}(virt=${a.is_virtual},hasTok=${!!a.token})`).join(", ")
-  }`);
-
-  if (!accounts.length)
-    return fail("No accounts returned by Deriv. Check your app_id and OAuth settings.");
 
   const sid = randHex(32);
   await saveSession(env, sid, {
-    accounts,          // [{ account_id, account_type, currency, is_virtual, token }]
-    created_at: Date.now(),
+    access_token: tokenBody.access_token,
+    accounts,
+    created_at:   Date.now(),
   });
 
   return new Response(null, {
@@ -188,94 +222,81 @@ async function handleMeSession(req, env){
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// GET /me/accounts
-// Returns all accounts — NEVER returns tokens to the browser.
+// GET /me/accounts — refreshes via WS if account list is empty
 // ══════════════════════════════════════════════════════════════════════
 async function handleMeAccounts(req, env){
   const s = await loadSession(req, env);
   if (!s) return J({ error: "not_logged_in" }, env, 401);
 
-  const accounts = (s.accounts || []).filter(a => a.account_id);
-  if (!accounts.length)
-    return J({ error:"no_accounts", message:"No accounts in session. Log out and log in again." }, env, 200);
+  let accounts = (s.accounts || []).filter(a => a.account_id);
 
-  return J({
-    data: accounts.map(({ token:_, ...rest }) => rest)
-  }, env);
+  // If no accounts (wsAuthorize failed at callback), retry now
+  if (!accounts.length && s.access_token){
+    console.log("[me/accounts] retrying wsAuthorize");
+    try {
+      const auth = await wsAuthorize(s.access_token, env.CLIENT_ID);
+      accounts = (auth.account_list || []).map(normalise).filter(a => a.account_id);
+      await saveSession(env, s._sid, { ...s, accounts });
+    } catch(e){ console.error("[me/accounts] retry failed:", e.message); }
+  }
+
+  if (!accounts.length)
+    return J({ error: "no_accounts", message: "No accounts found. Log out and log in again." }, env, 200);
+
+  return J({ data: accounts.map(({ token:_, ...rest }) => rest) }, env);
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// POST /ws/otp  { account_id } → { url }
-//
-// Uses each account's OWN token (from the OAuth redirect) to call the
-// REST OTP endpoint. This returns an authenticated WS URL specific to
-// that account (demo URL for virtual, real URL for real accounts).
-//
-// Demo WS URL: wss://api.derivws.com/trading/v1/options/ws/demo?otp=...
-// Real WS URL: wss://api.derivws.com/trading/v1/options/ws/real?otp=...
+// POST /ws/otp  { account_id } → { url, token }
+// Returns the WS URL + that account's own token.
+// Browser opens WS, sends { authorize: token } on open.
 // ══════════════════════════════════════════════════════════════════════
 async function handleWsOtp(req, env){
   const s = await loadSession(req, env);
   if (!s) return J({ error: "not_logged_in" }, env, 401);
 
-  const body = await req.json().catch(() => ({}));
-  const account_id = body.account_id;
+  const { account_id } = await req.json().catch(() => ({}));
   if (!account_id) return J({ error: "missing_account_id" }, env, 400);
 
-  // Find this account's token
-  const acct = (s.accounts || []).find(a => a.account_id === account_id);
+  let acct = (s.accounts || []).find(a => a.account_id === account_id);
+
+  // Refresh if not found
+  if (!acct || !acct.token){
+    try {
+      const auth = await wsAuthorize(s.access_token, env.CLIENT_ID);
+      const fresh = (auth.account_list || []).map(normalise).filter(a => a.account_id);
+      await saveSession(env, s._sid, { ...s, accounts: fresh });
+      acct = fresh.find(a => a.account_id === account_id);
+    } catch(e){ console.error("[ws/otp] refresh failed:", e.message); }
+  }
+
   if (!acct)
-    return J({ error:"account_not_found", message:`Account ${account_id} not in session. Log out and log in again.` }, env, 404);
+    return J({ error: "account_not_found", message: `${account_id} not in session. Log out and log in again.` }, env, 404);
   if (!acct.token)
-    return J({ error:"no_token", message:`No token stored for ${account_id}.` }, env, 500);
+    return J({ error: "no_token", message: `No token for ${account_id}. Log out and log in again.` }, env, 500);
 
-  // Call the REST OTP endpoint using THIS account's own token
-  // This is what gets the correct demo or real WS URL
-  let otpResp, otpBody;
-  try {
-    otpResp = await fetch(`${DERIV_OTP_BASE}/${encodeURIComponent(account_id)}/otp`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${acct.token}`,
-        "Deriv-App-ID":  env.CLIENT_ID,
-        "Content-Type":  "application/json",
-      },
-    });
-    otpBody = await otpResp.json().catch(() => null);
-  } catch(e){
-    return J({ error:"upstream_unreachable", message: String(e.message) }, env, 502);
-  }
-
-  if (!otpResp.ok){
-    const msg = (otpBody?.errors?.[0]?.message) || (otpBody?.error) || `HTTP ${otpResp.status}`;
-    return J({ error:"otp_failed", message: msg, account_id, status: otpResp.status }, env, otpResp.status);
-  }
-
-  const wsUrl = otpBody?.data?.url;
-  if (!wsUrl)
-    return J({ error:"no_url", message:"OTP response had no url field.", raw: otpBody }, env, 502);
-
-  console.log(`[ws/otp] ${account_id}(virt=${acct.is_virtual}) → ${wsUrl.split("?")[0]}?otp=***`);
-  return J({ url: wsUrl, account_id, is_virtual: acct.is_virtual }, env);
+  const url = `${DERIV_WS_URL}?app_id=${encodeURIComponent(env.CLIENT_ID)}`;
+  console.log(`[ws/otp] ${account_id}(virt=${acct.is_virtual}) → ${url}`);
+  return J({ url, token: acct.token, account_id, is_virtual: acct.is_virtual }, env);
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// GET /debug/session — inspect session contents (no tokens)
+// GET /debug/session
 // ══════════════════════════════════════════════════════════════════════
-async function handleDebugSession(req, env){
+async function handleDebug(req, env){
   const s = await loadSession(req, env);
-  if (!s) return J({ logged_in:false, message:"No valid session cookie." }, env, 200);
+  if (!s) return J({ logged_in: false }, env);
   return J({
-    logged_in:    true,
-    session_age:  s.created_at ? Math.round((Date.now()-s.created_at)/1000) + "s ago" : "?",
-    account_count:(s.accounts||[]).length,
-    accounts:     (s.accounts||[]).map(a => ({
+    logged_in:     true,
+    created:       new Date(s.created_at).toISOString(),
+    account_count: (s.accounts || []).length,
+    accounts: (s.accounts || []).map(a => ({
       account_id:   a.account_id,
       account_type: a.account_type,
       currency:     a.currency,
       is_virtual:   a.is_virtual,
-      has_token:    !!(a.token),
-      token_prefix: a.token ? a.token.slice(0,6)+"…" : "MISSING",
+      has_token:    !!a.token,
+      token_prefix: a.token ? a.token.slice(0,8) + "…" : "MISSING",
     })),
   }, env);
 }
@@ -297,39 +318,41 @@ export default {
     const path = new URL(req.url).pathname;
 
     if (req.method === "OPTIONS")
-      return new Response(null, { status:204, headers:cors(env) });
+      return new Response(null, { status: 204, headers: cors(env) });
 
-    const missing = [];
-    if (!env.SESSION?.get) missing.push("SESSION (KV binding)");
-    if (!env.CLIENT_ID)    missing.push("CLIENT_ID");
-    if (!env.REDIRECT_URI) missing.push("REDIRECT_URI");
-    if (missing.length && path !== "/" && path !== "/health")
-      return J({ error:"misconfigured", missing }, env, 500);
+    // Config guard
+    const miss = [];
+    if (!env.SESSION?.get)  miss.push("SESSION (KV)");
+    if (!env.CLIENT_ID)     miss.push("CLIENT_ID");
+    if (!env.REDIRECT_URI)  miss.push("REDIRECT_URI");
+    if (miss.length && path !== "/" && path !== "/health")
+      return J({ error: "misconfigured", missing: miss }, env, 500);
 
     try {
-      if (path==="/auth/start"                               && req.method==="GET")  return await handleAuthStart(req,env);
-      if (path==="/auth/callback"                            && req.method==="GET")  return await handleAuthCallback(req,env);
-      if (path==="/me/session"                               && req.method==="GET")  return await handleMeSession(req,env);
-      if (path==="/me/accounts"                              && req.method==="GET")  return await handleMeAccounts(req,env);
-      if ((path==="/ws/otp"||path==="/ws/connect")           && req.method==="POST") return await handleWsOtp(req,env);
-      if (path==="/logout"                                   && req.method==="POST") return await handleLogout(req,env);
-      if (path==="/debug/session"                            && req.method==="GET")  return await handleDebugSession(req,env);
+      if (path === "/auth/start"    && req.method === "GET")  return await handleAuthStart(req, env);
+      if (path === "/auth/callback" && req.method === "GET")  return await handleAuthCallback(req, env);
+      if (path === "/me/session"    && req.method === "GET")  return await handleMeSession(req, env);
+      if (path === "/me/accounts"   && req.method === "GET")  return await handleMeAccounts(req, env);
+      if ((path === "/ws/otp" || path === "/ws/connect") && req.method === "POST")
+                                                              return await handleWsOtp(req, env);
+      if (path === "/logout"        && req.method === "POST") return await handleLogout(req, env);
+      if (path === "/debug/session" && req.method === "GET")  return await handleDebug(req, env);
 
-      if (path==="/" || path==="/health")
+      if (path === "/" || path === "/health")
         return J({
           ok: true, service: "mambafx-backend",
-          config:{
+          config: {
             kv:       !!(env.SESSION?.get),
             clientId: !!env.CLIENT_ID,
             redirect: env.REDIRECT_URI || null,
-            spa:      env.SPA_URL || null,
+            spa:      env.SPA_URL      || null,
             origin:   env.ALLOWED_ORIGIN || null,
           },
         }, env);
 
-      return J({ error:"not_found", path }, env, 404);
+      return J({ error: "not_found", path }, env, 404);
     } catch(e){
-      return J({ error:"internal", message:String(e?.message||e), stack:String(e?.stack||"") }, env, 500);
+      return J({ error: "internal", message: String(e?.message||e), stack: String(e?.stack||"") }, env, 500);
     }
   }
 };
