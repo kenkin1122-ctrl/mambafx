@@ -6867,7 +6867,7 @@ try {
       <button class="mfx-btn fall" id="mfxFallBtn" onclick="mfxQuickTrade(-1)" disabled>▼ FALL</button>
     </div>
     <button class="mfx-run-btn" id="mfxRunBtn" onclick="mfxToggleRun()" disabled>▶ RUN AUTO</button>
-    <div class="mfx-hint">drag to move · double-click to minimise</div>
+    <div class="mfx-hint">drag to move · double-click to expand / collapse</div>
   </div>
 </div>
 
@@ -6891,7 +6891,8 @@ try {
       if(!s) return;
       if(s.x){ bot.style.left=s.x; bot.style.right='auto'; }
       if(s.y){ bot.style.top=s.y;  bot.style.bottom='auto'; }
-      if(s.min) setMin(true);
+      // Always start minimised — only expand on double-click (per spec)
+      // We intentionally do NOT restore the min/max state here
     }catch(_){}
   }
 
@@ -6899,10 +6900,12 @@ try {
   function setMin(on){
     bot.classList.toggle('minimised', on);
     minBtn.textContent = on ? '▣' : '⟨⟩';
-    minBtn.title = on ? 'Restore' : 'Double-click header or click to minimise';
+    minBtn.title = on ? 'Double-click to expand' : 'Click to minimise';
     savePos();
   }
-  minBtn.addEventListener('click', e=>{ e.stopPropagation(); setMin(!bot.classList.contains('minimised')); });
+  // Minimise button: click to minimise only
+  minBtn.addEventListener('click', e=>{ e.stopPropagation(); setMin(true); });
+  // Header: double-click to toggle (the only way to expand per spec)
   head.addEventListener('dblclick', ()=> setMin(!bot.classList.contains('minimised')));
 
   /* ── drag ────────────────────────────────────────────────────── */
@@ -7336,6 +7339,7 @@ try {
 
   /* ── init ────────────────────────────────────────────────────── */
   loadPos();
+  setMin(true); // Always start minimised — double-click header to expand
   // Populate the market selector from the app's own MARKETS constant
   (function initMarketSel(){
     const sel = document.getElementById('mfxMarketSel');
@@ -7603,7 +7607,7 @@ try {
     </div>
 
     <div id="dabStatus">Connect on Trading Grid to enable.</div>
-    <div class="dab-hint">drag · double-click to minimise</div>
+    <div class="dab-hint">drag · double-click to expand / collapse</div>
   </div>
 </div>
 
@@ -7627,7 +7631,7 @@ try {
       if(!s) return;
       if(s.x){bot.style.left=s.x;bot.style.right='auto';}
       if(s.y){bot.style.top=s.y;bot.style.bottom='auto';}
-      if(s.min) setMin(true);
+      // Always start minimised — do not restore expanded state
     }catch(_){}
   }
 
@@ -7635,9 +7639,12 @@ try {
   function setMin(on){
     bot.classList.toggle('minimised',on);
     minB.textContent=on?'▣':'⟨⟩';
+    minB.title=on?'Double-click to expand':'Click to minimise';
     savePos();
   }
-  minB.addEventListener('click',e=>{e.stopPropagation();setMin(!bot.classList.contains('minimised'));});
+  // Click minimises only
+  minB.addEventListener('click',e=>{e.stopPropagation();setMin(true);});
+  // Double-click toggles (only way to expand)
   head.addEventListener('dblclick',()=>setMin(!bot.classList.contains('minimised')));
 
   /* ── drag (mouse) ─────────────────────────────────────────── */
@@ -7935,6 +7942,7 @@ try {
 
   /* ── init ─────────────────────────────────────────────────── */
   loadPos();
+  setMin(true); // Always start minimised — double-click header to expand
   setInterval(dabRefresh,300);
   dabRefresh();
   dabOnContractChange(); // set initial labels
