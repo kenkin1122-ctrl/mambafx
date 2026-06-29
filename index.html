@@ -521,6 +521,9 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       <!-- populated by acctRenderPanels() -->
     </div>
 
+    <!-- Session debug panel — shows what the backend actually stored -->
+    <div id="acctDebugPanel" style="display:none;margin-bottom:14px;padding:12px 14px;background:#0a0e17;border:1px solid rgba(255,191,36,.18);border-radius:10px;font-size:10px"></div>
+
     <!-- Trade P/L summary per account -->
     <div class="grid-card" id="acctPLCard" style="display:none;margin-bottom:14px">
       <h2>📊 Session P/L by Account</h2>
@@ -9856,8 +9859,15 @@ function acctOnBalance(accountId, balance, currency){
   if (!_acctData[accountId]) _acctData[accountId] = { balance:null, currency:'USD', pnl:0, trades:0 };
   _acctData[accountId].balance  = balance;
   _acctData[accountId].currency = currency;
-  // Refresh panels if accounts page is visible
-  if (document.getElementById('page-accounts')?.classList.contains('active')){
+  // Update balance cell directly without full re-render (smoother)
+  const balEl = $(`acct-bal-${accountId}`);
+  if (balEl){
+    balEl.textContent = balance.toFixed(2);
+    balEl.style.color = 'var(--text)';
+    // Flash green briefly to show update
+    balEl.style.color = 'var(--up)';
+    setTimeout(()=>{ if(balEl) balEl.style.color='var(--text)'; }, 800);
+  } else if (document.getElementById('page-accounts')?.classList.contains('active')){
     acctRenderPanels();
   }
 }
@@ -9880,95 +9890,171 @@ function acctPageInit(){
 async function acctRefreshSession(){
   const dot = $('acctSessionDot'), lbl = $('acctSessionLbl');
   const loginBlock = $('acctLoginBlock'), loggedBlock = $('acctLoggedBlock');
+  if (lbl) lbl.textContent = 'Checking session…';
 
-  // Check session via backend
   try {
-    const resp = await fetch(BACKEND_URL + '/me/session', { credentials: 'include' });
-    const body = await resp.json().catch(() => null);
+    // ── Check session ────────────────────────────────────────────────
+    const resp = await fetch(BACKEND_URL + '/me/session', { credentials:'include' });
+    const body = await resp.json().catch(()=>null);
     const loggedIn = !!(body && body.logged_in);
 
-    if (dot)  dot.style.background  = loggedIn ? '#16e08b' : 'var(--muted)';
-    if (lbl)  lbl.style.color       = loggedIn ? 'var(--up)' : 'var(--muted)';
-    if (lbl)  lbl.textContent       = loggedIn ? '✅ Logged in to Deriv' : '⚪ Not logged in';
+    if (dot) dot.style.background  = loggedIn ? '#16e08b' : 'var(--muted)';
+    if (lbl) lbl.style.color       = loggedIn ? 'var(--up)' : 'var(--muted)';
+    if (lbl) lbl.textContent       = loggedIn ? '✅ Logged in to Deriv' : '⚪ Not logged in';
     if (loginBlock)  loginBlock.style.display  = loggedIn ? 'none'  : 'block';
     if (loggedBlock) loggedBlock.style.display = loggedIn ? 'block' : 'none';
 
-    if (loggedIn){
-      // Populate gridAccounts if not already loaded
-      if (!gridAccounts.length) await gridLoadAccounts();
-      acctRenderPanels();
-    } else {
-      const grid = $('acctPanelsGrid'); if (grid) grid.innerHTML = '';
+    if (!loggedIn){
+      const grid = $('acctPanelsGrid'); if (grid) grid.innerHTML='';
+      acctShowDiag('');
+      acctShowDebug(null);
+      return;
     }
+
+    // ── Fetch debug info — shows exactly what was stored at login ────
+    acctFetchDebug();
+
+    // ── Load accounts ────────────────────────────────────────────────
+    if (!gridAccounts.length) await gridLoadAccounts();
+
+    if (!gridAccounts.length){
+      acctShowDiag(
+        `<b>No accounts found in session.</b> This usually means the OAuth access_token did not ` +
+        `return an <code>account_list</code> with per-account tokens.<br><br>` +
+        `<b>Fix:</b><br>` +
+        `1. Click <b>Log out</b> below<br>` +
+        `2. Click <b>Login with Deriv</b><br>` +
+        `3. After login, check <a href="${BACKEND_URL}/debug/session" target="_blank" ` +
+        `style="color:var(--accent)">debug/session</a> — it should show <code>"account_count": 2</code><br>` +
+        `4. If <code>has_token: false</code>, your Deriv app may need <b>Read</b> scope — ` +
+        `visit <a href="https://app.deriv.com/account/api-token" target="_blank" style="color:var(--accent)">app.deriv.com → API Tokens</a>`
+      );
+    } else {
+      acctShowDiag('');
+    }
+    acctRenderPanels();
+
   } catch(e){
-    if (dot)  dot.style.background = 'var(--down)';
-    if (lbl){ lbl.textContent = 'Cannot reach backend'; lbl.style.color = 'var(--down)'; }
-    acctShowDiag(`Cannot reach backend at <code>${BACKEND_URL}</code>. Check Worker is deployed.`);
+    if (dot) dot.style.background = 'var(--down)';
+    if (lbl){ lbl.textContent='Cannot reach backend'; lbl.style.color='var(--down)'; }
+    acctShowDiag(`<b>Cannot reach backend</b> at <code>${BACKEND_URL}</code>. Confirm the Worker is deployed and <code>wrangler tail</code> shows no errors.`);
   }
 }
 
+// Fetch /debug/session and show what the backend actually stored
+async function acctFetchDebug(){
+  try {
+    const r = await fetch(BACKEND_URL+'/debug/session', { credentials:'include' });
+    const d = await r.json().catch(()=>null);
+    acctShowDebug(d);
+  } catch(_){
+    acctShowDebug(null);
+  }
+}
+
+function acctShowDebug(d){
+  const el = $('acctDebugPanel'); if (!el) return;
+  if (!d || !d.logged_in){ el.style.display='none'; return; }
+  el.style.display='block';
+  const ok = d.account_count >= 2;
+  const rows = (d.accounts||[]).map(a => {
+    const tokClr = a.has_token ? 'var(--up)' : 'var(--down)';
+    const tokIcon= a.has_token ? '✅' : '❌';
+    return `<tr>
+      <td>${a.account_id}</td>
+      <td>${a.is_virtual ? '🟢 DEMO' : '🔴 REAL'}</td>
+      <td>${a.currency}</td>
+      <td style="color:${tokClr}">${tokIcon} ${a.has_token?'yes':'NO — will not connect'}</td>
+      <td>${a.balance!=null?a.balance:'—'}</td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = `
+    <div style="font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">
+      🔍 Session debug — ${d.account_count} account(s) stored
+      ${d.authorize_error?`<span style="color:var(--down);margin-left:12px">⚠ Auth error at login: ${d.authorize_error}</span>`:''}
+    </div>
+    ${d.account_count===0?`<div style="color:var(--down);font-size:11px;margin-bottom:8px">
+      No accounts in session. <b>Log out and log back in</b> to refresh.
+      After re-login, <a href="${BACKEND_URL}/debug/session" target="_blank" style="color:var(--accent)">open debug/session</a>
+      to verify <code>account_count: 2</code> and <code>has_token: true</code> for both.
+    </div>`:''}
+    <table style="width:100%;border-collapse:collapse;font-size:10px;font-family:monospace">
+      <thead><tr style="color:var(--muted);border-bottom:1px solid var(--line)">
+        <th style="text-align:left;padding:3px 6px">Account ID</th>
+        <th style="text-align:left;padding:3px 6px">Type</th>
+        <th style="text-align:left;padding:3px 6px">Currency</th>
+        <th style="text-align:left;padding:3px 6px">API Token</th>
+        <th style="text-align:left;padding:3px 6px">Balance</th>
+      </tr></thead>
+      <tbody>${rows||'<tr><td colspan="5" style="color:var(--muted);padding:6px">No accounts</td></tr>'}</tbody>
+    </table>
+    <div style="font-size:9px;color:var(--muted);margin-top:6px">
+      If any row shows ❌ for API Token: log out, log in again.
+      If still missing after re-login: check Wrangler logs with <code>wrangler tail</code>
+      and look for <code>[callback] account_list</code>.
+    </div>`;
+}
+
 function acctShowDiag(msg){
-  const el = $('acctDiag');
-  if (!el) return;
-  el.innerHTML = msg;
+  const el = $('acctDiag'); if (!el) return;
+  el.innerHTML = msg||'';
   el.style.display = msg ? 'block' : 'none';
 }
 
 function acctRenderPanels(){
-  const grid = $('acctPanelsGrid');
-  if (!grid) return;
+  const grid = $('acctPanelsGrid'); if (!grid) return;
 
   if (!gridAccounts.length){
-    grid.innerHTML = '<div class="grid-card" style="opacity:.6">No accounts found — log in first.</div>';
+    grid.innerHTML = '<div class="grid-card" style="opacity:.6;grid-column:1/-1">No accounts found — log in first, then check the debug panel below.</div>';
     return;
   }
 
-  // Sort: real first, demo second
+  // Sort: real (is_virtual=0) first, then demo (is_virtual=1)
   const sorted = [...gridAccounts].sort((a,b) => a.is_virtual - b.is_virtual);
 
   grid.innerHTML = sorted.map(acct => {
-    const id       = acct.account_id;
-    const isDemo   = acct.is_virtual === 1;
-    const typeTag  = isDemo ? '🟢 DEMO' : '🔴 REAL';
-    const typeLbl  = isDemo ? 'Virtual / Demo' : 'Real Money';
-    const typeClr  = isDemo ? 'var(--up)' : '#ff4d5e';
-    const live     = _acctData[id] || {};
-    const balance  = live.balance  != null ? live.balance.toFixed(2)  : '—';
-    const currency = live.currency || acct.currency || 'USD';
-    const pnl      = live.pnl      != null ? live.pnl : null;
-    const trades   = live.trades   || 0;
-    const pnlStr   = pnl != null ? (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + ' ' + currency : '—';
-    const pnlClr   = pnl == null ? 'var(--muted)' : pnl >= 0 ? 'var(--up)' : 'var(--down)';
+    const id      = acct.account_id;
+    const isDemo  = acct.is_virtual === 1;
+    const typeTag = isDemo ? '🟢 DEMO' : '🔴 REAL';
+    const typeLbl = isDemo ? 'Virtual / Demo' : 'Real Money';
+    const typeClr = isDemo ? 'var(--up)' : '#ff4d5e';
+    const live    = _acctData[id] || {};
+    // Use live balance (from WS) if available, otherwise fall back to REST balance from account list
+    const bal     = live.balance!=null ? live.balance : acct.balance;
+    const balStr  = bal!=null ? Number(bal).toFixed(2) : '—';
+    const currency= live.currency || acct.currency || 'USD';
+    const pnl     = live.pnl!=null ? live.pnl : null;
+    const trades  = live.trades||0;
+    const pnlStr  = pnl!=null ? (pnl>=0?'+':'')+pnl.toFixed(2)+' '+currency : '—';
+    const pnlClr  = pnl==null?'var(--muted)':pnl>=0?'var(--up)':'var(--down)';
+    const isActive= (id===gridLoginId);
+    const balClr  = bal!=null ? 'var(--text)' : 'var(--muted)';
+    const balSrc  = live.balance!=null ? 'live' : (acct.balance!=null?'at login':'—');
 
-    // Is this the currently connected account?
-    const isActive = (id === gridLoginId);
-
-    return `<div class="grid-card" style="border:1px solid ${isActive ? typeClr : 'var(--line)'};position:relative">
+    return `<div class="grid-card" style="border:1px solid ${isActive?typeClr:'var(--line)'};position:relative">
       <div style="position:absolute;top:10px;right:12px;font-size:9px;font-weight:700;color:${typeClr};letter-spacing:.1em;text-transform:uppercase">${typeTag}</div>
       <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px">${typeLbl}</div>
       <div style="font-size:18px;font-weight:900;color:var(--text);margin-bottom:2px">${id}</div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:14px">${currency} · ${isActive ? '<span style="color:var(--up)">● connected</span>' : '○ not connected'}</div>
-
+      <div style="font-size:11px;color:var(--muted);margin-bottom:14px">
+        ${currency} · ${isActive?'<span style="color:var(--up)">● connected</span>':'○ not connected'}
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
         <div class="em-card">
-          <div class="em-lab">Live Balance</div>
-          <div style="font-size:20px;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums">
-            ${balance}
-          </div>
+          <div class="em-lab">Balance <span style="color:var(--muted);font-size:8px">(${balSrc})</span></div>
+          <div style="font-size:20px;font-weight:800;color:${balClr};font-variant-numeric:tabular-nums" id="acct-bal-${id}">${balStr}</div>
           <div style="font-size:10px;color:var(--muted);margin-top:2px">${currency}</div>
         </div>
         <div class="em-card">
           <div class="em-lab">Session P/L</div>
           <div style="font-size:18px;font-weight:800;color:${pnlClr};font-variant-numeric:tabular-nums">${pnlStr}</div>
-          <div style="font-size:10px;color:var(--muted);margin-top:2px">${trades} trade${trades !== 1 ? 's' : ''} this session</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">${trades} trade${trades!==1?'s':''} this session</div>
         </div>
       </div>
-
-      <button class="gc-btn${isActive ? '' : ' connect'}"
-              onclick="acctConnectTo('${id}')"
-              style="${isActive ? 'opacity:.4;cursor:default' : ''}"
-              ${isActive ? 'disabled' : ''}>
-        ${isActive ? '✅ Currently connected' : '⚡ Connect to this account'}
+      <button class="gc-btn${isActive?'':' connect'}"
+        onclick="acctConnectTo('${id}')"
+        style="${isActive?'opacity:.4;cursor:default':''}"
+        ${isActive?'disabled':''}>
+        ${isActive?'✅ Currently connected':'⚡ Connect to this account'}
       </button>
     </div>`;
   }).join('');
