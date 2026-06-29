@@ -1,8 +1,13 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "mambafx",
-  "compatibility_date": "2026-06-20",
+  "name": "mambafx-backend",
   "main": "src/index.js",
+  "compatibility_date": "2026-06-20",
+  "vars": {
+    "REDIRECT_URI":   "https://mambafx-backend.kenkin1122.workers.dev/auth/callback",
+    "SPA_URL":        "https://kenkin1122-ctrl.github.io/mambafx/",
+    "ALLOWED_ORIGIN": "https://kenkin1122-ctrl.github.io"
+  },
   "kv_namespaces": [
     {
       "binding": "SESSION",
