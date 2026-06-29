@@ -26,11 +26,11 @@
  *   CLIENT_ID   = 33BoT5hHIzs1muGu7qhww
  *
  * REQUIRED in wrangler.jsonc vars:
- *   SPA_URL     = https://kenlin1122-ctrl.github.io/mambafx/
- *   ALLOWED_ORIGIN = https://kenlin1122-ctrl.github.io
+ *   SPA_URL     = https://kenkin1122-ctrl.github.io/mambafx/
+ *   ALLOWED_ORIGIN = https://kenkin1122-ctrl.github.io
  *
  * REQUIRED in Deriv app dashboard:
- *   Redirect URL = https://mambafx-backend.kenlin1122.workers.dev/auth/callback
+ *   Redirect URL = https://mambafx-backend.kenkin1122.workers.dev/auth/callback
  */
 
 const DERIV_OAUTH_URL = "https://oauth.deriv.com/oauth2/authorize";
