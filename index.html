@@ -477,8 +477,8 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   </header>
 
   <nav class="pagenav">
-    <button id="navLogin" onclick="showPage('login')">🔐 Login / Account</button>
-    <button id="navLive" class="active" onclick="showPage('live')">📈 Live Tracker</button>
+    <button id="navGrid" class="active" onclick="showPage('grid')">🎯 Trading Grid</button>
+    <button id="navLive" onclick="showPage('live')">📈 Live Tracker</button>
     <button id="navCandles" onclick="showPage('candles')">🕯️ Candle Charts</button>
     <button id="navEngine" onclick="showPage('engine')">⚡ 5-Tick Engine</button>
     <button id="navAnalysis" onclick="showPage('analysis')">🔬 Analysis Tool</button>
@@ -497,110 +497,147 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   <!-- ============================================================== -->
   <!-- LOGIN / ACCOUNT PAGE                                           -->
   <!-- ============================================================== -->
-  <div id="page-login" class="page">
+  <div id="page-grid" class="page active">
 
-    <!-- Step 1: Login -->
-    <div class="grid-card" style="margin-bottom:14px" id="la-login-card">
-      <h2>🔐 Login / Account</h2>
-      <div class="gc-sub" style="margin-bottom:14px">
-        Login via Deriv OAuth2 with App ID <code>33BoT5hHIzs1muGu7qhww</code>.
-        Tokens are stored in <code>sessionStorage</code> only — cleared when you close the tab.
-        <br><br>
-        <b style="color:var(--accent)">⚠ One-time setup required:</b> Your Deriv app's redirect URL must be set to
-        <code style="background:#0a0e17;padding:2px 6px;border-radius:4px;color:#16e08b">https://kenlin1122-ctrl.github.io/mambafx/</code>
-        <br>
-        Go to <a href="https://app.deriv.com/account/api-token" target="_blank" style="color:var(--accent)">app.deriv.com → API Token → My Apps → Manage</a> and set the redirect URL to the above address. After that, login will work.
-      </div>
-
-      <!-- Session status indicator -->
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
-        <span style="width:10px;height:10px;border-radius:50%;background:var(--muted);display:inline-block;flex-shrink:0" id="la-status-dot"></span>
-        <span id="la-status-lbl" style="font-size:12px;color:var(--muted);font-weight:600">Checking session…</span>
-      </div>
-
-      <!-- Login buttons (shown when logged out) -->
-      <div id="la-logged-out" style="display:none">
-        <div class="gc-sub" style="margin-bottom:12px">
-          Click the button below. Deriv will ask you to log in and approve access. You'll be redirected back here with your account tokens.
+    <div class="grid-top">
+      <!-- Deriv connection / account -->
+      <div class="grid-card">
+        <h2>🔌 Deriv connection
+          <span class="gc-conn-pill"><span id="gridDot" class="d off"></span><span id="gridConnText">not connected</span></span>
+        </h2>
+        <div class="gc-sub">
+          Login via Deriv OAuth2 (Authorization Code + PKCE) — the entire login, including the Deriv redirect and code exchange, runs on the <code>mambafx-backend</code> Worker. This page only checks <code>/me/session</code>, lists accounts via <code>/me/accounts</code>, and requests a one-time trading WebSocket via <code>/ws/otp</code> — it never sees an access token. Login state is kept in an HttpOnly session cookie, not in this page.
         </div>
-        <button class="gc-btn connect" onclick="laLogin()" style="min-width:220px;font-size:13px;padding:10px 24px">
-          🔑 Login with Deriv
-        </button>
-        <div id="la-login-err" style="display:none;margin-top:10px;font-size:11px;color:var(--down);background:rgba(255,77,94,.07);border:1px solid rgba(255,77,94,.2);border-radius:8px;padding:10px 12px"></div>
+
+        <!-- Logged-out: show Login button -->
+        <div id="gridLoginBlock">
+          <button class="gc-btn connect" onclick="gridStartLogin()" style="min-width:200px">🔑 Login with Deriv</button>
+        </div>
+
+        <!-- Logged-in: account picker + connect -->
+        <div id="gridAcctPickBlock" style="display:none;margin-top:13px">
+          <div class="gc-field">
+            <label for="gridAcctPick">Account to trade on <span style="color:var(--muted);font-weight:400">(🔴 REAL = live money · 🟢 DEMO = virtual)</span></label>
+            <select id="gridAcctPick" onchange="gridSelectAccountFromPicker()"></select>
+          </div>
+          <div class="gc-row">
+            <button id="gridConnectBtn" class="gc-btn connect" onclick="gridConnect()" disabled>Connect &amp; authorize</button>
+            <button id="gridDisconnectBtn" class="gc-btn danger" onclick="gridDisconnect()" disabled>Disconnect</button>
+            <button class="gc-btn" onclick="gridLogout()" style="background:rgba(255,77,94,.08);border-color:#ff4d5e;color:#ff4d5e">🚪 Log out</button>
+          </div>
+        </div>
+
+        <div class="gc-acct">
+          <div class="ac-cell"><div class="ac-lab">Account</div><div id="gridAcct" class="ac-val">—</div></div>
+          <div class="ac-cell"><div class="ac-lab">Balance</div><div id="gridBal" class="ac-val">—</div></div>
+          <div class="ac-cell"><div class="ac-lab">Type</div><div id="gridType" class="ac-val">—</div></div>
+        </div>
+
+        <div id="gridDiagBox" style="display:none;margin-top:12px;font-size:11px;color:var(--down);background:rgba(255,77,94,.07);border:1px solid rgba(255,77,94,.2);border-radius:8px;padding:10px 12px"></div>
+
+        <div class="gc-warn">
+          <b>Real money risk.</b> A real-account connection places real trades automatically when armed. Synthetic indices are random — no signal predicts the next tick. Trade a demo account until you fully understand the behaviour, and only ever risk what you can afford to lose.
+        </div>
       </div>
 
-      <!-- Logged-in header (shown when logged in) -->
-      <div id="la-logged-in" style="display:none">
-        <button onclick="laLogout()" style="background:rgba(255,77,94,.1);border:1px solid #ff4d5e;color:#ff4d5e;padding:6px 16px;border-radius:8px;font-size:11px;cursor:pointer;font-weight:700">
-          🚪 Logout — clear session
-        </button>
-        <span style="font-size:10px;color:var(--muted);margin-left:14px">Clears all stored tokens and closes the WebSocket</span>
+      <!-- Contract configuration -->
+      <div class="grid-card">
+        <h2>⚙️ Contract settings</h2>
+        <div class="gc-sub">Each trade is a Deriv <b>Rise/Fall</b> contract on the market selected up top (<b id="gridMarketName">—</b>). A "rise" signal buys CALL, a "fall" buys PUT.</div>
+        <div class="gc-row">
+          <div class="gc-field">
+            <label for="gridStake">Stake per trade</label>
+            <input type="number" id="gridStake" min="0.35" step="0.01" value="1.00">
+          </div>
+          <div class="gc-field">
+            <label for="gridCurrency">Currency</label>
+            <input type="text" id="gridCurrency" value="USD" readonly>
+          </div>
+        </div>
+        <div class="gc-row3">
+          <div class="gc-field">
+            <label for="gridDurUnit">Duration unit</label>
+            <select id="gridDurUnit">
+              <option value="t" selected>Ticks</option>
+              <option value="s">Seconds</option>
+              <option value="m">Minutes</option>
+            </select>
+          </div>
+          <div class="gc-field">
+            <label for="gridDuration">Duration</label>
+            <input type="number" id="gridDuration" min="1" step="1" value="5">
+          </div>
+          <div class="gc-field">
+            <label for="gridMaxConc">Max open trades</label>
+            <input type="number" id="gridMaxConc" min="1" step="1" value="1">
+          </div>
+        </div>
+        <div class="manual-trade">
+          <button id="gridRiseBtn" class="gc-btn rise" onclick="gridManualTrade(1)" disabled>▲ Buy RISE (CALL)</button>
+          <button id="gridFallBtn" class="gc-btn fall" onclick="gridManualTrade(-1)" disabled>▼ Buy FALL (PUT)</button>
+        </div>
       </div>
     </div>
 
-    <!-- Step 2: Account panels (real + demo) — shown after login -->
-    <div id="la-accounts-grid" style="display:none;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px;margin-bottom:14px">
-      <!-- populated by laRenderAccounts() -->
+    <!-- Automatic execution -->
+    <div class="grid-card" style="margin-bottom:16px">
+      <h2>🤖 Automatic execution — 5-consecutive-tick signal</h2>
+      <div class="gc-sub">When armed, the grid fires a trade automatically the moment a <b>5-in-a-row</b> run forms on the Live Tracker (the same signal that fills the log): a run of 5 rises buys CALL, 5 falls buys PUT. Honors your stake, duration and max-open-trades limits.</div>
+      <div class="auto-bar">
+        <label class="auto-toggle">
+          <input type="checkbox" id="gridAutoArm" onchange="gridToggleAuto()">
+          <span class="track"></span>
+          <span id="gridAutoLabel">Auto-trade: OFF</span>
+        </label>
+        <div class="auto-status" id="gridAutoStatus">Disarmed. Connect an account and arm to trade the 5-tick signal automatically.</div>
+      </div>
+      <div class="gc-row3" style="margin-top:14px">
+        <div class="gc-field" style="margin:0">
+          <label for="gridAutoDir">Auto-trade which signals</label>
+          <select id="gridAutoDir">
+            <option value="both" selected>Both rise &amp; fall</option>
+            <option value="rise">Rise only (CALL)</option>
+            <option value="fall">Fall only (PUT)</option>
+          </select>
+        </div>
+        <div class="gc-field" style="margin:0">
+          <label for="gridAutoCooldown">Cooldown after a trade (s)</label>
+          <input type="number" id="gridAutoCooldown" min="0" step="1" value="10">
+        </div>
+        <div class="gc-field" style="margin:0">
+          <label for="gridAutoMax">Stop after N auto-trades (0 = ∞)</label>
+          <input type="number" id="gridAutoMax" min="0" step="1" value="0">
+        </div>
+      </div>
     </div>
 
-    <!-- Step 3: Active connection + balance -->
-    <div id="la-connection-card" style="display:none;margin-bottom:14px" class="grid-card">
-      <h2>📡 Live Connection</h2>
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-        <span id="la-ws-dot" style="width:10px;height:10px;border-radius:50%;background:var(--muted);display:inline-block"></span>
-        <span id="la-ws-lbl" style="font-size:12px;color:var(--muted)">Not connected</span>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:12px">
-        <div class="em-card">
-          <div class="em-lab">Account</div>
-          <div id="la-bal-acct" class="em-val neu" style="font-size:14px">—</div>
-        </div>
-        <div class="em-card">
-          <div class="em-lab">Type</div>
-          <div id="la-bal-type" class="em-val neu">—</div>
-        </div>
-        <div class="em-card">
-          <div class="em-lab">Live Balance</div>
-          <div id="la-bal-amount" class="em-val acc" style="font-size:20px;font-weight:900">—</div>
-        </div>
-        <div class="em-card">
-          <div class="em-lab">Currency</div>
-          <div id="la-bal-cur" class="em-val neu">—</div>
-        </div>
-      </div>
-      <div style="font-size:9px;color:var(--muted)">Balance updates in real-time via <code>balance: 1, subscribe: 1</code> on the authorized WebSocket. MT5/cTrader balances are separate and not returned here.</div>
-    </div>
-
-    <!-- Step 4: Transaction history -->
-    <div id="la-history-card" style="display:none;margin-bottom:14px" class="grid-card">
-      <h2>📋 Recent Transactions <button onclick="laFetchHistory()" style="font-size:10px;margin-left:12px;padding:3px 10px;background:#131c2e;border:1px solid var(--line);border-radius:6px;color:var(--muted);cursor:pointer">↻ Refresh</button></h2>
-      <div class="gc-sub" style="margin-bottom:10px">Last 10 transactions via <code>statement</code>. Includes deposits, withdrawals, and trade P/L.</div>
-      <div style="overflow-x:auto">
-        <table class="sig-table" style="min-width:560px">
+    <!-- Open / recent trades -->
+    <div class="grid-card" style="margin-bottom:16px">
+      <h2>📒 Trades this session
+        <span class="gc-conn-pill" style="margin-left:auto"><span class="cell-mut">P/L</span>&nbsp;<span id="gridPnL" class="ac-val" style="font-size:13px">—</span></span>
+      </h2>
+      <div class="gc-sub">Auto and manual trades placed from this page, with their live Deriv status.</div>
+      <div class="sig-tablewrap">
+        <table class="sig-table" style="min-width:760px">
           <thead>
             <tr>
-              <th class="l">Date</th><th>Type</th><th>Amount</th><th>Balance after</th><th class="l">Description</th>
+              <th class="l">Time</th><th class="l">Dir</th><th>Contract</th><th>Stake</th>
+              <th>Entry</th><th>Exit</th><th>Payout</th><th>P/L</th><th class="l">Status</th><th class="l">Source</th>
             </tr>
           </thead>
-          <tbody id="la-history-body">
-            <tr><td colspan="5" class="sig-empty">Connect to an account to load history.</td></tr>
+          <tbody id="gridTradeBody">
+            <tr><td colspan="10" class="sig-empty">No trades yet.</td></tr>
           </tbody>
         </table>
       </div>
     </div>
 
-    <!-- Debug panel -->
-    <div class="grid-card" style="margin-bottom:14px">
-      <h2 style="cursor:pointer" onclick="laToggleDebug()">🔍 Debug Info <span style="font-size:11px;font-weight:400;color:var(--muted)">(click to expand)</span></h2>
-      <div id="la-debug-panel" style="display:none;margin-top:10px;font-size:10px;font-family:monospace;color:var(--muted);background:#0a0e17;border-radius:8px;padding:12px;line-height:1.8;white-space:pre-wrap" id="la-debug"></div>
-    </div>
-
     <footer>
-      Authentication uses Deriv OAuth2 with App ID <code>33BoT5hHIzs1muGu7qhww</code>. Tokens are stored in <code>sessionStorage</code> and cleared when you close the tab. Demo and Real tokens are kept separate — switching accounts closes the current socket and re-authorizes with the new token. Balance uses the Deriv WebSocket <code>balance</code> call with <code>subscribe:1</code>. Transaction history uses <code>statement</code>. Full API docs: <a href="https://developers.deriv.com/" target="_blank" style="color:var(--accent)">developers.deriv.com</a>
+      Login uses Deriv OAuth2 — your access token never reaches this page, only an HttpOnly session cookie. Trading WebSocket is opened per-account via a one-time URL from the backend. Synthetic indices are random-walk products — automation does not create an edge.
     </footer>
-  </div><!-- /page-login -->
+  </div><!-- /page-grid -->
 
-  <div id="page-live" class="page active">
+  <div id="page-live" class="page">
 
   <!-- Connection panel — replaces the deleted Trading Grid -->
   <div class="grid-card" style="margin-bottom:12px;padding:10px 14px">
@@ -2199,6 +2236,8 @@ function handleTick(price, epoch){
   if (typeof lmvOnTick === "function") lmvOnTick(price, epoch, dir);
   // Only Ups/Downs Bot — fires on every tick based on fingerprint (NOT on 5-tick run signal)
   if (typeof ouHandleSignal === "function") ouHandleSignal(dir, price, epoch);
+  // Trading Grid auto-trade — fires on confirmed 5-tick run signal
+  if (typeof gridHandleSignal === "function") gridHandleSignal(dir, price, epoch);
   // Refresh fingerprint display when on the OU bot page
   if (typeof ouRefreshFingerprint === "function"){
     if(document.getElementById("page-oubot")&&document.getElementById("page-oubot").classList.contains("active"))
@@ -3429,8 +3468,8 @@ function startTfTimers(){
 }
 
 function showPage(which){
-  const pages = { login:"page-login", live:"page-live", candles:"page-candles", engine:"page-engine", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot" };
-  const navs  = { login:"navLogin", live:"navLive",  candles:"navCandles", engine:"navEngine", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot" };
+  const pages = { grid:"page-grid", live:"page-live", candles:"page-candles", engine:"page-engine", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot" };
+  const navs  = { grid:"navGrid",  live:"navLive",  candles:"navCandles", engine:"navEngine", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot" };
   Object.keys(pages).forEach(k => {
     document.getElementById(pages[k]).classList.toggle("active", k===which);
     const nav = document.getElementById(navs[k]); if (nav) nav.classList.toggle("active", k===which);
@@ -3466,11 +3505,10 @@ function showPage(which){
   if (which === "diag"){
     diagUpdateConnStatus();
   }
-  if (which === "accounts"){
-    acctPageInit();
-  }
-  if (which === "login"){
-    laPageInit();
+  if (which === "grid"){
+    gridCheckSession();
+    gridRenderTrades();
+    gridRenderPnL();
   }
   if (which === "features"){
     featPageInit();
@@ -6080,26 +6118,28 @@ function adxRenderStats(){
 }
 
 // =====================================================================
-// CONNECTION MANAGER
-// Replaces the deleted Trading Grid — provides WS state and the
-// Connect panel on the Live Tracker page so all bots can trade.
+// TRADING GRID — OAuth login, account picker, WebSocket connect, trading
 // =====================================================================
-const BACKEND_URL  = "https://mambafx-backend.kenkin1122.workers.dev";
-const ACCTID_KEY   = "v100tracker_deriv_acctid_v1";
+const BACKEND_URL = "https://mambafx-backend.kenkin1122.workers.dev";
+const ACCTID_KEY  = "v100tracker_deriv_acctid_v1";
 
 let gridWs            = null;
 let gridAuthed        = false;
+let gridConnecting    = false;
 let gridPing          = null;
 let gridLoginId       = null;
 let gridBalance       = null;
 let gridCurrency      = "USD";
 let gridIsVirtual     = null;
 let gridLoggedIn      = false;
-let gridAccounts      = [];
+let gridAccounts      = [];      // [{account_id, account_type, currency, is_virtual}]
 let gridArmed         = false;   // true when any bot has an open contract
 let gridReqId         = 0;
-let gridPending       = {};      // { reqId: callback }
+let gridPending       = {};      // { reqId: callback(data, error) }
 let gridOpenContracts = {};      // { contractId: row }
+let gridAutoArmed     = false;
+let gridAutoTradeCount= 0;
+let gridLastAutoTime  = 0;
 
 function gridSet(id, txt){ const e=$(id); if(e) e.textContent=txt; }
 
@@ -6109,503 +6149,458 @@ function gridDisarm(reason){
 }
 
 function gridConnState(state){
-  const dot=$("dot"),txt=$("connText");
-  if(!dot) return;
-  dot.className='dot '+(state==='on'?'on':state==='connecting'?'connecting':'');
-  if(txt) txt.textContent=state==='on'?`Connected · ${gridLoginId||'—'} · ${gridIsVirtual?'DEMO':'REAL'}`:state==='connecting'?'Connecting…':'Disconnected';
+  const dot=$("gridDot"), txt=$("gridConnText");
+  if(dot) dot.className='d '+(state==='on'?'on':state==='connecting'?'connecting':'off');
+  if(txt) txt.textContent = state==='on'
+    ? `Connected · ${gridLoginId||'—'} · ${gridIsVirtual?'DEMO':'REAL'}`
+    : state==='connecting' ? 'Connecting…' : 'not connected';
+  // mirror to other pages that show connection status
+  if (typeof digUpdateConnStatus  === 'function') digUpdateConnStatus();
+  if (typeof diagUpdateConnStatus === 'function') diagUpdateConnStatus();
+  if (typeof engUpdateConnStatus  === 'function') engUpdateConnStatus();
+  if (typeof ouUpdateConnStatus   === 'function') ouUpdateConnStatus();
+  if (typeof adxUpdateConn        === 'function') adxUpdateConn();
 }
 
 function gridDiag(html, isError){
-  // silently log — no grid UI to update
-  if (html) console.warn('[grid]', html.replace(/<[^>]+>/g,''));
+  const box = $("gridDiagBox");
+  if (!box) return;
+  if (!html){ box.style.display='none'; box.innerHTML=''; return; }
+  box.style.display='block';
+  box.innerHTML=html;
 }
 
-function gridStartLogin(){ window.location.assign(BACKEND_URL + "/auth/start"); }
-function gridLogout(){
-  gridDisconnect();
-  fetch(BACKEND_URL+"/logout",{method:"POST",credentials:"include"}).catch(()=>{});
-  gridLoggedIn=false; gridAccounts=[];
-}
-
-async function gridCheckSession(){
-  // Sync accounts from backend session (set by laPageInit on login page)
-  if (typeof _laAccounts !== 'undefined' && _laAccounts.length){
-    gridLoggedIn = true;
-    gridAccounts = _laAccounts.map(a=>({account_id:a.loginid,account_type:a.is_virtual?'virtual':'trading',currency:a.currency||'USD',is_virtual:a.is_virtual||0}));
-    gridBuildPicker();
-  } else {
-    gridLoggedIn = false;
-  }
-}
-
-async function gridLoadAccounts(){
-  if (typeof _laAccounts !== 'undefined' && _laAccounts.length){
-    gridAccounts = _laAccounts.map(a=>({account_id:a.loginid,account_type:a.is_virtual?'virtual':'trading',currency:a.currency||'USD',is_virtual:a.is_virtual||0}));
-    gridBuildPicker();
-  }
-}
-
-function gridBuildPicker(){
-  // Build from LA accounts if available, otherwise from gridAccounts
-  const source = (typeof _laAccounts!=='undefined' && _laAccounts.length)
-    ? _laAccounts.map(a=>({account_id:a.loginid,is_virtual:a.is_virtual,currency:a.currency}))
-    : gridAccounts;
-  ['liveAcctPick'].forEach(id=>{
-    const sel=$(id); if(!sel) return;
-    const prev=sel.value;
-    sel.innerHTML=source.sort((a,b)=>a.is_virtual-b.is_virtual).map(a=>
-      `<option value="${a.account_id}">${a.account_id} · ${a.is_virtual?'🟢 DEMO':'🔴 REAL'} · ${a.currency}</option>`
-    ).join('');
-    try { if(prev) sel.value=prev; } catch(_){}
-  });
-  const lbl=$('connAcctLbl');
-  if(lbl) lbl.textContent=source.length
-    ? source.map(a=>`${a.account_id}(${a.is_virtual?'demo':'real'})`).join(' · ')
-    : 'No accounts — login via Login/Account page';
-}
-
-function gridMergeAccounts(newList){
-  if(!newList||!newList.length) return;
-  let changed=false;
-  newList.forEach(na=>{
-    const id=String(na.account_id||na.loginid||'');
-    if(!id||gridAccounts.some(a=>a.account_id===id)) return;
-    gridAccounts.push({account_id:id,account_type:/^VR/i.test(id)?'virtual':'trading',currency:na.currency||'USD',is_virtual:/^VR/i.test(id)?1:0});
-    changed=true;
-  });
-  if(changed) gridBuildPicker();
-}
-
-async function gridConnect(acctIdOverride){
-  // Primary path: use the LA (Login/Account) engine which works
-  // without the backend. Simply call laConnectAccount with the loginid.
-  if (typeof _laAccounts !== 'undefined' && _laAccounts.length){
-    const acctId = acctIdOverride || (() => {
-      const s=$('liveAcctPick'); return s&&s.value?s.value:(_laAccounts[0]&&_laAccounts[0].loginid);
-    })();
-    if (acctId && typeof laConnectAccount==='function'){ laConnectAccount(acctId); return; }
-  }
-  console.warn('[gridConnect] No LA accounts — login via Login/Account page first');
-}
-
-let gridConnecting=false;
-
-function gridDisconnect(){
-  if(gridArmed) gridDisarm('disconnected');
-  try{if(gridWs){gridWs.onclose=null;gridWs.close();}}catch(_){}
-  gridWs=null; gridAuthed=false; gridConnecting=false;
-  if(gridPing){clearInterval(gridPing);gridPing=null;}
-  gridConnState('off');
-  if(typeof digUpdateConnStatus==='function') digUpdateConnStatus();
-  if(typeof ouUpdateConnStatus==='function') ouUpdateConnStatus();
-  if(typeof adxUpdateConn==='function') adxUpdateConn();
-}
-
-function gridHandleMsg(msg){
-  if(!msg||!msg.msg_type) return;
-  const t=msg.msg_type;
-  if(t==='authorize'){
-    gridAuthed=true;
-    const al=msg.authorize&&msg.authorize.account_list;
-    if(al) gridMergeAccounts(al.map(a=>({account_id:a.loginid,currency:a.currency,is_virtual:a.is_virtual?1:0})));
-  }
-  if(t==='balance'&&msg.balance){
-    gridBalance=Number(msg.balance.balance);
-    gridCurrency=msg.balance.currency||gridCurrency;
-    gridSet('gridBal',gridBalance.toFixed(2)+' '+gridCurrency);
-    const ce=$('gridCurrency'); if(ce) ce.value=gridCurrency;
-    if(msg.balance.accounts){
-      const disc=Object.entries(msg.balance.accounts).map(([id,info])=>({account_id:id,currency:info.currency||'USD',is_virtual:/^VR/i.test(id)?1:0}));
-      gridMergeAccounts(disc);
-    }
-  }
-  if(t==='proposal'&&msg.proposal){
-    const cb=gridPending[msg.req_id];
-    if(cb){delete gridPending[msg.req_id];cb(msg.proposal,msg.error);}
-  }
-  if(t==='buy'){
-    const cb=gridPending[msg.req_id];
-    if(cb){delete gridPending[msg.req_id];cb(msg.buy,msg.error);}
-  }
-  if(t==='proposal_open_contract'&&msg.proposal_open_contract){
-    const poc=msg.proposal_open_contract;
-    if(poc.status==='sold'||poc.status==='expired'){
-      gridUpdateContract(poc);
-    }
-  }
-  if(t==='transaction'&&msg.transaction){
-    const tr=msg.transaction;
-    if(tr.action==='sell') gridUpdateContract({contract_id:tr.contract_id,profit:tr.amount,status:'sold'});
-  }
-  if(t==='ping') return;
-  // Route to sub-systems
-  if(typeof digHandleMsg==='function') digHandleMsg(msg);
-  if(typeof diagHandleMsg==='function') diagHandleMsg(msg);
-  if(typeof engHandleMsg==='function') engHandleMsg(msg);
-}
-
-function gridUpdateContract(c){
-  if(!c) return;
-  const id=String(c.contract_id||'');
-  const won=c.profit>0||(c.status==='won');
-  const row=gridOpenContracts[id]
-    ||(typeof ouTrades!=='undefined'?ouTrades.find(t=>t.id===id):null)
-    ||(typeof adxTrades!=='undefined'?adxTrades.find(t=>t.id===id):null);
-  if(row){
-    const stk=row.stake||1;
-    const pnl=c.profit!=null?Number(c.profit):won?stk*0.9:-stk;
-    row.pnl=pnl; row.payout=won?stk+pnl:0; row.status=won?'won':'lost';
-    delete gridOpenContracts[id];
-    if(typeof window._multRecord==='function') window._multRecord(id,stk,won);
-    if(typeof ouOpenContracts!=='undefined'&&ouOpenContracts[id]&&typeof ouSettleContract==='function') ouSettleContract(id,won);
-    if(typeof adxOpenContracts!=='undefined'&&adxOpenContracts[id]&&typeof adxSettle==='function') adxSettle(id,won);
-  }
-}
-
-function gridHandleRedirectReturn(){
-  const params=new URLSearchParams(window.location.search);
-  const err=params.get('login_error');
-  if(err){ console.error('[login error]',err); try{window.history.replaceState({},'',window.location.pathname);}catch(_){} }
-  gridCheckSession();
-}
-
-// ======================================================================
-// LOGIN / ACCOUNT ENGINE
-// ======================================================================
-// Follows the official Deriv OAuth + WebSocket flow exactly:
-//
-// 1. LOGIN: redirect to oauth.deriv.com with app_id.
-//    Deriv returns tokens in the URL: ?acct1=...&token1=...&cur1=...
-//
-// 2. AUTHORIZE: open wss://ws.derivws.com/websockets/v3?app_id=APP_ID
-//    send { authorize: token } — response gives account_list.
-//
-// 3. PICK ACCOUNT: read account_list. is_virtual=1 → demo, 0 → real.
-//
-// 4. BALANCE: send { balance:1, subscribe:1 } — real-time Deriv Wallet.
-//
-// 5. HISTORY: send { statement:1, limit:10 } — transactions.
-//
-// 6. LOGOUT: send { logout:1 }, close socket, clear sessionStorage.
-// ======================================================================
-
-const LA_APP_ID  = "33BoT5hHIzs1muGu7qhww";
-const LA_WS_URL  = `wss://ws.derivws.com/websockets/v3?app_id=${LA_APP_ID}`;
-// Redirect URL is configured in the Deriv app dashboard — NOT passed in the URL
-// Dashboard: https://app.deriv.com → Account → API Token → My Apps → Manage
-// Set redirect URL to: https://kenlin1122-ctrl.github.io/mambafx/
-const LA_OAUTH   = `https://oauth.deriv.com/oauth2/authorize?app_id=${LA_APP_ID}`;
-const LA_KEY     = "mfx_la_accounts";
-
-let _laAccounts = [];
-let _laWs       = null;
-let _laActiveId = null;
-let _laPing     = null;
-
-function laLog(msg){
-  const el=$("la-debug-panel"); if(!el)return;
-  el.textContent+="["+new Date().toLocaleTimeString()+"] "+msg+"\n";
-  el.scrollTop=el.scrollHeight;
-}
-function laDebug(data){ const el=$("la-debug-panel"); if(el) el.textContent=JSON.stringify(data,null,2); }
-function laToggleDebug(){ const el=$("la-debug-panel"); if(el) el.style.display=el.style.display==="none"?"block":"none"; }
-function laDot(id,on){ const e=$(id); if(e) e.style.background=on?"#16e08b":"var(--muted)"; }
-function laSet(id,v){ const e=$(id); if(e) e.textContent=v; }
-
-function laSaveAccounts(list){ try{ sessionStorage.setItem(LA_KEY,JSON.stringify(list)); }catch(_){} }
-function laLoadAccounts(){ try{ return JSON.parse(sessionStorage.getItem(LA_KEY)||"[]"); }catch(_){ return []; } }
-
-async function laPageInit(){
-  laDot("la-status-dot", false);
-  laSet("la-status-lbl", "Checking session…");
-
-  // Check login_error from backend redirect
-  const params = new URLSearchParams(window.location.search);
-  const err = params.get("login_error");
-  if (err){
-    const el = $("la-login-err");
-    if (el){ el.textContent = "Login error: " + err; el.style.display = "block"; }
-    try { window.history.replaceState({}, document.title, window.location.pathname); } catch(_){}
-  }
-
-  try {
-    // Ask backend if we have a valid session (HttpOnly cookie)
-    const r = await fetch(BACKEND_URL + "/me/session", { credentials: "include" });
-    const b = await r.json().catch(() => null);
-
-    if (b && b.logged_in){
-      // Load accounts from backend (tokens stay server-side)
-      await laLoadAccountsFromBackend();
-    } else {
-      laRenderLoggedOut();
-    }
-  } catch(e){
-    laRenderLoggedOut();
-    const el = $("la-login-err");
-    if (el){
-      el.textContent = "Cannot reach backend: " + BACKEND_URL + " — deploy the Worker first.";
-      el.style.display = "block";
-    }
-  }
-}
-
-async function laLoadAccountsFromBackend(){
-  try {
-    const r = await fetch(BACKEND_URL + "/me/accounts", { credentials: "include" });
-    const b = await r.json().catch(() => null);
-    const raw = (b && b.data) || [];
-
-    // Store locally (no tokens — just IDs/currencies for display)
-    _laAccounts = raw.map(a => ({
-      loginid:    a.account_id,
-      currency:   a.currency || "USD",
-      is_virtual: a.is_virtual || 0,
-      balance:    null,
-    }));
-
-    if (_laAccounts.length){
-      laRenderLoggedIn();
-      laRenderAccounts();
-    } else {
-      laRenderLoggedOut();
-    }
-  } catch(e){
-    laRenderLoggedOut();
-  }
-}
-
-function laParseRedirectUrl(){
-  const p=new URLSearchParams(window.location.search);
-  const accounts=[]; let i=1;
-  while(true){
-    const loginid=p.get("acct"+i), token=p.get("token"+i), cur=p.get("cur"+i);
-    if(!loginid||!token) break;
-    accounts.push({ loginid, token, currency:(cur||"USD").toUpperCase(), is_virtual:/^VR/i.test(loginid)?1:0, balance:null });
-    i++;
-  }
-  const err=p.get("login_error");
-  if(err){
-    const el=$("la-login-err"); if(el){ el.textContent="Login error: "+err; el.style.display="block"; }
-    try{ window.history.replaceState({},"",window.location.pathname); }catch(_){}
-  }
-  return accounts;
-}
-
-function laRenderLoggedOut(){
-  laDot("la-status-dot",false); laSet("la-status-lbl","⚪ Not logged in");
-  const lo=$("la-logged-out"); if(lo) lo.style.display="block";
-  const li=$("la-logged-in"); if(li) li.style.display="none";
-  const ag=$("la-accounts-grid"); if(ag){ ag.style.display="none"; ag.innerHTML=""; }
-  const cc=$("la-connection-card"); if(cc) cc.style.display="none";
-  const hc=$("la-history-card"); if(hc) hc.style.display="none";
-}
-
-function laRenderLoggedIn(){
-  laDot("la-status-dot",true);
-  laSet("la-status-lbl","✅ Logged in — "+_laAccounts.length+" account(s) found");
-  const lo=$("la-logged-out"); if(lo) lo.style.display="none";
-  const li=$("la-logged-in"); if(li) li.style.display="block";
-}
-
-function laRenderAccounts(){
-  const grid=$("la-accounts-grid"); if(!grid) return;
-  grid.style.display="grid";
-  grid.innerHTML=_laAccounts.sort((a,b)=>a.is_virtual-b.is_virtual).map(acct=>{
-    const isDemo=acct.is_virtual===1;
-    const typeClr=isDemo?"var(--up)":"#ff4d5e";
-    const bal=acct.balance!=null?Number(acct.balance).toFixed(2):"—";
-    const isActive=_laActiveId===acct.loginid;
-    return `<div class="grid-card" style="border:1px solid ${isActive?typeClr:"var(--line)"};position:relative">
-      <div style="position:absolute;top:10px;right:12px;font-size:9px;font-weight:700;letter-spacing:.1em;color:${typeClr}">${isDemo?"🟢 DEMO":"🔴 REAL"}</div>
-      <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px">${isDemo?"Virtual / Demo":"Real Money"}</div>
-      <div style="font-size:18px;font-weight:900;color:var(--text);margin-bottom:2px">${acct.loginid}</div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:14px">${acct.currency}${isActive?' · <span style="color:var(--up)">● connected</span>':''}</div>
-      <div class="em-card" style="margin-bottom:14px">
-        <div class="em-lab">Balance</div>
-        <div id="la-acct-bal-${acct.loginid}" style="font-size:22px;font-weight:900;color:var(--text);font-variant-numeric:tabular-nums">${bal}</div>
-        <div style="font-size:10px;color:var(--muted);margin-top:2px">${acct.currency}</div>
-      </div>
-      <button class="gc-btn${isActive?"":" connect"}" onclick="laConnectAccount('${acct.loginid}')" ${isActive?"disabled style=\"opacity:.45;cursor:default\"":" "}>
-        ${isActive?"✅ Connected — active":"⚡ Connect to this account"}
-      </button>
-    </div>`;
-  }).join("");
-}
-
-function laLogin(){
-  // Go to backend /auth/start which redirects to Deriv OAuth.
-  // After login, Deriv sends tokens to /auth/callback on the backend.
-  // The backend stores tokens in KV, sets a session cookie, then
-  // redirects the browser back to this SPA.
-  laLog("Redirecting via backend auth/start…");
+// ── Step 1: kick off OAuth login ───────────────────────────────────────
+function gridStartLogin(){
   window.location.assign(BACKEND_URL + "/auth/start");
 }
 
-function laLogout(){
-  laLog("Logging out...");
-  if (_laWs && _laWs.readyState === WebSocket.OPEN){
-    try { _laWs.send(JSON.stringify({ logout: 1 })); } catch(_){}
-    try { _laWs.close(); } catch(_){}
+// ── Step 2: check session on page load / after redirect back ──────────
+async function gridCheckSession(){
+  try {
+    const resp = await fetch(BACKEND_URL + "/me/session", { credentials:"include" });
+    const body = await resp.json().catch(()=>null);
+    gridLoggedIn = !!(body && body.logged_in);
+  } catch(e){
+    gridLoggedIn = false;
+    if (e instanceof TypeError)
+      gridDiag(`<b>Cannot reach backend.</b> <code>${BACKEND_URL}/me/session</code> — check the Worker is deployed.`, true);
+    return;
   }
-  _laWs = null; _laActiveId = null;
-  if (_laPing){ clearInterval(_laPing); _laPing = null; }
-  _laAccounts = [];
-  gridDisconnect();
-  // Clear the HttpOnly session cookie via backend
-  fetch(BACKEND_URL + "/logout", { method: "POST", credentials: "include" }).catch(() => {});
-  laRenderLoggedOut();
-  laLog("Logged out — session cleared");
+  const loginBlock = $("gridLoginBlock"), pickBlock = $("gridAcctPickBlock");
+  if (gridLoggedIn){
+    if (loginBlock) loginBlock.style.display = "none";
+    if (pickBlock)  pickBlock.style.display  = "block";
+    gridDiag(null);
+    await gridLoadAccounts();
+  } else {
+    if (loginBlock) loginBlock.style.display = "block";
+    if (pickBlock)  pickBlock.style.display  = "none";
+  }
 }
 
-async function laConnectAccount(loginid){
-  const acct = _laAccounts.find(a => a.loginid === loginid);
-  if (!acct){ laLog("Account not found: " + loginid); return; }
-
-  // Drop existing socket
-  if (_laWs && _laWs.readyState === WebSocket.OPEN){
-    laLog("Dropping existing socket before switch to " + loginid);
-    try { _laWs.close(); } catch(_){} _laWs = null;
-  }
-  if (_laPing){ clearInterval(_laPing); _laPing = null; }
-  _laActiveId = null;
-  laDot("la-ws-dot", false);
-  laSet("la-ws-lbl", "Getting WS URL for " + loginid + "…");
-
-  // Ask backend for WS URL + account token
-  // Backend returns { url, token } — token is the per-account API token
-  let wsUrl, wsToken;
+// ── Step 3: fetch accounts for this session ────────────────────────────
+async function gridLoadAccounts(){
+  gridSet("gridConnText", "fetching accounts…");
+  let raw = [];
   try {
-    const r = await fetch(BACKEND_URL + "/ws/otp", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ account_id: loginid }),
-    });
-    const b = await r.json().catch(() => null);
-    if (!r.ok) throw new Error((b && b.message) || `HTTP ${r.status}`);
-    wsUrl   = b && b.url;
-    wsToken = b && b.token;
-    if (!wsUrl || !wsToken) throw new Error("Backend did not return url or token");
+    const resp = await fetch(BACKEND_URL + "/me/accounts", { credentials:"include" });
+    const body = await resp.json().catch(()=>null);
+    if (!resp.ok) throw new Error((body && body.message) || `HTTP ${resp.status}`);
+    if (body && body.error) throw new Error(body.message || "Account error — log out and back in.");
+    raw = (body && body.data) || [];
+    if (!raw.length) throw new Error("No accounts returned — log out and log back in.");
   } catch(e){
-    laLog("Failed to get WS credentials: " + e.message);
-    laSet("la-ws-lbl", "Error: " + e.message);
+    gridDiag(`<b>Could not list accounts.</b> ${
+      e instanceof TypeError
+        ? `Cannot reach <code>${BACKEND_URL}/me/accounts</code>.`
+        : `Backend: <b>${e.message||"unknown"}</b>.`
+    }`, true);
+    gridConnState("off");
     return;
   }
 
-  laLog("app_id: " + LA_APP_ID);
-  laLog("endpoint: " + wsUrl.split("?")[0]);
-  laLog("token: " + wsToken.slice(0, 8) + "… (virtual=" + acct.is_virtual + ")");
+  // Normalise: is_virtual is authoritative; loginid prefix VR is cross-check
+  gridAccounts = raw.map(a => {
+    const id   = String(a.account_id || a.loginid || "");
+    const type = String(a.account_type || "").toLowerCase();
+    const isDemo = a.is_virtual === 1 || type === "demo" || type === "virtual" || /^VR/i.test(id);
+    return {
+      account_id:   id,
+      account_type: isDemo ? "virtual" : "trading",
+      currency:     String(a.currency || "USD"),
+      is_virtual:   isDemo ? 1 : 0,
+      balance:      a.balance != null ? Number(a.balance) : null,
+    };
+  }).filter(a => a.account_id);
 
-  _laWs = new WebSocket(wsUrl);
+  gridBuildPicker();
+}
 
-  _laWs.onopen = () => {
-    laLog("WS open — sending { authorize: token }");
-    // Per Deriv docs: authorize with the account-specific token
-    _laWs.send(JSON.stringify({ authorize: wsToken }));
+// ── Build (or rebuild) the account picker — real accounts first ───────
+function gridBuildPicker(){
+  const pickBlock = $("gridAcctPickBlock"), loginBlock = $("gridLoginBlock");
+  if (loginBlock) loginBlock.style.display = "none";
+  if (pickBlock)  pickBlock.style.display  = "block";
+
+  const sel = $("gridAcctPick");
+  if (!sel) return;
+
+  const sorted = [...gridAccounts].sort((a,b) => a.is_virtual - b.is_virtual);
+  const prev = sel.value;
+  sel.innerHTML = sorted.map(a =>
+    `<option value="${a.account_id}">${a.account_id} · ${a.is_virtual ? "🟢 DEMO" : "🔴 REAL"} · ${a.currency}</option>`
+  ).join("");
+
+  try {
+    const saved = localStorage.getItem(ACCTID_KEY);
+    if      (saved && gridAccounts.some(a => a.account_id === saved)) sel.value = saved;
+    else if (prev  && gridAccounts.some(a => a.account_id === prev))  sel.value = prev;
+  } catch(_){}
+
+  const connBtn = $("gridConnectBtn"); if (connBtn) connBtn.disabled = false;
+  gridConnState("off");
+}
+
+function gridSelectAccountFromPicker(){
+  const sel = $("gridAcctPick");
+  if (sel && sel.value){ try { localStorage.setItem(ACCTID_KEY, sel.value); } catch(_){} }
+}
+
+// Merge accounts discovered at runtime (e.g. from a balance.accounts map)
+function gridMergeAccounts(newList){
+  if (!newList || !newList.length) return;
+  let changed = false;
+  newList.forEach(na => {
+    const id = String(na.account_id || na.loginid || "");
+    if (!id || gridAccounts.some(a => a.account_id === id)) return;
+    const isDemo = na.is_virtual === 1 || na.is_virtual === true || /^VR/i.test(id);
+    gridAccounts.push({ account_id:id, account_type:isDemo?"virtual":"trading", currency:na.currency||"USD", is_virtual:isDemo?1:0 });
+    changed = true;
+  });
+  if (changed) gridBuildPicker();
+}
+
+// ── Step 4: connect to the chosen account ───────────────────────────────
+// POST /ws/otp { account_id } → { url } — open WS, subscribe to balance.
+async function gridConnect(){
+  if (gridConnecting) return;
+  if (!gridLoggedIn){ alert("Login with Deriv first."); return; }
+  const sel    = $("gridAcctPick");
+  const acctId = sel && sel.value;
+  if (!acctId){ alert("Pick an account first."); return; }
+
+  gridDiag(null);
+  gridConnecting = true;
+  gridConnState("connecting");
+
+  let wsUrl;
+  try {
+    const resp = await fetch(BACKEND_URL + "/ws/otp", {
+      method:"POST", credentials:"include",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ account_id: acctId }),
+    });
+    const body = await resp.json().catch(()=>null);
+    if (!resp.ok) throw new Error((body && body.message) || `HTTP ${resp.status}`);
+    wsUrl = body && body.url;
+    if (!wsUrl) throw new Error("No WebSocket URL returned by backend.");
+  } catch(e){
+    gridConnecting = false;
+    gridConnState("off");
+    gridDiag(`<b>Could not connect to ${acctId}.</b> ${
+      e instanceof TypeError
+        ? `Cannot reach <code>${BACKEND_URL}/ws/otp</code>.`
+        : `Backend: <b>${e.message||"unknown"}</b>. Try logging out and in again.`
+    }`, true);
+    return;
+  }
+
+  try { gridWs = new WebSocket(wsUrl); }
+  catch(e){
+    gridConnecting = false; gridConnState("off");
+    gridDiag("<b>Cannot open WebSocket:</b> " + (e.message||""), true);
+    return;
+  }
+
+  gridWs.onopen = () => {
+    gridConnecting = false;
+    gridAuthed = true;
+    gridConnState("on");
+    gridDiag(null);
+
+    gridWs.send(JSON.stringify({ balance:1, subscribe:1 }));
+    gridWs.send(JSON.stringify({ proposal_open_contract:1, subscribe:1 }));
+
+    const meta    = gridAccounts.find(a => a.account_id === acctId);
+    gridLoginId   = acctId;
+    gridIsVirtual = meta ? meta.is_virtual === 1 : /^VR/i.test(acctId);
+    gridCurrency  = (meta && meta.currency) || gridCurrency;
+
+    try { localStorage.setItem(ACCTID_KEY, acctId); } catch(_){}
+
+    gridSet("gridAcct", acctId);
+    gridSet("gridType", gridIsVirtual ? "🟢 Virtual / Demo" : "🔴 Real");
+    const cur = $("gridCurrency"); if (cur) cur.value = gridCurrency;
+
+    const connBtn = $("gridConnectBtn"), discBtn = $("gridDisconnectBtn");
+    if (connBtn) connBtn.disabled = true;
+    if (discBtn) discBtn.disabled = false;
+    const riseBtn = $("gridRiseBtn"), fallBtn = $("gridFallBtn");
+    if (riseBtn) riseBtn.disabled = false;
+    if (fallBtn) fallBtn.disabled = false;
+
+    if (gridPing) clearInterval(gridPing);
+    gridPing = setInterval(() => {
+      if (gridWs && gridWs.readyState === WebSocket.OPEN)
+        gridWs.send(JSON.stringify({ ping:1 }));
+    }, 20000);
   };
 
-  _laWs.onmessage = ev => {
-    let m; try { m = JSON.parse(ev.data); } catch(_){ return; }
-    laHandleMsg(m, acct);
+  gridWs.onmessage = ev => {
+    let msg; try { msg = JSON.parse(ev.data); } catch(_){ return; }
+    gridHandleMsg(msg);
   };
-
-  _laWs.onerror = () => {
-    laLog("WS error");
-    laDot("la-ws-dot", false);
-    laSet("la-ws-lbl", "Connection error");
-  };
-
-  _laWs.onclose = () => {
-    laLog("WS closed");
-    laDot("la-ws-dot", false);
-    laSet("la-ws-lbl", "Disconnected");
-    if (_laPing){ clearInterval(_laPing); _laPing = null; }
-    laRenderAccounts();
+  gridWs.onerror = () => {};
+  gridWs.onclose = ev => {
+    gridConnecting = false; gridAuthed = false;
+    if (gridPing){ clearInterval(gridPing); gridPing = null; }
+    gridConnState("off");
+    const connBtn = $("gridConnectBtn"), discBtn = $("gridDisconnectBtn");
+    if (connBtn) connBtn.disabled = false;
+    if (discBtn) discBtn.disabled = true;
+    const riseBtn = $("gridRiseBtn"), fallBtn = $("gridFallBtn");
+    if (riseBtn) riseBtn.disabled = true;
+    if (fallBtn) fallBtn.disabled = true;
+    if (gridArmed) gridDisarm("connection closed");
+    if (ev && ev.code && ev.code !== 1000)
+      gridDiag(`<b>WebSocket closed</b> (code ${ev.code}). Click Connect again.`, true);
   };
 }
 
-function laHandleMsg(msg,acct){
-  if(!msg||!msg.msg_type) return;
-  switch(msg.msg_type){
-    case "authorize":{
-      if(msg.error){ laLog("Auth error: "+msg.error.message); laLog("Tip: ensure token has Read+Trade scope"); laDot("la-ws-dot",false); laSet("la-ws-lbl","Auth error: "+msg.error.message); return; }
-      _laActiveId=msg.authorize.loginid;
-      laLog("Authorized: "+_laActiveId+" ("+(acct.is_virtual?"demo":"real")+")");
-      laDot("la-ws-dot",true);
-      laSet("la-ws-lbl","Connected · "+_laActiveId+" · "+(acct.is_virtual?"🟢 DEMO":"🔴 REAL"));
-      // Enrich account list from authorize account_list
-      (msg.authorize.account_list||[]).forEach(entry=>{
-        if(entry.token&&!_laAccounts.find(a=>a.loginid===entry.loginid))
-          _laAccounts.push({loginid:entry.loginid,token:entry.token,currency:entry.currency||"USD",is_virtual:entry.is_virtual?1:0,balance:null});
-      });
-      laSaveAccounts(_laAccounts);
-      // Step 4: subscribe to balance
-      _laWs.send(JSON.stringify({balance:1,subscribe:1}));
-      // Wire into global grid state so all bots can trade
-      gridWs=_laWs; gridAuthed=true; gridLoginId=_laActiveId;
-      gridIsVirtual=acct.is_virtual===1; gridCurrency=acct.currency||"USD";
-      const cc=$("la-connection-card"); if(cc) cc.style.display="block";
-      laSet("la-bal-acct",_laActiveId);
-      laSet("la-bal-type",acct.is_virtual?"🟢 Virtual / Demo":"🔴 Real Money");
-      laSet("la-bal-cur",acct.currency);
-      if(_laPing) clearInterval(_laPing);
-      _laPing=setInterval(()=>{ if(_laWs&&_laWs.readyState===1) _laWs.send(JSON.stringify({ping:1})); },25000);
-      laFetchHistory();
-      if(typeof ouUpdateConnStatus==="function"){ ouUpdateConnStatus(); ouRefreshFingerprint(); }
-      if(typeof adxUpdateConn==="function") adxUpdateConn();
-      if(typeof digUpdateConnStatus==="function") digUpdateConnStatus();
-      if(typeof engUpdateConnStatus==="function") engUpdateConnStatus();
-      if(typeof diagUpdateConnStatus==="function") diagUpdateConnStatus();
-      laRenderAccounts(); laRenderLoggedIn();
-      laDebug({authorized_as:_laActiveId,is_virtual:acct.is_virtual,currency:acct.currency,balance:msg.authorize.balance,scopes:msg.authorize.scopes,account_list:(msg.authorize.account_list||[]).map(a=>({loginid:a.loginid,is_virtual:a.is_virtual,has_token:!!a.token}))});
-      break;
+function gridDisconnect(){
+  if (gridArmed) gridDisarm("disconnected");
+  try { if (gridWs){ gridWs.onclose=null; gridWs.close(); } } catch(_){}
+  gridWs = null; gridAuthed = false; gridConnecting = false;
+  if (gridPing){ clearInterval(gridPing); gridPing = null; }
+  gridConnState("off");
+  const connBtn = $("gridConnectBtn"), discBtn = $("gridDisconnectBtn");
+  if (connBtn) connBtn.disabled = false;
+  if (discBtn) discBtn.disabled = true;
+  const riseBtn = $("gridRiseBtn"), fallBtn = $("gridFallBtn");
+  if (riseBtn) riseBtn.disabled = true;
+  if (fallBtn) fallBtn.disabled = true;
+}
+
+async function gridLogout(){
+  gridDisconnect();
+  try { await fetch(BACKEND_URL + "/logout", { method:"POST", credentials:"include" }); } catch(_){}
+  gridLoggedIn = false;
+  gridAccounts = [];
+  const pickBlock = $("gridAcctPickBlock"), loginBlock = $("gridLoginBlock");
+  if (pickBlock)  pickBlock.style.display  = "none";
+  if (loginBlock) loginBlock.style.display = "block";
+  const sel = $("gridAcctPick"); if (sel) sel.innerHTML = "";
+  gridSet("gridAcct","—"); gridSet("gridBal","—"); gridSet("gridType","—");
+}
+
+function gridHandleRedirectReturn(){
+  const params = new URLSearchParams(window.location.search);
+  const err = params.get("login_error");
+  if (err){
+    gridDiag(`<b>Login failed:</b> ${err}`, true);
+    try { window.history.replaceState({}, "", window.location.pathname); } catch(_){}
+  }
+  gridCheckSession();
+}
+
+// ── Incoming WS message router ─────────────────────────────────────────
+function gridHandleMsg(msg){
+  if (!msg || !msg.msg_type) return;
+  const t = msg.msg_type;
+
+  if (t === "balance" && msg.balance){
+    gridBalance  = Number(msg.balance.balance);
+    gridCurrency = msg.balance.currency || gridCurrency;
+    gridSet("gridBal", gridBalance.toFixed(2) + " " + gridCurrency);
+    const cur = $("gridCurrency"); if (cur) cur.value = gridCurrency;
+    if (msg.balance.accounts){
+      const disc = Object.entries(msg.balance.accounts).map(([id, info]) => ({
+        account_id:id, currency:info.currency||"USD", is_virtual:/^VR/i.test(id)?1:0,
+      }));
+      gridMergeAccounts(disc);
     }
-    case "balance":{
-      const b=msg.balance; if(!b) break;
-      const bal=Number(b.balance).toFixed(2), cur=b.currency||acct.currency;
-      const stored=_laAccounts.find(a=>a.loginid===_laActiveId);
-      if(stored){ stored.balance=Number(b.balance); laSaveAccounts(_laAccounts); }
-      laSet("la-bal-amount",bal); laSet("la-bal-cur",cur);
-      const balEl=$("la-acct-bal-"+_laActiveId);
-      if(balEl){ balEl.textContent=bal; balEl.style.color="var(--up)"; setTimeout(()=>{if(balEl)balEl.style.color="var(--text)";},600); }
-      gridBalance=Number(b.balance); gridCurrency=cur;
-      if(b.accounts) Object.entries(b.accounts).forEach(([id,info])=>{
-        const a=_laAccounts.find(x=>x.loginid===id); if(a) a.balance=Number(info.balance);
-        const el=$("la-acct-bal-"+id); if(el) el.textContent=Number(info.balance).toFixed(2);
-      });
-      laSaveAccounts(_laAccounts);
-      break;
-    }
-    case "statement": laRenderHistory(msg.statement); break;
-    case "logout": laLog("Logout acknowledged by Deriv"); break;
-    case "ping": break;
-    default: if(typeof gridHandleMsg==="function") gridHandleMsg(msg);
+  }
+  if (t === "proposal"){
+    const cb = gridPending[msg.req_id];
+    if (cb){ delete gridPending[msg.req_id]; cb(msg.proposal, msg.error); }
+  }
+  if (t === "buy"){
+    const cb = gridPending[msg.req_id];
+    if (cb){ delete gridPending[msg.req_id]; cb(msg.buy, msg.error); }
+  }
+  if (t === "proposal_open_contract" && msg.proposal_open_contract){
+    const poc = msg.proposal_open_contract;
+    if (poc.status === "sold" || poc.status === "expired") gridUpdateContract(poc);
+  }
+  if (t === "transaction" && msg.transaction){
+    const tr = msg.transaction;
+    if (tr.action === "sell") gridUpdateContract({ contract_id:tr.contract_id, profit:tr.amount, status:"sold" });
+  }
+  if (t === "ping") return;
+
+  // Route to sub-systems that read the same socket
+  if (typeof digHandleMsg  === "function") digHandleMsg(msg);
+  if (typeof diagHandleMsg === "function") diagHandleMsg(msg);
+  if (typeof engHandleMsg  === "function") engHandleMsg(msg);
+}
+
+function gridUpdateContract(c){
+  if (!c) return;
+  const id  = String(c.contract_id || "");
+  const won = c.profit > 0 || c.status === "won";
+  const row = gridOpenContracts[id]
+    || (typeof ouTrades  !== "undefined" ? ouTrades.find(t => t.id === id)  : null)
+    || (typeof adxTrades !== "undefined" ? adxTrades.find(t => t.id === id) : null);
+  if (row){
+    const stk = row.stake || 1;
+    const pnl = c.profit != null ? Number(c.profit) : (won ? stk*0.9 : -stk);
+    row.pnl = pnl; row.payout = won ? stk+pnl : 0; row.status = won ? "won" : "lost";
+    delete gridOpenContracts[id];
+    if (typeof window._multRecord  === "function") window._multRecord(id, stk, won);
+    if (typeof ouOpenContracts  !== "undefined" && ouOpenContracts[id]  && typeof ouSettleContract === "function") ouSettleContract(id, won);
+    if (typeof adxOpenContracts !== "undefined" && adxOpenContracts[id] && typeof adxSettle        === "function") adxSettle(id, won);
+    gridRenderTrades();
+    gridRenderPnL();
   }
 }
 
-function laFetchHistory(){
-  if(!_laWs||_laWs.readyState!==WebSocket.OPEN){ laLog("Not connected — cannot fetch history"); return; }
-  _laWs.send(JSON.stringify({statement:1,limit:10,description:1}));
-  laLog("Fetching statement (last 10 transactions)");
+// ── Manual trade buttons ────────────────────────────────────────────────
+function gridManualTrade(dir){
+  gridPlaceTrade(dir, "manual");
 }
 
-function laRenderHistory(stmt){
-  const hc=$("la-history-card"); if(hc) hc.style.display="block";
-  const body=$("la-history-body"); if(!body) return;
-  const rows=(stmt&&stmt.transactions)||[];
-  if(!rows.length){ body.innerHTML='<tr><td colspan="5" class="sig-empty">No transactions found.</td></tr>'; return; }
-  body.innerHTML=rows.map(r=>{
-    const dt=r.transaction_time?new Date(r.transaction_time*1000).toLocaleString():"—";
-    const typ=String(r.action_type||r.action||"—");
-    const amt=r.amount!=null?(r.amount>=0?"+":"")+Number(r.amount).toFixed(2):"—";
-    const amtClr=r.amount>0?"var(--up)":r.amount<0?"var(--down)":"var(--muted)";
-    const balAfter=r.balance_after!=null?Number(r.balance_after).toFixed(2):"—";
-    const desc=r.longcode||r.shortcode||r.reference_id||"—";
-    return `<tr><td class="l" style="font-size:10px;white-space:nowrap">${dt}</td><td style="font-weight:700;text-transform:capitalize">${typ}</td><td style="color:${amtClr};font-weight:700">${amt}</td><td>${balAfter}</td><td class="l" style="font-size:9px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${desc}">${desc}</td></tr>`;
+function gridPlaceTrade(dir, source){
+  if (!gridWs || gridWs.readyState !== 1 || !gridAuthed){ alert("Connect first."); return; }
+  const stake = Math.max(0.35, parseFloat(($("gridStake")||{value:"1"}).value || "1"));
+  const dur   = parseInt(($("gridDuration")||{value:"5"}).value || "5", 10);
+  const unit  = ($("gridDurUnit")||{value:"t"}).value;
+  const contractType = dir === 1 ? "CALL" : "PUT";
+  const reqId = ++gridReqId;
+
+  const row = {
+    id:"pending-"+reqId, dir, source, contractType, stake,
+    currency:gridCurrency, isVirtual:!!gridIsVirtual,
+    time:Math.floor(Date.now()/1000),
+    entry:null, exit:null, payout:null, pnl:null, status:"pricing…",
+  };
+  if (!gridTrades) gridTrades = [];
+  gridTrades.unshift(row);
+  if (gridTrades.length > 100) gridTrades.pop();
+  gridRenderTrades();
+
+  gridPending[reqId] = (proposal, err) => {
+    if (err){ row.status = "rejected: "+(err.message||err.code||"error"); gridRenderTrades(); return; }
+    if (!proposal || !proposal.id || proposal.ask_price == null){ row.status = "rejected: no price"; gridRenderTrades(); return; }
+    const buyReqId = ++gridReqId;
+    row.status = "open"; gridRenderTrades();
+    gridPending[buyReqId] = (buy, buyErr) => {
+      if (buyErr){ row.status = "buy failed: "+(buyErr.message||buyErr.code||"error"); gridRenderTrades(); return; }
+      if (buy){
+        row.id = String(buy.contract_id);
+        row.status = "open";
+        gridOpenContracts[row.id] = row;
+        gridRenderTrades();
+      }
+    };
+    gridWs.send(JSON.stringify({ buy:proposal.id, price:proposal.ask_price, req_id:buyReqId }));
+  };
+  gridWs.send(JSON.stringify({
+    proposal:1, req_id:reqId,
+    amount:stake, basis:"stake",
+    contract_type:contractType,
+    currency:gridCurrency,
+    duration:dur, duration_unit:unit,
+    underlying_symbol: typeof SYMBOL!=="undefined" ? SYMBOL : undefined,
+  }));
+}
+
+let gridTrades = [];
+
+function gridRenderTrades(){
+  const body = $("gridTradeBody"); if (!body) return;
+  if (!gridTrades.length){ body.innerHTML = '<tr><td colspan="10" class="sig-empty">No trades yet.</td></tr>'; return; }
+  const dec = typeof decimals !== "undefined" ? decimals : 2;
+  body.innerHTML = gridTrades.map(t => {
+    const dirTxt = t.dir === 1 ? "▲ RISE" : "▼ FALL";
+    const dirCls = t.dir === 1 ? "cell-pos" : "cell-neg";
+    const pCls = t.pnl == null ? "cell-mut" : t.pnl >= 0 ? "cell-pos" : "cell-neg";
+    const sCls = t.status === "won" ? "cell-pos" : t.status === "lost" ? "cell-neg" : /reject|fail/.test(t.status) ? "cell-warn" : "cell-mut";
+    return `<tr>
+      <td class="l">${typeof fmtTime==="function"?fmtTime(t.time):t.time}</td>
+      <td class="${dirCls}" style="font-weight:700">${dirTxt}</td>
+      <td>${t.contractType}</td>
+      <td>${t.stake!=null?Number(t.stake).toFixed(2):"—"}</td>
+      <td>${t.entry!=null?Number(t.entry).toFixed(dec):"—"}</td>
+      <td>${t.exit!=null?Number(t.exit).toFixed(dec):"—"}</td>
+      <td>${t.payout!=null?Number(t.payout).toFixed(2):"—"}</td>
+      <td class="${pCls}">${t.pnl!=null?(t.pnl>=0?"+":"")+t.pnl.toFixed(2):"—"}</td>
+      <td class="${sCls} l">${t.status}</td>
+      <td class="cell-mut l">${t.source||"—"}</td>
+    </tr>`;
   }).join("");
 }
 
-// Tokens are now handled server-side by /auth/callback — no URL parsing needed here.
+function gridRenderPnL(){
+  const net = gridTrades.filter(t => t.pnl != null).reduce((s,t) => s+t.pnl, 0);
+  const any = gridTrades.some(t => t.pnl != null);
+  const el = $("gridPnL");
+  if (el){
+    el.textContent = any ? (net>=0?"+":"")+net.toFixed(2)+" "+gridCurrency : "—";
+    el.style.color = any ? (net>=0?"var(--up)":"var(--down)") : "var(--muted)";
+  }
+}
+
+// ── Auto-trade on 5-tick signal ─────────────────────────────────────────
+function gridToggleAuto(){
+  const cb = $("gridAutoArm");
+  gridAutoArmed = cb ? cb.checked : !gridAutoArmed;
+  const lbl = $("gridAutoLabel"), sts = $("gridAutoStatus");
+  if (gridAutoArmed){
+    if (!gridAuthed){ if (cb) cb.checked = false; gridAutoArmed = false; alert("Connect first."); return; }
+    if (lbl) lbl.textContent = "Auto-trade: ON";
+    if (sts) sts.textContent = "Armed — watching for 5-tick run signal…";
+    gridArmed = true;
+  } else {
+    if (lbl) lbl.textContent = "Auto-trade: OFF";
+    if (sts) sts.textContent = "Disarmed.";
+  }
+}
+
+// Called by onSignalFired(dir, price, epoch) when a 5-tick run completes
+function gridHandleSignal(dir, price, epoch){
+  if (!gridAutoArmed || !gridAuthed) return;
+  const dirSetting = ($("gridAutoDir")||{value:"both"}).value;
+  if (dirSetting === "rise" && dir !== 1) return;
+  if (dirSetting === "fall" && dir !== -1) return;
+
+  const maxN = parseInt(($("gridAutoMax")||{value:"0"}).value || "0", 10);
+  if (maxN > 0 && gridAutoTradeCount >= maxN){
+    const cb = $("gridAutoArm"); if (cb) cb.checked = false;
+    gridAutoArmed = false;
+    const sts = $("gridAutoStatus"); if (sts) sts.textContent = `Stopped: reached ${maxN} auto-trade limit.`;
+    return;
+  }
+  const cooldown = parseInt(($("gridAutoCooldown")||{value:"10"}).value || "10", 10);
+  const now = Date.now()/1000;
+  if (now - gridLastAutoTime < cooldown) return;
+
+  gridLastAutoTime = now;
+  gridAutoTradeCount++;
+  gridPlaceTrade(dir, "auto");
+  const sts = $("gridAutoStatus");
+  if (sts) sts.textContent = `Fired ${dir===1?"RISE":"FALL"} at ${typeof fmtPrice==="function"?fmtPrice(price,decimals):price} · auto-trade #${gridAutoTradeCount}`;
+}
 
 try {
   // Resume the market that was open before the refresh, if any
