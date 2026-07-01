@@ -5868,21 +5868,22 @@ async function gridLoadAccounts(){
     return;
   }
 
-  // Normalise accounts from the backend.
-  // IMPORTANT: The backend's normaliseAccount() already sets is_virtual correctly
-  // using loginid prefix (VR* = virtual) + the WS authorize account_list field.
-  // We use is_virtual from the server as authoritative.
-  // We do NOT trust account_type string (REST sometimes mislabels accounts).
+  // Normalise accounts from the backend. The backend now trusts Deriv's own
+  // account_type field ("demo"/"virtual" vs "real") as authoritative, with
+  // is_virtual as a secondary confirmation — no more guessing from the
+  // loginid prefix here. Balance comes straight from /me/accounts, so the
+  // Accounts page can show it immediately without waiting on a WS connect.
   gridAccounts = raw.map(a => {
-    const id       = String(a.account_id || a.loginid || "");
-    // Use server-set is_virtual as primary signal
-    // Cross-check: loginid starting with VR is always virtual regardless
-    const isVirtual = (a.is_virtual === 1) || /^VR/i.test(id);
+    const demo =
+      a.account_type === "demo"    ||
+      a.account_type === "virtual" ||
+      a.is_virtual === true        ||
+      a.is_virtual === 1;
     return {
-      account_id:   id,
-      account_type: isVirtual ? "virtual" : "trading",
+      account_id:   String(a.account_id || a.loginid || ""),
+      account_type: demo ? "virtual" : "real",
       currency:     String(a.currency || "USD"),
-      is_virtual:   isVirtual ? 1 : 0,
+      is_virtual:   demo ? 1 : 0,
       balance:      a.balance != null ? Number(a.balance) : null,
     };
   }).filter(a => a.account_id);
@@ -5909,11 +5910,13 @@ function gridBuildPicker(){
   const sel = $("gridAcctPick");
   if (!sel) return;
 
-  const sorted = [...gridAccounts].sort((a, b) => a.is_virtual - b.is_virtual);
+  const demoAccts = gridAccounts.filter(a => a.is_virtual === 1);
+  const realAccts = gridAccounts.filter(a => a.is_virtual !== 1);
   const prev = sel.value;
-  sel.innerHTML = sorted.map(a =>
-    `<option value="${a.account_id}">${a.account_id} · ${a.is_virtual ? "🟢 DEMO" : "🔴 REAL"} · ${a.currency}</option>`
-  ).join("");
+  const optRow = a => `<option value="${a.account_id}">${a.account_id} · ${a.currency}${a.balance!=null?` · ${a.balance.toFixed(2)}`:''}</option>`;
+  sel.innerHTML =
+    (demoAccts.length ? `<optgroup label="🟢 Demo Accounts">${demoAccts.map(optRow).join("")}</optgroup>` : "") +
+    (realAccts.length ? `<optgroup label="🔴 Real Accounts">${realAccts.map(optRow).join("")}</optgroup>` : "");
 
   // Restore previous / saved selection
   try {
@@ -10126,24 +10129,23 @@ function acctRenderPanels(){
     return;
   }
 
-  // Sort: real first, demo second
-  const sorted = [...gridAccounts].sort((a,b) => a.is_virtual - b.is_virtual);
+  const demoAccts = gridAccounts.filter(a => a.is_virtual === 1);
+  const realAccts = gridAccounts.filter(a => a.is_virtual !== 1);
 
-  grid.innerHTML = sorted.map(acct => {
+  const cardFor = acct => {
     const id       = acct.account_id;
     const isDemo   = acct.is_virtual === 1;
     const typeTag  = isDemo ? '🟢 DEMO' : '🔴 REAL';
     const typeLbl  = isDemo ? 'Virtual / Demo' : 'Real Money';
     const typeClr  = isDemo ? 'var(--up)' : '#ff4d5e';
     const live     = _acctData[id] || {};
-    const balance  = live.balance  != null ? live.balance.toFixed(2)  : '—';
+    const balance  = (live.balance != null ? live.balance : acct.balance);
+    const balStr   = balance != null ? balance.toFixed(2) : '—';
     const currency = live.currency || acct.currency || 'USD';
     const pnl      = live.pnl      != null ? live.pnl : null;
     const trades   = live.trades   || 0;
     const pnlStr   = pnl != null ? (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + ' ' + currency : '—';
     const pnlClr   = pnl == null ? 'var(--muted)' : pnl >= 0 ? 'var(--up)' : 'var(--down)';
-
-    // Is this the currently connected account?
     const isActive = (id === gridLoginId);
 
     return `<div class="grid-card" style="border:1px solid ${isActive ? typeClr : 'var(--line)'};position:relative">
@@ -10156,7 +10158,7 @@ function acctRenderPanels(){
         <div class="em-card">
           <div class="em-lab">Live Balance</div>
           <div style="font-size:20px;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums">
-            ${balance}
+            ${balStr}
           </div>
           <div style="font-size:10px;color:var(--muted);margin-top:2px">${currency}</div>
         </div>
@@ -10174,7 +10176,15 @@ function acctRenderPanels(){
         ${isActive ? '✅ Currently connected' : '⚡ Connect to this account'}
       </button>
     </div>`;
-  }).join('');
+  };
+
+  const sectionHtml = (title, accts) => !accts.length ? '' : `
+    <div style="grid-column:1/-1;margin-top:${title==='🟢 Demo Accounts'?'0':'8px'}">
+      <div style="font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--line)">${title}</div>
+    </div>
+    ${accts.map(cardFor).join('')}`;
+
+  grid.innerHTML = sectionHtml('🟢 Demo Accounts', demoAccts) + sectionHtml('🔴 Real Accounts', realAccts);
 
   acctRenderPL();
 }
