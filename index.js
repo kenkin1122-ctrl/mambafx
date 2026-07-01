@@ -145,6 +145,42 @@ async function handleAuthStart(req, env){
 }
 
 // ══════════════════════════════════════════════════════════════════════
+// GET /debug/authurl — shows the exact login URL & params without
+// redirecting, so you can eyeball client_id/redirect_uri in a browser
+// instead of digging through wrangler tail. Safe to view: everything here
+// is already sent in the open, unauthenticated browser redirect anyway —
+// no secret/token is exposed. Remove this route once login works if you'd
+// rather not leave a diagnostic endpoint deployed.
+// ══════════════════════════════════════════════════════════════════════
+async function handleDebugAuthUrl(req, env){
+  const verifier  = randHex(48);
+  const state     = randHex(16);
+  const challenge = await sha256(verifier);
+
+  const params = new URLSearchParams({
+    response_type:         "code",
+    client_id:             env.CLIENT_ID || "",
+    redirect_uri:          env.REDIRECT_URI || "",
+    scope:                 "trade",
+    state,
+    code_challenge:        challenge,
+    code_challenge_method: "S256",
+  });
+  const url = DERIV_AUTH_URL + "?" + params.toString();
+
+  return J({
+    ok: true,
+    note: "Compare client_id and redirect_uri below EXACTLY against your app in the Deriv OAuth2/OIDC developer portal (developers.deriv.com) — not the legacy Application manager. This request is not stored/consumed; clicking full_url will still work as a real login attempt.",
+    client_id: env.CLIENT_ID || null,
+    client_id_set: !!env.CLIENT_ID,
+    client_id_length: env.CLIENT_ID ? env.CLIENT_ID.length : 0,
+    redirect_uri: env.REDIRECT_URI || null,
+    auth_endpoint: DERIV_AUTH_URL,
+    full_url: url,
+  }, env);
+}
+
+// ══════════════════════════════════════════════════════════════════════
 // GET /auth/callback — exchange code, get tokens, store session
 // ══════════════════════════════════════════════════════════════════════
 async function handleAuthCallback(req, env){
@@ -325,7 +361,7 @@ export default {
     if (!env.SESSION?.get)  miss.push("SESSION (KV)");
     if (!env.CLIENT_ID)     miss.push("CLIENT_ID");
     if (!env.REDIRECT_URI)  miss.push("REDIRECT_URI");
-    if (miss.length && path !== "/" && path !== "/health")
+    if (miss.length && path !== "/" && path !== "/health" && path !== "/debug/authurl")
       return J({ error: "misconfigured", missing: miss }, env, 500);
 
     try {
@@ -337,6 +373,7 @@ export default {
                                                               return await handleWsOtp(req, env);
       if (path === "/logout"        && req.method === "POST") return await handleLogout(req, env);
       if (path === "/debug/session" && req.method === "GET")  return await handleDebug(req, env);
+      if (path === "/debug/authurl" && req.method === "GET")  return await handleDebugAuthUrl(req, env);
 
       if (path === "/" || path === "/health")
         return J({
