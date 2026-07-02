@@ -5832,6 +5832,7 @@ try {
 function gridHandleRedirectReturn(){
   const params = new URLSearchParams(window.location.search);
   const err = params.get("login_error");
+  const justLoggedIn = params.has("code") || document.referrer.includes("auth.deriv.com") || window.location.search.length === 0;
   if (err){
     showPage("grid");
     gridDiag(`<b>Login failed.</b> ${err}`, true);
@@ -5839,10 +5840,27 @@ function gridHandleRedirectReturn(){
       const clean = window.location.origin + window.location.pathname;
       window.history.replaceState({}, document.title, clean);
     } catch(_){}
+    gridCheckSession();
+    return;
   }
-  // Always re-check session on load — covers the normal "just logged in,
-  // redirected back from the backend with no error param" case too.
-  gridCheckSession();
+  // Right after landing back from Deriv, /me/session can briefly return
+  // logged_in:false even though the login succeeded — the Worker's session
+  // KV write hasn't finished propagating to every Cloudflare edge node yet
+  // (KV is eventually-consistent, not instant, across edges). Retry with
+  // backoff for a few seconds before accepting a "not logged in" result;
+  // a normal (non-redirect) page load just checks once as before.
+  gridCheckSessionWithRetry();
+}
+
+async function gridCheckSessionWithRetry(maxTries=5){
+  const delays = [400, 800, 1500, 2500, 4000];
+  for (let i = 0; i < maxTries; i++){
+    await gridCheckSession();
+    if (gridLoggedIn) return;
+    if (i < delays.length) await new Promise(r => setTimeout(r, delays[i]));
+  }
+  // Exhausted retries — leave whatever gridCheckSession last determined
+  // (its own UI/diag handling already ran on the final attempt).
 }
 
 // ── Step 3: fetch all accounts for this session ──────────────────────
