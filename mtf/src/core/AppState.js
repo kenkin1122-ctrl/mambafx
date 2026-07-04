@@ -32,7 +32,10 @@ const state = {
   crosshair: null,          // { t, p, source }
   draft: null,              // in-progress (not yet committed) drawing
   drag: null,               // active mouse-drag operation descriptor
-  panels: {},                // { htf: Panel, ltf: Panel } — registered by charts/Panel.js
+  panels: {},                // { htf: Panel, ltf: Panel } — LIVE ALIASES into timeframePanels (see registerPanel/setActiveTimeframe below)
+  timeframePanels: {},        // { m1: Panel, m3: Panel, ..., d1: Panel } — all 10 MTF Dashboard panels, always live
+  activeTimeframeKey: null,    // which timeframePanels key panels.htf currently points to
+  compareTimeframeKey: null,    // which timeframePanels key panels.ltf currently points to
 };
 
 export const AppState = {
@@ -165,9 +168,61 @@ export const AppState = {
   setDrag(d) { state.drag = d; },
 
   // ── Panel registry ────────────────────────────────────────────────
+  // `panels` (.htf / .ltf) are the two INTERACTIVE chart panels — the ones
+  // behind candle decomposition, replay, zoom-to-drawing, and every mouse
+  // interaction. drawing/candleMarking.js, charts/replayManager.js, and
+  // charts/zoomManager.js all read AppState.panels.htf/.ltf freshly on
+  // every call (not a cached reference), which means these two MUST stay
+  // pointed at the panels the user can actually see and click on. Never
+  // reassign them to a dashboard panel — doing so would silently redirect
+  // decomposition/replay/zoom onto an invisible panel while the user
+  // keeps interacting with the visible one, a confusing, hard-to-diagnose
+  // bug that's worse than not having the feature at all.
   get panels() { return state.panels; },
   registerPanel(key, panel) {
     state.panels[key] = panel;
+    state.timeframePanels[key] = panel;
     eventBus.emit('panel:registered', { key, panel });
+  },
+
+  /** All 10 MTF Dashboard panels, keyed by timeframe (m1, m3, m5, m10, m30, h1, h4, h8, h12, d1) — always live, always updating. Also includes 'htf'/'ltf' under those same keys, since registerPanel() adds to both registries. */
+  get timeframePanels() { return state.timeframePanels; },
+  registerTimeframePanel(key, panel) {
+    state.timeframePanels[key] = panel;
+    eventBus.emit('timeframePanel:registered', { key, panel });
+  },
+
+  get activeTimeframeKey() { return state.activeTimeframeKey; },
+  get compareTimeframeKey() { return state.compareTimeframeKey; },
+
+  /**
+   * Which timeframe the ANALYSIS DISPLAY layer (Smart Market Intelligence,
+   * Probability Engine's UI, Continuous Learning's snapshot) should read —
+   * NOT the same thing as AppState.panels.htf, and deliberately so. This
+   * lets clicking a dashboard card redirect what the analysis text is
+   * ABOUT without ever touching the two panels every interactive tool
+   * depends on. Falls back to the original panels.htf/.ltf when no
+   * dashboard card has been activated yet (e.g. app just booted).
+   */
+  getAnalysisPanels() {
+    const htf = state.activeTimeframeKey ? state.timeframePanels[state.activeTimeframeKey] : null;
+    const ltf = state.compareTimeframeKey ? state.timeframePanels[state.compareTimeframeKey] : null;
+    return { htf: htf || state.panels.htf, ltf: ltf || state.panels.ltf };
+  },
+
+  /** Make `key`'s panel the one the analysis display layer reads via getAnalysisPanels(). Does NOT touch panels.htf — see the note above. */
+  setActiveTimeframe(key) {
+    if (!state.timeframePanels[key]) return false;
+    state.activeTimeframeKey = key;
+    eventBus.emit('activeTimeframe:changed', key);
+    return true;
+  },
+
+  /** Make `key`'s panel the analysis-comparison timeframe (mirrors setActiveTimeframe for the "ltf" role). */
+  setCompareTimeframe(key) {
+    if (!state.timeframePanels[key]) return false;
+    state.compareTimeframeKey = key;
+    eventBus.emit('compareTimeframe:changed', key);
+    return true;
   },
 };

@@ -42,7 +42,7 @@ import { inferOverallTrend } from '../analysis/structurePatterns.js';
 import { findHistoricalAnalogs } from '../analysis/historicalSimilarity.js';
 import { findGenomeAnalogs } from '../analysis/candleGenome.js';
 
-const WEIGHTS = {
+export const DEFAULT_WEIGHTS = {
   trend: 0.15, momentum: 0.12, structure: 0.15, liquidity: 0.10,
   orderFlow: 0.15, historicalSim: 0.13, candleGenome: 0.10, mtfAlignment: 0.10,
 };
@@ -104,10 +104,11 @@ function scoreMtfAlignment(htfTrend, ltfCandles) {
 /**
  * @param {Array} htfCandles
  * @param {Array} ltfCandles
- * @param {'bullish'|'bearish'|'ranging'|'neutral'} bias — the already-derived bias, so continuation/reversal is measured relative to a single, consistent bias definition across the whole app.
+ * @param {'bullish'|'bearish'|'ranging'|'neutral'} bias
+ * @param {object} [weights] — optional calibrated weights from ai/continuousLearning.js's getCalibratedWeights(). Defaults to the fixed, documented model above when omitted (or when calibration hasn't accumulated enough trades yet).
  * @returns {object|null}
  */
-export function runProbabilityEngine(htfCandles, ltfCandles, bias) {
+export function runProbabilityEngine(htfCandles, ltfCandles, bias, weights = DEFAULT_WEIGHTS) {
   if (!htfCandles || htfCandles.length < 40) return null;
 
   const stats = computeStats(htfCandles);
@@ -129,7 +130,7 @@ export function runProbabilityEngine(htfCandles, ltfCandles, bias) {
     mtfAlignment: scoreMtfAlignment(trend, ltfCandles),
   };
 
-  const weightedScore = Object.keys(WEIGHTS).reduce((sum, key) => sum + dims[key].score * WEIGHTS[key], 0);
+  const weightedScore = Object.keys(weights).reduce((sum, key) => sum + dims[key].score * weights[key], 0);
 
   const biasDirection = bias === 'bullish' ? 1 : bias === 'bearish' ? -1 : 0;
   let pContinue, pReverse;
@@ -150,7 +151,7 @@ export function runProbabilityEngine(htfCandles, ltfCandles, bias) {
 
   return {
     pContinue, pReverse, confidence, bias,
-    dimensions: Object.entries(dims).map(([name, d]) => ({ name, score: Math.round(d.score * 100) / 100, weight: WEIGHTS[name], detail: d.detail })),
+    dimensions: Object.entries(dims).map(([name, d]) => ({ name, score: Math.round(d.score * 100) / 100, weight: weights[name], detail: d.detail })),
     weightedScore: Math.round(weightedScore * 100) / 100,
   };
 }

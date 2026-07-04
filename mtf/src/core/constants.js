@@ -38,6 +38,28 @@ export const HANDLE_R = 5;
 export const HIT_PX = 7;
 export const COLORS = ["#4fb2ff", "#1fdf9b", "#ff4d6a", "#ffc857", "#a78bfa", "#fb923c", "#f472b6", "#94a3b8", "#ffffff"];
 
+/**
+ * The 10 simultaneous timeframes for the new Multi-Timeframe Dashboard —
+ * distinct from HTF_TFS/LTF_TFS above, which remain unchanged and still
+ * drive the existing 2-panel chart view's dropdown pickers. This list is
+ * fixed and ordered (fastest to slowest), matching the requested
+ * 1m|3m|5m|10m|30m|1h|4h|8h|12h|1d layout exactly. Each entry gets its own
+ * live, independently-updating Panel instance — see charts/mtfDashboard.js.
+ */
+export const MTF_DASHBOARD_TFS = [
+  { key: "d1", g: 86400, label: "1 Day" },
+  { key: "h12", g: 43200, label: "12 Hour" },
+  { key: "h8", g: 28800, label: "8 Hour" },
+  { key: "h4", g: 14400, label: "4 Hour" },
+  { key: "h2", g: 7200, label: "2 Hour" },
+  { key: "h1", g: 3600, label: "1 Hour" },
+  { key: "m30", g: 1800, label: "30 Min" },
+  { key: "m15", g: 900, label: "15 Min" },
+  { key: "m10", g: 600, label: "10 Min" },
+  { key: "m5", g: 300, label: "5 Min" },
+  { key: "m1", g: 60, label: "1 Min" },
+];
+
 /** localStorage key prefix for per-symbol drawing persistence (Phase 1: unchanged from v1; Phase 16 will replace with named workspaces). */
 export const STORAGE_PREFIX = "mtf_drawings_v2_";
 

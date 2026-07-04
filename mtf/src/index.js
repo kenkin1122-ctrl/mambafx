@@ -35,6 +35,9 @@ import { initDrawingManager, renderManager, toggleVisible, toggleLock } from './
 import { initPropertiesPanel, renderProps } from './ui/propertiesPanel.js';
 import { initAnalysisPanel } from './ui/analysisPanel.js';
 import { initSmartIntelligencePanel } from './ui/smartIntelligencePanel.js';
+import { initContinuousLearning } from './ai/continuousLearning.js';
+import { initDecompPanel } from './ui/decompPanel.js';
+import { initMtfDashboard } from './charts/mtfDashboard.js';
 import { initHeader, populateSelects } from './ui/header.js';
 import { initAutosave, loadDrawings } from './workspace/storage.js';
 import { $ } from './utils/dom.js';
@@ -59,6 +62,9 @@ function boot() {
   initPropertiesPanel();
   initAnalysisPanel();
   initSmartIntelligencePanel();
+  initContinuousLearning();
+  initDecompPanel();
+  initMtfDashboard();
   initHeader();
   initAutosave();
 
@@ -94,14 +100,15 @@ function boot() {
   }
 }
 
-/** Called from the dashboard's showPage() hook when the MTF tab is opened. Safe to call repeatedly. */
+/** Called from the dashboard's showPage() hook when either the MTF Structure or Njanja Analysis tab is opened. Safe to call repeatedly, and safe to call from either page's trigger — the boot itself only ever runs once. */
 function mtfPageInit() {
   if (booted) {
-    // Re-entering the tab: canvases had zero size while display:none, so
-    // just refit + redraw rather than reconnecting.
-    const { htf, ltf } = AppState.panels;
-    if (htf) htf.fitCanvas();
-    if (ltf) ltf.fitCanvas();
+    // Re-entering a tab: canvases had zero size while their page was
+    // display:none, so just refit + redraw rather than reconnecting.
+    // Covers every registered panel — the original htf/ltf plus all 11
+    // Njanja Analysis dashboard panels — since either page's visibility
+    // can now change independently of the other.
+    Object.values(AppState.timeframePanels).forEach(p => p && p.fitCanvas());
     drawAll();
     return;
   }

@@ -41,9 +41,13 @@ export function connect() {
     clearTimeout(timeout);
     setConnState("live");
     ws.send(JSON.stringify({ forget_all: ["candles", "ticks"] }));
-    const { htf, ltf } = AppState.panels;
-    if (htf) requestPanelData(htf);
-    if (ltf) requestPanelData(ltf);
+    // Iterate ALL registered timeframe panels (not just the htf/ltf
+    // aliases) — with the 10-panel MTF Dashboard, every one of them needs
+    // its own live subscription re-established, whether or not it's
+    // currently aliased as the "active" analysis timeframe.
+    const allPanels = Object.values(AppState.timeframePanels);
+    const isReconnect = allPanels.length > 0 && allPanels[0].viewT0 != null;
+    allPanels.forEach(p => requestPanelData(p, { preserveView: isReconnect }));
   };
   ws.onmessage = ev => {
     let msg; try { msg = JSON.parse(ev.data); } catch (_) { return; }
@@ -69,13 +73,18 @@ function setConnState(state) {
 
 function routeUnsolicited(msg) {
   if (msg.error) return;
-  const { htf, ltf } = AppState.panels;
+  // Iterate every registered timeframe panel, not just the two current
+  // htf/ltf aliases — the 10-panel MTF Dashboard subscribes to all ten
+  // simultaneously (see connect()'s onopen above), so incoming live data
+  // must reach all ten too, whether or not each one happens to be
+  // currently aliased as the "active" analysis timeframe.
+  const allPanels = Object.values(AppState.timeframePanels);
   if (msg.msg_type === "ohlc" && msg.ohlc) {
-    const p = [htf, ltf].find(p => p && String(p.tf.g) === String(msg.ohlc.granularity));
+    const p = allPanels.find(p => p && String(p.tf.g) === String(msg.ohlc.granularity));
     if (p) p.applyLiveCandle(msg.ohlc); // Panel itself emits panel:dataUpdated
   }
   if (msg.msg_type === "tick" && msg.tick && msg.tick.symbol === AppState.symbol) {
-    [htf, ltf].forEach(p => p && p.applyLiveTick(msg.tick));
+    allPanels.forEach(p => p && p.applyLiveTick(msg.tick));
   }
 }
 
@@ -94,28 +103,36 @@ export function requestPanelData(panel, opts = {}) {
     const msg = { ticks_history: AppState.symbol, style: "ticks", count, req_id: reqId };
     if (opts.start && opts.end) { msg.start = opts.start; msg.end = opts.end; delete msg.count; }
     else { msg.end = "latest"; msg.subscribe = 1; }
-    pending[reqId] = m => handleTicksHistory(panel, m);
+    pending[reqId] = m => handleTicksHistory(panel, m, opts);
     ws.send(JSON.stringify(msg));
   } else {
     const msg = { ticks_history: AppState.symbol, style: "candles", granularity: panel.tf.g, req_id: reqId };
     if (opts.start && opts.end) { msg.start = opts.start; msg.end = opts.end; }
     else { msg.count = CANDLE_COUNT; msg.end = "latest"; msg.subscribe = 1; }
-    pending[reqId] = m => handleCandlesHistory(panel, m);
+    pending[reqId] = m => handleCandlesHistory(panel, m, opts);
     ws.send(JSON.stringify(msg));
   }
 }
 
-function handleCandlesHistory(panel, msg) {
+function handleCandlesHistory(panel, msg, opts = {}) {
   if (msg.error) { eventBus.emit('panel:dataUpdated', { panel }); return; }
   if (msg.msg_type === "candles" && Array.isArray(msg.candles)) {
     panel.candles = msg.candles.map(c => ({ epoch: +c.epoch, open: +c.open, high: +c.high, low: +c.low, close: +c.close }));
-    if (!panel.decompRange) panel.setDefaultView();
-    else panel.zoomToRange(panel.decompRange.t0, panel.decompRange.t1, 0.08);
+    if (panel.decompRange) panel.zoomToRange(panel.decompRange.t0, panel.decompRange.t1, 0.08);
+    // A view already exists AND the caller asked to preserve it (the
+    // reconnect path in connect()'s ws.onopen) — a dropped/restored
+    // WebSocket connection refetches history to stay in sync, but that's
+    // not a reason to yank the user's zoom/pan out from under them. Any
+    // other caller (deliberate timeframe/symbol switch) still gets the
+    // reset-to-default behavior, since the old view's time range is
+    // usually meaningless at a different granularity.
+    else if (panel.viewT0 != null && opts.preserveView) { /* leave viewT0/viewT1 untouched */ }
+    else panel.setDefaultView();
     eventBus.emit('panel:dataUpdated', { panel });
   }
 }
 
-function handleTicksHistory(panel, msg) {
+function handleTicksHistory(panel, msg, opts = {}) {
   if (msg.error) { eventBus.emit('panel:dataUpdated', { panel }); return; }
   const h = msg.history;
   if (!h) return;
@@ -134,27 +151,28 @@ function handleTicksHistory(panel, msg) {
   } else {
     panel.ticks = raw;
   }
-  if (!panel.decompRange) panel.setDefaultView();
-  else panel.zoomToRange(panel.decompRange.t0, panel.decompRange.t1, 0.08);
+  if (panel.decompRange) panel.zoomToRange(panel.decompRange.t0, panel.decompRange.t1, 0.08);
+  else if (panel.viewT0 != null && opts.preserveView) { /* leave the existing view untouched — see handleCandlesHistory's comment */ }
+  else panel.setDefaultView();
   eventBus.emit('panel:dataUpdated', { panel });
 }
 
-/** Drop all history + subscriptions and refetch both panels — used on symbol switch. */
+/** Drop all history + subscriptions and refetch every registered panel — used on symbol switch. */
 export function resubscribeAll() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ forget_all: ["candles", "ticks"] }));
-  const { htf, ltf } = AppState.panels;
-  if (htf) requestPanelData(htf);
-  if (ltf) requestPanelData(ltf);
+  Object.values(AppState.timeframePanels).forEach(p => p && requestPanelData(p));
 }
 
 /**
  * One-shot candle snapshot for an arbitrary granularity — NOT tied to any
  * Panel instance, no live subscription (no `subscribe: 1`), just a single
- * request/response. Used by ai/marketIntelligence.js's multi-timeframe
- * cascade to get real data for timeframes not currently displayed in
- * either panel (e.g. Daily/H4 when the panels are showing H1/M1), without
- * disturbing what's actually on screen.
+ * request/response. Currently unused by any active feature (an earlier,
+ * superseded draft of Smart Market Intelligence used it for a one-shot
+ * multi-timeframe cascade before that feature was rebuilt with live data;
+ * the draft was removed as dead code). Kept here as a small, self-contained,
+ * already-correct utility in case a future feature needs a one-shot fetch
+ * for a timeframe outside the live-subscribed set.
  * @returns {Promise<Array<{epoch:number,open:number,high:number,low:number,close:number}>>}
  */
 export function fetchCandlesOnce(symbol, granularity, count = 60) {

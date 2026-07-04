@@ -15,6 +15,7 @@ import { eventBus } from '../core/EventBus.js';
 import { $ } from '../utils/dom.js';
 import { generateIntelligenceReport } from '../ai/narrativeEngine.js';
 import { runProbabilityEngine } from '../ai/probabilityEngine.js';
+import { getCalibratedWeights, getLearningStatus, resetLearning } from '../ai/continuousLearning.js';
 
 const BIAS_STYLE = {
   bullish: { label: 'Bullish', color: '#1fdf9b' },
@@ -57,7 +58,7 @@ function render() {
   const wrap = $("mtfIntelligenceBody");
   if (!wrap) return;
 
-  const { htf, ltf } = AppState.panels;
+  const { htf, ltf } = AppState.getAnalysisPanels();
   if (!htf) return;
 
   const report = generateIntelligenceReport(
@@ -72,7 +73,8 @@ function render() {
 
   const biasStyle = BIAS_STYLE[report.bias] || BIAS_STYLE.neutral;
   const verdictColor = VERDICT_STYLE[report.tradeAssessment.verdict] || '#94a3b8';
-  const prob = runProbabilityEngine(htf.candles, ltf ? ltf.candles : [], report.bias);
+  const prob = runProbabilityEngine(htf.candles, ltf ? ltf.candles : [], report.bias, getCalibratedWeights().weights);
+  const learning = getLearningStatus();
 
   wrap.innerHTML = `
     <div class="smi-section">
@@ -113,6 +115,12 @@ function render() {
       </div>
       <p class="smi-prose">${describeProbabilityFactors(prob)}</p>
       <p class="smi-prose" style="color:var(--mtf-muted);font-size:10.5px">Probabilistic decision support derived from currently loaded data — not a prediction of future price action.</p>
+      <p class="smi-prose" style="color:var(--mtf-muted);font-size:10px;margin-top:6px">
+        ${learning.isCalibrating
+          ? `Weights are calibrated from ${learning.total} of your own logged trades (${learning.winRatePct}% win rate).`
+          : `Learning from your trades: ${learning.total}/${learning.minRequired} logged — using default weights until enough data accumulates.`}
+        <a href="#" id="mtfResetLearning" style="color:var(--mtf-muted);text-decoration:underline;margin-left:6px">Reset learning data</a>
+      </p>
     </div>` : ''}
 
     <div class="smi-section">
@@ -144,5 +152,21 @@ export function initSmartIntelligencePanel() {
   eventBus.on('symbol:changed', scheduleUpdate);
   eventBus.on('panel:dataUpdated', scheduleUpdate); // covers timeframe switches AND decomposition (both trigger a data refetch)
   eventBus.on('replay:changed', scheduleUpdate);
+
+  // Event delegation: the reset link lives inside dynamically-rendered
+  // innerHTML and gets recreated on every render(), so a direct listener
+  // attached once at init time would go stale — the container itself is
+  // the only persistent element to listen on.
+  const wrap = $("mtfIntelligenceBody");
+  if (wrap) wrap.addEventListener('click', e => {
+    if (e.target && e.target.id === 'mtfResetLearning') {
+      e.preventDefault();
+      if (confirm('Reset all learned calibration data? This clears your logged trade history used for weight calibration and cannot be undone.')) {
+        resetLearning();
+        scheduleUpdate();
+      }
+    }
+  });
+
   render();
 }

@@ -30,7 +30,14 @@ export class Panel {
    */
   constructor(id, side, tfList) {
     this.id = id; this.side = side; this.tfList = tfList;
-    this.tf = tfList[side === "htf" ? 1 : 2]; // default 1H / 1min
+    // Original behavior preserved exactly for the two existing roles
+    // (htf defaults to index 1, ltf to index 2 of their respective
+    // dropdown lists). Any other role (the 10 MTF Dashboard panels, each
+    // with a single-entry, fixed tfList) defaults to index 0 — reading a
+    // hardcoded index 1 or 2 against a 1-element array would silently be
+    // `undefined`, which is exactly the kind of thing worth fixing before
+    // it ships rather than after.
+    this.tf = tfList[side === "htf" ? Math.min(1, tfList.length - 1) : side === "ltf" ? Math.min(2, tfList.length - 1) : 0];
 
     this.bgCanvas = $(id + "Canvas");
     this.bgCtx = this.bgCanvas.getContext("2d");

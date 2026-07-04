@@ -21,6 +21,7 @@ import { CircleDrawing } from './CircleDrawing.js';
 import { TextDrawing } from './TextDrawing.js';
 import { BrushDrawing } from './BrushDrawing.js';
 import { TrendlineDrawing, RayDrawing, ArrowDrawing, MeasurementDrawing } from './LineSegmentDrawing.js';
+import { FibRetracementDrawing } from './FibRetracementDrawing.js';
 
 /** type string -> class. 'wick' is intentionally routed to RectangleDrawing (see that file's header comment). */
 const REGISTRY = {
@@ -35,6 +36,7 @@ const REGISTRY = {
   ray: RayDrawing,
   arrow: ArrowDrawing,
   measure: MeasurementDrawing,
+  fibretracement: FibRetracementDrawing,
 };
 
 export function classFor(type) {

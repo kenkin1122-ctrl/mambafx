@@ -62,7 +62,7 @@ export function openCandleMenu(panel, candle, clientX, clientY) {
   let html = `<div class="cm-title">Mark region</div>${buttonsFor(regions)}`;
   html += `<hr><div class="cm-title">Mark exact level (OHLC)</div>${buttonsFor(levels)}`;
   const decompCfg = { epoch: candle.epoch, gran: panel.granSeconds(), open: candle.open, high: candle.high, low: candle.low, close: candle.close };
-  html += `<hr><div class="cm-title">Or decompose</div><button onclick='mtfDecomposeCandleFromMenu(${JSON.stringify(decompCfg).replace(/'/g, "&#39;")})'>🔬 Show inside on LTF</button>`;
+  html += `<hr><div class="cm-title">Or decompose</div><button onclick='mtfDecomposeCandleFromMenu(${JSON.stringify(decompCfg).replace(/'/g, "&#39;")})'>Show inside on LTF</button>`;
   menu.innerHTML = html;
   menu.style.left = left + "px"; menu.style.top = top + "px"; menu.style.display = "block";
   const closer = ev => {
@@ -92,7 +92,7 @@ export function decomposeCandle(candle, gran) {
   const t0 = candle.epoch, t1 = candle.epoch + gran;
   ltf.decompRange = { t0, t1 };
   const banner = $("mtfLtfDecompBanner");
-  if (banner) banner.style.display = "flex";
+  if (banner) banner.style.display = "block";
   const textEl = $("mtfLtfDecompText");
   if (textEl) {
     const timeStr = new Date(candle.epoch * 1000).toLocaleString([], { hour12: false });
@@ -101,7 +101,13 @@ export function decomposeCandle(candle, gran) {
       const dec = decimalsFor(candle.close);
       ohlcStr = ` · O ${candle.open.toFixed(dec)} H ${candle.high.toFixed(dec)} L ${candle.low.toFixed(dec)} C ${candle.close.toFixed(dec)}`;
     }
-    textEl.textContent = `🔬 Decomposed: candle @ ${timeStr}${ohlcStr}`;
+    textEl.textContent = `Decomposed: candle @ ${timeStr}${ohlcStr}`;
+  }
+  const bodyEl = $("mtfLtfDecompBody");
+  if (bodyEl) {
+    const startStr = new Date(t0 * 1000).toLocaleString([], { hour12: false });
+    const endStr = new Date(t1 * 1000).toLocaleString([], { hour12: false });
+    bodyEl.innerHTML = `Range start: ${startStr}<br>Range end: ${endStr}<br>Duration: ${gran >= 3600 ? (gran / 3600) + 'h' : (gran / 60) + 'm'}`;
   }
   requestPanelData(ltf, { start: t0 - 5, end: t1 + 5 });
   htf.zoomToRange(t0 - gran * 3, t1 + gran * 3, 0.1);
