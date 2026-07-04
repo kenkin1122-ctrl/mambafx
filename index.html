@@ -7,7 +7,7 @@
 <style>
 :root{
   --bg:#0a0e17;--panel:#121826;--line:#1f2937;--text:#e8edf4;--muted:#6b7689;
-  --up:#16e08b;--down:#ff4d5e;--neutral:#3a4253;--accent:#56b6ff;
+  --up:#16e08b;--down:#ff4d5e;--neutral:#3a4253;--accent:#56b6ff;--amber:#f2954a;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
@@ -413,19 +413,31 @@ table.an-table tbody tr:last-child td{border-bottom:none}
 .dig-stat .lab{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
 .dig-stat .v{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums}
 /* prediction bars */
-.pred-grid{display:grid;grid-template-columns:repeat(10,1fr);gap:6px;margin-bottom:16px}
-@media(max-width:700px){.pred-grid{grid-template-columns:repeat(5,1fr)}}
-.pred-cell{background:#0a0e17;border:1px solid var(--line);border-radius:12px;padding:10px 4px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;position:relative;overflow:hidden}
-.pred-cell:hover{border-color:#2a3650}
-.pred-cell.top{border-color:var(--accent);background:rgba(86,182,255,.06)}
-.pred-cell.hot{border-color:var(--up);background:rgba(22,224,139,.06)}
-.pred-cell.cold{border-color:var(--down);background:rgba(255,77,94,.06)}
-.pred-cell .digit{font-size:22px;font-weight:800;line-height:1}
-.pred-cell .pct{font-size:11px;font-weight:600;margin-top:5px;color:var(--muted)}
-.pred-cell .bar-bg{position:absolute;bottom:0;left:0;right:0;height:4px;background:#131c2e;border-radius:0 0 12px 12px}
-.pred-cell .bar-fill{height:100%;border-radius:0 0 12px 12px;transition:width .3s}
-.pred-cell .gap-tag{font-size:9px;color:var(--muted);margin-top:4px}
-.pred-cell .score-tag{font-size:10px;font-weight:700;margin-top:3px}
+
+
+.dig-circle-grid{display:flex;flex-direction:column;gap:18px;align-items:center;margin:20px 0}
+.dig-circle-row{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
+.dig-circle{width:88px;height:88px;border-radius:50%;background:#1a2233;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;position:relative;transition:transform .15s,box-shadow .2s;border:3px solid transparent}
+.dig-circle:hover{transform:translateY(-2px)}
+.dig-circle .digit{font-size:22px;font-weight:800;color:#fff;line-height:1.1}
+.dig-circle .pct{font-size:12px;font-weight:600;color:rgba(255,255,255,.85);margin-top:2px}
+.dig-circle.freq-high{background:var(--accent);border-color:rgba(86,182,255,.5);box-shadow:0 0 18px rgba(86,182,255,.45)}
+.dig-circle.freq-low{background:var(--down);border-color:rgba(255,77,94,.5);box-shadow:0 0 18px rgba(255,77,94,.4)}
+.dig-circle.freq-2ndlow{background:var(--amber);border-color:rgba(242,149,74,.5);box-shadow:0 0 18px rgba(242,149,74,.4)}
+.dig-circle.current{background:var(--up);border-color:rgba(22,224,139,.6);box-shadow:0 0 20px rgba(22,224,139,.55)}
+.dig-circle.current::after{content:"";position:absolute;bottom:-14px;left:50%;transform:translateX(-50%);border-left:7px solid transparent;border-right:7px solid transparent;border-top:9px solid var(--accent);filter:drop-shadow(0 0 4px rgba(86,182,255,.6))}
+@media(max-width:700px){.dig-circle{width:64px;height:64px}.dig-circle .digit{font-size:17px}.dig-circle .pct{font-size:10px}.dig-circle-row{gap:10px}}
+
+
+
+
+
+
+
+
+
+
+
 /* frequency table */
 .freq-table{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}
 .freq-table th{background:#0d1320;color:var(--muted);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;text-align:center;padding:8px 6px;border-bottom:1px solid var(--line)}
@@ -451,8 +463,8 @@ table.an-table tbody tr:last-child td{border-bottom:none}
 .dig-digit-btn:disabled{opacity:.4;cursor:not-allowed}
 .dig-digit-btn.sel{border-color:var(--accent);background:rgba(86,182,255,.15);color:var(--accent)}
 .dig-auto-bar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:#0a0e17;border:1px solid var(--line);border-radius:12px;padding:13px 16px;margin-top:6px}
-.dig-pred-legend{font-size:10px;color:var(--muted);margin-top:8px;line-height:1.55}
-.dig-pred-legend b{color:var(--text)}
+
+
 /* ── Indicator Charts (Page 8) ───────────────────────────────────── */
 .ind-chart{width:100%;height:160px;display:block;background:#080b12;
   border-radius:8px;border:1px solid var(--line);overflow:visible;}
@@ -1125,14 +1137,11 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       </div>
     </div>
 
-    <!-- Prediction bar — the core visual -->
+    <!-- Digit distribution — the core visual -->
     <div class="dig-card">
-      <h2>📊 Prediction scores <span id="digTickCount" style="font-weight:400;font-size:11px;color:var(--muted);margin-left:auto">0 ticks</span></h2>
-      <div class="dig-sub">Each cell shows the digit, its observed frequency %, composite prediction score, and gap (ticks since it last appeared). <b>Higher bar = model favours this digit next.</b> Click a digit to place a manual Matches trade.</div>
-      <div class="pred-grid" id="digPredGrid"></div>
-      <div class="dig-pred-legend">
-        <b>Score formula:</b> 40% frequency-deviation (digits below 10% get a boost) + 30% gap score (longer absent → higher) + 30% transition probability (Markov: P(digit | previous digit)). Scores are normalised so they sum to 100%. <span style="color:var(--accent)">Blue border</span> = top pick. <span style="color:var(--up)">Green</span> = hot (above average). <span style="color:var(--down)">Red</span> = cold (below average).
-      </div>
+      <h2>Digit Distribution <span id="digTickCount" style="font-weight:400;font-size:11px;color:var(--muted);margin-left:auto">0 ticks</span></h2>
+      <div class="dig-sub">Frequency of each digit over the last 1,000 ticks. <span style="color:var(--accent)">Blue</span> = highest frequency, <span style="color:var(--down)">red</span> = lowest, <span style="color:var(--amber)">amber</span> = 2nd-lowest, <span style="color:var(--up)">green (with the pointer below it)</span> = the digit that just occurred. The prediction engine's composite score runs continuously in the background — it drives auto-execution below but isn't shown here as a raw number. Click any digit to place a manual Matches trade.</div>
+      <div class="dig-circle-grid" id="digCircleGrid"></div>
     </div>
 
     <!-- Stats row -->
@@ -8321,20 +8330,16 @@ function digPageInit(){
     }
     btnsEl.innerHTML = html;
   }
-  // build prediction grid skeleton
-  const predEl = $("digPredGrid");
-  if (predEl && !predEl.childElementCount){
-    let html = "";
-    for (let d = 0; d < 10; d++){
-      html += `<div class="pred-cell" id="digPred${d}" onclick="digManualTrade(${d})">
+  // build digit-distribution circle skeleton (6 top row, 4 bottom row)
+  const circleGridEl = $("digCircleGrid");
+  if (circleGridEl && !circleGridEl.childElementCount){
+    const circle = d => `<div class="dig-circle" id="digCircle${d}" onclick="digManualTrade(${d})">
         <div class="digit">${d}</div>
-        <div class="pct" id="digPredPct${d}">—</div>
-        <div class="score-tag" id="digPredScore${d}">—</div>
-        <div class="gap-tag" id="digPredGap${d}">gap —</div>
-        <div class="bar-bg"><div class="bar-fill" id="digPredBar${d}" style="width:0;background:var(--accent)"></div></div>
+        <div class="pct" id="digCirclePct${d}">—</div>
       </div>`;
-    }
-    predEl.innerHTML = html;
+    const topRow = [0,1,2,3,4,5].map(circle).join("");
+    const bottomRow = [6,7,8,9].map(circle).join("");
+    circleGridEl.innerHTML = `<div class="dig-circle-row">${topRow}</div><div class="dig-circle-row">${bottomRow}</div>`;
   }
   // build transition matrix header
   const tmHead = $("digTmHead");
@@ -8343,6 +8348,45 @@ function digPageInit(){
   }
   digUpdateConnStatus();
   digRender();
+}
+
+// ── digit distribution circles: fixed 1000-tick window, frequency-rank
+// colored (blue=highest, red=lowest, amber=2nd-lowest), plus a green
+// "current digit" indicator — independent of the page's user-configurable
+// digWindow, since this widget specifically shows the last 1,000 ticks
+// regardless of what window size the frequency table/prediction grid use.
+function digRenderCircles(){
+  const data = digRing.length > 1000 ? digRing.slice(-1000) : digRing;
+  const n = data.length;
+  const counts = new Array(10).fill(0);
+  data.forEach(d => counts[d]++);
+  const pct = counts.map(c => n ? (c / n * 100) : 0);
+
+  let highD = 0, lowD = 0, secondLowD = -1;
+  if (n > 0){
+    for (let d = 1; d < 10; d++){
+      if (pct[d] > pct[highD]) highD = d;
+      if (pct[d] < pct[lowD]) lowD = d;
+    }
+    for (let d = 0; d < 10; d++){
+      if (d === lowD) continue;
+      if (secondLowD === -1 || pct[d] < pct[secondLowD]) secondLowD = d;
+    }
+  }
+  const currentDigit = digRing.length ? digRing[digRing.length - 1] : -1;
+
+  for (let d = 0; d < 10; d++){
+    const el = $("digCircle" + d);
+    const pctEl = $("digCirclePct" + d);
+    if (pctEl) pctEl.textContent = n ? pct[d].toFixed(1) + "%" : "—";
+    if (!el) continue;
+    let cls = "dig-circle";
+    if (d === currentDigit) cls += " current";
+    else if (n > 0 && d === highD) cls += " freq-high";
+    else if (n > 0 && d === lowD) cls += " freq-low";
+    else if (n > 0 && d === secondLowD) cls += " freq-2ndlow";
+    el.className = cls;
+  }
 }
 
 function digRender(){
@@ -8381,25 +8425,8 @@ function digRender(){
     chiBarEl.style.background = chiResult.pval < 0.05 ? "var(--up)" : "var(--accent)";
   }
 
-  // prediction grid
-  const maxPred = Math.max(...preds);
-  for (let d = 0; d < 10; d++){
-    const cell = $("digPred" + d);
-    const pctEl = $("digPredPct" + d);
-    const scoreEl = $("digPredScore" + d);
-    const gapEl = $("digPredGap" + d);
-    const barEl = $("digPredBar" + d);
-    if (pctEl) pctEl.textContent = (freqs[d].freq * 100).toFixed(1) + "%";
-    if (scoreEl){
-      scoreEl.textContent = (preds[d] * 100).toFixed(1);
-      scoreEl.style.color = preds[d] === maxPred ? "var(--accent)" : freqs[d].freq > 0.1 ? "var(--up)" : freqs[d].freq < 0.1 ? "var(--down)" : "var(--text)";
-    }
-    if (gapEl) gapEl.textContent = "gap " + gaps[d];
-    if (barEl) barEl.style.width = (preds[d] / maxPred * 100).toFixed(1) + "%";
-    if (cell){
-      cell.className = "pred-cell" + (preds[d] === maxPred ? " top" : freqs[d].freq > 0.12 ? " hot" : freqs[d].freq < 0.08 ? " cold" : "");
-    }
-  }
+  // digit distribution circles (fixed 1000-tick window, independent of digWindow)
+  digRenderCircles();
 
   // frequency table
   const tbody = $("digFreqBody");
