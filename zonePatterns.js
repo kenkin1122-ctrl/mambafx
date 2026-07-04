@@ -1,90 +1,61 @@
 /**
- * analysis/similarity.js
+ * analysis/patternEngine.js
  *
- * Historical similarity: describes the current candle region as a small
- * feature vector (trend direction, momentum, volatility, dominant recent
- * pattern), then scans backward through the SAME loaded candle series for
- * earlier windows with a similar feature vector, and reports how those
- * earlier windows actually resolved (continued in the same direction, or
- * reversed) over the N candles that followed each one.
- *
- * Scope, stated plainly: this searches within whatever candle history is
- * already loaded (the same ~200 HTF candles the app normally keeps in
- * memory), not a separate deep historical archive — consistent with how
- * charts/replayManager.js (Phase 15) is scoped. It is NOT a machine-learned
- * pattern matcher; "similar" means "close in a handful of hand-chosen,
- * interpretable features," and the comparison logic is fully inspectable
- * below. This is meant to answer "have setups shaped like this tended to
- * continue or reverse, within the price history I can currently see" — a
- * modest, honest claim, not a promise of statistical significance.
+ * Runs every Phase 11 detector over a candle series and merges the results
+ * into one findings list, sorted most-recent-first (what a trader glancing
+ * at the panel cares about first). Each finding carries enough to render a
+ * readable line item and to jump the chart to it — see ui/analysisPanel.js.
  */
 
-import { computeStats } from './statistics.js';
-import { inferOverallTrend } from './structurePatterns.js';
+import { detectEngulfing, detectOutsideBar, detectInsideBar, detectPinBar, detectDoji } from './candlestickPatterns.js';
+import { detectStructureBreaks, detectLiquiditySweep } from './structurePatterns.js';
+import { detectFVG, detectOrderBlock } from './zonePatterns.js';
 
-/** Reduce a candle window to a small, comparable feature vector. */
-function featuresOf(candles) {
-  const stats = computeStats(candles);
-  if (!stats) return null;
-  const trend = inferOverallTrend(candles);
-  return {
-    trend,
-    momentumSign: Math.sign(stats.momentumPct),
-    momentumMagnitude: Math.min(Math.abs(stats.momentumPct), 15) / 15,
-    volatilityNorm: Math.min(stats.volatilityPct, 100) / 100,
-    bullishSkew: (stats.bullishCount - stats.bearishCount) / stats.candleCount,
-  };
-}
-
-/** Distance between two feature vectors — lower is more similar. Trend mismatch is penalized heavily since it dominates what "similar setup" means to a trader. */
-function distance(a, b) {
-  if (!a || !b) return Infinity;
-  const trendPenalty = a.trend === b.trend ? 0 : 0.6;
-  return trendPenalty
-    + Math.abs(a.momentumSign - b.momentumSign) * 0.15
-    + Math.abs(a.momentumMagnitude - b.momentumMagnitude) * 0.5
-    + Math.abs(a.volatilityNorm - b.volatilityNorm) * 0.3
-    + Math.abs(a.bullishSkew - b.bullishSkew) * 0.4;
-}
+const LABELS = {
+  engulfing: 'Engulfing', outsideBar: 'Outside Bar', insideBar: 'Inside Bar', pinBar: 'Pin Bar', doji: 'Doji',
+  bos: 'Break of Structure', choch: 'Change of Character', liquiditySweep: 'Liquidity Sweep',
+  fvg: 'Fair Value Gap', orderBlock: 'Order Block',
+};
 
 /**
- * @param {Array} candles full loaded candle series (oldest first)
- * @param {number} windowSize candles per comparison window
- * @param {number} lookaheadSize candles after a historical window checked for continuation/reversal
- * @param {number} maxMatches how many closest historical windows to return
+ * @param {Array<{epoch:number,open:number,high:number,low:number,close:number}>} candles
+ * @returns {Array<{type:string,label:string,index:number,epoch:number,direction?:string,description:string}>} sorted newest-first
  */
-export function findSimilarHistoricalWindows(candles, windowSize = 12, lookaheadSize = 8, maxMatches = 8) {
-  if (!candles || candles.length < windowSize * 2 + lookaheadSize) {
-    return { available: false, matches: [], continuedCount: 0, reversedCount: 0 };
+export function runPatternScan(candles) {
+  if (!candles || candles.length < 3) return [];
+
+  const { bos, choch } = detectStructureBreaks(candles);
+  const all = [
+    ...detectEngulfing(candles),
+    ...detectOutsideBar(candles),
+    ...detectInsideBar(candles),
+    ...detectPinBar(candles),
+    ...detectDoji(candles),
+    ...bos,
+    ...choch,
+    ...detectLiquiditySweep(candles),
+    ...detectFVG(candles),
+    ...detectOrderBlock(candles),
+  ];
+
+  return all
+    .map(f => ({ ...f, label: LABELS[f.type] || f.type, description: describe(f) }))
+    .sort((a, b) => b.index - a.index);
+}
+
+function describe(f) {
+  const dir = f.direction ? f.direction[0].toUpperCase() + f.direction.slice(1) : '';
+  switch (f.type) {
+    case 'engulfing': return `${dir} engulfing — the candle's body fully covers the prior candle's body.`;
+    case 'outsideBar': return `${dir} outside bar — range fully engulfs the prior candle.`;
+    case 'insideBar': return `Inside bar — range fully contained within the prior candle.`;
+    case 'pinBar': return `${dir} pin bar — long rejection wick with a small opposite wick.`;
+    case 'doji': return `Doji — open and close nearly equal, signaling indecision.`;
+    case 'bos': return `${dir} break of structure — closed beyond the prior swing ${f.direction === 'bullish' ? 'high' : 'low'} at ${f.brokenLevel.toFixed(2)}.`;
+    case 'choch': return `${dir} change of character — closed beyond the prior swing ${f.direction === 'bullish' ? 'high' : 'low'} at ${f.brokenLevel.toFixed(2)}, against the prevailing trend.`;
+    case 'liquiditySweep': return `${dir} liquidity sweep — wick pierced ${f.sweptLevel.toFixed(2)} then closed back inside.`;
+    case 'fvg': return `${dir} fair value gap between ${f.bottom.toFixed(2)} and ${f.top.toFixed(2)}.`;
+    case 'orderBlock': return `${dir} order block between ${f.bottom.toFixed(2)} and ${f.top.toFixed(2)}, preceding a displacement move.`;
+    default: return '';
   }
-
-  const currentWindow = candles.slice(candles.length - windowSize);
-  const currentFeatures = featuresOf(currentWindow);
-  if (!currentFeatures || !currentFeatures.trend) {
-    return { available: false, matches: [], continuedCount: 0, reversedCount: 0 };
-  }
-
-  const candidates = [];
-  const latestStart = candles.length - windowSize - lookaheadSize - windowSize;
-  for (let start = 0; start <= latestStart; start++) {
-    const window = candles.slice(start, start + windowSize);
-    const features = featuresOf(window);
-    if (!features || !features.trend) continue;
-    const d = distance(currentFeatures, features);
-    if (d > 0.9) continue;
-
-    const after = candles.slice(start + windowSize, start + windowSize + lookaheadSize);
-    const afterTrend = inferOverallTrend(window.concat(after));
-    let outcome = 'inconclusive';
-    if (afterTrend) outcome = afterTrend === features.trend ? 'continued' : 'reversed';
-
-    candidates.push({ startIndex: start, distance: d, outcome });
-  }
-
-  candidates.sort((a, b) => a.distance - b.distance);
-  const matches = candidates.slice(0, maxMatches);
-  const continuedCount = matches.filter(m => m.outcome === 'continued').length;
-  const reversedCount = matches.filter(m => m.outcome === 'reversed').length;
-
-  return { available: matches.length > 0, matches, continuedCount, reversedCount, currentTrend: currentFeatures.trend };
 }

@@ -1,61 +1,92 @@
 /**
- * analysis/patternEngine.js
+ * analysis/historicalSimilarity.js
  *
- * Runs every Phase 11 detector over a candle series and merges the results
- * into one findings list, sorted most-recent-first (what a trader glancing
- * at the panel cares about first). Each finding carries enough to render a
- * readable line item and to jump the chart to it — see ui/analysisPanel.js.
+ * "Historical context" for the Smart Market Intelligence page: compares the
+ * CURRENT market structure signature (trend direction, momentum sign,
+ * bullish/bearish candle balance over a recent window) against every
+ * earlier window of the same length in the SAME already-loaded candle
+ * history, and reports how often sufficiently-similar setups were followed
+ * by continuation vs reversal over a fixed look-ahead horizon.
+ *
+ * This is deliberately simple and fully deterministic — no ML, no
+ * external data, no curve-fitting. The "similarity" score is a fixed,
+ * inspectable formula (trend match + momentum-sign match + bullish-ratio
+ * closeness). Precision here matters more than sophistication: every
+ * number this produces is traceable back to real candles that actually
+ * occurred in the loaded history, not a fabricated statistic.
+ *
+ * Honest limitation, stated directly: sample size is bounded by how much
+ * history is loaded (~200 HTF candles), so results on a young session or a
+ * newly-switched symbol may have too few analogs to be meaningful —
+ * findHistoricalAnalogs() reports sampleSize explicitly so callers (and
+ * the narrative text) can say so rather than presenting a thin sample as
+ * confident evidence.
  */
 
-import { detectEngulfing, detectOutsideBar, detectInsideBar, detectPinBar, detectDoji } from './candlestickPatterns.js';
-import { detectStructureBreaks, detectLiquiditySweep } from './structurePatterns.js';
-import { detectFVG, detectOrderBlock } from './zonePatterns.js';
+import { inferOverallTrend } from './structurePatterns.js';
 
-const LABELS = {
-  engulfing: 'Engulfing', outsideBar: 'Outside Bar', insideBar: 'Inside Bar', pinBar: 'Pin Bar', doji: 'Doji',
-  bos: 'Break of Structure', choch: 'Change of Character', liquiditySweep: 'Liquidity Sweep',
-  fvg: 'Fair Value Gap', orderBlock: 'Order Block',
-};
+function buildSignature(windowCandles) {
+  if (!windowCandles || windowCandles.length < 6) return null;
+  const trend = inferOverallTrend(windowCandles, 1);
+  const bullishCount = windowCandles.filter(c => c.close >= c.open).length;
+  const bullishRatio = bullishCount / windowCandles.length;
+  const momentum = windowCandles[0].open !== 0
+    ? (windowCandles[windowCandles.length - 1].close - windowCandles[0].open) / windowCandles[0].open
+    : 0;
+  return { trend, bullishRatio, momentumSign: Math.sign(momentum) };
+}
+
+/** @returns {number} 0..1 */
+function signatureSimilarity(a, b) {
+  if (!a || !b) return 0;
+  let score = 0;
+  if (a.trend !== null && a.trend === b.trend) score += 0.5;
+  if (a.momentumSign === b.momentumSign) score += 0.3;
+  score += 0.2 * (1 - Math.min(1, Math.abs(a.bullishRatio - b.bullishRatio)));
+  return score;
+}
 
 /**
  * @param {Array<{epoch:number,open:number,high:number,low:number,close:number}>} candles
- * @returns {Array<{type:string,label:string,index:number,epoch:number,direction?:string,description:string}>} sorted newest-first
+ * @param {{windowSize?:number, lookAhead?:number, simThreshold?:number}} [opts]
+ * @returns {{sampleSize:number, continued:number, reversed:number, neutral:number, continuedPct:number, reversedPct:number, currentTrend:'up'|'down'|null}|null}
  */
-export function runPatternScan(candles) {
-  if (!candles || candles.length < 3) return [];
+export function findHistoricalAnalogs(candles, opts = {}) {
+  const windowSize = opts.windowSize ?? 12;
+  const lookAhead = opts.lookAhead ?? 8;
+  const simThreshold = opts.simThreshold ?? 0.75;
 
-  const { bos, choch } = detectStructureBreaks(candles);
-  const all = [
-    ...detectEngulfing(candles),
-    ...detectOutsideBar(candles),
-    ...detectInsideBar(candles),
-    ...detectPinBar(candles),
-    ...detectDoji(candles),
-    ...bos,
-    ...choch,
-    ...detectLiquiditySweep(candles),
-    ...detectFVG(candles),
-    ...detectOrderBlock(candles),
-  ];
+  if (!candles || candles.length < windowSize * 2 + lookAhead) return null;
 
-  return all
-    .map(f => ({ ...f, label: LABELS[f.type] || f.type, description: describe(f) }))
-    .sort((a, b) => b.index - a.index);
-}
-
-function describe(f) {
-  const dir = f.direction ? f.direction[0].toUpperCase() + f.direction.slice(1) : '';
-  switch (f.type) {
-    case 'engulfing': return `${dir} engulfing — the candle's body fully covers the prior candle's body.`;
-    case 'outsideBar': return `${dir} outside bar — range fully engulfs the prior candle.`;
-    case 'insideBar': return `Inside bar — range fully contained within the prior candle.`;
-    case 'pinBar': return `${dir} pin bar — long rejection wick with a small opposite wick.`;
-    case 'doji': return `Doji — open and close nearly equal, signaling indecision.`;
-    case 'bos': return `${dir} break of structure — closed beyond the prior swing ${f.direction === 'bullish' ? 'high' : 'low'} at ${f.brokenLevel.toFixed(2)}.`;
-    case 'choch': return `${dir} change of character — closed beyond the prior swing ${f.direction === 'bullish' ? 'high' : 'low'} at ${f.brokenLevel.toFixed(2)}, against the prevailing trend.`;
-    case 'liquiditySweep': return `${dir} liquidity sweep — wick pierced ${f.sweptLevel.toFixed(2)} then closed back inside.`;
-    case 'fvg': return `${dir} fair value gap between ${f.bottom.toFixed(2)} and ${f.top.toFixed(2)}.`;
-    case 'orderBlock': return `${dir} order block between ${f.bottom.toFixed(2)} and ${f.top.toFixed(2)}, preceding a displacement move.`;
-    default: return '';
+  const currentSig = buildSignature(candles.slice(candles.length - windowSize));
+  if (!currentSig || currentSig.trend === null) {
+    return { sampleSize: 0, continued: 0, reversed: 0, neutral: 0, continuedPct: 0, reversedPct: 0, currentTrend: null };
   }
+
+  let continued = 0, reversed = 0, neutral = 0;
+  for (let end = windowSize; end <= candles.length - lookAhead; end++) {
+    if (end > candles.length - windowSize) continue; // skip windows overlapping "now"
+
+    const windowCandles = candles.slice(end - windowSize, end);
+    const sig = buildSignature(windowCandles);
+    if (!sig || sig.trend === null) continue;
+    if (signatureSimilarity(currentSig, sig) < simThreshold) continue;
+
+    const before = candles[end - 1].close;
+    const after = candles[Math.min(end - 1 + lookAhead, candles.length - 1)].close;
+    const changeFrac = before !== 0 ? (after - before) / before : 0;
+    const continuedTrend = (sig.trend === 'up' && changeFrac > 0.001) || (sig.trend === 'down' && changeFrac < -0.001);
+    const reversedTrend = (sig.trend === 'up' && changeFrac < -0.001) || (sig.trend === 'down' && changeFrac > 0.001);
+    if (continuedTrend) continued++;
+    else if (reversedTrend) reversed++;
+    else neutral++;
+  }
+
+  const sampleSize = continued + reversed + neutral;
+  return {
+    sampleSize, continued, reversed, neutral,
+    continuedPct: sampleSize ? Math.round((continued / sampleSize) * 100) : 0,
+    reversedPct: sampleSize ? Math.round((reversed / sampleSize) * 100) : 0,
+    currentTrend: currentSig.trend,
+  };
 }

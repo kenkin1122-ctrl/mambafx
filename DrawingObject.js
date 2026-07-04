@@ -38,6 +38,27 @@ export const HANDLE_R = 5;
 export const HIT_PX = 7;
 export const COLORS = ["#4fb2ff", "#1fdf9b", "#ff4d6a", "#ffc857", "#a78bfa", "#fb923c", "#f472b6", "#94a3b8", "#ffffff"];
 
+/**
+ * The 10 simultaneous timeframes for the new Multi-Timeframe Dashboard —
+ * distinct from HTF_TFS/LTF_TFS above, which remain unchanged and still
+ * drive the existing 2-panel chart view's dropdown pickers. This list is
+ * fixed and ordered (fastest to slowest), matching the requested
+ * 1m|3m|5m|10m|30m|1h|4h|8h|12h|1d layout exactly. Each entry gets its own
+ * live, independently-updating Panel instance — see charts/mtfDashboard.js.
+ */
+export const MTF_DASHBOARD_TFS = [
+  { key: "m1", g: 60, label: "1m" },
+  { key: "m3", g: 180, label: "3m" },
+  { key: "m5", g: 300, label: "5m" },
+  { key: "m10", g: 600, label: "10m" },
+  { key: "m30", g: 1800, label: "30m" },
+  { key: "h1", g: 3600, label: "1h" },
+  { key: "h4", g: 14400, label: "4h" },
+  { key: "h8", g: 28800, label: "8h" },
+  { key: "h12", g: 43200, label: "12h" },
+  { key: "d1", g: 86400, label: "1D" },
+];
+
 /** localStorage key prefix for per-symbol drawing persistence (Phase 1: unchanged from v1; Phase 16 will replace with named workspaces). */
 export const STORAGE_PREFIX = "mtf_drawings_v2_";
 

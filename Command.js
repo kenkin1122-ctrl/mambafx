@@ -41,15 +41,13 @@ export function connect() {
     clearTimeout(timeout);
     setConnState("live");
     ws.send(JSON.stringify({ forget_all: ["candles", "ticks"] }));
-    const { htf, ltf } = AppState.panels;
-    // If a view already exists, this WS connection is a RECONNECT (the
-    // socket dropped and reopened), not the page's first load — a flaky
-    // network blip shouldn't be able to yank the user's zoom/pan out from
-    // under them. Only the true first connection (viewT0 still null) gets
-    // the default view.
-    const isReconnect = htf && htf.viewT0 != null;
-    if (htf) requestPanelData(htf, { preserveView: isReconnect });
-    if (ltf) requestPanelData(ltf, { preserveView: isReconnect });
+    // Iterate ALL registered timeframe panels (not just the htf/ltf
+    // aliases) — with the 10-panel MTF Dashboard, every one of them needs
+    // its own live subscription re-established, whether or not it's
+    // currently aliased as the "active" analysis timeframe.
+    const allPanels = Object.values(AppState.timeframePanels);
+    const isReconnect = allPanels.length > 0 && allPanels[0].viewT0 != null;
+    allPanels.forEach(p => requestPanelData(p, { preserveView: isReconnect }));
   };
   ws.onmessage = ev => {
     let msg; try { msg = JSON.parse(ev.data); } catch (_) { return; }
@@ -75,13 +73,18 @@ function setConnState(state) {
 
 function routeUnsolicited(msg) {
   if (msg.error) return;
-  const { htf, ltf } = AppState.panels;
+  // Iterate every registered timeframe panel, not just the two current
+  // htf/ltf aliases — the 10-panel MTF Dashboard subscribes to all ten
+  // simultaneously (see connect()'s onopen above), so incoming live data
+  // must reach all ten too, whether or not each one happens to be
+  // currently aliased as the "active" analysis timeframe.
+  const allPanels = Object.values(AppState.timeframePanels);
   if (msg.msg_type === "ohlc" && msg.ohlc) {
-    const p = [htf, ltf].find(p => p && String(p.tf.g) === String(msg.ohlc.granularity));
+    const p = allPanels.find(p => p && String(p.tf.g) === String(msg.ohlc.granularity));
     if (p) p.applyLiveCandle(msg.ohlc); // Panel itself emits panel:dataUpdated
   }
   if (msg.msg_type === "tick" && msg.tick && msg.tick.symbol === AppState.symbol) {
-    [htf, ltf].forEach(p => p && p.applyLiveTick(msg.tick));
+    allPanels.forEach(p => p && p.applyLiveTick(msg.tick));
   }
 }
 
@@ -154,22 +157,22 @@ function handleTicksHistory(panel, msg, opts = {}) {
   eventBus.emit('panel:dataUpdated', { panel });
 }
 
-/** Drop all history + subscriptions and refetch both panels — used on symbol switch. */
+/** Drop all history + subscriptions and refetch every registered panel — used on symbol switch. */
 export function resubscribeAll() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ forget_all: ["candles", "ticks"] }));
-  const { htf, ltf } = AppState.panels;
-  if (htf) requestPanelData(htf);
-  if (ltf) requestPanelData(ltf);
+  Object.values(AppState.timeframePanels).forEach(p => p && requestPanelData(p));
 }
 
 /**
  * One-shot candle snapshot for an arbitrary granularity — NOT tied to any
  * Panel instance, no live subscription (no `subscribe: 1`), just a single
- * request/response. Used by ai/marketIntelligence.js's multi-timeframe
- * cascade to get real data for timeframes not currently displayed in
- * either panel (e.g. Daily/H4 when the panels are showing H1/M1), without
- * disturbing what's actually on screen.
+ * request/response. Currently unused by any active feature (an earlier,
+ * superseded draft of Smart Market Intelligence used it for a one-shot
+ * multi-timeframe cascade before that feature was rebuilt with live data;
+ * the draft was removed as dead code). Kept here as a small, self-contained,
+ * already-correct utility in case a future feature needs a one-shot fetch
+ * for a timeframe outside the live-subscribed set.
  * @returns {Promise<Array<{epoch:number,open:number,high:number,low:number,close:number}>>}
  */
 export function fetchCandlesOnce(symbol, granularity, count = 60) {

@@ -1,92 +1,110 @@
 /**
- * analysis/historicalSimilarity.js
+ * analysis/candlestickPatterns.js
  *
- * "Historical context" for the Smart Market Intelligence page: compares the
- * CURRENT market structure signature (trend direction, momentum sign,
- * bullish/bearish candle balance over a recent window) against every
- * earlier window of the same length in the SAME already-loaded candle
- * history, and reports how often sufficiently-similar setups were followed
- * by continuation vs reversal over a fixed look-ahead horizon.
+ * Detectors for the 5 single/two-candle patterns in the Phase 11 spec.
+ * Each function scans a candle array and returns every match — pure,
+ * side-effect-free, and independently testable (no dependency on
+ * AppState, panels, or anything DOM-related), same design principle as
+ * the drawing object hierarchy: logic that doesn't need a browser doesn't
+ * get one.
  *
- * This is deliberately simple and fully deterministic — no ML, no
- * external data, no curve-fitting. The "similarity" score is a fixed,
- * inspectable formula (trend match + momentum-sign match + bullish-ratio
- * closeness). Precision here matters more than sophistication: every
- * number this produces is traceable back to real candles that actually
- * occurred in the loaded history, not a fabricated statistic.
+ * Definitions used (standard technical-analysis definitions, stated
+ * explicitly since "pattern recognition" is meaningless without a precise
+ * rule — these are deterministic rules, not ML/fuzzy matching):
  *
- * Honest limitation, stated directly: sample size is bounded by how much
- * history is loaded (~200 HTF candles), so results on a young session or a
- * newly-switched symbol may have too few analogs to be meaningful —
- * findHistoricalAnalogs() reports sampleSize explicitly so callers (and
- * the narrative text) can say so rather than presenting a thin sample as
- * confident evidence.
+ *   Engulfing:   candle[i]'s body fully contains candle[i-1]'s body, and
+ *                the two candles are opposite colors.
+ *   Outside Bar: candle[i]'s high/low fully engulfs candle[i-1]'s high/low
+ *                (range engulfing, not just body — a superset condition of
+ *                candlestick "engulfing" that traders use for structure).
+ *   Inside Bar:  candle[i]'s high/low is fully contained within
+ *                candle[i-1]'s high/low (the opposite of Outside Bar).
+ *   Pin Bar:     one wick is at least `wickRatio` (default 2x) the size of
+ *                the body, and the opposite wick is small — signals
+ *                rejection at that price level.
+ *   Doji:        body size is below `bodyThreshold` (default 10%) of the
+ *                candle's full range — open ≈ close, indicating indecision.
  */
 
-import { inferOverallTrend } from './structurePatterns.js';
+function bodySize(c) { return Math.abs(c.close - c.open); }
+function fullRange(c) { return c.high - c.low; }
+function bodyTop(c) { return Math.max(c.open, c.close); }
+function bodyBot(c) { return Math.min(c.open, c.close); }
+function isBullish(c) { return c.close >= c.open; }
 
-function buildSignature(windowCandles) {
-  if (!windowCandles || windowCandles.length < 6) return null;
-  const trend = inferOverallTrend(windowCandles, 1);
-  const bullishCount = windowCandles.filter(c => c.close >= c.open).length;
-  const bullishRatio = bullishCount / windowCandles.length;
-  const momentum = windowCandles[0].open !== 0
-    ? (windowCandles[windowCandles.length - 1].close - windowCandles[0].open) / windowCandles[0].open
-    : 0;
-  return { trend, bullishRatio, momentumSign: Math.sign(momentum) };
+/** @returns {Array<{type:'engulfing', index:number, epoch:number, direction:'bullish'|'bearish'}>} */
+export function detectEngulfing(candles) {
+  const found = [];
+  for (let i = 1; i < candles.length; i++) {
+    const prev = candles[i - 1], cur = candles[i];
+    if (isBullish(cur) === isBullish(prev)) continue; // must be opposite colors
+    const engulfs = bodyTop(cur) >= bodyTop(prev) && bodyBot(cur) <= bodyBot(prev) && bodySize(cur) > bodySize(prev);
+    if (engulfs) {
+      found.push({ type: 'engulfing', index: i, epoch: cur.epoch, direction: isBullish(cur) ? 'bullish' : 'bearish' });
+    }
+  }
+  return found;
 }
 
-/** @returns {number} 0..1 */
-function signatureSimilarity(a, b) {
-  if (!a || !b) return 0;
-  let score = 0;
-  if (a.trend !== null && a.trend === b.trend) score += 0.5;
-  if (a.momentumSign === b.momentumSign) score += 0.3;
-  score += 0.2 * (1 - Math.min(1, Math.abs(a.bullishRatio - b.bullishRatio)));
-  return score;
+/** @returns {Array<{type:'outsideBar', index:number, epoch:number, direction:'bullish'|'bearish'}>} */
+export function detectOutsideBar(candles) {
+  const found = [];
+  for (let i = 1; i < candles.length; i++) {
+    const prev = candles[i - 1], cur = candles[i];
+    if (cur.high > prev.high && cur.low < prev.low) {
+      found.push({ type: 'outsideBar', index: i, epoch: cur.epoch, direction: isBullish(cur) ? 'bullish' : 'bearish' });
+    }
+  }
+  return found;
+}
+
+/** @returns {Array<{type:'insideBar', index:number, epoch:number}>} */
+export function detectInsideBar(candles) {
+  const found = [];
+  for (let i = 1; i < candles.length; i++) {
+    const prev = candles[i - 1], cur = candles[i];
+    if (cur.high <= prev.high && cur.low >= prev.low) {
+      found.push({ type: 'insideBar', index: i, epoch: cur.epoch });
+    }
+  }
+  return found;
 }
 
 /**
- * @param {Array<{epoch:number,open:number,high:number,low:number,close:number}>} candles
- * @param {{windowSize?:number, lookAhead?:number, simThreshold?:number}} [opts]
- * @returns {{sampleSize:number, continued:number, reversed:number, neutral:number, continuedPct:number, reversedPct:number, currentTrend:'up'|'down'|null}|null}
+ * @param {number} [wickRatio=2] the dominant wick must be at least this many times the body size
+ * @param {number} [maxOppositeWickFrac=0.3] the opposite wick must be at most this fraction of the dominant wick
+ * @returns {Array<{type:'pinBar', index:number, epoch:number, direction:'bullish'|'bearish'}>}
  */
-export function findHistoricalAnalogs(candles, opts = {}) {
-  const windowSize = opts.windowSize ?? 12;
-  const lookAhead = opts.lookAhead ?? 8;
-  const simThreshold = opts.simThreshold ?? 0.75;
+export function detectPinBar(candles, wickRatio = 2, maxOppositeWickFrac = 0.3) {
+  const found = [];
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    const body = bodySize(c);
+    if (body === 0) continue; // a zero-body pin bar is really a doji — let detectDoji own that case
+    const upperWick = c.high - bodyTop(c);
+    const lowerWick = bodyBot(c) - c.low;
 
-  if (!candles || candles.length < windowSize * 2 + lookAhead) return null;
-
-  const currentSig = buildSignature(candles.slice(candles.length - windowSize));
-  if (!currentSig || currentSig.trend === null) {
-    return { sampleSize: 0, continued: 0, reversed: 0, neutral: 0, continuedPct: 0, reversedPct: 0, currentTrend: null };
+    if (lowerWick >= body * wickRatio && upperWick <= lowerWick * maxOppositeWickFrac) {
+      // Long lower wick, rejection from below — bullish signal (hammer-type)
+      found.push({ type: 'pinBar', index: i, epoch: c.epoch, direction: 'bullish' });
+    } else if (upperWick >= body * wickRatio && lowerWick <= upperWick * maxOppositeWickFrac) {
+      // Long upper wick, rejection from above — bearish signal (shooting-star-type)
+      found.push({ type: 'pinBar', index: i, epoch: c.epoch, direction: 'bearish' });
+    }
   }
+  return found;
+}
 
-  let continued = 0, reversed = 0, neutral = 0;
-  for (let end = windowSize; end <= candles.length - lookAhead; end++) {
-    if (end > candles.length - windowSize) continue; // skip windows overlapping "now"
-
-    const windowCandles = candles.slice(end - windowSize, end);
-    const sig = buildSignature(windowCandles);
-    if (!sig || sig.trend === null) continue;
-    if (signatureSimilarity(currentSig, sig) < simThreshold) continue;
-
-    const before = candles[end - 1].close;
-    const after = candles[Math.min(end - 1 + lookAhead, candles.length - 1)].close;
-    const changeFrac = before !== 0 ? (after - before) / before : 0;
-    const continuedTrend = (sig.trend === 'up' && changeFrac > 0.001) || (sig.trend === 'down' && changeFrac < -0.001);
-    const reversedTrend = (sig.trend === 'up' && changeFrac < -0.001) || (sig.trend === 'down' && changeFrac > 0.001);
-    if (continuedTrend) continued++;
-    else if (reversedTrend) reversed++;
-    else neutral++;
+/** @param {number} [bodyThreshold=0.1] body size as a fraction of full range, below which it counts as a doji @returns {Array<{type:'doji', index:number, epoch:number}>} */
+export function detectDoji(candles, bodyThreshold = 0.1) {
+  const found = [];
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    const range = fullRange(c);
+    if (range === 0) continue; // a candle with zero range (open=high=low=close) isn't a meaningful doji signal, just missing/flat data
+    if (bodySize(c) / range <= bodyThreshold) {
+      found.push({ type: 'doji', index: i, epoch: c.epoch });
+    }
   }
-
-  const sampleSize = continued + reversed + neutral;
-  return {
-    sampleSize, continued, reversed, neutral,
-    continuedPct: sampleSize ? Math.round((continued / sampleSize) * 100) : 0,
-    reversedPct: sampleSize ? Math.round((reversed / sampleSize) * 100) : 0,
-    currentTrend: currentSig.trend,
-  };
+  return found;
 }

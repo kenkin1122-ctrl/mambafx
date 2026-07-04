@@ -62,7 +62,7 @@ export function openCandleMenu(panel, candle, clientX, clientY) {
   let html = `<div class="cm-title">Mark region</div>${buttonsFor(regions)}`;
   html += `<hr><div class="cm-title">Mark exact level (OHLC)</div>${buttonsFor(levels)}`;
   const decompCfg = { epoch: candle.epoch, gran: panel.granSeconds(), open: candle.open, high: candle.high, low: candle.low, close: candle.close };
-  html += `<hr><div class="cm-title">Or decompose</div><button onclick='mtfDecomposeCandleFromMenu(${JSON.stringify(decompCfg).replace(/'/g, "&#39;")})'>🔬 Show inside on LTF</button>`;
+  html += `<hr><div class="cm-title">Or decompose</div><button onclick='mtfDecomposeCandleFromMenu(${JSON.stringify(decompCfg).replace(/'/g, "&#39;")})'>Show inside on LTF</button>`;
   menu.innerHTML = html;
   menu.style.left = left + "px"; menu.style.top = top + "px"; menu.style.display = "block";
   const closer = ev => {
@@ -101,7 +101,7 @@ export function decomposeCandle(candle, gran) {
       const dec = decimalsFor(candle.close);
       ohlcStr = ` · O ${candle.open.toFixed(dec)} H ${candle.high.toFixed(dec)} L ${candle.low.toFixed(dec)} C ${candle.close.toFixed(dec)}`;
     }
-    textEl.textContent = `🔬 Decomposed: candle @ ${timeStr}${ohlcStr}`;
+    textEl.textContent = `Decomposed: candle @ ${timeStr}${ohlcStr}`;
   }
   const bodyEl = $("mtfLtfDecompBody");
   if (bodyEl) {

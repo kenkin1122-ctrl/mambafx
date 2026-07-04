@@ -1,187 +1,100 @@
 /**
- * charts/Panel.js
+ * charts/mtfDashboard.js
  *
- * One chart panel (HTF or LTF): owns its coordinate transforms, its live
- * candle/tick data, its view window — and, as of Phase 2, TWO stacked
- * canvases instead of one:
- *   - bgCanvas/bgCtx  ("background") — candles, grid, committed drawings.
- *     Repainted only when data or the view actually changes; NOT on every
- *     mousemove. This is charts/render.js's drawBackground().
- *   - ovCanvas/ovCtx  ("overlay") — crosshair, selection handles, the
- *     drag-in-progress preview. Cheap, repainted every mousemove via
- *     charts/render.js's drawOverlay(). Sits visually on top (later in DOM
- *     order) and is the one that actually receives pointer events — the
- *     background canvas is purely a paint target now.
+ * The 10-timeframe MTF Dashboard: one live, independently-updating Panel
+ * per entry in MTF_DASHBOARD_TFS (m1 through d1), laid out in a single
+ * responsive horizontal row. Each panel is a REAL Panel instance — same
+ * class, same rendering path, same drawing-sync mechanism as the original
+ * htf/ltf panels — so nothing about candles, drawings, or live updates
+ * needed to be reimplemented for these ten; they get it for free from the
+ * existing architecture.
  *
- * Panel itself still only emits events (canvas:*, panel:resized, panel:
- * dataUpdated) — it has no opinion on *how* those trigger a repaint. That
- * decision now lives entirely in charts/render.js's invalidate*() scheduler.
+ * DESIGN DECISION, STATED DIRECTLY: clicking a card's header calls
+ * AppState.setActiveTimeframe(key), which sets which panel the ANALYSIS
+ * DISPLAY layer (Smart Market Intelligence, Probability Engine's UI,
+ * Continuous Learning) reads via AppState.getAnalysisPanels() — it does
+ * NOT reassign AppState.panels.htf/.ltf. That distinction matters: several
+ * modules (drawing/candleMarking.js's decomposition, charts/replayManager.js,
+ * charts/zoomManager.js) read panels.htf/.ltf freshly on every call to
+ * drive interaction with the two VISIBLE chart panels. An earlier version
+ * of this reassigned panels.htf directly, which would have silently
+ * redirected decomposition/replay/zoom onto an invisible dashboard panel
+ * the instant a card was clicked, while the user kept interacting with the
+ * visible panel — caught before shipping, not after. The practical result
+ * of the corrected design: the dashboard card you click becomes what the
+ * analysis text is ABOUT, visible in its own live mini-chart in the row;
+ * the separate big 2-panel view and its own dropdowns are untouched. The
+ * currently-active card gets a visible highlight so this is never
+ * ambiguous, and Smart Market Intelligence states which timeframe it's
+ * analyzing at the top of its report.
  */
 
+import { AppState } from '../core/AppState.js';
 import { eventBus } from '../core/EventBus.js';
+import { Panel } from './Panel.js';
+import { requestPanelData } from './socket.js';
+import { MTF_DASHBOARD_TFS } from '../core/constants.js';
 import { $ } from '../utils/dom.js';
-import { CANDLE_COUNT } from '../core/constants.js';
 
-export class Panel {
-  /**
-   * @param {string} id     unique DOM id prefix, e.g. "mtfHtf" — expects `${id}Canvas` (background) and `${id}CanvasOv` (overlay) elements
-   * @param {string} side   "htf" | "ltf" — logical role, used by scope rules elsewhere (not a DOM id)
-   * @param {Array}  tfList the timeframe option list this panel selects from
-   */
-  constructor(id, side, tfList) {
-    this.id = id; this.side = side; this.tfList = tfList;
-    this.tf = tfList[side === "htf" ? 1 : 2]; // default 1H / 1min
+function canvasIdFor(key) {
+  return 'mtfDash' + key.charAt(0).toUpperCase() + key.slice(1);
+}
 
-    this.bgCanvas = $(id + "Canvas");
-    this.bgCtx = this.bgCanvas.getContext("2d");
-    this.ovCanvas = $(id + "CanvasOv");
-    this.ovCtx = this.ovCanvas.getContext("2d");
+function buildCardMarkup() {
+  return MTF_DASHBOARD_TFS.map(tf => `
+    <div class="mtf-dash-card" data-tf="${tf.key}" id="mtfDashCard_${tf.key}">
+      <div class="mtf-dash-card-head" data-tf-click="${tf.key}">
+        <span class="mtf-dash-card-label">${tf.label}</span>
+        <span class="mtf-dash-card-meta" id="mtfDashMeta_${tf.key}">—</span>
+      </div>
+      <div class="mtf-dash-card-chart">
+        <canvas id="${canvasIdFor(tf.key)}Canvas"></canvas>
+        <canvas id="${canvasIdFor(tf.key)}CanvasOv"></canvas>
+      </div>
+    </div>
+  `).join('');
+}
 
-    this.candles = [];        // {epoch,open,high,low,close}
-    this.ticks = [];           // for tick1 line mode: {epoch,price}
-    this.viewT0 = null; this.viewT1 = null;   // visible time window
-    this.priceLock = null;                     // {p0,p1} if user manually panned price
-    this.decompRange = null;                    // {t0,t1} when in candle-decomposition mode
-    this.padL = 8; this.padR = 60; this.padT = 14; this.padB = 26;
+function updateActiveHighlight(activeKey) {
+  MTF_DASHBOARD_TFS.forEach(tf => {
+    const card = $('mtfDashCard_' + tf.key);
+    if (card) card.classList.toggle('mtf-dash-card-active', tf.key === activeKey);
+  });
+}
 
-    this._attachResizeObserver();
-    this._attachInteractionEvents();
-  }
+function updateCardMeta(panel) {
+  const meta = $('mtfDashMeta_' + panel.side);
+  if (!meta) return;
+  const last = panel.candles[panel.candles.length - 1];
+  meta.textContent = last ? last.close.toFixed(2) : '—';
+}
 
-  _attachInteractionEvents() {
-    // Listeners live on the overlay canvas — it's the topmost element and
-    // the one under the cursor. The background canvas never receives events.
-    const emit = (name) => (e) => eventBus.emit(name, { panel: this, event: e });
-    this.ovCanvas.addEventListener("mousedown", emit("canvas:mousedown"));
-    this.ovCanvas.addEventListener("mousemove", emit("canvas:mousemove"));
-    window.addEventListener("mouseup", emit("canvas:mouseup"));
-    this.ovCanvas.addEventListener("wheel", emit("canvas:wheel"), { passive: false });
-    this.ovCanvas.addEventListener("dblclick", emit("canvas:dblclick"));
-    this.ovCanvas.addEventListener("contextmenu", emit("canvas:contextmenu"));
-    this.ovCanvas.addEventListener("mouseleave", () => eventBus.emit("canvas:mouseleave", { panel: this }));
-  }
+export function initMtfDashboard() {
+  const row = $('mtfDashboardRow');
+  if (!row) return;
+  row.innerHTML = buildCardMarkup();
 
-  _attachResizeObserver() {
-    const ro = new ResizeObserver(() => this.fitCanvas());
-    ro.observe(this.bgCanvas.parentElement);
-    this.fitCanvas();
-  }
+  MTF_DASHBOARD_TFS.forEach(tf => {
+    const panel = new Panel(canvasIdFor(tf.key), tf.key, [tf]);
+    AppState.registerTimeframePanel(tf.key, panel);
+    requestPanelData(panel);
+  });
 
-  fitCanvas() {
-    const r = this.bgCanvas.parentElement.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    const w = Math.max(50, r.width), h = Math.max(50, r.height);
-    for (const [canvas, ctx] of [[this.bgCanvas, this.bgCtx], [this.ovCanvas, this.ovCtx]]) {
-      canvas.width = w * dpr; canvas.height = h * dpr;
-      canvas.style.width = w + "px"; canvas.style.height = h + "px";
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    }
-    this.W = w; this.H = h;
-    this.plotW = this.W - this.padL - this.padR;
-    this.plotH = this.H - this.padT - this.padB;
-    eventBus.emit("panel:resized", { panel: this });
-  }
+  row.addEventListener('click', e => {
+    const head = e.target.closest('[data-tf-click]');
+    if (!head) return;
+    const key = head.getAttribute('data-tf-click');
+    AppState.setActiveTimeframe(key);
+  });
 
-  isTick() { return this.tf.g === "tick1"; }
+  eventBus.on('activeTimeframe:changed', updateActiveHighlight);
+  eventBus.on('panel:dataUpdated', ({ panel }) => {
+    if (MTF_DASHBOARD_TFS.some(tf => tf.key === panel.side)) updateCardMeta(panel);
+  });
 
-  granSeconds() {
-    if (this.tf.g === "tick1") return 1;
-    if (this.tf.g === "tick10") return 10;
-    return this.tf.g;
-  }
-
-  // ── coordinate transforms (time in epoch seconds, price in quote units) ──
-  timeToX(t) {
-    if (this.viewT0 == null) return this.padL;
-    const frac = (t - this.viewT0) / (this.viewT1 - this.viewT0 || 1);
-    return this.padL + frac * this.plotW;
-  }
-  xToTime(x) {
-    if (this.viewT0 == null) return 0;
-    const frac = (x - this.padL) / (this.plotW || 1);
-    return this.viewT0 + frac * (this.viewT1 - this.viewT0);
-  }
-  priceToY(p) {
-    const { p0, p1 } = this.currentPriceRange();
-    const frac = (p - p0) / (p1 - p0 || 1);
-    return this.padT + (1 - frac) * this.plotH;
-  }
-  yToPrice(y) {
-    const { p0, p1 } = this.currentPriceRange();
-    const frac = (y - this.padT) / (this.plotH || 1);
-    return p1 - frac * (p1 - p0);
-  }
-
-  visibleData() {
-    if (this.isTick()) return this.ticks.filter(t => t.epoch >= this.viewT0 && t.epoch <= this.viewT1);
-    return this.candles.filter(c => c.epoch + this.granSeconds() >= this.viewT0 && c.epoch <= this.viewT1);
-  }
-
-  currentPriceRange() {
-    if (this.priceLock) return this.priceLock;
-    const vis = this.visibleData();
-    if (!vis.length) return { p0: 0, p1: 1 };
-    let hi, lo;
-    if (this.isTick()) { hi = Math.max(...vis.map(t => t.price)); lo = Math.min(...vis.map(t => t.price)); }
-    else { hi = Math.max(...vis.map(c => c.high)); lo = Math.min(...vis.map(c => c.low)); }
-    if (hi === lo) { hi += 1; lo -= 1; }
-    const pad = (hi - lo) * 0.1;
-    return { p0: lo - pad, p1: hi + pad };
-  }
-
-  lastPrice() {
-    if (this.isTick()) return this.ticks.length ? this.ticks[this.ticks.length - 1].price : null;
-    return this.candles.length ? this.candles[this.candles.length - 1].close : null;
-  }
-
-  setDefaultView() {
-    const now = Math.floor(Date.now() / 1000);
-    const span = this.granSeconds() * CANDLE_COUNT;
-    this.viewT0 = now - span; this.viewT1 = now + this.granSeconds() * 3;
-    this.priceLock = null;
-  }
-
-  zoomToRange(t0, t1, padFrac) {
-    const pad = (t1 - t0) * (padFrac ?? 0.15);
-    this.viewT0 = t0 - pad; this.viewT1 = t1 + pad;
-    this.priceLock = null;
-  }
-
-  zoomToPriceRange(p0, p1, padFrac) {
-    const pad = (p1 - p0) * (padFrac ?? 0.25) || (p1 * 0.001);
-    this.priceLock = { p0: p0 - pad, p1: p1 + pad };
-  }
-
-  applyLiveCandle(ohlc) {
-    if (this.isTick()) return;
-    const epoch = Number(ohlc.open_time != null ? ohlc.open_time : ohlc.epoch);
-    const c = { epoch, open: +ohlc.open, high: +ohlc.high, low: +ohlc.low, close: +ohlc.close };
-    const last = this.candles[this.candles.length - 1];
-    if (last && last.epoch === epoch) this.candles[this.candles.length - 1] = c;
-    else if (!last || epoch > last.epoch) {
-      this.candles.push(c);
-      if (this.candles.length > CANDLE_COUNT * 2) this.candles.shift();
-    }
-    eventBus.emit("panel:dataUpdated", { panel: this });
-  }
-
-  applyLiveTick(tick) {
-    const price = Number(tick.quote);
-    const epoch = Number(tick.epoch);
-    if (this.isTick()) {
-      this.ticks.push({ epoch, price });
-      if (this.ticks.length > CANDLE_COUNT * 4) this.ticks.shift();
-    } else if (this.tf.g === "tick10") {
-      let last = this.candles[this.candles.length - 1];
-      if (!last || last._n >= 10) {
-        last = { epoch, open: price, high: price, low: price, close: price, _n: 1 };
-        this.candles.push(last);
-        if (this.candles.length > CANDLE_COUNT * 2) this.candles.shift();
-      } else {
-        last.high = Math.max(last.high, price); last.low = Math.min(last.low, price);
-        last.close = price; last._n++;
-      }
-    }
-    eventBus.emit("panel:dataUpdated", { panel: this });
-  }
+  // Safe to set immediately at boot: these only affect what the analysis
+  // display layer reads (via getAnalysisPanels()), never the interactive
+  // htf/ltf panels — see the design note at the top of this file.
+  AppState.setActiveTimeframe('h1');
+  AppState.setCompareTimeframe('m1');
 }

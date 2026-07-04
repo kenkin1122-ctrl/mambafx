@@ -1,110 +1,117 @@
 /**
- * analysis/candlestickPatterns.js
+ * analysis/candleGenome.js
  *
- * Detectors for the 5 single/two-candle patterns in the Phase 11 spec.
- * Each function scans a candle array and returns every match — pure,
- * side-effect-free, and independently testable (no dependency on
- * AppState, panels, or anything DOM-related), same design principle as
- * the drawing object hierarchy: logic that doesn't need a browser doesn't
- * get one.
+ * "Candle Genome": a compact, deterministic shape fingerprint for a small
+ * sequence of candles (default: the most recent 3) — body ratio, upper/
+ * lower wick ratio, direction, and size relative to recent average range,
+ * per candle. This is genuinely different from analysis/historicalSimilarity.js,
+ * which compares WHOLE-WINDOW trend signatures (12+ candles, direction +
+ * momentum + swing structure). A genome is the fine-grained shape of just
+ * the last few candles — the kind of thing a discretionary trader means by
+ * "this looks like a classic exhaustion candle" or "that's a textbook
+ * absorption bar." Two candles can belong to very different trend contexts
+ * and still have near-identical genomes; that's the point of keeping this
+ * separate from the window-level comparison.
  *
- * Definitions used (standard technical-analysis definitions, stated
- * explicitly since "pattern recognition" is meaningless without a precise
- * rule — these are deterministic rules, not ML/fuzzy matching):
- *
- *   Engulfing:   candle[i]'s body fully contains candle[i-1]'s body, and
- *                the two candles are opposite colors.
- *   Outside Bar: candle[i]'s high/low fully engulfs candle[i-1]'s high/low
- *                (range engulfing, not just body — a superset condition of
- *                candlestick "engulfing" that traders use for structure).
- *   Inside Bar:  candle[i]'s high/low is fully contained within
- *                candle[i-1]'s high/low (the opposite of Outside Bar).
- *   Pin Bar:     one wick is at least `wickRatio` (default 2x) the size of
- *                the body, and the opposite wick is small — signals
- *                rejection at that price level.
- *   Doji:        body size is below `bodyThreshold` (default 10%) of the
- *                candle's full range — open ≈ close, indicating indecision.
+ * Like historicalSimilarity.js, this is fully deterministic — a fixed,
+ * inspectable distance formula in feature space, no ML, no external data.
+ * Every match is a real historical candle sequence that occurred in the
+ * loaded history.
  */
 
-function bodySize(c) { return Math.abs(c.close - c.open); }
-function fullRange(c) { return c.high - c.low; }
-function bodyTop(c) { return Math.max(c.open, c.close); }
-function bodyBot(c) { return Math.min(c.open, c.close); }
-function isBullish(c) { return c.close >= c.open; }
-
-/** @returns {Array<{type:'engulfing', index:number, epoch:number, direction:'bullish'|'bearish'}>} */
-export function detectEngulfing(candles) {
-  const found = [];
-  for (let i = 1; i < candles.length; i++) {
-    const prev = candles[i - 1], cur = candles[i];
-    if (isBullish(cur) === isBullish(prev)) continue; // must be opposite colors
-    const engulfs = bodyTop(cur) >= bodyTop(prev) && bodyBot(cur) <= bodyBot(prev) && bodySize(cur) > bodySize(prev);
-    if (engulfs) {
-      found.push({ type: 'engulfing', index: i, epoch: cur.epoch, direction: isBullish(cur) ? 'bullish' : 'bearish' });
-    }
-  }
-  return found;
+function bodyRatio(c) {
+  const range = c.high - c.low;
+  return range > 0 ? Math.abs(c.close - c.open) / range : 0;
 }
-
-/** @returns {Array<{type:'outsideBar', index:number, epoch:number, direction:'bullish'|'bearish'}>} */
-export function detectOutsideBar(candles) {
-  const found = [];
-  for (let i = 1; i < candles.length; i++) {
-    const prev = candles[i - 1], cur = candles[i];
-    if (cur.high > prev.high && cur.low < prev.low) {
-      found.push({ type: 'outsideBar', index: i, epoch: cur.epoch, direction: isBullish(cur) ? 'bullish' : 'bearish' });
-    }
-  }
-  return found;
+function upperWickRatio(c) {
+  const range = c.high - c.low;
+  return range > 0 ? (c.high - Math.max(c.open, c.close)) / range : 0;
 }
-
-/** @returns {Array<{type:'insideBar', index:number, epoch:number}>} */
-export function detectInsideBar(candles) {
-  const found = [];
-  for (let i = 1; i < candles.length; i++) {
-    const prev = candles[i - 1], cur = candles[i];
-    if (cur.high <= prev.high && cur.low >= prev.low) {
-      found.push({ type: 'insideBar', index: i, epoch: cur.epoch });
-    }
-  }
-  return found;
+function lowerWickRatio(c) {
+  const range = c.high - c.low;
+  return range > 0 ? (Math.min(c.open, c.close) - c.low) / range : 0;
+}
+function direction(c) {
+  return c.close >= c.open ? 1 : -1;
 }
 
 /**
- * @param {number} [wickRatio=2] the dominant wick must be at least this many times the body size
- * @param {number} [maxOppositeWickFrac=0.3] the opposite wick must be at most this fraction of the dominant wick
- * @returns {Array<{type:'pinBar', index:number, epoch:number, direction:'bullish'|'bearish'}>}
+ * @param {Array} candles the full series
+ * @param {number} endIndex exclusive — genome covers candles[endIndex-genomeLen .. endIndex-1]
+ * @param {number} genomeLen
+ * @param {number} avgWindow how many preceding candles define "recent average range" for the relative-size feature
  */
-export function detectPinBar(candles, wickRatio = 2, maxOppositeWickFrac = 0.3) {
-  const found = [];
-  for (let i = 0; i < candles.length; i++) {
-    const c = candles[i];
-    const body = bodySize(c);
-    if (body === 0) continue; // a zero-body pin bar is really a doji — let detectDoji own that case
-    const upperWick = c.high - bodyTop(c);
-    const lowerWick = bodyBot(c) - c.low;
+function buildGenome(candles, endIndex, genomeLen = 3, avgWindow = 20) {
+  if (endIndex - genomeLen < 0) return null;
+  const avgStart = Math.max(0, endIndex - avgWindow);
+  const avgSlice = candles.slice(avgStart, endIndex);
+  if (avgSlice.length < 5) return null;
+  const avgRange = avgSlice.reduce((s, c) => s + (c.high - c.low), 0) / avgSlice.length;
+  if (avgRange === 0) return null;
 
-    if (lowerWick >= body * wickRatio && upperWick <= lowerWick * maxOppositeWickFrac) {
-      // Long lower wick, rejection from below — bullish signal (hammer-type)
-      found.push({ type: 'pinBar', index: i, epoch: c.epoch, direction: 'bullish' });
-    } else if (upperWick >= body * wickRatio && lowerWick <= upperWick * maxOppositeWickFrac) {
-      // Long upper wick, rejection from above — bearish signal (shooting-star-type)
-      found.push({ type: 'pinBar', index: i, epoch: c.epoch, direction: 'bearish' });
-    }
-  }
-  return found;
+  const slice = candles.slice(endIndex - genomeLen, endIndex);
+  return {
+    bodyRatios: slice.map(bodyRatio),
+    upperWicks: slice.map(upperWickRatio),
+    lowerWicks: slice.map(lowerWickRatio),
+    directions: slice.map(direction),
+    relativeSizes: slice.map(c => (c.high - c.low) / avgRange),
+  };
 }
 
-/** @param {number} [bodyThreshold=0.1] body size as a fraction of full range, below which it counts as a doji @returns {Array<{type:'doji', index:number, epoch:number}>} */
-export function detectDoji(candles, bodyThreshold = 0.1) {
-  const found = [];
-  for (let i = 0; i < candles.length; i++) {
-    const c = candles[i];
-    const range = fullRange(c);
-    if (range === 0) continue; // a candle with zero range (open=high=low=close) isn't a meaningful doji signal, just missing/flat data
-    if (bodySize(c) / range <= bodyThreshold) {
-      found.push({ type: 'doji', index: i, epoch: c.epoch });
-    }
+/** Distance between two genomes — lower is more similar. A direction mismatch adds a fixed penalty per candle, since a shape match in the wrong direction isn't really the same genome. */
+function genomeDistance(a, b) {
+  if (!a || !b || a.bodyRatios.length !== b.bodyRatios.length) return Infinity;
+  let sum = 0;
+  for (let i = 0; i < a.bodyRatios.length; i++) {
+    sum += (a.bodyRatios[i] - b.bodyRatios[i]) ** 2;
+    sum += (a.upperWicks[i] - b.upperWicks[i]) ** 2;
+    sum += (a.lowerWicks[i] - b.lowerWicks[i]) ** 2;
+    sum += Math.min(1, (a.relativeSizes[i] - b.relativeSizes[i]) ** 2 / 4);
+    if (a.directions[i] !== b.directions[i]) sum += 0.5;
   }
-  return found;
+  return Math.sqrt(sum);
+}
+
+/**
+ * @param {Array<{epoch:number,open:number,high:number,low:number,close:number}>} candles
+ * @param {{genomeLen?:number, lookAhead?:number, maxDistance?:number}} [opts]
+ * @returns {{sampleSize:number, continuedPct:number, reversedPct:number, currentDirection:1|-1|null}|null}
+ */
+export function findGenomeAnalogs(candles, opts = {}) {
+  const genomeLen = opts.genomeLen ?? 3;
+  const lookAhead = opts.lookAhead ?? 6;
+  const maxDistance = opts.maxDistance ?? 0.6;
+
+  if (!candles || candles.length < genomeLen + 30 + lookAhead) return null;
+
+  const currentGenome = buildGenome(candles, candles.length, genomeLen);
+  if (!currentGenome) return null;
+  const currentDirection = currentGenome.directions[currentGenome.directions.length - 1];
+
+  let continued = 0, reversed = 0, neutral = 0;
+  for (let end = genomeLen + 20; end <= candles.length - lookAhead; end++) {
+    if (end > candles.length - genomeLen) continue;
+    const g = buildGenome(candles, end, genomeLen);
+    if (!g) continue;
+    if (genomeDistance(currentGenome, g) > maxDistance) continue;
+
+    const before = candles[end - 1].close;
+    const after = candles[Math.min(end - 1 + lookAhead, candles.length - 1)].close;
+    const changeFrac = before !== 0 ? (after - before) / before : 0;
+    const genomeDir = g.directions[g.directions.length - 1];
+    const continuedMove = (genomeDir === 1 && changeFrac > 0.001) || (genomeDir === -1 && changeFrac < -0.001);
+    const reversedMove = (genomeDir === 1 && changeFrac < -0.001) || (genomeDir === -1 && changeFrac > 0.001);
+    if (continuedMove) continued++;
+    else if (reversedMove) reversed++;
+    else neutral++;
+  }
+
+  const sampleSize = continued + reversed + neutral;
+  return {
+    sampleSize, continued, reversed, neutral,
+    continuedPct: sampleSize ? Math.round((continued / sampleSize) * 100) : 0,
+    reversedPct: sampleSize ? Math.round((reversed / sampleSize) * 100) : 0,
+    currentDirection,
+  };
 }

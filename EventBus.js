@@ -42,8 +42,12 @@ import { renderDrawing, drawSelectionHandles } from '../drawing/render.js';
 import { replayCutoffEpoch } from './replayManager.js';
 
 // ── Dirty-flag + rAF scheduler ──────────────────────────────────────────
-const bgDirty = { htf: false, ltf: false };
-const ovDirty = { htf: false, ltf: false };
+// Keyed dynamically by whatever panels are actually registered — works
+// correctly whether that's the original 2 (htf/ltf) or the new 10-panel
+// MTF Dashboard, with no special-casing. A key simply starts undefined
+// (falsy, same as `false`) until something marks it dirty.
+const bgDirty = {};
+const ovDirty = {};
 let rafHandle = null;
 
 function scheduleFrame() {
@@ -53,8 +57,8 @@ function scheduleFrame() {
 
 function runFrame() {
   rafHandle = null;
-  for (const key of ['htf', 'ltf']) {
-    const panel = AppState.panels[key];
+  for (const key of Object.keys(AppState.timeframePanels)) {
+    const panel = AppState.timeframePanels[key];
     if (!panel) continue;
     if (bgDirty[key]) { paintBackground(panel); bgDirty[key] = false; }
     if (ovDirty[key]) { paintOverlay(panel); ovDirty[key] = false; }
@@ -62,17 +66,17 @@ function runFrame() {
   eventBus.emit('render:complete');
 }
 
-/** Mark a panel's background layer (or both, if no key given) for repaint on the next frame. */
+/** Mark a panel's background layer (or every registered panel, if no key given) for repaint on the next frame. */
 export function invalidateBackground(panelKey) {
   if (panelKey) bgDirty[panelKey] = true;
-  else { bgDirty.htf = true; bgDirty.ltf = true; }
+  else { for (const k of Object.keys(AppState.timeframePanels)) bgDirty[k] = true; }
   scheduleFrame();
 }
 
-/** Mark a panel's overlay layer (or both) for repaint on the next frame. */
+/** Mark a panel's overlay layer (or every registered panel) for repaint on the next frame. */
 export function invalidateOverlay(panelKey) {
   if (panelKey) ovDirty[panelKey] = true;
-  else { ovDirty.htf = true; ovDirty.ltf = true; }
+  else { for (const k of Object.keys(AppState.timeframePanels)) ovDirty[k] = true; }
   scheduleFrame();
 }
 
