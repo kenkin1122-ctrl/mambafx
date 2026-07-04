@@ -488,16 +488,16 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   width:32px; height:32px; display:flex; align-items:center; justify-content:center;
   background:var(--mtf-panel); border:1px solid var(--mtf-line); border-radius:8px; color:var(--mtf-muted);
   cursor:pointer; font-size:15px; transition:all .12s; flex-shrink:0;
-}#page-mtf .tool-btn:hover{color:var(--mtf-text); border-color:#2a3650}#page-mtf .tool-btn.active{color:#04101a; background:var(--mtf-accent); border-color:var(--mtf-accent)}#page-mtf .tool-sep{width:1px; height:22px; background:var(--mtf-line); margin:0 6px; flex-shrink:0}#page-mtf .tool-toggle{
+}#page-mtf .tool-btn:hover{color:var(--mtf-text); border-color:#2a3650}#page-mtf .tool-btn.active{color:#04101a; background:var(--mtf-accent); border-color:var(--mtf-accent)}#page-mtf .tool-btn:disabled{opacity:.3; cursor:not-allowed; pointer-events:none}#page-mtf .tool-sep{width:1px; height:22px; background:var(--mtf-line); margin:0 6px; flex-shrink:0}#page-mtf .zone-preset-row{display:flex; align-items:center; gap:8px; padding:7px 16px; background:var(--mtf-panel2); border-bottom:1px solid var(--mtf-line); flex-wrap:wrap}#page-mtf .zone-preset-label{font-size:9px; letter-spacing:.12em; text-transform:uppercase; color:var(--mtf-muted); flex-shrink:0}#page-mtf #mtfZonePresets{display:flex; gap:6px; flex-wrap:wrap}#page-mtf .zone-preset-btn{display:inline-flex; align-items:center; gap:6px; font-family:inherit; font-size:10.5px; font-weight:600; padding:5px 10px 5px 8px; border-radius:999px; border:1px solid var(--mtf-line); background:var(--mtf-panel); color:var(--mtf-muted); cursor:pointer; transition:all .12s}#page-mtf .zone-preset-btn:hover{color:var(--mtf-text); border-color:#2a3650}#page-mtf .zone-preset-btn.active{color:var(--mtf-text); border-color:var(--mtf-accent2); background:rgba(167,139,250,.1)}#page-mtf .zone-preset-btn .dot{width:8px; height:8px; border-radius:3px; flex-shrink:0}#page-mtf .tool-toggle{
   display:flex; align-items:center; gap:6px; font-size:10.5px; color:var(--mtf-muted); cursor:pointer;
   padding:6px 10px; border-radius:7px; border:1px solid transparent;
 }#page-mtf .tool-toggle.on{color:var(--mtf-accent); border-color:rgba(79,178,255,.3); background:rgba(79,178,255,.06)}#page-mtf .tool-toggle input{display:none}#page-mtf .wrap{flex:1; display:grid; grid-template-columns:220px 1fr 1fr 250px; min-height:0}#page-mtf .manager{background:var(--mtf-panel2); border-right:1px solid var(--mtf-line); display:flex; flex-direction:column; min-height:0}#page-mtf .manager h3{font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--mtf-muted); padding:12px 14px 8px}#page-mtf .manager-list{flex:1; overflow-y:auto; padding:0 8px 8px}#page-mtf .dr-row{
   display:flex; align-items:center; gap:7px; padding:7px 8px; border-radius:7px; cursor:pointer;
   font-size:11px; color:var(--mtf-text); margin-bottom:2px; border:1px solid transparent;
-}#page-mtf .dr-row:hover{background:var(--mtf-panel)}#page-mtf .dr-row.sel{background:rgba(79,178,255,.1); border-color:rgba(79,178,255,.35)}#page-mtf .dr-row .sw{width:10px;height:10px;border-radius:3px;flex-shrink:0}#page-mtf .dr-row .nm{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}#page-mtf .dr-row .ic{color:var(--mtf-muted); font-size:11px; width:14px; text-align:center; flex-shrink:0}#page-mtf .dr-row .ic:hover{color:var(--mtf-text)}#page-mtf .manager-empty{color:var(--mtf-muted); font-size:11px; padding:14px; line-height:1.6; text-align:center}#page-mtf .manager-foot{padding:9px 14px; border-top:1px solid var(--mtf-line); font-size:9.5px; color:var(--mtf-muted); line-height:1.6}#page-mtf .panel{display:flex; flex-direction:column; min-height:0; border-right:1px solid var(--mtf-line); position:relative}#page-mtf .panel-head{
+}#page-mtf .dr-row:hover{background:var(--mtf-panel)}#page-mtf .dr-row.sel{background:rgba(79,178,255,.1); border-color:rgba(79,178,255,.35)}#page-mtf .dr-row .sw{width:10px;height:10px;border-radius:3px;flex-shrink:0}#page-mtf .dr-row .nm{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}#page-mtf .dr-row .ic{color:var(--mtf-muted); font-size:11px; width:14px; text-align:center; flex-shrink:0}#page-mtf .dr-row .ic:hover{color:var(--mtf-text)}#page-mtf .manager-empty{color:var(--mtf-muted); font-size:11px; padding:14px; line-height:1.6; text-align:center}#page-mtf .manager-foot{padding:9px 14px; border-top:1px solid var(--mtf-line); font-size:9.5px; color:var(--mtf-muted); line-height:1.6}#page-mtf .manager-tabs{display:flex; border-bottom:1px solid var(--mtf-line); flex-shrink:0}#page-mtf .manager-tab{flex:1; background:transparent; border:none; color:var(--mtf-muted); font-family:inherit; font-size:10px; letter-spacing:.1em; text-transform:uppercase; font-weight:700; padding:11px 6px; cursor:pointer; border-bottom:2px solid transparent}#page-mtf .manager-tab:hover{color:var(--mtf-text)}#page-mtf .manager-tab.active{color:var(--mtf-accent); border-bottom-color:var(--mtf-accent)}#page-mtf #mtfManagerTabDrawings, #page-mtf #mtfManagerTabAnalysis, #page-mtf #mtfManagerTabIntelligence{flex:1; display:flex; flex-direction:column; min-height:0; overflow-y:auto}#page-mtf .smi-body{flex:1; overflow-y:auto}#page-mtf .smi-section{padding:14px; border-bottom:1px solid var(--mtf-line)}#page-mtf .smi-section:last-child{border-bottom:none}#page-mtf .smi-bias{font-size:22px; font-weight:800; text-align:center; letter-spacing:-.01em}#page-mtf .smi-bias-sub{font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:var(--mtf-muted); text-align:center; margin-top:3px}#page-mtf .smi-title{font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--mtf-muted); font-weight:700; margin-bottom:9px}#page-mtf .smi-prose{font-size:12px; line-height:1.75; color:var(--mtf-text); margin-bottom:8px}#page-mtf .smi-prose:last-child{margin-bottom:0}#page-mtf .smi-verdict{font-size:17px; font-weight:800; margin-bottom:8px}#page-mtf .smi-list{padding-left:18px; font-size:12px; line-height:1.85; color:var(--mtf-text); margin:0}#page-mtf .smi-list-risk li{color:#ffb26b}#page-mtf .smi-tf-rung{padding:9px 11px; background:var(--mtf-panel); border-radius:8px; border:1px solid var(--mtf-line)}#page-mtf .smi-tf-label{font-size:10px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:var(--mtf-accent2); margin-bottom:4px}#page-mtf .smi-tf-text{font-size:11.5px; line-height:1.55; color:var(--mtf-text)}#page-mtf .smi-tf-arrow{text-align:center; color:var(--mtf-muted); font-size:14px; padding:3px 0}#page-mtf .smi-disclaimer{padding:12px 14px; font-size:9.5px; color:var(--mtf-muted); line-height:1.6; font-style:italic}#page-mtf .smi-prob-row{display:flex; gap:8px; margin-bottom:10px}#page-mtf .smi-prob-item{flex:1; text-align:center; background:var(--mtf-panel); border:1px solid var(--mtf-line); border-radius:8px; padding:10px 4px}#page-mtf .smi-prob-val{font-size:20px; font-weight:800}#page-mtf .smi-prob-lab{font-size:9px; letter-spacing:.08em; text-transform:uppercase; color:var(--mtf-muted); margin-top:2px}#page-mtf .analysis-section{padding:12px 14px; border-bottom:1px solid var(--mtf-line)}#page-mtf .analysis-section:last-child{flex:1; min-height:0; display:flex; flex-direction:column; overflow-y:auto}#page-mtf .analysis-section-title{font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--mtf-muted); margin-bottom:8px; font-weight:700}#page-mtf .stat-row{display:flex; justify-content:space-between; padding:3px 0; font-size:11px}#page-mtf .stat-row .k{color:var(--mtf-muted)}#page-mtf .stat-row .v{font-weight:700; font-variant-numeric:tabular-nums}#page-mtf .finding-row{padding:7px 8px; border-radius:6px; cursor:pointer; margin-bottom:3px; border:1px solid transparent}#page-mtf .finding-row:hover{background:var(--mtf-panel); border-color:var(--mtf-line)}#page-mtf .finding-row .f-head{display:flex; align-items:center; gap:6px; font-size:11px; font-weight:700; margin-bottom:2px}#page-mtf .finding-row .f-desc{font-size:9.5px; color:var(--mtf-muted); line-height:1.5}#page-mtf .finding-dot{width:7px; height:7px; border-radius:2px; flex-shrink:0}#page-mtf .panel{display:flex; flex-direction:column; min-height:0; border-right:1px solid var(--mtf-line); position:relative}#page-mtf .panel-head{
   display:flex; align-items:center; gap:10px; padding:8px 12px; background:var(--mtf-panel);
   border-bottom:1px solid var(--mtf-line); flex-shrink:0; flex-wrap:wrap;
-}#page-mtf .panel-head .tag{font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:var(--mtf-accent2); font-weight:700}#page-mtf .panel-head .px{font-size:15px; font-weight:800; font-variant-numeric:tabular-nums}#page-mtf .panel-head .px.up{color:var(--mtf-up)}#page-mtf .panel-head .px.dn{color:var(--mtf-down)}#page-mtf .panel-head .meta{font-size:10px; color:var(--mtf-muted); margin-left:auto; display:flex; gap:10px; align-items:center}#page-mtf .chart-canvas-wrap{flex:1; position:relative; min-height:0; background:#080c15}#page-mtf canvas{display:block; width:100%; height:100%; cursor:crosshair}#page-mtf .of-strip{
+}#page-mtf .panel-head .tag{font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:var(--mtf-accent2); font-weight:700}#page-mtf .panel-head .px{font-size:15px; font-weight:800; font-variant-numeric:tabular-nums}#page-mtf .panel-head .px.up{color:var(--mtf-up)}#page-mtf .panel-head .px.dn{color:var(--mtf-down)}#page-mtf .panel-head .meta{font-size:10px; color:var(--mtf-muted); margin-left:auto; display:flex; gap:10px; align-items:center}#page-mtf .chart-canvas-wrap{flex:1; position:relative; min-height:0; background:#080c15}#page-mtf canvas{display:block; position:absolute; top:0; left:0; width:100%; height:100%;}#page-mtf canvas[id$="Canvas"]{cursor:default;}#page-mtf canvas[id$="CanvasOv"]{cursor:crosshair;}#page-mtf .of-strip{
   display:grid; grid-template-columns:repeat(5,1fr); gap:1px; background:var(--mtf-line);
   border-top:1px solid var(--mtf-line); flex-shrink:0;
 }#page-mtf .of-cell{background:var(--mtf-panel2); padding:6px 10px}#page-mtf .of-cell .lab{font-size:8px; letter-spacing:.1em; text-transform:uppercase; color:var(--mtf-muted); margin-bottom:2px}#page-mtf .of-cell .val{font-size:12px; font-weight:700; font-variant-numeric:tabular-nums}#page-mtf .of-up{color:var(--mtf-up)}#page-mtf .of-dn{color:var(--mtf-down)}#page-mtf .of-neu{color:var(--mtf-text)}#page-mtf .of-warn{color:var(--mtf-warn)}#page-mtf .decomp-banner{
@@ -521,7 +521,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   font-family:inherit; font-size:11px; font-weight:700; padding:9px 0; border-radius:8px; cursor:pointer;
   border:1px solid var(--mtf-line); background:var(--mtf-panel); color:var(--mtf-text);
 }#page-mtf .pf-btn:hover{border-color:#2a3650}#page-mtf .pf-btn.danger{border-color:rgba(255,77,106,.4); color:var(--mtf-down)}#page-mtf .pf-btn.danger:hover{background:rgba(255,77,106,.08)}#page-mtf .pf-btn.wide{grid-column:1/-1}#page-mtf .type-badge{display:inline-flex; align-items:center; gap:6px; font-size:10px; font-weight:700; color:var(--mtf-accent2);
-  background:rgba(167,139,250,.1); border:1px solid rgba(167,139,250,.3); padding:4px 10px; border-radius:999px; margin-bottom:14px}#page-mtf .hint-foot{font-size:9px; color:#2a3650; text-align:center; padding:6px}
+  background:rgba(167,139,250,.1); border:1px solid rgba(167,139,250,.3); padding:4px 10px; border-radius:999px; margin-bottom:14px}#page-mtf .analysis-panel{display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--mtf-line); border-top:1px solid var(--mtf-line); max-height:170px; flex-shrink:0}#page-mtf .analysis-col{background:var(--mtf-panel2); display:flex; flex-direction:column; min-height:0}#page-mtf .analysis-head{font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--mtf-muted); padding:7px 12px; border-bottom:1px solid var(--mtf-line); flex-shrink:0}#page-mtf .finding-list{flex:1; overflow-y:auto; padding:4px 8px; min-height:0}#page-mtf .finding-row{display:flex; align-items:center; gap:8px; padding:5px 6px; border-radius:6px; cursor:pointer; font-size:11px}#page-mtf .finding-row:hover{background:var(--mtf-panel)}#page-mtf .finding-icon{width:16px; text-align:center; flex-shrink:0; font-size:11px}#page-mtf .finding-label{flex:1; color:var(--mtf-text)}#page-mtf .finding-label.up{color:var(--mtf-up)}#page-mtf .finding-label.down{color:var(--mtf-down)}#page-mtf .finding-time{color:var(--mtf-muted); font-size:9.5px; font-variant-numeric:tabular-nums; flex-shrink:0}#page-mtf .finding-empty{color:var(--mtf-muted); font-size:11px; padding:12px; text-align:center}#page-mtf .hint-foot{font-size:9px; color:#2a3650; text-align:center; padding:6px}
 @keyframes mtfPulse{0%{box-shadow:0 0 0 0 rgba(31,223,155,.45)}70%{box-shadow:0 0 0 7px rgba(31,223,155,0)}100%{box-shadow:0 0 0 0 rgba(31,223,155,0)}}
 </style>
 </head>
@@ -2238,6 +2238,9 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   <label class="tool-toggle" id="mtfSnapToggle"><input type="checkbox" checked><span>🧲 Snap to H/L</span></label>
   <label class="tool-toggle" id="mtfLockToolToggle"><input type="checkbox"><span>📌 Keep tool active</span></label>
   <div class="tool-sep"></div>
+  <button class="tool-btn" id="mtfUndoBtn" title="Undo (Ctrl+Z)" disabled>↶</button>
+  <button class="tool-btn" id="mtfRedoBtn" title="Redo (Ctrl+Y)" disabled>↷</button>
+  <div class="tool-sep"></div>
   <div class="hdr-field"><label>Scope for new drawings</label>
     <select id="mtfNewScopeSel">
       <option value="all" selected>All timeframes</option>
@@ -2246,12 +2249,76 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   </div>
 </div>
 
+<div class="zone-preset-row" id="mtfZonePresetRow">
+  <span class="zone-preset-label">Zone presets</span>
+  <div id="mtfZonePresets"></div>
+</div>
+
+<div class="zone-preset-row" id="mtfReplayBar">
+  <button class="tool-btn" id="mtfReplayToggle" title="Toggle Replay Mode — step or play back through loaded history">⏱ Replay Mode</button>
+  <div id="mtfReplayControls" style="display:none; align-items:center; gap:6px">
+    <button class="tool-btn" id="mtfReplayStepBack" title="Step Back">⏮</button>
+    <button class="tool-btn" id="mtfReplayPlayPause" title="Play / Pause">▶</button>
+    <button class="tool-btn" id="mtfReplayStepForward" title="Step Forward">⏭</button>
+    <select id="mtfReplaySpeedSel" title="Replay Speed">
+      <option value="0.5">0.5x</option>
+      <option value="1" selected>1x</option>
+      <option value="2">2x</option>
+      <option value="4">4x</option>
+      <option value="8">8x</option>
+    </select>
+    <span id="mtfReplayStatus" class="zone-preset-label"></span>
+    <button class="tool-btn" id="mtfReplayExit" title="Exit Replay">✕ Exit</button>
+  </div>
+</div>
+
+<div class="zone-preset-row" id="mtfWorkspaceBar">
+  <span class="zone-preset-label">Workspace</span>
+  <select id="mtfWorkspaceSel" style="min-width:160px"></select>
+  <button class="tool-btn" id="mtfWorkspaceSaveBtn" title="Save current symbol, timeframes, view, and drawings as a named workspace">💾 Save</button>
+  <button class="tool-btn" id="mtfWorkspaceLoadBtn" title="Restore the selected workspace">📂 Load</button>
+  <button class="tool-btn" id="mtfWorkspaceDeleteBtn" title="Delete the selected workspace">🗑</button>
+</div>
+
 <div class="wrap">
   <!-- Drawing Manager -->
   <div class="manager">
-    <h3>Drawing Manager</h3>
-    <div class="manager-list" id="mtfManagerList"></div>
-    <div class="manager-foot">Click an item to select it and zoom both charts to its price/time range. Drawings are shared across every timeframe by real price &amp; time coordinates — nothing is redrawn per panel.</div>
+    <div class="manager-tabs">
+      <button class="manager-tab active" id="mtfTabDrawings">Drawings</button>
+      <button class="manager-tab" id="mtfTabAnalysis">Analysis</button>
+      <button class="manager-tab" id="mtfTabIntelligence">🧠 Intelligence</button>
+    </div>
+    <div id="mtfManagerTabDrawings">
+      <div class="manager-list" id="mtfManagerList"></div>
+      <div class="manager-foot">Click an item to select it and zoom both charts to its price/time range. Drawings are shared across every timeframe by real price &amp; time coordinates — nothing is redrawn per panel.</div>
+    </div>
+    <div id="mtfManagerTabAnalysis" style="display:none">
+      <div class="analysis-section">
+        <button class="pf-btn wide" id="mtfRunAnalysisBtn">🔎 Scan HTF chart for patterns</button>
+        <div class="manager-foot" style="margin-top:6px">Scans the candles currently visible on the HTF chart. Deterministic rule-based detection (Engulfing, BOS, CHoCH, FVG, Order Block, etc) — not a predictive signal.</div>
+      </div>
+      <div class="analysis-section">
+        <div class="analysis-section-title">Statistics</div>
+        <div class="manager-foot" id="mtfStatsSource" style="margin-bottom:6px">Select a zone to see stats for it, or run a scan for the visible range.</div>
+        <div id="mtfAnalysisStats"></div>
+      </div>
+      <div class="analysis-section">
+        <div class="analysis-section-title">Order Flow</div>
+        <div id="mtfAnalysisOrderFlow"></div>
+      </div>
+      <div class="analysis-section">
+        <div class="analysis-section-title">Market Analysis</div>
+        <div class="manager-foot" style="margin-bottom:6px">Deterministic rule-based classification — not a prediction. Confidence reflects how strongly the underlying stats/patterns satisfy each rule's own thresholds.</div>
+        <div class="manager-list" id="mtfRuleEngineResults" style="flex:none; max-height:220px"></div>
+      </div>
+      <div class="analysis-section">
+        <div class="analysis-section-title">Detected Patterns</div>
+        <div class="manager-list" id="mtfAnalysisFindings"></div>
+      </div>
+    </div>
+    <div id="mtfManagerTabIntelligence" style="display:none">
+      <div id="mtfIntelligenceBody" class="smi-body"></div>
+    </div>
   </div>
 
   <!-- HTF Panel -->
@@ -2265,6 +2332,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <div class="chart-canvas-wrap">
       <div class="decomp-banner" id="mtfHtfDecompBanner"></div>
       <canvas id="mtfHtfCanvas"></canvas>
+      <canvas id="mtfHtfCanvasOv"></canvas>
       <div class="candle-menu" id="mtfHtfCandleMenu"></div>
     </div>
     <div class="of-strip" id="mtfHtfOF"></div>
@@ -2280,10 +2348,11 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     </div>
     <div class="chart-canvas-wrap">
       <div class="decomp-banner" id="mtfLtfDecompBanner">
-        <span>🔬 Decomposed view — showing only candles inside the selected HTF candle</span>
+        <span id="mtfLtfDecompText">🔬 Decomposed view</span>
         <button onclick="mtfExitDecomposition()">Exit ✕</button>
       </div>
       <canvas id="mtfLtfCanvas"></canvas>
+      <canvas id="mtfLtfCanvasOv"></canvas>
       <div class="candle-menu" id="mtfLtfCandleMenu"></div>
     </div>
     <div class="of-strip" id="mtfLtfOF"></div>
@@ -2295,6 +2364,17 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <div class="props-body" id="mtfPropsBody">
       <div class="props-empty">Select a drawing (click it on a chart or in the Drawing Manager) to edit its label, color, opacity, thickness, scope, lock state and notes.<br><br>Or pick a tool above and draw directly on either chart — every object is stored by real price &amp; time, so it appears correctly positioned on both panels automatically.</div>
     </div>
+  </div>
+</div>
+
+<div class="analysis-panel" id="mtfAnalysisPanel">
+  <div class="analysis-col">
+    <div class="analysis-head">🔎 HTF Pattern Findings</div>
+    <div class="finding-list" id="mtfHtfFindings"><div class="finding-empty">Waiting for candle data…</div></div>
+  </div>
+  <div class="analysis-col">
+    <div class="analysis-head">🔎 LTF Pattern Findings</div>
+    <div class="finding-list" id="mtfLtfFindings"><div class="finding-empty">Waiting for candle data…</div></div>
   </div>
 </div>
 
@@ -12193,1147 +12273,6 @@ try {
 })();
 </script>
 
-<script>
-(function(){
-
-"use strict";
-// =====================================================================
-// CONSTANTS
-// =====================================================================
-const APP_ID = 1089;
-const WS_ENDPOINTS = [
-  `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`,
-  `wss://ws.binaryws.com/websockets/v3?app_id=${APP_ID}`,
-];
-const SYMBOLS = {
-  "R_10":"Volatility 10", "R_25":"Volatility 25", "R_50":"Volatility 50", "R_75":"Volatility 75", "R_100":"Volatility 100",
-  "1HZ10V":"Volatility 10 (1s)", "1HZ25V":"Volatility 25 (1s)", "1HZ50V":"Volatility 50 (1s)",
-  "1HZ75V":"Volatility 75 (1s)", "1HZ100V":"Volatility 100 (1s)",
-};
-const HTF_TFS = [
-  { key:"1800",  g:1800,  label:"30 min" },
-  { key:"3600",  g:3600,  label:"1 Hour" },
-  { key:"7200",  g:7200,  label:"2 Hour" },
-  { key:"14400", g:14400, label:"4 Hour" },
-  { key:"28800", g:28800, label:"8 Hour" },
-];
-const LTF_TFS = [
-  { key:"tick1",  g:"tick1",  label:"1 Tick Line" },
-  { key:"tick10", g:"tick10", label:"10 Tick" },
-  { key:"60",     g:60,       label:"1 min" },
-  { key:"300",    g:300,      label:"5 min" },
-  { key:"900",    g:900,      label:"15 min" },
-];
-const CANDLE_COUNT = 200;
-const HANDLE_R = 5;
-const HIT_PX = 7;
-const COLORS = ["#4fb2ff","#1fdf9b","#ff4d6a","#ffc857","#a78bfa","#fb923c","#f472b6","#94a3b8","#ffffff"];
-
-const $ = id => document.getElementById(id);
-
-// =====================================================================
-// STATE
-// =====================================================================
-let SYMBOL = "1HZ100V";
-let ws = null, reconnectTimer = null, endpointIdx = 0;
-let reqSeq = 1000;
-const pending = {};           // req_id -> callback(msg)
-
-let drawings = [];            // shared objects, price/time coordinate based
-let selectedId = null;
-let activeTool = "select";
-let snapEnabled = true, lockTool = false;
-let crosshair = null;         // { t, source }
-let draft = null;             // in-progress new drawing
-let drag = null;               // { mode:'move'|'resize'|'pan'|'brush', ... }
-
-const panels = {}; // filled below with two Panel instances
-
-// =====================================================================
-// PERSISTENCE
-// =====================================================================
-function storeKey(sym){ return "mtf_drawings_v2_" + sym; }
-function saveDrawings(){
-  try { localStorage.setItem(storeKey(SYMBOL), JSON.stringify(drawings)); } catch(_){}
-}
-function loadDrawings(sym){
-  try {
-    const raw = localStorage.getItem(storeKey(sym));
-    return raw ? JSON.parse(raw) : [];
-  } catch(_){ return []; }
-}
-let saveTimer = null;
-function scheduleSave(){ clearTimeout(saveTimer); saveTimer = setTimeout(saveDrawings, 300); }
-
-// =====================================================================
-// WEBSOCKET
-// =====================================================================
-function connect(){
-  setConn("connecting");
-  const url = WS_ENDPOINTS[endpointIdx % WS_ENDPOINTS.length];
-  try { ws = new WebSocket(url); } catch(e){ setConn("dead"); endpointIdx++; scheduleReconnect(); return; }
-
-  const timeout = setTimeout(() => {
-    if (ws && ws.readyState !== WebSocket.OPEN){ try{ws.close();}catch(_){} endpointIdx++; setConn("dead"); scheduleReconnect(); }
-  }, 8000);
-
-  ws.onopen = () => {
-    clearTimeout(timeout);
-    setConn("live");
-    ws.send(JSON.stringify({ forget_all: ["candles","ticks"] }));
-    requestPanelData(panels.htf);
-    requestPanelData(panels.ltf);
-  };
-  ws.onmessage = ev => {
-    let msg; try { msg = JSON.parse(ev.data); } catch(_){ return; }
-    if (msg.req_id && pending[msg.req_id]){ pending[msg.req_id](msg); if (!msg.subscription) delete pending[msg.req_id]; return; }
-    routeUnsolicited(msg);
-  };
-  ws.onerror = () => setConn("dead");
-  ws.onclose = () => { setConn("dead"); scheduleReconnect(); };
-}
-function scheduleReconnect(){ if (reconnectTimer) clearTimeout(reconnectTimer); reconnectTimer = setTimeout(connect, 3000); }
-function setConn(state){
-  const dot = $("mtfConnDot"), txt = $("mtfConnText");
-  dot.className = "d" + (state==="live"?" on":"");
-  txt.textContent = state==="live" ? "Live" : state==="dead" ? "Reconnecting…" : "Connecting…";
-}
-function routeUnsolicited(msg){
-  if (msg.error) return;
-  if (msg.msg_type === "ohlc" && msg.ohlc){
-    const p = [panels.htf, panels.ltf].find(p => String(p.tf.g) === String(msg.ohlc.granularity));
-    if (p) p.applyLiveCandle(msg.ohlc);
-  }
-  if (msg.msg_type === "tick" && msg.tick && msg.tick.symbol === SYMBOL){
-    [panels.htf, panels.ltf].forEach(p => p.applyLiveTick(msg.tick));
-  }
-}
-
-// =====================================================================
-// PANEL — one chart (HTF or LTF), fully self-contained: data, view,
-// coordinate transforms, rendering, and mouse interaction.
-// =====================================================================
-class Panel {
-  constructor(id, side, tfList){
-    this.id = id; this.side = side; this.tfList = tfList;
-    this.tf = tfList[side === "htf" ? 1 : 2]; // default 1H / 1min
-    this.canvas = $(id + "Canvas");
-    this.ctx = this.canvas.getContext("2d");
-    this.candles = [];        // {epoch,open,high,low,close}
-    this.ticks = [];          // for tick1 line mode: {epoch,price}
-    this.viewT0 = null; this.viewT1 = null;   // visible time window
-    this.priceLock = null;                    // {p0,p1} if user manually panned price
-    this.decompRange = null;                  // {t0,t1} when in candle-decomposition mode
-    this.padL = 8; this.padR = 60; this.padT = 14; this.padB = 26;
-    this._resizeObserver();
-    this.canvas.addEventListener("mousedown", e => onCanvasDown(this, e));
-    this.canvas.addEventListener("mousemove", e => onCanvasMove(this, e));
-    window.addEventListener("mouseup", e => onCanvasUp(this, e));
-    this.canvas.addEventListener("wheel", e => onCanvasWheel(this, e), { passive:false });
-    this.canvas.addEventListener("dblclick", e => onCanvasDblClick(this, e));
-    this.canvas.addEventListener("contextmenu", e => onCanvasContext(this, e));
-    this.canvas.addEventListener("mouseleave", () => { crosshair = null; drawAll(); });
-  }
-  _resizeObserver(){
-    const ro = new ResizeObserver(() => this.fitCanvas());
-    ro.observe(this.canvas.parentElement);
-    this.fitCanvas();
-  }
-  fitCanvas(){
-    const r = this.canvas.parentElement.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    this.canvas.width = Math.max(50, r.width) * dpr;
-    this.canvas.height = Math.max(50, r.height) * dpr;
-    this.canvas.style.width = r.width + "px";
-    this.canvas.style.height = r.height + "px";
-    this.ctx.setTransform(dpr,0,0,dpr,0,0);
-    this.W = r.width; this.H = r.height;
-    this.plotW = this.W - this.padL - this.padR;
-    this.plotH = this.H - this.padT - this.padB;
-    if (typeof drawAll === "function" && panels.htf && panels.ltf) drawAll();
-  }
-  isTick(){ return this.tf.g === "tick1"; }
-  granSeconds(){
-    if (this.tf.g === "tick1") return 1;
-    if (this.tf.g === "tick10") return 10;
-    return this.tf.g;
-  }
-  // ── coordinate transforms (time in epoch seconds, price in quote units) ──
-  timeToX(t){
-    if (this.viewT0 == null) return this.padL;
-    const frac = (t - this.viewT0) / (this.viewT1 - this.viewT0 || 1);
-    return this.padL + frac * this.plotW;
-  }
-  xToTime(x){
-    if (this.viewT0 == null) return 0;
-    const frac = (x - this.padL) / (this.plotW || 1);
-    return this.viewT0 + frac * (this.viewT1 - this.viewT0);
-  }
-  priceToY(p){
-    const { p0, p1 } = this.currentPriceRange();
-    const frac = (p - p0) / (p1 - p0 || 1);
-    return this.padT + (1 - frac) * this.plotH;
-  }
-  yToPrice(y){
-    const { p0, p1 } = this.currentPriceRange();
-    const frac = (y - this.padT) / (this.plotH || 1);
-    return p1 - frac * (p1 - p0);
-  }
-  visibleData(){
-    if (this.isTick()) return this.ticks.filter(t => t.epoch >= this.viewT0 && t.epoch <= this.viewT1);
-    return this.candles.filter(c => c.epoch + this.granSeconds() >= this.viewT0 && c.epoch <= this.viewT1);
-  }
-  currentPriceRange(){
-    if (this.priceLock) return this.priceLock;
-    const vis = this.visibleData();
-    if (!vis.length) return { p0:0, p1:1 };
-    let hi, lo;
-    if (this.isTick()){ hi = Math.max(...vis.map(t=>t.price)); lo = Math.min(...vis.map(t=>t.price)); }
-    else { hi = Math.max(...vis.map(c=>c.high)); lo = Math.min(...vis.map(c=>c.low)); }
-    if (hi === lo){ hi += 1; lo -= 1; }
-    const pad = (hi - lo) * 0.1;
-    return { p0: lo - pad, p1: hi + pad };
-  }
-  lastPrice(){
-    if (this.isTick()) return this.ticks.length ? this.ticks[this.ticks.length-1].price : null;
-    return this.candles.length ? this.candles[this.candles.length-1].close : null;
-  }
-  setDefaultView(){
-    const now = Math.floor(Date.now()/1000);
-    const span = this.granSeconds() * CANDLE_COUNT;
-    this.viewT0 = now - span; this.viewT1 = now + this.granSeconds() * 3;
-    this.priceLock = null;
-  }
-  zoomToRange(t0, t1, padFrac){
-    const pad = (t1 - t0) * (padFrac ?? 0.15);
-    this.viewT0 = t0 - pad; this.viewT1 = t1 + pad;
-    this.priceLock = null;
-  }
-  zoomToPriceRange(p0, p1, padFrac){
-    const pad = (p1 - p0) * (padFrac ?? 0.25) || (p1*0.001);
-    this.priceLock = { p0: p0 - pad, p1: p1 + pad };
-  }
-  applyLiveCandle(ohlc){
-    if (this.isTick()) return;
-    const epoch = Number(ohlc.open_time != null ? ohlc.open_time : ohlc.epoch);
-    const c = { epoch, open:+ohlc.open, high:+ohlc.high, low:+ohlc.low, close:+ohlc.close };
-    const last = this.candles[this.candles.length-1];
-    if (last && last.epoch === epoch) this.candles[this.candles.length-1] = c;
-    else if (!last || epoch > last.epoch){ this.candles.push(c); if (this.candles.length > CANDLE_COUNT*2) this.candles.shift(); }
-    onPriceUpdate(this);
-  }
-  applyLiveTick(tick){
-    const price = Number(tick.quote);
-    const epoch = Number(tick.epoch);
-    if (this.isTick()){
-      this.ticks.push({ epoch, price });
-      if (this.ticks.length > CANDLE_COUNT*4) this.ticks.shift();
-    } else if (this.tf.g === "tick10"){
-      let last = this.candles[this.candles.length-1];
-      if (!last || last._n >= 10){
-        last = { epoch, open:price, high:price, low:price, close:price, _n:1 };
-        this.candles.push(last);
-        if (this.candles.length > CANDLE_COUNT*2) this.candles.shift();
-      } else {
-        last.high = Math.max(last.high, price); last.low = Math.min(last.low, price);
-        last.close = price; last._n++;
-      }
-    }
-    onPriceUpdate(this);
-  }
-}
-
-function onPriceUpdate(panel){
-  const isLive = panel.decompRange == null;
-  if (isLive){
-    const now = Math.floor(Date.now()/1000);
-    if (panel.viewT1 == null || panel.viewT1 < now - panel.granSeconds()*2) {
-      // keep the live edge in view if the user hasn't panned far away
-    }
-  }
-  updatePanelHeader(panel);
-  drawAll();
-}
-
-panels.htf = new Panel("mtfHtf", "htf", HTF_TFS);
-panels.ltf = new Panel("mtfLtf", "ltf", LTF_TFS);
-panels.htf.setDefaultView();
-panels.ltf.setDefaultView();
-
-// =====================================================================
-// DATA REQUESTS
-// =====================================================================
-function requestPanelData(panel, opts={}){
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  const reqId = ++reqSeq;
-  panel.candles = []; panel.ticks = [];
-  if (panel.isTick() || panel.tf.g === "tick10"){
-    const count = panel.tf.g === "tick10" ? CANDLE_COUNT*10 : CANDLE_COUNT*4;
-    const msg = { ticks_history: SYMBOL, style:"ticks", count, req_id:reqId };
-    if (opts.start && opts.end){ msg.start = opts.start; msg.end = opts.end; delete msg.count; }
-    else { msg.end = "latest"; msg.subscribe = 1; }
-    pending[reqId] = m => handleTicksHistory(panel, m);
-    ws.send(JSON.stringify(msg));
-  } else {
-    const msg = { ticks_history: SYMBOL, style:"candles", granularity: panel.tf.g, req_id:reqId };
-    if (opts.start && opts.end){ msg.start = opts.start; msg.end = opts.end; }
-    else { msg.count = CANDLE_COUNT; msg.end = "latest"; msg.subscribe = 1; }
-    pending[reqId] = m => handleCandlesHistory(panel, m);
-    ws.send(JSON.stringify(msg));
-  }
-}
-function handleCandlesHistory(panel, msg){
-  if (msg.error){ updatePanelHeader(panel); return; }
-  if (msg.msg_type === "candles" && Array.isArray(msg.candles)){
-    panel.candles = msg.candles.map(c => ({ epoch:+c.epoch, open:+c.open, high:+c.high, low:+c.low, close:+c.close }));
-    if (!panel.decompRange) panel.setDefaultView();
-    else panel.zoomToRange(panel.decompRange.t0, panel.decompRange.t1, 0.08);
-    updatePanelHeader(panel); drawAll();
-  }
-}
-function handleTicksHistory(panel, msg){
-  if (msg.error){ updatePanelHeader(panel); return; }
-  const h = msg.history;
-  if (!h) return;
-  const raw = h.times.map((t,i) => ({ epoch:+t, price:+h.prices[i] }));
-  if (panel.tf.g === "tick10"){
-    panel.candles = [];
-    for (let i=0;i<raw.length;i+=10){
-      const chunk = raw.slice(i,i+10);
-      if (!chunk.length) continue;
-      panel.candles.push({
-        epoch: chunk[0].epoch, open: chunk[0].price,
-        high: Math.max(...chunk.map(c=>c.price)), low: Math.min(...chunk.map(c=>c.price)),
-        close: chunk[chunk.length-1].price, _n: chunk.length,
-      });
-    }
-  } else {
-    panel.ticks = raw;
-  }
-  if (!panel.decompRange) panel.setDefaultView();
-  else panel.zoomToRange(panel.decompRange.t0, panel.decompRange.t1, 0.08);
-  updatePanelHeader(panel); drawAll();
-}
-
-function switchTimeframe(panel, tfKey){
-  panel.tf = panel.tfList.find(t => t.key === tfKey) || panel.tf;
-  panel.decompRange = null;
-  $(panel.id + "DecompBanner").style.display = "none";
-  requestPanelData(panel);
-}
-function switchSymbol(sym){
-  SYMBOL = sym;
-  drawings = loadDrawings(SYMBOL);
-  selectedId = null; renderProps();
-  panels.htf.decompRange = null; panels.ltf.decompRange = null;
-  $("mtfLtfDecompBanner").style.display = "none";
-  if (ws && ws.readyState === WebSocket.OPEN){
-    ws.send(JSON.stringify({ forget_all: ["candles","ticks"] }));
-    requestPanelData(panels.htf); requestPanelData(panels.ltf);
-  }
-  renderManager();
-}
-
-// =====================================================================
-// HEADER / ORDER-FLOW READOUT
-// =====================================================================
-function updatePanelHeader(panel){
-  const px = panel.lastPrice();
-  const pxEl = $(panel.id + "Px");
-  if (px != null){
-    pxEl.textContent = px.toFixed(decimalsFor(px));
-    const vis = panel.isTick() ? panel.ticks : panel.candles;
-    if (vis.length >= 2){
-      const prev = panel.isTick() ? vis[vis.length-2].price : vis[vis.length-2].close;
-      pxEl.className = "px " + (px > prev ? "up" : px < prev ? "dn" : "");
-    }
-  }
-  const metaEl = $(panel.id + "Meta");
-  const n = panel.isTick() ? panel.ticks.length : panel.candles.length;
-  metaEl.textContent = `${SYMBOLS[SYMBOL]||SYMBOL} · ${panel.tf.label} · ${n} loaded`;
-  renderOrderFlow(panel);
-}
-function decimalsFor(px){ return px < 10 ? 4 : px < 1000 ? 3 : 2; }
-
-function renderOrderFlow(panel){
-  const wrap = $(panel.id + "OF");
-  const vis = panel.visibleData();
-  const cells = [
-    ["Delta","—","of-neu"], ["CVD","—","of-neu"], ["Imbalance","—","of-neu"], ["Volume","—","of-neu"], ["Absorption","—","of-neu"],
-  ];
-  if (!panel.isTick() && vis.length){
-    let cvd = 0, lastDelta = 0, ups = 0, downs = 0, sumRange = 0;
-    vis.forEach(c => {
-      const range = (c.high - c.low) || 1e-9;
-      const pos = (c.close - c.low) / range;
-      const delta = (pos - 0.5) * 2 * range;
-      cvd += delta; lastDelta = delta;
-      if (c.close >= c.open) ups++; else downs++;
-      sumRange += range;
-    });
-    const imb = Math.round((ups/(ups+downs||1))*100);
-    const net = vis[vis.length-1].close - vis[0].open;
-    const absorb = sumRange > 0 ? Math.abs(net)/sumRange : 0;
-    const dec = decimalsFor(vis[0].close);
-    cells[0] = ["Delta", (lastDelta>=0?"+":"")+lastDelta.toFixed(dec), lastDelta>=0?"of-up":"of-dn"];
-    cells[1] = ["CVD", (cvd>=0?"+":"")+cvd.toFixed(Math.min(dec,2)), cvd>=0?"of-up":"of-dn"];
-    cells[2] = ["Imbalance", imb+"%", imb>=55?"of-up":imb<=45?"of-dn":"of-neu"];
-    cells[3] = ["Volume (ticks)", String(vis.length), "of-neu"];
-    const label = absorb < 0.15 ? "HIGH" : absorb < 0.35 ? "MILD" : "LOW";
-    cells[4] = ["Absorption", label, label==="HIGH"?"of-warn":"of-neu"];
-  }
-  wrap.innerHTML = cells.map(([lab,val,cls]) =>
-    `<div class="of-cell"><div class="lab">${lab}</div><div class="val ${cls}">${val}</div></div>`).join("");
-}
-
-// =====================================================================
-// DRAWING OBJECT MODEL
-// type: 'rect'|'hline'|'vline'|'trend'|'ray'|'arrow'|'brush'|'circle'|'text'|'measure'|'wick'
-// Coordinates are always REAL (epoch seconds, price) so a single object
-// renders correctly on any panel/timeframe/zoom without transformation.
-// =====================================================================
-let idSeq = 1;
-function newId(){ return "d" + (Date.now().toString(36)) + (idSeq++); }
-
-function makeDrawing(type, t1, p1, t2, p2, extra={}){
-  return {
-    id: newId(), type, symbol: SYMBOL,
-    createdTF: (extra._fromPanel || "htf"),
-    scope: $("mtfNewScopeSel").value,          // 'all' | 'current'
-    t1, p1, t2: t2 ?? t1, p2: p2 ?? p1,
-    points: extra.points || null,            // brush only: [{t,p}]
-    label: extra.label || defaultLabel(type),
-    color: extra.color || "#4fb2ff",
-    opacity: extra.opacity ?? 0.85,
-    borderWidth: extra.borderWidth ?? 2,
-    lineStyle: extra.lineStyle || "solid",
-    extendLeft: false, extendRight: type === "ray",
-    locked: false, visible: true,
-    notes: "", wickPart: extra.wickPart || null, semanticLabel: extra.semanticLabel || null,
-    createdAt: Date.now(),
-  };
-}
-function defaultLabel(type){
-  const n = { rect:"Zone", hline:"Level", vline:"Time Marker", trend:"Trendline", ray:"Ray",
-              arrow:"Arrow", brush:"Sketch", circle:"Circle", text:"Note", measure:"Measurement", wick:"Candle Component" };
-  return (n[type] || "Drawing");
-}
-function typeIcon(type){
-  return { rect:"▭", hline:"―", vline:"❘", trend:"╱", ray:"↗", arrow:"➔", brush:"✎", circle:"◯", text:"T", measure:"⤢", wick:"🕯" }[type] || "●";
-}
-
-// Should this drawing be shown on the given panel?
-function visibleOnPanel(d, panel){
-  if (!d.visible) return false;
-  if (d.symbol !== SYMBOL) return false;
-  if (d.scope === "current") return d.createdTF === panel.side;
-  return true; // 'all'
-}
-
-// =====================================================================
-// RENDERING
-// =====================================================================
-function drawAll(){
-  drawPanel(panels.htf);
-  drawPanel(panels.ltf);
-  renderManager();
-}
-
-function drawPanel(panel){
-  const ctx = panel.ctx;
-  ctx.clearRect(0,0,panel.W,panel.H);
-  drawGrid(panel);
-  if (panel.isTick()) drawTickLine(panel);
-  else drawCandles(panel);
-  drawings.filter(d => visibleOnPanel(d, panel)).forEach(d => renderDrawing(panel, d));
-  if (draft) renderDrawing(panel, draft, true);
-  drawCrosshair(panel);
-  drawSelectionHandles(panel);
-}
-
-function drawGrid(panel){
-  const ctx = panel.ctx;
-  ctx.strokeStyle = "#141c2c"; ctx.lineWidth = 1;
-  const { p0, p1 } = panel.currentPriceRange();
-  const dec = decimalsFor(p1);
-  ctx.font = "9.5px IBM Plex Mono, monospace";
-  for (let i=0;i<=4;i++){
-    const p = p1 - (p1-p0)*i/4;
-    const y = panel.priceToY(p);
-    ctx.beginPath(); ctx.moveTo(panel.padL, y); ctx.lineTo(panel.W-panel.padR, y); ctx.stroke();
-    ctx.fillStyle = "#5c6b82"; ctx.fillText(p.toFixed(dec), panel.W-panel.padR+5, y+3);
-  }
-  // vertical time gridlines (5 ticks)
-  for (let i=0;i<=4;i++){
-    const t = panel.viewT0 + (panel.viewT1-panel.viewT0)*i/4;
-    const x = panel.timeToX(t);
-    ctx.beginPath(); ctx.moveTo(x, panel.padT); ctx.lineTo(x, panel.H-panel.padB); ctx.stroke();
-    const d = new Date(t*1000);
-    const lbl = panel.granSeconds() >= 3600 ? d.toLocaleDateString([], {month:"short",day:"numeric"}) : d.toLocaleTimeString([], {hour12:false});
-    ctx.fillStyle = "#5c6b82"; ctx.fillText(lbl, x-20, panel.H-8);
-  }
-}
-
-function drawCandles(panel){
-  const ctx = panel.ctx;
-  const vis = panel.candles.filter(c => c.epoch + panel.granSeconds() >= panel.viewT0 && c.epoch <= panel.viewT1);
-  if (!vis.length) return;
-  const bw = Math.max(1.5, Math.min(panel.plotW / Math.max(vis.length,1) * 0.66, 16));
-  vis.forEach(c => {
-    const x = panel.timeToX(c.epoch + panel.granSeconds()/2);
-    const bull = c.close >= c.open;
-    ctx.strokeStyle = ctx.fillStyle = bull ? "#1fdf9b" : "#ff4d6a";
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(x, panel.priceToY(c.high)); ctx.lineTo(x, panel.priceToY(c.low)); ctx.stroke();
-    const yT = panel.priceToY(Math.max(c.open,c.close)), yB = panel.priceToY(Math.min(c.open,c.close));
-    ctx.fillRect(x-bw/2, yT, bw, Math.max(1, yB-yT));
-    c._x = x; c._bw = bw; // cache for hit-testing
-  });
-}
-function drawTickLine(panel){
-  const ctx = panel.ctx;
-  const vis = panel.ticks.filter(t => t.epoch >= panel.viewT0 && t.epoch <= panel.viewT1);
-  if (vis.length < 2) return;
-  ctx.strokeStyle = "#4fb2ff"; ctx.lineWidth = 1.6; ctx.beginPath();
-  vis.forEach((t,i) => {
-    const x = panel.timeToX(t.epoch), y = panel.priceToY(t.price);
-    i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
-  });
-  ctx.stroke();
-}
-
-function withAlpha(hex, a){
-  const n = parseInt(hex.slice(1),16);
-  const r=(n>>16)&255,g=(n>>8)&255,b=n&255;
-  return `rgba(${r},${g},${b},${a})`;
-}
-function setStroke(ctx, d, isDraft){
-  ctx.strokeStyle = withAlpha(d.color, isDraft ? d.opacity*0.7 : d.opacity);
-  ctx.lineWidth = d.borderWidth;
-  ctx.setLineDash(d.lineStyle === "dashed" ? [7,5] : d.lineStyle === "dotted" ? [2,4] : []);
-}
-
-function renderDrawing(panel, d, isDraft){
-  const ctx = panel.ctx;
-  ctx.save();
-  switch (d.type){
-    case "rect": case "wick": {
-      const x1 = panel.timeToX(d.t1), x2 = panel.timeToX(d.t2);
-      const y1 = panel.priceToY(d.p1), y2 = panel.priceToY(d.p2);
-      ctx.fillStyle = withAlpha(d.color, (isDraft?0.12:0.16));
-      ctx.fillRect(Math.min(x1,x2), Math.min(y1,y2), Math.abs(x2-x1), Math.abs(y2-y1));
-      setStroke(ctx, d, isDraft);
-      if (d.type === "wick") ctx.setLineDash([5,4]);
-      ctx.strokeRect(Math.min(x1,x2), Math.min(y1,y2), Math.abs(x2-x1), Math.abs(y2-y1));
-      drawLabel(ctx, d, Math.min(x1,x2)+4, Math.min(y1,y2)-6);
-      break;
-    }
-    case "hline": {
-      const y = panel.priceToY(d.p1);
-      setStroke(ctx, d, isDraft);
-      ctx.beginPath(); ctx.moveTo(panel.padL, y); ctx.lineTo(panel.W-panel.padR, y); ctx.stroke();
-      drawLabel(ctx, d, panel.W-panel.padR-90, y-6);
-      break;
-    }
-    case "vline": {
-      const x = panel.timeToX(d.t1);
-      setStroke(ctx, d, isDraft);
-      ctx.beginPath(); ctx.moveTo(x, panel.padT); ctx.lineTo(x, panel.H-panel.padB); ctx.stroke();
-      drawLabel(ctx, d, x+5, panel.padT+12);
-      break;
-    }
-    case "trend": case "ray": case "arrow": case "measure": {
-      let x1 = panel.timeToX(d.t1), y1 = panel.priceToY(d.p1);
-      let x2 = panel.timeToX(d.t2), y2 = panel.priceToY(d.p2);
-      const dx = x2-x1, dy = y2-y1;
-      if ((d.extendRight || d.type==="ray") && dx !== 0){
-        const k = (panel.W - panel.padR - x1) / dx;
-        if (k > 1){ x2 = panel.W-panel.padR; y2 = y1 + dy*k; }
-      }
-      if (d.extendLeft && dx !== 0){
-        const k = (panel.padL - x1) / dx;
-        if (k < 0){ x1 = panel.padL; y1 = y1 + dy*k; }
-      }
-      setStroke(ctx, d, isDraft);
-      if (d.type === "measure") ctx.setLineDash([4,4]);
-      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
-      if (d.type === "arrow"){
-        const ang = Math.atan2(y2-y1, x2-x1);
-        ctx.fillStyle = ctx.strokeStyle;
-        ctx.beginPath();
-        ctx.moveTo(x2, y2);
-        ctx.lineTo(x2 - 10*Math.cos(ang-0.4), y2 - 10*Math.sin(ang-0.4));
-        ctx.lineTo(x2 - 10*Math.cos(ang+0.4), y2 - 10*Math.sin(ang+0.4));
-        ctx.closePath(); ctx.fill();
-      }
-      drawLabel(ctx, d, (x1+x2)/2, (y1+y2)/2 - 8);
-      break;
-    }
-    case "circle": {
-      const cx = panel.timeToX(d.t1), cy = panel.priceToY(d.p1);
-      const ex = panel.timeToX(d.t2), ey = panel.priceToY(d.p2);
-      const r = Math.hypot(ex-cx, ey-cy);
-      ctx.fillStyle = withAlpha(d.color, 0.12);
-      ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
-      setStroke(ctx, d, isDraft); ctx.stroke();
-      drawLabel(ctx, d, cx-14, cy-r-8);
-      break;
-    }
-    case "text": {
-      const x = panel.timeToX(d.t1), y = panel.priceToY(d.p1);
-      ctx.fillStyle = withAlpha(d.color, d.opacity);
-      ctx.font = "700 12px IBM Plex Mono, monospace";
-      ctx.fillText(d.label, x, y);
-      d._bbox = { x, y: y-12, w: ctx.measureText(d.label).width, h: 16 };
-      break;
-    }
-    case "brush": {
-      if (!d.points || d.points.length < 2) break;
-      setStroke(ctx, d, isDraft);
-      ctx.beginPath();
-      d.points.forEach((pt,i) => {
-        const x = panel.timeToX(pt.t), y = panel.priceToY(pt.p);
-        i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
-      });
-      ctx.stroke();
-      break;
-    }
-  }
-  ctx.restore();
-}
-function drawLabel(ctx, d, x, y){
-  if (!d.label) return;
-  ctx.font = "700 10px IBM Plex Mono, monospace";
-  ctx.fillStyle = withAlpha(d.color, Math.min(1, d.opacity+0.15));
-  ctx.fillText(d.label, x, y);
-}
-
-function drawCrosshair(panel){
-  if (!crosshair) return;
-  const ctx = panel.ctx;
-  const x = panel.timeToX(crosshair.t);
-  if (x < panel.padL || x > panel.W - panel.padR) return;
-  ctx.save();
-  ctx.strokeStyle = "rgba(79,178,255,.55)"; ctx.lineWidth = 1; ctx.setLineDash([3,3]);
-  ctx.beginPath(); ctx.moveTo(x, panel.padT); ctx.lineTo(x, panel.H-panel.padB); ctx.stroke();
-  if (crosshair.source === panel.id && crosshair.p != null){
-    const y = panel.priceToY(crosshair.p);
-    ctx.beginPath(); ctx.moveTo(panel.padL, y); ctx.lineTo(panel.W-panel.padR, y); ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = "#0a0e17"; ctx.fillRect(panel.W-panel.padR, y-9, panel.padR-2, 18);
-    ctx.fillStyle = "#4fb2ff"; ctx.font="10px IBM Plex Mono";
-    ctx.fillText(crosshair.p.toFixed(decimalsFor(crosshair.p)), panel.W-panel.padR+4, y+3);
-  }
-  ctx.restore();
-}
-
-function drawSelectionHandles(panel){
-  const d = drawings.find(x => x.id === selectedId);
-  if (!d || !visibleOnPanel(d, panel)) return;
-  const ctx = panel.ctx;
-  ctx.save();
-  ctx.fillStyle = "#fff"; ctx.strokeStyle = "#4fb2ff"; ctx.lineWidth = 1.5;
-  handlesFor(panel, d).forEach(h => {
-    ctx.beginPath(); ctx.arc(h.x, h.y, HANDLE_R, 0, Math.PI*2); ctx.fill(); ctx.stroke();
-  });
-  ctx.restore();
-}
-function handlesFor(panel, d){
-  switch (d.type){
-    case "rect": case "wick": {
-      const x1=panel.timeToX(d.t1), x2=panel.timeToX(d.t2), y1=panel.priceToY(d.p1), y2=panel.priceToY(d.p2);
-      return [{x:x1,y:y1,h:"tl"},{x:x2,y:y1,h:"tr"},{x:x1,y:y2,h:"bl"},{x:x2,y:y2,h:"br"}];
-    }
-    case "hline": return [{x:panel.padL+20, y:panel.priceToY(d.p1), h:"p1"}];
-    case "vline": return [{x:panel.timeToX(d.t1), y:panel.padT+20, h:"t1"}];
-    case "trend": case "ray": case "arrow": case "measure":
-      return [{x:panel.timeToX(d.t1),y:panel.priceToY(d.p1),h:"p1"},{x:panel.timeToX(d.t2),y:panel.priceToY(d.p2),h:"p2"}];
-    case "circle":
-      return [{x:panel.timeToX(d.t1),y:panel.priceToY(d.p1),h:"c"},{x:panel.timeToX(d.t2),y:panel.priceToY(d.p2),h:"r"}];
-    case "text": return [{x:panel.timeToX(d.t1),y:panel.priceToY(d.p1),h:"p1"}];
-    default: return [];
-  }
-}
-
-// =====================================================================
-// MOUSE INTERACTION
-// =====================================================================
-function mousePos(panel, e){
-  const r = panel.canvas.getBoundingClientRect();
-  return { x: e.clientX - r.left, y: e.clientY - r.top };
-}
-function snapPrice(panel, t, p){
-  if (!snapEnabled || panel.isTick()) return p;
-  const gran = panel.granSeconds();
-  const c = panel.candles.find(c => Math.abs((c.epoch+gran/2) - t) < gran);
-  if (!c) return p;
-  return Math.abs(p - c.high) < Math.abs(p - c.low) ? c.high : c.low;
-}
-
-function hitTest(panel, mx, my){
-  // 1. handles of the selected object first
-  const sel = drawings.find(x => x.id === selectedId);
-  if (sel && visibleOnPanel(sel, panel)){
-    for (const h of handlesFor(panel, sel)){
-      if (Math.hypot(mx-h.x, my-h.y) <= HANDLE_R+3) return { obj: sel, handle: h.h };
-    }
-  }
-  // 2. bodies of any visible object, topmost (last drawn) first
-  const list = drawings.filter(d => visibleOnPanel(d, panel)).slice().reverse();
-  for (const d of list){
-    if (bodyHit(panel, d, mx, my)) return { obj: d, handle: null };
-  }
-  return null;
-}
-function bodyHit(panel, d, mx, my){
-  switch (d.type){
-    case "rect": case "wick": {
-      const x1=panel.timeToX(d.t1), x2=panel.timeToX(d.t2), y1=panel.priceToY(d.p1), y2=panel.priceToY(d.p2);
-      const xa=Math.min(x1,x2)-HIT_PX, xb=Math.max(x1,x2)+HIT_PX, ya=Math.min(y1,y2)-HIT_PX, yb=Math.max(y1,y2)+HIT_PX;
-      return mx>=xa && mx<=xb && my>=ya && my<=yb;
-    }
-    case "hline": return Math.abs(my - panel.priceToY(d.p1)) <= HIT_PX;
-    case "vline": return Math.abs(mx - panel.timeToX(d.t1)) <= HIT_PX;
-    case "trend": case "ray": case "arrow": case "measure": {
-      const x1=panel.timeToX(d.t1),y1=panel.priceToY(d.p1),x2=panel.timeToX(d.t2),y2=panel.priceToY(d.p2);
-      return distToSeg(mx,my,x1,y1,x2,y2) <= HIT_PX;
-    }
-    case "circle": {
-      const cx=panel.timeToX(d.t1),cy=panel.priceToY(d.p1),r=Math.hypot(panel.timeToX(d.t2)-cx, panel.priceToY(d.p2)-cy);
-      return Math.abs(Math.hypot(mx-cx,my-cy) - r) <= HIT_PX;
-    }
-    case "text": {
-      const b = d._bbox; if (!b) return false;
-      return mx>=b.x-3 && mx<=b.x+b.w+3 && my>=b.y-3 && my<=b.y+b.h+3;
-    }
-    case "brush": {
-      if (!d.points) return false;
-      for (let i=1;i<d.points.length;i++){
-        const x1=panel.timeToX(d.points[i-1].t), y1=panel.priceToY(d.points[i-1].p);
-        const x2=panel.timeToX(d.points[i].t), y2=panel.priceToY(d.points[i].p);
-        if (distToSeg(mx,my,x1,y1,x2,y2) <= HIT_PX) return true;
-      }
-      return false;
-    }
-  }
-  return false;
-}
-function distToSeg(px,py,x1,y1,x2,y2){
-  const dx=x2-x1, dy=y2-y1, len2=dx*dx+dy*dy;
-  let t = len2 ? ((px-x1)*dx+(py-y1)*dy)/len2 : 0;
-  t = Math.max(0, Math.min(1, t));
-  return Math.hypot(px-(x1+t*dx), py-(y1+t*dy));
-}
-
-function onCanvasDown(panel, e){
-  const { x, y } = mousePos(panel, e);
-  const t = panel.xToTime(x), p = panel.yToPrice(y);
-
-  if (activeTool !== "select"){
-    if (activeTool === "brush"){
-      draft = makeDrawing("brush", t, p, t, p, { points:[{t,p}], _fromPanel: panel.side });
-      drag = { mode:"brush", panel };
-      return;
-    }
-    const sp = snapPrice(panel, t, p);
-    draft = makeDrawing(activeTool, t, sp, t, sp, { _fromPanel: panel.side });
-    drag = { mode:"draft", panel, startT:t, startP:sp };
-    return;
-  }
-
-  const hit = hitTest(panel, x, y);
-  if (hit){
-    if (hit.obj.locked && hit.handle){ selectedId = hit.obj.id; renderProps(); drawAll(); return; }
-    selectedId = hit.obj.id;
-    renderProps();
-    if (!hit.obj.locked){
-      if (hit.handle) drag = { mode:"resize", panel, obj:hit.obj, handle:hit.handle };
-      else drag = { mode:"move", panel, obj:hit.obj, startT:t, startP:p,
-                     orig: JSON.parse(JSON.stringify(hit.obj)) };
-    }
-    drawAll();
-    return;
-  }
-  selectedId = null; renderProps();
-  drag = { mode:"pan", panel, startX:x, startY:y, startT0:panel.viewT0, startT1:panel.viewT1, startPriceLock: panel.priceLock, startRange: panel.currentPriceRange() };
-}
-
-function onCanvasMove(panel, e){
-  const { x, y } = mousePos(panel, e);
-  const t = panel.xToTime(x), p = panel.yToPrice(y);
-  crosshair = { t, p, source: panel.id };
-  $("mtfSyncTime").textContent = new Date(t*1000).toLocaleString([], { hour12:false });
-
-  if (drag){
-    if (drag.mode === "draft" && draft){
-      const sp = snapPrice(panel, t, p);
-      draft.t2 = t; draft.p2 = sp;
-      if (draft.type === "hline") draft.p1 = sp;
-      if (draft.type === "vline") draft.t1 = t;
-    } else if (drag.mode === "brush" && draft){
-      draft.points.push({ t, p });
-    } else if (drag.mode === "resize"){
-      applyResize(drag.panel, drag.obj, drag.handle, t, p);
-      scheduleSave();
-    } else if (drag.mode === "move"){
-      const dt = t - drag.startT, dp = p - drag.startP;
-      applyMove(drag.obj, drag.orig, dt, dp);
-      scheduleSave();
-    } else if (drag.mode === "pan"){
-      const dxFrac = (x - drag.startX) / panel.plotW;
-      const span = drag.startT1 - drag.startT0;
-      panel.viewT0 = drag.startT0 - dxFrac*span;
-      panel.viewT1 = drag.startT1 - dxFrac*span;
-      if (e.shiftKey || drag.panMode === "price"){
-        const pr = drag.startRange;
-        const dyFrac = (y - drag.startY) / panel.plotH;
-        const pspan = pr.p1 - pr.p0;
-        panel.priceLock = { p0: pr.p0 + dyFrac*pspan, p1: pr.p1 + dyFrac*pspan };
-      }
-    }
-  }
-  drawAll();
-}
-function applyMove(obj, orig, dt, dp){
-  if (obj.type === "brush"){
-    obj.points = orig.points.map(pt => ({ t: pt.t+dt, p: pt.p+dp }));
-  } else {
-    obj.t1 = orig.t1 + dt; obj.t2 = orig.t2 + dt;
-    obj.p1 = orig.p1 + dp; obj.p2 = orig.p2 + dp;
-  }
-}
-function applyResize(panel, obj, handle, t, p){
-  switch (obj.type){
-    case "rect": case "wick":
-      if (handle === "tl"){ obj.t1 = t; obj.p1 = p; }
-      else if (handle === "tr"){ obj.t2 = t; obj.p1 = p; }
-      else if (handle === "bl"){ obj.t1 = t; obj.p2 = p; }
-      else if (handle === "br"){ obj.t2 = t; obj.p2 = p; }
-      break;
-    case "hline": obj.p1 = p; break;
-    case "vline": obj.t1 = t; break;
-    case "trend": case "ray": case "arrow": case "measure":
-      if (handle === "p1"){ obj.t1 = t; obj.p1 = p; } else { obj.t2 = t; obj.p2 = p; }
-      break;
-    case "circle":
-      if (handle === "c"){ obj.t1 = t; obj.p1 = p; } else { obj.t2 = t; obj.p2 = p; }
-      break;
-    case "text": obj.t1 = t; obj.p1 = p; break;
-  }
-}
-
-function onCanvasUp(panel, e){
-  if (drag && (drag.mode === "draft" || drag.mode === "brush") && draft){
-    const tiny = draft.type !== "brush" && Math.hypot(panel.timeToX(draft.t2)-panel.timeToX(draft.t1), panel.priceToY(draft.p2)-panel.priceToY(draft.p1)) < 4;
-    if (draft.type === "measure" && !tiny){
-      const dp = draft.p2 - draft.p1, pct = (dp/draft.p1*100);
-      const bars = Math.round(Math.abs(draft.t2-draft.t1)/panel.granSeconds());
-      draft.label = `${dp>=0?'+':''}${dp.toFixed(decimalsFor(draft.p1))} (${pct>=0?'+':''}${pct.toFixed(2)}%) · ${bars} bars`;
-    }
-    if (draft.type === "text"){
-      const txt = prompt("Label text:", "Note");
-      if (txt === null){ draft = null; drag = null; drawAll(); return; }
-      draft.label = txt || "Note";
-    }
-    if (!tiny || draft.type === "hline" || draft.type === "vline" || draft.type === "text" || draft.type === "brush"){
-      drawings.push(draft);
-      selectedId = draft.id;
-      scheduleSave(); renderProps();
-    }
-    draft = null;
-    if (!lockTool) setTool("select");
-  }
-  drag = null;
-  drawAll();
-}
-function onCanvasWheel(panel, e){
-  e.preventDefault();
-  const { x, y } = mousePos(panel, e);
-  if (e.shiftKey){
-    const pr = panel.currentPriceRange();
-    const anchor = panel.yToPrice(y);
-    const factor = e.deltaY < 0 ? 0.85 : 1.18;
-    panel.priceLock = { p0: anchor - (anchor-pr.p0)*factor, p1: anchor + (pr.p1-anchor)*factor };
-  } else {
-    const anchorT = panel.xToTime(x);
-    const factor = e.deltaY < 0 ? 0.85 : 1.18;
-    panel.viewT0 = anchorT - (anchorT-panel.viewT0)*factor;
-    panel.viewT1 = anchorT + (panel.viewT1-anchorT)*factor;
-  }
-  drawAll();
-}
-function onCanvasDblClick(panel, e){
-  if (panel.side !== "htf" || panel.isTick()) return;
-  const { x, y } = mousePos(panel, e);
-  const t = panel.xToTime(x);
-  const c = panel.candles.find(c => t >= c.epoch && t <= c.epoch + panel.granSeconds());
-  if (!c) return;
-  decomposeCandle(c, panel.granSeconds());
-}
-function onCanvasContext(panel, e){
-  e.preventDefault();
-  if (panel.isTick()) return;
-  const { x, y } = mousePos(panel, e);
-  const t = panel.xToTime(x);
-  const c = panel.candles.find(c => t >= c.epoch && t <= c.epoch + panel.granSeconds());
-  if (!c) return;
-  openCandleMenu(panel, c, e.clientX, e.clientY);
-}
-
-// =====================================================================
-// CANDLE DECOMPOSITION
-// =====================================================================
-function decomposeCandle(candle, gran){
-  const t0 = candle.epoch, t1 = candle.epoch + gran;
-  panels.ltf.decompRange = { t0, t1 };
-  const banner = $("mtfLtfDecompBanner");
-  banner.style.display = "flex";
-  requestPanelData(panels.ltf, { start: t0 - 5, end: t1 + 5 });
-  panels.htf.zoomToRange(t0 - gran*3, t1 + gran*3, 0.1);
-  drawAll();
-}
-function mtfExitDecomposition(){
-  panels.ltf.decompRange = null;
-  $("mtfLtfDecompBanner").style.display = "none";
-  requestPanelData(panels.ltf);
-}
-
-// =====================================================================
-// CANDLE COMPONENT MARKING (right-click menu)
-// =====================================================================
-const SEMANTIC = {
-  upper: ["Buy-side Liquidity","Rejection","Distribution"],
-  lower: ["Sell-side Liquidity","Reversal","Absorption"],
-  body:  ["Aggressive Buying","Aggressive Selling","Accumulation"],
-};
-function openCandleMenu(panel, candle, clientX, clientY){
-  const menu = $(panel.id + "CandleMenu");
-  const wrapRect = panel.canvas.parentElement.getBoundingClientRect();
-  const left = clientX - wrapRect.left, top = clientY - wrapRect.top;
-  const bodyTop = Math.max(candle.open, candle.close), bodyBot = Math.min(candle.open, candle.close);
-  const parts = [
-    { key:"upper", label:"Upper Wick", p1:candle.high, p2:bodyTop, color:"#ff4d6a" },
-    { key:"body",  label:"Body",       p1:bodyTop,     p2:bodyBot, color:"#4fb2ff" },
-    { key:"lower", label:"Lower Wick", p1:bodyBot,      p2:candle.low, color:"#1fdf9b" },
-  ];
-  let html = `<div class="cm-title">Mark candle component</div>`;
-  parts.forEach(part => {
-    html += `<button onclick='mtfMarkCandlePart(${JSON.stringify({panel:panel.id, epoch:candle.epoch, gran:panel.granSeconds(), key:part.key, p1:part.p1, p2:part.p2, color:part.color, label:part.label}).replace(/'/g,"&#39;")})'>
-      <span class="dot" style="background:${part.color}"></span> ${part.label}
-    </button>`;
-  });
-  html += `<hr><div class="cm-title">Or decompose</div><button onclick='mtfDecomposeCandleFromMenu(${candle.epoch}, ${panel.granSeconds()})'>🔬 Show inside on LTF</button>`;
-  menu.innerHTML = html;
-  menu.style.left = left + "px"; menu.style.top = top + "px"; menu.style.display = "block";
-  const closer = ev => { if (!menu.contains(ev.target)){ menu.style.display="none"; document.removeEventListener("mousedown", closer); } };
-  setTimeout(() => document.addEventListener("mousedown", closer), 10);
-}
-function mtfMarkCandlePart(cfg){
-  const semOptions = SEMANTIC[cfg.key];
-  const sem = prompt(`Semantic label for this ${cfg.label.toLowerCase()}?\n(${semOptions.join(" / ")}, or leave blank)`, semOptions[0]);
-  const d = makeDrawing("wick", cfg.epoch, cfg.p1, cfg.epoch + cfg.gran, cfg.p2, {
-    color: cfg.color, label: `${cfg.label}${sem ? " — " + sem : ""}`, opacity: 0.9, borderWidth: 1.5,
-    wickPart: cfg.key, semanticLabel: sem || null, _fromPanel: cfg.panel,
-  });
-  drawings.push(d); selectedId = d.id; scheduleSave(); renderProps(); drawAll();
-  document.querySelectorAll(".candle-menu").forEach(m => m.style.display = "none");
-}
-function mtfDecomposeCandleFromMenu(epoch, gran){
-  decomposeCandle({ epoch }, gran);
-  document.querySelectorAll(".candle-menu").forEach(m => m.style.display = "none");
-}
-window.mtfMarkCandlePart = mtfMarkCandlePart;
-window.mtfDecomposeCandleFromMenu = mtfDecomposeCandleFromMenu;
-window.mtfExitDecomposition = mtfExitDecomposition;
-
-// =====================================================================
-// TOOLBAR
-// =====================================================================
-function setTool(tool){
-  activeTool = tool;
-  document.querySelectorAll(".tool-btn").forEach(b => b.classList.toggle("active", b.dataset.tool === tool));
-  document.querySelectorAll("canvas").forEach(c => c.style.cursor = tool === "select" ? "crosshair" : "crosshair");
-}
-document.querySelectorAll(".tool-btn").forEach(b => b.addEventListener("click", () => setTool(b.dataset.tool)));
-$("mtfSnapToggle").addEventListener("click", function(){
-  const cb = this.querySelector("input"); cb.checked = !cb.checked;
-  snapEnabled = cb.checked; this.classList.toggle("on", snapEnabled);
-});
-$("mtfLockToolToggle").addEventListener("click", function(){
-  const cb = this.querySelector("input"); cb.checked = !cb.checked;
-  lockTool = cb.checked; this.classList.toggle("on", lockTool);
-});
-window.addEventListener("keydown", e => {
-  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
-  const mtfPageEl = document.getElementById("page-mtf");
-  if (!mtfPageEl || !mtfPageEl.classList.contains("active")) return;
-  if (e.key === "v" || e.key === "V") setTool("select");
-  if (e.key === "Escape"){ setTool("select"); selectedId = null; renderProps(); drawAll(); }
-  if ((e.key === "Delete" || e.key === "Backspace") && selectedId){ mtfDeleteSelected(); }
-});
-
-// =====================================================================
-// DRAWING MANAGER SIDEBAR
-// =====================================================================
-function renderManager(){
-  const list = $("mtfManagerList");
-  const mine = drawings.filter(d => d.symbol === SYMBOL);
-  if (!mine.length){
-    list.innerHTML = `<div class="manager-empty">No drawings yet.<br>Pick a tool above and draw on either chart.</div>`;
-    return;
-  }
-  list.innerHTML = mine.slice().reverse().map(d => `
-    <div class="dr-row ${d.id===selectedId?'sel':''}" onclick="mtfSelectAndZoom('${d.id}')">
-      <span class="ic">${typeIcon(d.type)}</span>
-      <span class="sw" style="background:${d.color}"></span>
-      <span class="nm">${escapeHtml(d.label)}</span>
-      <span class="ic" title="${d.visible?'Hide':'Show'}" onclick="event.stopPropagation();mtfToggleVisible('${d.id}')">${d.visible?'👁':'⦸'}</span>
-      <span class="ic" title="${d.locked?'Unlock':'Lock'}" onclick="event.stopPropagation();mtfToggleLock('${d.id}')">${d.locked?'🔒':'🔓'}</span>
-    </div>`).join("");
-}
-function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function mtfSelectAndZoom(id){
-  const d = drawings.find(x => x.id === id); if (!d) return;
-  selectedId = id; renderProps();
-  const t0 = Math.min(d.t1, d.t2 ?? d.t1), t1 = Math.max(d.t1, d.t2 ?? d.t1);
-  const p0 = Math.min(d.p1, d.p2 ?? d.p1), p1 = Math.max(d.p1, d.p2 ?? d.p1);
-  const tspan = Math.max(t1-t0, panels.htf.granSeconds()*6);
-  panels.htf.zoomToRange(t0, t0+tspan, 0.4);
-  panels.ltf.zoomToRange(t0, t0+tspan, 0.4);
-  if (p1 > p0){ panels.htf.zoomToPriceRange(p0,p1); panels.ltf.zoomToPriceRange(p0,p1); }
-  drawAll();
-}
-function mtfToggleVisible(id){ const d = drawings.find(x=>x.id===id); if(d){ d.visible=!d.visible; scheduleSave(); drawAll(); } }
-function mtfToggleLock(id){ const d = drawings.find(x=>x.id===id); if(d){ d.locked=!d.locked; scheduleSave(); renderProps(); } }
-window.mtfSelectAndZoom = mtfSelectAndZoom;
-window.mtfToggleVisible = mtfToggleVisible;
-window.mtfToggleLock = mtfToggleLock;
-
-// =====================================================================
-// PROPERTIES PANEL
-// =====================================================================
-function renderProps(){
-  const body = $("mtfPropsBody");
-  const d = drawings.find(x => x.id === selectedId);
-  if (!d){
-    body.innerHTML = `<div class="props-empty">Select a drawing (click it on a chart or in the Drawing Manager) to edit its label, color, opacity, thickness, scope, lock state and notes.<br><br>Or pick a tool above and draw directly on either chart — every object is stored by real price &amp; time, so it appears correctly positioned on both panels automatically.</div>`;
-    return;
-  }
-  const showExtend = d.type === "trend";
-  const showLineStyle = ["rect","hline","vline","trend","ray","arrow","circle"].includes(d.type);
-  body.innerHTML = `
-    <div class="type-badge">${typeIcon(d.type)} ${d.type.toUpperCase()}${d.wickPart ? " · " + d.wickPart : ""}</div>
-    <div class="pf"><label>Label</label><input type="text" id="mtfPLabel" value="${escapeHtml(d.label)}"></div>
-    <div class="pf"><label>Color</label>
-      <div class="swatches" id="mtfPColors">${COLORS.map(c=>`<div class="sw-btn ${c===d.color?'sel':''}" style="background:${c}" data-c="${c}"></div>`).join("")}</div>
-    </div>
-    <div class="pf"><label>Opacity — <span id="mtfPOpVal">${Math.round(d.opacity*100)}%</span></label>
-      <input type="range" id="mtfPOpacity" min="10" max="100" value="${Math.round(d.opacity*100)}"></div>
-    <div class="pf"><label>Border / line width — <span id="mtfPBwVal">${d.borderWidth}px</span></label>
-      <input type="range" id="mtfPBorderW" min="1" max="6" value="${d.borderWidth}"></div>
-    ${showLineStyle ? `<div class="pf"><label>Line style</label>
-      <select id="mtfPLineStyle">
-        <option value="solid" ${d.lineStyle==='solid'?'selected':''}>Solid</option>
-        <option value="dashed" ${d.lineStyle==='dashed'?'selected':''}>Dashed</option>
-        <option value="dotted" ${d.lineStyle==='dotted'?'selected':''}>Dotted</option>
-      </select></div>` : ""}
-    ${showExtend ? `
-      <div class="pf-toggle"><span class="lbl">Extend left</span><label class="switch"><input type="checkbox" id="mtfPExtL" ${d.extendLeft?'checked':''}><span class="trk"></span></label></div>
-      <div class="pf-toggle"><span class="lbl">Extend right</span><label class="switch"><input type="checkbox" id="mtfPExtR" ${d.extendRight?'checked':''}><span class="trk"></span></label></div>
-    ` : ""}
-    <div class="pf"><label>Visible on</label>
-      <select id="mtfPScope">
-        <option value="all" ${d.scope==='all'?'selected':''}>All timeframes</option>
-        <option value="current" ${d.scope==='current'?'selected':''}>Current timeframe only (${d.createdTF.toUpperCase()})</option>
-      </select></div>
-    <div class="pf-toggle"><span class="lbl">Locked</span><label class="switch"><input type="checkbox" id="mtfPLocked" ${d.locked?'checked':''}><span class="trk"></span></label></div>
-    <div class="pf-toggle"><span class="lbl">Visible</span><label class="switch"><input type="checkbox" id="mtfPVisible" ${d.visible?'checked':''}><span class="trk"></span></label></div>
-    <div class="pf"><label>Notes</label><textarea id="mtfPNotes" placeholder="Optional notes…">${escapeHtml(d.notes||"")}</textarea></div>
-    <div class="pf" style="font-size:9.5px;color:var(--muted);line-height:1.7">
-      Symbol ${d.symbol} · Created on ${d.createdTF.toUpperCase()}<br>
-      ${fmtCoord(d)}
-    </div>
-    <div class="pf-btns">
-      <button class="pf-btn" onclick="mtfDuplicateSelected()">⧉ Duplicate</button>
-      <button class="pf-btn danger" onclick="mtfDeleteSelected()">🗑 Delete</button>
-      <button class="pf-btn wide" onclick="mtfSelectAndZoom('${d.id}')">🔍 Zoom both charts here</button>
-    </div>
-  `;
-  bindPropsEvents(d);
-}
-function fmtCoord(d){
-  if (d.type === "hline") return `Price ${d.p1.toFixed(decimalsFor(d.p1))}`;
-  if (d.type === "vline") return `Time ${new Date(d.t1*1000).toLocaleString([],{hour12:false})}`;
-  if (d.type === "brush") return `${d.points?.length||0} points`;
-  return `${new Date(d.t1*1000).toLocaleString([],{hour12:false})} → ${new Date(d.t2*1000).toLocaleString([],{hour12:false})}`;
-}
-function bindPropsEvents(d){
-  $("mtfPLabel").oninput = e => { d.label = e.target.value; scheduleSave(); drawAll(); };
-  document.querySelectorAll("#mtfPColors .sw-btn").forEach(el => el.onclick = () => {
-    d.color = el.dataset.c; scheduleSave(); renderProps(); drawAll();
-  });
-  $("mtfPOpacity").oninput = e => { d.opacity = +e.target.value/100; $("mtfPOpVal").textContent = e.target.value+"%"; scheduleSave(); drawAll(); };
-  $("mtfPBorderW").oninput = e => { d.borderWidth = +e.target.value; $("mtfPBwVal").textContent = e.target.value+"px"; scheduleSave(); drawAll(); };
-  if ($("mtfPLineStyle")) $("mtfPLineStyle").onchange = e => { d.lineStyle = e.target.value; scheduleSave(); drawAll(); };
-  if ($("mtfPExtL")) $("mtfPExtL").onchange = e => { d.extendLeft = e.target.checked; scheduleSave(); drawAll(); };
-  if ($("mtfPExtR")) $("mtfPExtR").onchange = e => { d.extendRight = e.target.checked; scheduleSave(); drawAll(); };
-  $("mtfPScope").onchange = e => { d.scope = e.target.value; scheduleSave(); drawAll(); };
-  $("mtfPLocked").onchange = e => { d.locked = e.target.checked; scheduleSave(); renderManager(); };
-  $("mtfPVisible").onchange = e => { d.visible = e.target.checked; scheduleSave(); drawAll(); };
-  $("mtfPNotes").oninput = e => { d.notes = e.target.value; scheduleSave(); };
-}
-function mtfDuplicateSelected(){
-  const d = drawings.find(x => x.id === selectedId); if (!d) return;
-  const copy = JSON.parse(JSON.stringify(d));
-  copy.id = newId(); copy.label = d.label + " copy";
-  const shift = (panels.htf.viewT1 - panels.htf.viewT0) * 0.05;
-  copy.t1 += shift; copy.t2 += shift;
-  if (copy.points) copy.points = copy.points.map(p => ({ t:p.t+shift, p:p.p }));
-  drawings.push(copy); selectedId = copy.id; scheduleSave(); renderProps(); drawAll();
-}
-function mtfDeleteSelected(){
-  drawings = drawings.filter(x => x.id !== selectedId);
-  selectedId = null; scheduleSave(); renderProps(); drawAll();
-}
-window.mtfDuplicateSelected = mtfDuplicateSelected;
-window.mtfDeleteSelected = mtfDeleteSelected;
-
-// =====================================================================
-// BOOT
-// =====================================================================
-function populateSelects(){
-  $("mtfSymbolSel").innerHTML = Object.entries(SYMBOLS).map(([k,v]) => `<option value="${k}" ${k===SYMBOL?'selected':''}>${v}</option>`).join("");
-  $("mtfHtfTfSel").innerHTML = HTF_TFS.map(t => `<option value="${t.key}" ${t.key===panels.htf.tf.key?'selected':''}>${t.label}</option>`).join("");
-  $("mtfLtfTfSel").innerHTML = LTF_TFS.map(t => `<option value="${t.key}" ${t.key===panels.ltf.tf.key?'selected':''}>${t.label}</option>`).join("");
-  $("mtfSymbolSel").onchange = e => switchSymbol(e.target.value);
-  $("mtfHtfTfSel").onchange = e => switchTimeframe(panels.htf, e.target.value);
-  $("mtfLtfTfSel").onchange = e => switchTimeframe(panels.ltf, e.target.value);
-}
-
-let mtfBooted = false;
-function mtfPageInit(){
-  if (mtfBooted){
-    // Re-entering the tab after it was hidden: canvases had zero size while
-    // display:none, so just refit + redraw rather than reconnecting.
-    panels.htf.fitCanvas(); panels.ltf.fitCanvas(); drawAll();
-    return;
-  }
-  mtfBooted = true;
-  try {
-    populateSelects();
-    drawings = loadDrawings(SYMBOL);
-    renderManager();
-    renderProps();
-    connect();
-    setInterval(() => { if (crosshair) $("mtfSyncTime").textContent = new Date(crosshair.t*1000).toLocaleString([], {hour12:false}); }, 1000);
-  } catch (err){
-    console.error("MTF module boot failed:", err);
-    $("mtfConnText").textContent = "Boot failed — see console";
-  }
-}
-window.mtfPageInit = mtfPageInit;
-
-})();
-</script>
+<script type="module" src="mtf/src/index.js"></script>
 </body>
 </html>
