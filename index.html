@@ -6503,6 +6503,14 @@ function gridPlaceTrade(dir, source){
       row.buyPrice = buy.buy_price;
       row.status = "open";
       gridOpenContracts[row.id] = row;
+      // MambaFX v2: purely additive — mirrors the tradeClosed dispatch in
+      // gridUpdateContract. Fired here (not at pre-insert above) specifically
+      // because row.id only becomes the real, stable contract_id at this
+      // point — dispatching earlier would use a temporary "pending-N" id
+      // that tradeClosed's id would never match.
+      window.dispatchEvent(new CustomEvent('mambafx:tradeOpened', {
+        detail: { id: row.id, symbol: SYMBOL, dir: row.dir, contractType: row.contractType, stake: row.stake, time: row.time },
+      }));
       renderGridTrades();
     };
     gridWs.send(JSON.stringify(buyMsg));
@@ -6657,6 +6665,20 @@ function gridUpdateContract(c){
     delete gridOpenContracts[id];
     const won = row.status === "won";
     const stk = row.stake || 0;
+    // MambaFX v2: notify any listening module that a trade has settled —
+    // purely additive. window.dispatchEvent has no effect on code that
+    // isn't explicitly listening for this event name, so this cannot alter
+    // any existing bot's behavior. The MTF Structure page's Continuous
+    // Learning Engine (a separate ES module, sharing this same `window`)
+    // listens via window.addEventListener('mambafx:tradeClosed', ...).
+    window.dispatchEvent(new CustomEvent('mambafx:tradeClosed', {
+      detail: {
+        id, symbol: SYMBOL, contractType: row.contractType, dir: row.dir,
+        stake: stk, payout: row.payout, pnl: row.pnl, won,
+        entry: row.entry, exit: row.exit, openedAt: row.time, closedAt: Math.floor(Date.now() / 1000),
+        source: row.source, isVirtual: row.isVirtual,
+      },
+    }));
     // Record outcome in the appropriate multiplier
     if (gridTrades.some(t => t.id === id) && typeof gridMult === 'function')
       gridMult().record(stk, won);
