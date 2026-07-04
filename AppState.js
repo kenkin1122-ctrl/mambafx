@@ -2,14 +2,15 @@
  * charts/mtfDashboard.js
  *
  * The 10-timeframe MTF Dashboard: one live, independently-updating Panel
- * per entry in MTF_DASHBOARD_TFS (m1 through d1), laid out in a single
- * responsive horizontal row. Each panel is a REAL Panel instance — same
- * class, same rendering path, same drawing-sync mechanism as the original
- * htf/ltf panels — so nothing about candles, drawings, or live updates
- * needed to be reimplemented for these ten; they get it for free from the
- * existing architecture.
+ * per entry in MTF_DASHBOARD_TFS (12h down to 1m), laid out as a stacked
+ * list of full-width rows — one row per timeframe, each with its own wide
+ * mini-chart — rather than side-by-side cards. Each panel is a REAL Panel
+ * instance — same class, same rendering path, same drawing-sync mechanism
+ * as the original htf/ltf panels — so nothing about candles, drawings, or
+ * live updates needed to be reimplemented for these ten; they get it for
+ * free from the existing architecture.
  *
- * DESIGN DECISION, STATED DIRECTLY: clicking a card's header calls
+ * DESIGN DECISION, STATED DIRECTLY: clicking a row's label calls
  * AppState.setActiveTimeframe(key), which sets which panel the ANALYSIS
  * DISPLAY layer (Smart Market Intelligence, Probability Engine's UI,
  * Continuous Learning) reads via AppState.getAnalysisPanels() — it does
@@ -19,12 +20,12 @@
  * drive interaction with the two VISIBLE chart panels. An earlier version
  * of this reassigned panels.htf directly, which would have silently
  * redirected decomposition/replay/zoom onto an invisible dashboard panel
- * the instant a card was clicked, while the user kept interacting with the
+ * the instant a row was clicked, while the user kept interacting with the
  * visible panel — caught before shipping, not after. The practical result
- * of the corrected design: the dashboard card you click becomes what the
- * analysis text is ABOUT, visible in its own live mini-chart in the row;
- * the separate big 2-panel view and its own dropdowns are untouched. The
- * currently-active card gets a visible highlight so this is never
+ * of the corrected design: the row you click becomes what the analysis
+ * text is ABOUT, visible in its own live mini-chart in the row; the
+ * separate big 2-panel view and its own dropdowns are untouched. The
+ * currently-active row gets a visible highlight so this is never
  * ambiguous, and Smart Market Intelligence states which timeframe it's
  * analyzing at the top of its report.
  */
@@ -40,14 +41,14 @@ function canvasIdFor(key) {
   return 'mtfDash' + key.charAt(0).toUpperCase() + key.slice(1);
 }
 
-function buildCardMarkup() {
+function buildRowMarkup() {
   return MTF_DASHBOARD_TFS.map(tf => `
-    <div class="mtf-dash-card" data-tf="${tf.key}" id="mtfDashCard_${tf.key}">
-      <div class="mtf-dash-card-head" data-tf-click="${tf.key}">
-        <span class="mtf-dash-card-label">${tf.label}</span>
-        <span class="mtf-dash-card-meta" id="mtfDashMeta_${tf.key}">—</span>
+    <div class="mtf-dash-tf-row" data-tf="${tf.key}" id="mtfDashCard_${tf.key}">
+      <div class="mtf-dash-tf-label" data-tf-click="${tf.key}">
+        <span class="mtf-dash-tf-name">${tf.label}</span>
+        <span class="mtf-dash-tf-meta" id="mtfDashMeta_${tf.key}">—</span>
       </div>
-      <div class="mtf-dash-card-chart">
+      <div class="mtf-dash-tf-chart">
         <canvas id="${canvasIdFor(tf.key)}Canvas"></canvas>
         <canvas id="${canvasIdFor(tf.key)}CanvasOv"></canvas>
       </div>
@@ -57,8 +58,8 @@ function buildCardMarkup() {
 
 function updateActiveHighlight(activeKey) {
   MTF_DASHBOARD_TFS.forEach(tf => {
-    const card = $('mtfDashCard_' + tf.key);
-    if (card) card.classList.toggle('mtf-dash-card-active', tf.key === activeKey);
+    const row = $('mtfDashCard_' + tf.key);
+    if (row) row.classList.toggle('mtf-dash-tf-row-active', tf.key === activeKey);
   });
 }
 
@@ -69,10 +70,29 @@ function updateCardMeta(panel) {
   meta.textContent = last ? last.close.toFixed(2) : '—';
 }
 
+// Rows are compact, so the full CANDLE_COUNT (200) default view would
+// compress each candle to a couple of pixels — too thin to read as a real
+// candlestick body/wick, closer to a blurred line. This narrows the view
+// to a small, fixed number of recent candles so each one gets meaningful
+// width, matching what an actual "candlestick chart" is supposed to look
+// like at a glance. Re-applied on every panel:dataUpdated (including live
+// tick/candle updates, not just the initial history load), so the window
+// keeps sliding forward with fresh data rather than freezing at whatever
+// it was when the row first loaded.
+const DASHBOARD_VISIBLE_CANDLES = 40;
+function applyDashboardView(panel) {
+  if (!panel.candles.length) return;
+  const last = panel.candles[panel.candles.length - 1];
+  const gran = panel.granSeconds();
+  panel.viewT0 = last.epoch - gran * DASHBOARD_VISIBLE_CANDLES;
+  panel.viewT1 = last.epoch + gran * 3;
+  panel.priceLock = null;
+}
+
 export function initMtfDashboard() {
   const row = $('mtfDashboardRow');
   if (!row) return;
-  row.innerHTML = buildCardMarkup();
+  row.innerHTML = buildRowMarkup();
 
   MTF_DASHBOARD_TFS.forEach(tf => {
     const panel = new Panel(canvasIdFor(tf.key), tf.key, [tf]);
@@ -89,7 +109,10 @@ export function initMtfDashboard() {
 
   eventBus.on('activeTimeframe:changed', updateActiveHighlight);
   eventBus.on('panel:dataUpdated', ({ panel }) => {
-    if (MTF_DASHBOARD_TFS.some(tf => tf.key === panel.side)) updateCardMeta(panel);
+    if (MTF_DASHBOARD_TFS.some(tf => tf.key === panel.side)) {
+      applyDashboardView(panel);
+      updateCardMeta(panel);
+    }
   });
 
   // Safe to set immediately at boot: these only affect what the analysis
