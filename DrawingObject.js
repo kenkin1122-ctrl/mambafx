@@ -47,16 +47,17 @@ export const COLORS = ["#4fb2ff", "#1fdf9b", "#ff4d6a", "#ffc857", "#a78bfa", "#
  * live, independently-updating Panel instance — see charts/mtfDashboard.js.
  */
 export const MTF_DASHBOARD_TFS = [
-  { key: "h12", g: 43200, label: "12h" },
-  { key: "h8", g: 28800, label: "8h" },
-  { key: "h4", g: 14400, label: "4h" },
-  { key: "h2", g: 7200, label: "2h" },
-  { key: "h1", g: 3600, label: "1h" },
-  { key: "m30", g: 1800, label: "30m" },
-  { key: "m15", g: 900, label: "15m" },
-  { key: "m10", g: 600, label: "10m" },
-  { key: "m5", g: 300, label: "5m" },
-  { key: "m1", g: 60, label: "1m" },
+  { key: "d1", g: 86400, label: "1 Day" },
+  { key: "h12", g: 43200, label: "12 Hour" },
+  { key: "h8", g: 28800, label: "8 Hour" },
+  { key: "h4", g: 14400, label: "4 Hour" },
+  { key: "h2", g: 7200, label: "2 Hour" },
+  { key: "h1", g: 3600, label: "1 Hour" },
+  { key: "m30", g: 1800, label: "30 Min" },
+  { key: "m15", g: 900, label: "15 Min" },
+  { key: "m10", g: 600, label: "10 Min" },
+  { key: "m5", g: 300, label: "5 Min" },
+  { key: "m1", g: 60, label: "1 Min" },
 ];
 
 /** localStorage key prefix for per-symbol drawing persistence (Phase 1: unchanged from v1; Phase 16 will replace with named workspaces). */

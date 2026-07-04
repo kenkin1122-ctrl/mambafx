@@ -40,6 +40,9 @@ import { decimalsFor } from '../utils/geometry.js';
 import { visibleOnPanel } from '../drawing/model.js';
 import { renderDrawing, drawSelectionHandles } from '../drawing/render.js';
 import { replayCutoffEpoch } from './replayManager.js';
+import { MTF_DASHBOARD_TFS } from '../core/constants.js';
+
+const DASHBOARD_PANEL_KEYS = new Set(MTF_DASHBOARD_TFS.map(tf => tf.key));
 
 // ── Dirty-flag + rAF scheduler ──────────────────────────────────────────
 // Keyed dynamically by whatever panels are actually registered — works
@@ -122,20 +125,23 @@ function drawGrid(panel) {
   const { p0, p1 } = panel.currentPriceRange();
   const dec = decimalsFor(p1);
   ctx.font = "9.5px IBM Plex Mono, monospace";
-  // Compact panels (the MTF Dashboard's 74px rows) get fewer horizontal
-  // gridlines and skip vertical time gridlines entirely — the standard
-  // 5-line grid designed for a 300px+ tall chart is cramped and cluttered
-  // at that height; the row's own label already carries the timeframe, so
-  // repeating time gridlines there adds noise without adding information.
-  const compact = panel.H < 100;
-  const hDivisions = compact ? 2 : 4;
+  // MTF Dashboard rows: horizontal price gridlines only, no vertical time
+  // gridlines and no date/time labels on the x-axis — "clean candlestick
+  // data exactly as they appear on Deriv," per the spec, not a full
+  // technical chart. This is keyed to WHICH panel this is, not to its
+  // pixel height, deliberately: an earlier version used panel.H < 100 as
+  // the signal, which would have silently stopped applying the moment the
+  // dashboard rows got taller for legibility — a real bug avoided by
+  // asking "is this a dashboard panel" instead of "is this short."
+  const isDashboardPanel = DASHBOARD_PANEL_KEYS.has(panel.side);
+  const hDivisions = isDashboardPanel ? 3 : 4;
   for (let i = 0; i <= hDivisions; i++) {
     const p = p1 - (p1 - p0) * i / hDivisions;
     const y = panel.priceToY(p);
     ctx.beginPath(); ctx.moveTo(panel.padL, y); ctx.lineTo(panel.W - panel.padR, y); ctx.stroke();
     ctx.fillStyle = "#5c6b82"; ctx.fillText(p.toFixed(dec), panel.W - panel.padR + 5, y + 3);
   }
-  if (compact) return;
+  if (isDashboardPanel) return;
   for (let i = 0; i <= 4; i++) {
     const t = panel.viewT0 + (panel.viewT1 - panel.viewT0) * i / 4;
     const x = panel.timeToX(t);
