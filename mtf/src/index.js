@@ -37,7 +37,9 @@ import { initAnalysisPanel } from './ui/analysisPanel.js';
 import { initSmartIntelligencePanel } from './ui/smartIntelligencePanel.js';
 import { initContinuousLearning } from './ai/continuousLearning.js';
 import { initDecompPanel } from './ui/decompPanel.js';
+import { initCandleCommentaryPanel } from './ui/candleCommentaryPanel.js';
 import { initMtfDashboard } from './charts/mtfDashboard.js';
+import { initFiveMinCommentaryPanel } from './ui/fiveMinCommentaryPanel.js';
 import { initHeader, populateSelects } from './ui/header.js';
 import { initAutosave, loadDrawings } from './workspace/storage.js';
 import { $ } from './utils/dom.js';
@@ -64,7 +66,9 @@ function boot() {
   initSmartIntelligencePanel();
   initContinuousLearning();
   initDecompPanel();
+  initCandleCommentaryPanel();
   initMtfDashboard();
+  initFiveMinCommentaryPanel();
   initHeader();
   initAutosave();
 

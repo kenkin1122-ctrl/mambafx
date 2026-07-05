@@ -115,7 +115,18 @@ export function requestPanelData(panel, opts = {}) {
 }
 
 function handleCandlesHistory(panel, msg, opts = {}) {
-  if (msg.error) { eventBus.emit('panel:dataUpdated', { panel }); return; }
+  if (msg.error) {
+    // Previously silent — a rejected request (rate limit, unsupported
+    // granularity, anything) produced a blank chart with no diagnostic
+    // trail at all, indistinguishable from "no data yet." Now it's at
+    // least visible in the console, and charted, so it can be a fixed a bug
+    // that says why, not an unexplained blank panel.
+    console.warn(`[MTF] candle history request failed for ${panel.side} (granularity ${panel.tf?.g}):`, msg.error.message || msg.error);
+    panel.lastError = msg.error.message || String(msg.error);
+    eventBus.emit('panel:dataUpdated', { panel });
+    return;
+  }
+  panel.lastError = null;
   if (msg.msg_type === "candles" && Array.isArray(msg.candles)) {
     panel.candles = msg.candles.map(c => ({ epoch: +c.epoch, open: +c.open, high: +c.high, low: +c.low, close: +c.close }));
     if (panel.decompRange) panel.zoomToRange(panel.decompRange.t0, panel.decompRange.t1, 0.08);
@@ -133,7 +144,13 @@ function handleCandlesHistory(panel, msg, opts = {}) {
 }
 
 function handleTicksHistory(panel, msg, opts = {}) {
-  if (msg.error) { eventBus.emit('panel:dataUpdated', { panel }); return; }
+  if (msg.error) {
+    console.warn(`[MTF] tick history request failed for ${panel.side}:`, msg.error.message || msg.error);
+    panel.lastError = msg.error.message || String(msg.error);
+    eventBus.emit('panel:dataUpdated', { panel });
+    return;
+  }
+  panel.lastError = null;
   const h = msg.history;
   if (!h) return;
   const raw = h.times.map((t, i) => ({ epoch: +t, price: +h.prices[i] }));

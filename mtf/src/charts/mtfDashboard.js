@@ -94,10 +94,16 @@ export function initMtfDashboard() {
   if (!row) return;
   row.innerHTML = buildRowMarkup();
 
-  MTF_DASHBOARD_TFS.forEach(tf => {
+  // Staggered rather than fired all at once: 10 concurrent ticks_history+
+  // subscribe requests on the same connection is a plausible way for some
+  // of them to silently fail if the API rate-limits rapid bursts — a small
+  // gap between each is a low-cost, defensible precaution against that,
+  // even without being able to confirm from here whether that's the exact
+  // mechanism behind any given panel coming back empty.
+  MTF_DASHBOARD_TFS.forEach((tf, i) => {
     const panel = new Panel(canvasIdFor(tf.key), tf.key, [tf]);
     AppState.registerTimeframePanel(tf.key, panel);
-    requestPanelData(panel);
+    setTimeout(() => requestPanelData(panel), i * 120);
   });
 
   row.addEventListener('click', e => {

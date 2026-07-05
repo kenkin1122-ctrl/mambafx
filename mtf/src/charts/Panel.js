@@ -46,6 +46,7 @@ export class Panel {
 
     this.candles = [];        // {epoch,open,high,low,close}
     this.ticks = [];           // for tick1 line mode: {epoch,price}
+    this.lastError = null;     // set by charts/socket.js when a history/subscribe request is rejected — surfaced on-canvas by render.js instead of silently staying blank
     this.viewT0 = null; this.viewT1 = null;   // visible time window
     this.priceLock = null;                     // {p0,p1} if user manually panned price
     this.decompRange = null;                    // {t0,t1} when in candle-decomposition mode

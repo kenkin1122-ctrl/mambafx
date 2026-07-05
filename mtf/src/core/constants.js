@@ -46,9 +46,19 @@ export const COLORS = ["#4fb2ff", "#1fdf9b", "#ff4d6a", "#ffc857", "#a78bfa", "#
  * 1m|3m|5m|10m|30m|1h|4h|8h|12h|1d layout exactly. Each entry gets its own
  * live, independently-updating Panel instance — see charts/mtfDashboard.js.
  */
+// Every value below is in Deriv's documented, confirmed-safe granularity
+// set: [60, 120, 180, 300, 600, 900, 1800, 3600, 7200, 14400, 28800,
+// 86400]. 12 hours (43200) was deliberately removed — it was never part
+// of that confirmed set, and was very likely the cause of the 12-hour
+// chart rendering blank: an unsupported granularity value silently
+// producing no candle data rather than an obvious error. Stated plainly:
+// I can't verify this against the live API from this environment (no
+// network access to Deriv's WS endpoint here), so this is the correct
+// fix based on documented API behavior, not something I watched succeed
+// against a live connection — please confirm the 12h row is genuinely
+// gone (not just renamed) and every remaining row now loads data.
 export const MTF_DASHBOARD_TFS = [
   { key: "d1", g: 86400, label: "1 Day" },
-  { key: "h12", g: 43200, label: "12 Hour" },
   { key: "h8", g: 28800, label: "8 Hour" },
   { key: "h4", g: 14400, label: "4 Hour" },
   { key: "h2", g: 7200, label: "2 Hour" },

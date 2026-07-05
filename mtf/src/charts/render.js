@@ -41,6 +41,8 @@ import { visibleOnPanel } from '../drawing/model.js';
 import { renderDrawing, drawSelectionHandles } from '../drawing/render.js';
 import { replayCutoffEpoch } from './replayManager.js';
 import { MTF_DASHBOARD_TFS } from '../core/constants.js';
+import { labelSwings } from '../analysis/swingLabels.js';
+import { detectStructureBreaks } from '../analysis/structurePatterns.js';
 
 const DASHBOARD_PANEL_KEYS = new Set(MTF_DASHBOARD_TFS.map(tf => tf.key));
 
@@ -111,6 +113,19 @@ function paintBackground(panel) {
   drawGrid(panel);
   if (panel.isTick()) drawTickLine(panel);
   else drawCandles(panel);
+
+  if (!panel.isTick()) drawMarketStructure(panel);
+
+  // A rejected request (rate limit, unsupported granularity, connection
+  // hiccup) previously left a blank chart with zero indication anything
+  // had gone wrong — visually identical to "just hasn't loaded yet."
+  // Surfacing it here means a real failure is never mistaken for that.
+  const hasData = panel.isTick() ? panel.ticks.length > 0 : panel.candles.length > 0;
+  if (!hasData && panel.lastError) {
+    ctx.fillStyle = "#ff4d6a";
+    ctx.font = "11px IBM Plex Mono, monospace";
+    ctx.fillText(`⚠ ${panel.lastError}`, panel.padL + 8, panel.H / 2);
+  }
 
   const excludeId = AppState.draggingDrawingId;
   const view = withBgCtx(panel);
@@ -186,6 +201,56 @@ function drawCandles(panel) {
   });
 }
 
+/**
+ * Auto-drawn market structure: HH/HL/LH/LL swing labels plus BOS/CHoCH
+ * markers, recomputed from the panel's OWN currently-visible candles on
+ * every background repaint — "continuously shown" means this is never a
+ * one-shot snapshot, it's re-derived from whatever data is current right
+ * now, the same way the candles themselves are.
+ *
+ * SCOPE, STATED DIRECTLY: this is the foundational piece of a much larger
+ * request (support/resistance levels, supply/demand zone auto-detection
+ * with fresh/tested/broken state, equal highs/lows, liquidity pools,
+ * mitigated/unmitigated order blocks, FVG rendering, daily/weekly/monthly
+ * levels, psychological levels, internal/external structure). Swing
+ * labeling and BOS/CHoCH were built first because the underlying
+ * detectors already existed and were already tested (Phase 11) — this is
+ * a new RENDERING layer on top of them, not new detection math. The rest
+ * of the list is real, separate, unbuilt work, not silently included here.
+ */
+function drawMarketStructure(panel) {
+  const ctx = panel.bgCtx;
+  const cutoff = replayCutoffEpoch();
+  const vis = panel.candles.filter(c =>
+    c.epoch + panel.granSeconds() >= panel.viewT0 && c.epoch <= panel.viewT1 &&
+    (cutoff === null || c.epoch < cutoff));
+  if (vis.length < 6) return; // too little visible data for swings to mean anything
+
+  ctx.font = "9px IBM Plex Mono, monospace";
+  labelSwings(vis, 2).forEach(s => {
+    const x = panel.timeToX(s.epoch + panel.granSeconds() / 2);
+    const y = panel.priceToY(s.price);
+    const bullishLabel = s.label === 'HH' || s.label === 'HL';
+    ctx.fillStyle = s.label === 'H' || s.label === 'L' ? "#5c6b82" : (bullishLabel ? "#1fdf9b" : "#ff4d6a");
+    const yOff = s.type === 'high' ? -6 : 12;
+    ctx.fillText(s.label, x - 8, y + yOff);
+  });
+
+  const { bos, choch } = detectStructureBreaks(vis, 2);
+  const drawBreak = (f, tag) => {
+    const y = panel.priceToY(f.brokenLevel);
+    const x = panel.timeToX(f.epoch);
+    ctx.strokeStyle = f.direction === 'bullish' ? "#1fdf9b" : "#ff4d6a";
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(Math.max(panel.padL, x - 40), y); ctx.lineTo(x, y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.fillText(tag, x + 3, y - 3);
+  };
+  bos.forEach(f => drawBreak(f, 'BOS'));
+  choch.forEach(f => drawBreak(f, 'CHoCH'));
+}
+
 function drawTickLine(panel) {
   const ctx = panel.bgCtx;
   const cutoff = replayCutoffEpoch();
@@ -221,8 +286,40 @@ function paintOverlay(panel) {
   const selected = AppState.selectedDrawing;
   if (selected && visibleOnPanel(selected, panel)) drawSelectionHandles(withOvCtx(panel), selected);
 
+  drawLivePriceLine(panel);
   drawPriceTag(panel);
   drawProgressIndicator(panel);
+}
+
+/**
+ * Dotted yellow horizontal line spanning the full chart width at the
+ * current live price — same convention TradingView uses. Synchronization
+ * across panels needs no extra mechanism: each panel independently reads
+ * its OWN last candle/tick, and since every panel is for the same
+ * instrument, they naturally track the same underlying price as soon as
+ * their own data updates via the shared feed — there's nothing to keep in
+ * sync that isn't already kept in sync by the existing live-update path.
+ */
+function drawLivePriceLine(panel) {
+  const ctx = panel.ovCtx;
+  const isTickMode = panel.isTick();
+  const last = isTickMode ? panel.ticks[panel.ticks.length - 1] : panel.candles[panel.candles.length - 1];
+  if (!last) return;
+  const price = isTickMode ? last.price : last.close;
+  if (price == null || Number.isNaN(price)) return;
+
+  const y = panel.priceToY(price);
+  if (y < panel.padT || y > panel.H - panel.padB) return; // current price outside the visible range — nothing sensible to draw
+
+  ctx.save();
+  ctx.strokeStyle = "#ffd60a";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath();
+  ctx.moveTo(panel.padL, y);
+  ctx.lineTo(panel.W - panel.padR, y);
+  ctx.stroke();
+  ctx.restore();
 }
 
 /** Live price tag anchored at the right edge of the plot, at the last price's actual y-position (not a fixed grid interval) — colored by the last candle's direction, matching how real trading platforms flag "this is where price is right now." */
