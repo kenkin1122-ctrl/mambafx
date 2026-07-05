@@ -922,7 +922,8 @@ table.an-table tbody tr:last-child td{border-bottom:none}
           </div>
           <div class="gc-field" style="max-width:120px">
             <label for="martingaleXInput">Multiplier (×N)</label>
-            <input type="number" id="martingaleXInput" min="1.0" max="9.9" step="0.1" value="2.0" oninput="setMartingaleX(this.value)" title="Applies to every Martingale / Reverse Martingale bot on this page — shared, not per-bot">
+            <input type="number" id="martingaleXInput" min="1.00" max="5.00" step="0.01" value="2.00" oninput="setMartingaleX(this.value)" title="Applies to every Martingale / Reverse Martingale bot on this page — shared, not per-bot. Allowed range: 1.00–5.00, step 0.01.">
+            <div class="gc-sub" style="margin-top:2px;margin-bottom:0">Allowed Range: 1.00 → 5.00 · Step: 0.01</div>
           </div>
         </div>
         <div class="gc-sub" style="margin-top:-4px;margin-bottom:10px">Shared across every bot's Martingale &amp; Reverse Martingale progression (Trading Grid, Digits Bot, 5-Tick Engine, Only Ups/Downs Bot, ADX Bot, and both floating bots). All strategies still reset to base stake automatically after a win (Martingale) or a loss (Reverse Martingale).</div>
@@ -1801,6 +1802,19 @@ table.an-table tbody tr:last-child td{border-bottom:none}
           </div>
         </div>
 
+        <!-- Proposal Comparison Tool -->
+        <div class="grid-card">
+          <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">🔍 Proposal Comparison Tool</h3>
+          <div class="gc-sub" style="margin-bottom:10px">
+            Compares the exact proposal request this bot just sent against a SmartTrader proposal you capture yourself. To capture SmartTrader's request: open SmartTrader in a separate tab, open your browser's DevTools → Network tab, filter for "proposal", place the same trade there, click the request, and copy its request payload (right-click → Copy → Copy as JSON, or copy the Request Payload panel). Paste it below.
+          </div>
+          <div id="ouAppProposalDisplay" style="background:#0a0e17;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:10.5px;font-family:'IBM Plex Mono',monospace;color:var(--muted);margin-bottom:8px;white-space:pre-wrap;word-break:break-all">No proposal sent yet — request a payout preview or fire the bot once.</div>
+          <label for="ouSmartTraderProposal">Paste SmartTrader's proposal request (JSON)</label>
+          <textarea id="ouSmartTraderProposal" rows="4" style="width:100%;background:#0a0e17;border:1px solid var(--line);border-radius:8px;color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:10.5px;padding:8px;margin:4px 0 8px" placeholder='{"proposal":1,"amount":0.35,"basis":"stake","contract_type":"RUNHIGH","currency":"USD","duration":5,"duration_unit":"t","symbol":"R_100"}'></textarea>
+          <button class="gc-btn" onclick="ouCompareProposals()" style="width:100%;margin-bottom:8px">Compare Field-by-Field</button>
+          <div id="ouProposalDiffResults"></div>
+        </div>
+
         <!-- Arm / disarm + current state -->
         <div class="grid-card">
           <div class="dig-auto-bar" style="margin-bottom:10px">
@@ -2436,6 +2450,111 @@ table.an-table tbody tr:last-child td{border-bottom:none}
 </div>
 
 <script>
+// ══════════════════════════════════════════════════════════════════════
+// Developer AI Mode — instrumentation hub (window.__mfxDebug)
+// ══════════════════════════════════════════════════════════════════════
+// Inline duplicate of mtf/src/core/debugRecorder.js's logic. Duplicated
+// rather than shared because this is a plain inline <script> (not an ES
+// module) and the MTF module's script tag is type="module", which loads
+// asynchronously — this one runs synchronously during initial parse, so
+// it's the one guaranteed to be ready before the indicator engine below
+// starts computing on the very first tick. Whichever of the two installs
+// first wins (see the idempotency guard in debugRecorder.js's own
+// installGlobal()) — neither side silently discards what the other has
+// already recorded.
+//
+// DESIGN PRINCIPLE: fire-and-forget, one-way sink. Nothing in this app
+// calls back INTO this block's logic to change behavior — it only ever
+// records what already happened. Observability code that can affect the
+// thing it observes is how you get bugs that only occur while watching
+// for bugs.
+(function(){
+  if (window.__mfxDebug) return; // MTF module's ES-module script already installed it first
+  const MAX_WS_LOG = 2000, MAX_MARKET_STATES = 10000, MAX_ERRORS = 500, MAX_SIGNALS = 1000, MAX_TRADES = 1000;
+  const RELAY_THROTTLE_MS = 1000;
+  const state = { wsLog:[], marketStates:[], errors:[], reconnectCount:0, connectionStatus:'unknown', subscriptions:{}, pendingLatency:{}, signals:[], trades:[] };
+  let relayUrl = null, lastRelayAt = 0;
+  function push(arr, item, max){ arr.push(item); if (arr.length > max) arr.shift(); }
+
+  function recordOutgoing(reqId, msg){
+    const ts = Date.now();
+    push(state.wsLog, {dir:'out', reqId: reqId==null?null:reqId, msg, ts}, MAX_WS_LOG);
+    if (reqId != null) state.pendingLatency[reqId] = ts;
+    maybeRelay();
+  }
+  function recordIncoming(reqId, msg){
+    const ts = Date.now();
+    let latencyMs = null;
+    if (reqId != null && state.pendingLatency[reqId] != null){ latencyMs = ts - state.pendingLatency[reqId]; delete state.pendingLatency[reqId]; }
+    push(state.wsLog, {dir:'in', reqId: reqId==null?null:reqId, msg, ts, latencyMs}, MAX_WS_LOG);
+    maybeRelay();
+  }
+  function recordReconnect(){ state.reconnectCount++; }
+  function setConnectionStatus(s){ state.connectionStatus = s; }
+  function setSubscription(key, info){ state.subscriptions[key] = Object.assign({}, info, {updatedAt: Date.now()}); }
+  function recordMarketState(snapshot){ push(state.marketStates, Object.assign({}, snapshot, {ts: Date.now()}), MAX_MARKET_STATES); maybeRelay(); }
+  function recordError(source, message, stack){ push(state.errors, {source, message:String(message), stack: stack?String(stack):null, ts: Date.now()}, MAX_ERRORS); maybeRelay(); }
+  function recordSignal(signal){ push(state.signals, Object.assign({}, signal, {ts: Date.now()}), MAX_SIGNALS); maybeRelay(); }
+  function recordTrade(trade){ push(state.trades, Object.assign({}, trade, {ts: Date.now()}), MAX_TRADES); maybeRelay(); }
+
+  function getState(){ return state.marketStates[state.marketStates.length-1] || null; }
+  function getHistory(n){ n = n||500; return {
+    ticks: state.marketStates.slice(-n).map(function(s){ return {ts:s.ts, tick:s.tick, symbol:s.symbol}; }),
+    marketStates: state.marketStates.slice(-n), signals: state.signals.slice(-n), trades: state.trades.slice(-100),
+  }; }
+  function computeAverageLatency(){
+    const withLatency = state.wsLog.filter(function(e){ return e.dir==='in' && e.latencyMs != null; });
+    if (!withLatency.length) return null;
+    return Math.round(withLatency.reduce(function(s,e){ return s+e.latencyMs; }, 0) / withLatency.length);
+  }
+  function getSocketInfo(){ return {
+    status: state.connectionStatus, reconnectCount: state.reconnectCount, subscriptions: state.subscriptions,
+    pendingRequests: Object.keys(state.pendingLatency).length, recentMessages: state.wsLog.slice(-50),
+    averageLatencyMs: computeAverageLatency(),
+  }; }
+  function getIndicators(){ const last = getState(); return last ? (last.indicators || null) : null; }
+  function getSignals(n){ return state.signals.slice(-(n||100)); }
+  function getTrades(n){ return state.trades.slice(-(n||100)); }
+  function getErrors(n){ return state.errors.slice(-(n||100)); }
+  function estimateMemory(){ try { return JSON.stringify(state).length; } catch(_) { return null; } }
+  function getPerformance(){ return {
+    marketStateCount: state.marketStates.length, wsLogCount: state.wsLog.length, errorCount: state.errors.length,
+    reconnectCount: state.reconnectCount, memoryEstimateBytes: estimateMemory(),
+  }; }
+  function maybeRelay(){
+    if (!relayUrl) return;
+    const now = Date.now();
+    if (now - lastRelayAt < RELAY_THROTTLE_MS) return;
+    lastRelayAt = now;
+    try {
+      fetch(relayUrl.replace(/\/$/, '') + '/debug/report', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ state:getState(), socket:getSocketInfo(), performance:getPerformance(), signals:getSignals(20), trades:getTrades(20), errors:getErrors(20) }),
+      }).catch(function(){});
+    } catch(_) {}
+  }
+  function enableHttpRelay(url){ relayUrl = url; }
+  function disableHttpRelay(){ relayUrl = null; }
+
+  window.__mfxDebug = {
+    recordOutgoing: recordOutgoing, recordIncoming: recordIncoming, recordReconnect: recordReconnect,
+    setConnectionStatus: setConnectionStatus, setSubscription: setSubscription,
+    getState: getState, getHistory: getHistory, getSocketInfo: getSocketInfo, getIndicators: getIndicators,
+    getSignals: getSignals, getTrades: getTrades, getPerformance: getPerformance, getErrors: getErrors,
+    recordMarketState: recordMarketState, recordSignal: recordSignal, recordTrade: recordTrade,
+    enableHttpRelay: enableHttpRelay, disableHttpRelay: disableHttpRelay,
+  };
+
+  if (!console.__mfxWrapped) {
+    const origError = console.error.bind(console), origWarn = console.warn.bind(console);
+    console.error = function(){ recordError('console.error', Array.prototype.map.call(arguments, String).join(' ')); origError.apply(null, arguments); };
+    console.warn  = function(){ recordError('console.warn',  Array.prototype.map.call(arguments, String).join(' ')); origWarn.apply(null, arguments); };
+    console.__mfxWrapped = true;
+  }
+  window.addEventListener('error', function(e){ recordError('window.onerror', e.message, e.error && e.error.stack); });
+  window.addEventListener('unhandledrejection', function(e){ recordError('unhandledrejection', (e.reason && e.reason.message) ? e.reason.message : String(e.reason)); });
+})();
+
 // ── Config ───────────────────────────────────────────────────────────
 const APP_ID = 1089;                 // Deriv public app id (read-only tick data)
 // All 10 standard Volatility indices (continuous + 1-second variants)
@@ -3324,6 +3443,25 @@ function recordIndicatorTick(epoch, price){
   if (indHistory.length > IND_HIST_MAX) indHistory.shift();
   // ADX Bot — feed every indicator snapshot
   if (typeof adxOnTick === 'function') adxOnTick(indSnapshot);
+
+  // Developer AI Mode — record the real market state snapshot, using the
+  // exact same indicator values every other part of the app already
+  // computed above (nothing here is recalculated or approximated).
+  if (window.__mfxDebug) {
+    window.__mfxDebug.recordMarketState({
+      symbol: (typeof SYMBOL !== 'undefined') ? SYMBOL : null,
+      tick: price,
+      currentCandle: (typeof liveCandles !== 'undefined' && liveCandles.length) ? liveCandles[liveCandles.length - 1] : null,
+      indicators: {
+        ema5: indSnapshot.ema5, ema10: indSnapshot.ema10, ema20: indSnapshot.ema20,
+        macd: indSnapshot.macd, macdSignal: indSnapshot.macdSig, macdHist: indSnapshot.macdHist,
+        adx: indSnapshot.adx, plusDI: indSnapshot.pdi, minusDI: indSnapshot.ndi,
+        rsi: indSnapshot.rsi, atr: indSnapshot.atr,
+        bbUpper: indSnapshot.bbUpper, bbMid: indSnapshot.bbMid, bbLower: indSnapshot.bbLower, bbPctB: indSnapshot.bbPctB,
+        stochK: indSnapshot.stochK, stochD: indSnapshot.stochD, roc: indSnapshot.roc, cci: indSnapshot.cci, chop: indSnapshot.chop,
+      },
+    });
+  }
 }
 
 // Persistent store of every 5-tick run — B-window (before) only.
@@ -6279,6 +6417,7 @@ function gridSelectAccountFromPicker(){
 async function gridConnect(){
   if (gridConnecting) return;
   if (!gridLoggedIn){ alert("Login with Deriv first."); return; }
+  if (gridWs && window.__mfxDebug) window.__mfxDebug.recordReconnect(); // a prior connection existed — this call is a reconnect, not the first
   const sel    = $("gridAcctPick");
   const acctId = sel && sel.value;
   if (!acctId){ alert("Pick an account first."); return; }
@@ -6317,7 +6456,21 @@ async function gridConnect(){
     return;
   }
 
+  // Developer AI Mode — wrap .send() ONCE here so every outgoing message
+  // from anywhere in the app (proposals, buys, subscriptions, pings) is
+  // recorded automatically, rather than needing every individual call
+  // site updated. The original send behavior is completely unchanged —
+  // this only observes, per this module's own one-way-sink principle.
+  if (window.__mfxDebug) {
+    const realSend = gridWs.send.bind(gridWs);
+    gridWs.send = (data) => {
+      try { const parsed = JSON.parse(data); window.__mfxDebug.recordOutgoing(parsed.req_id ?? null, parsed); } catch(_) {}
+      return realSend(data);
+    };
+  }
+
   gridWs.onopen = () => {
+    if (window.__mfxDebug) window.__mfxDebug.setConnectionStatus('live');
     if (wsToken){
       // Per-account token flow: send authorize first, then subscribe after confirmation
       gridWs.send(JSON.stringify({ authorize: wsToken, req_id: 1 }));
@@ -6342,6 +6495,7 @@ async function gridConnect(){
   };
   gridWs.onmessage = ev => {
     let msg; try { msg = JSON.parse(ev.data); } catch(_){ return; }
+    if (window.__mfxDebug) window.__mfxDebug.recordIncoming(msg.req_id ?? null, msg);
     gridHandleMsg(msg);
   };
   gridWs.onerror = () => {};
@@ -6349,6 +6503,7 @@ async function gridConnect(){
     gridConnecting = false; gridAuthed = false;
     if (gridPing){ clearInterval(gridPing); gridPing = null; }
     gridConnState("off");
+    if (window.__mfxDebug) window.__mfxDebug.setConnectionStatus('closed');
     if (gridArmed) gridDisarm("connection closed");
     if (ev && ev.code && ev.code !== 1000)
       gridDiag(`<b>WebSocket closed</b> (code ${ev.code}). Click Connect again.`, true);
@@ -8913,22 +9068,28 @@ function chartRenderAll(){
 // =====================================================================
 // STAKE MULTIPLIER ENGINE — shared factory used by all five bots
 // =====================================================================
-// Shared Martingale/Reverse-Martingale multiplier — editable (1.0-9.9), used by
-// EVERY bot's makeMultiplier() instance below, not just one. Persisted across
-// sessions. Note: strategies already reset to base stake automatically after
-// the triggering outcome (Martingale -> base on a WIN, Reverse Martingale ->
-// base on a LOSS) — that logic is unchanged, only the ×N step size is now
-// user-controlled instead of hardcoded to ×2.
+// Shared Martingale/Reverse-Martingale multiplier — editable (1.00-5.00,
+// step 0.01), used by EVERY bot's makeMultiplier() instance below, not
+// just one. Persisted across sessions. Note: strategies already reset to
+// base stake automatically after the triggering outcome (Martingale ->
+// base on a WIN, Reverse Martingale -> base on a LOSS) — that logic is
+// unchanged, only the ×N step size is now user-controlled instead of
+// hardcoded to ×2, and constrained to exactly the requested range.
+const MARTINGALE_MIN = 1.00, MARTINGALE_MAX = 5.00;
 let MARTINGALE_X = (function(){
-  try { const v = parseFloat(localStorage.getItem('mfx_martingale_x')); if (v>=1.0 && v<=9.9) return v; } catch(_){}
-  return 2.0;
+  try { const v = parseFloat(localStorage.getItem('mfx_martingale_x')); if (v>=MARTINGALE_MIN && v<=MARTINGALE_MAX) return v; } catch(_){}
+  return 2.00;
 })();
 function setMartingaleX(v){
-  const n = Math.max(1.0, Math.min(9.9, parseFloat(v) || 2.0));
-  MARTINGALE_X = n;
-  try { localStorage.setItem('mfx_martingale_x', String(n)); } catch(_){}
+  const parsed = parseFloat(v);
+  // Reject NaN outright rather than let it silently fall through to some
+  // arbitrary clamped result — an invalid input should fall back to the
+  // last valid value, not to a fabricated default that overwrites it.
+  const n = Number.isFinite(parsed) ? Math.max(MARTINGALE_MIN, Math.min(MARTINGALE_MAX, parsed)) : MARTINGALE_X;
+  MARTINGALE_X = Math.round(n * 100) / 100; // keep exactly 2 decimal places, matching the 0.01 step
+  try { localStorage.setItem('mfx_martingale_x', String(MARTINGALE_X)); } catch(_){}
   const el = document.getElementById('martingaleXInput');
-  if (el && parseFloat(el.value) !== n) el.value = n;
+  if (el && parseFloat(el.value) !== MARTINGALE_X) el.value = MARTINGALE_X.toFixed(2);
 }
 
 function makeMultiplier(getStakeEl){
@@ -10215,6 +10376,71 @@ function ouRefreshFingerprint(){
 }
 
 // ── Proposal → buy flow ───────────────────────────────────────────────
+let ouLastProposal = null; // captured for the Proposal Comparison Tool — the exact object sent, not a reconstruction
+
+/**
+ * Validates a proposal object BEFORE it's sent, per the "reject invalid
+ * requests before sending them" requirement. Returns { ok, errors }.
+ * Deliberately conservative: only rejects things that are unambiguously
+ * wrong (empty/non-numeric amount, non-positive duration, missing symbol,
+ * a contract_type outside the two this bot actually uses) rather than
+ * guessing at additional constraints Deriv's API might enforce server-side.
+ */
+function ouValidateProposal(p){
+  const errors = [];
+  if (typeof p.amount !== 'number' || !Number.isFinite(p.amount) || p.amount <= 0) errors.push(`amount must be a positive number (got ${JSON.stringify(p.amount)})`);
+  if (typeof p.duration !== 'number' || !Number.isInteger(p.duration) || p.duration <= 0) errors.push(`duration must be a positive integer (got ${JSON.stringify(p.duration)})`);
+  if (!p.underlying_symbol || typeof p.underlying_symbol !== 'string') errors.push('symbol is missing or not a string');
+  if (p.contract_type !== 'RUNHIGH' && p.contract_type !== 'RUNLOW') errors.push(`contract_type must be RUNHIGH or RUNLOW for this bot (got ${JSON.stringify(p.contract_type)})`);
+  if (p.basis !== 'stake' && p.basis !== 'payout') errors.push(`basis must be "stake" or "payout" (got ${JSON.stringify(p.basis)})`);
+  return { ok: errors.length === 0, errors };
+}
+
+function ouCaptureProposalForComparison(proposalMsg){
+  ouLastProposal = proposalMsg;
+  const el = $("ouAppProposalDisplay");
+  if (el) el.textContent = JSON.stringify(proposalMsg, null, 2);
+}
+
+/** Field-by-field diff against a user-pasted SmartTrader proposal — the actual comparison tool. */
+function ouCompareProposals(){
+  const resultEl = $("ouProposalDiffResults");
+  if (!resultEl) return;
+  if (!ouLastProposal) {
+    resultEl.innerHTML = '<div class="manager-empty">No application proposal captured yet — request a payout preview or fire the bot once first.</div>';
+    return;
+  }
+  const raw = ($("ouSmartTraderProposal")||{value:''}).value.trim();
+  if (!raw) {
+    resultEl.innerHTML = '<div class="manager-empty">Paste a SmartTrader proposal request above first.</div>';
+    return;
+  }
+  let stObj;
+  try { stObj = JSON.parse(raw); }
+  catch(e) {
+    resultEl.innerHTML = '<div style="color:var(--down);font-size:11px">Could not parse that as JSON. Paste the exact request payload captured from your browser\'s Network tab (right-click the "proposal" request → Copy → Copy as JSON, or copy the Request Payload panel directly).</div>';
+    return;
+  }
+
+  const allFields = Array.from(new Set([...Object.keys(ouLastProposal), ...Object.keys(stObj)])).sort();
+  let mismatches = 0;
+  const rows = allFields.map(field => {
+    const appVal = ouLastProposal[field];
+    const stVal = stObj[field];
+    const match = JSON.stringify(appVal) === JSON.stringify(stVal);
+    if (!match) mismatches++;
+    return `<div style="padding:8px 10px;border-bottom:1px solid var(--line)">
+      <div style="font-weight:700;font-size:11px;display:flex;justify-content:space-between">
+        <span>${field}</span>
+        <span style="color:${match?'var(--up)':'var(--down)'}">${match?'✓ Match':'❌ Different'}</span>
+      </div>
+      ${!match ? `<div style="font-size:10px;color:var(--muted);margin-top:4px">Application: <code style="color:var(--text)">${JSON.stringify(appVal)}</code><br>SmartTrader: <code style="color:var(--text)">${JSON.stringify(stVal)}</code></div>` : ''}
+    </div>`;
+  }).join('');
+
+  resultEl.innerHTML = `<div style="margin-bottom:8px;font-size:12px;font-weight:700;color:${mismatches?'var(--down)':'var(--up)'}">${mismatches===0?'✓ All fields match SmartTrader exactly':`${mismatches} field(s) differ from SmartTrader — this is very likely the source of any payout discrepancy`}</div>${rows}`;
+}
+
 function ouPlaceTrade(dir, source){
   if(typeof gridWs==='undefined'||!gridWs||gridWs.readyState!==1||!gridAuthed){
     alert('Connect on Trading Grid first.'); return;
@@ -10236,6 +10462,15 @@ function ouPlaceTrade(dir, source){
     duration:dur, duration_unit:'t',
     underlying_symbol:sym,
   };
+
+  // Validate before sending — "reject invalid requests before sending
+  // them," not after Deriv's API rejects them or silently mis-prices them.
+  const validation = ouValidateProposal(proposalMsg);
+  if (!validation.ok) {
+    alert('Proposal rejected before sending:\n' + validation.errors.join('\n'));
+    return;
+  }
+  ouCaptureProposalForComparison(proposalMsg);
 
   const row={
     id:'pending-'+reqId, dir, source, contractType, stake,
@@ -10966,7 +11201,7 @@ try {
   connect();
 
   // Reflect the persisted Martingale multiplier in the input on load
-  { const mxEl = $("martingaleXInput"); if (mxEl) mxEl.value = MARTINGALE_X; }
+  { const mxEl = $("martingaleXInput"); if (mxEl) mxEl.value = MARTINGALE_X.toFixed(2); }
 
   // If Deriv just redirected back here with ?code=&state=, finish the login.
   gridHandleRedirectReturn();
@@ -12370,5 +12605,106 @@ try {
 </script>
 
 <script type="module" src="mtf/src/index.js"></script>
+
+<!-- Developer AI Mode — Debug Panel -->
+<div id="mfxDebugPanel" style="display:none;position:fixed;top:0;right:0;width:380px;height:100vh;background:#0a0e17;border-left:1px solid #1f2937;z-index:99999;overflow-y:auto;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#e8edf4;padding:12px;box-shadow:-8px 0 24px rgba(0,0,0,.4)">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+    <b style="font-size:13px">🛠 Developer AI Mode</b>
+    <button onclick="mfxToggleDebugPanel()" style="background:#1f2937;border:none;color:#e8edf4;border-radius:6px;padding:3px 8px;cursor:pointer">✕</button>
+  </div>
+  <div style="font-size:9.5px;color:#6b7689;margin-bottom:10px">Ctrl+Shift+D to toggle. Live view of window.__mfxDebug.</div>
+  <div id="mfxDebugPanelBody"></div>
+</div>
+
+<script>
+(function(){
+  function fmt(v){ return (v === null || v === undefined) ? '—' : (typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(4)) : String(v)); }
+  function section(title, html){ return `<div style="margin-bottom:14px"><div style="font-weight:700;color:#56b6ff;margin-bottom:4px;text-transform:uppercase;font-size:9.5px;letter-spacing:.06em">${title}</div>${html}</div>`; }
+  function kv(label, value, color){ return `<div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:#6b7689">${label}</span><span style="${color?'color:'+color+';':''}font-weight:600">${fmt(value)}</span></div>`; }
+
+  window.mfxToggleDebugPanel = function(){
+    const el = document.getElementById('mfxDebugPanel');
+    if (!el) return;
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    if (el.style.display === 'block') window.mfxRenderDebugPanel();
+  };
+
+  window.mfxRenderDebugPanel = function(){
+    const el = document.getElementById('mfxDebugPanel');
+    const body = document.getElementById('mfxDebugPanelBody');
+    if (!el || !body || el.style.display === 'none') return;
+    if (!window.__mfxDebug) { body.innerHTML = '<div style="color:#ff4d6a">window.__mfxDebug not installed yet.</div>'; return; }
+
+    const dbg = window.__mfxDebug;
+    const state = dbg.getState();
+    const socket = dbg.getSocketInfo();
+    const perf = dbg.getPerformance();
+    const errors = dbg.getErrors(8);
+    const signals = dbg.getSignals(5);
+    const recentMsgs = socket.recentMessages.slice(-8);
+
+    let html = '';
+
+    html += section('Connection', 
+      kv('Status', socket.status, socket.status === 'live' ? '#1fdf9b' : '#ff4d6a') +
+      kv('Reconnects', socket.reconnectCount) +
+      kv('Avg Latency', socket.averageLatencyMs != null ? socket.averageLatencyMs + 'ms' : '—') +
+      kv('Pending Requests', socket.pendingRequests)
+    );
+
+    if (state) {
+      html += section('Current Market State',
+        kv('Symbol', state.symbol) +
+        kv('Tick', state.tick) +
+        (state.currentCandle ? kv('Candle O/H/L/C', `${fmt(state.currentCandle.open)} / ${fmt(state.currentCandle.high)} / ${fmt(state.currentCandle.low)} / ${fmt(state.currentCandle.close)}`) : '')
+      );
+      if (state.indicators) {
+        const ind = state.indicators;
+        html += section('Indicators',
+          kv('EMA 5/10/20', `${fmt(ind.ema5)} / ${fmt(ind.ema10)} / ${fmt(ind.ema20)}`) +
+          kv('MACD / Signal', `${fmt(ind.macd)} / ${fmt(ind.macdSignal)}`) +
+          kv('ADX', ind.adx) +
+          kv('+DI / -DI', `${fmt(ind.plusDI)} / ${fmt(ind.minusDI)}`) +
+          kv('RSI', ind.rsi) +
+          kv('ATR', ind.atr)
+        );
+      }
+    } else {
+      html += section('Current Market State', '<div style="color:#6b7689">No state recorded yet.</div>');
+    }
+
+    html += section('Recent Signals', signals.length
+      ? signals.slice().reverse().map(s => `<div style="border-left:2px solid #56b6ff;padding-left:6px;margin-bottom:6px">
+          <div style="font-weight:700">${s.signal || '—'} <span style="color:#6b7689;font-weight:400">(${s.confidence != null ? (s.confidence*100).toFixed(0)+'%' : '—'})</span></div>
+          <div style="color:#6b7689;font-size:9.5px">${s.marketState || ''}</div>
+          ${Array.isArray(s.reasons) ? '<ul style="margin:2px 0 0 14px;padding:0;color:#9aa7bd;font-size:9.5px">' + s.reasons.map(r=>`<li>${r}</li>`).join('') + '</ul>' : ''}
+        </div>`).join('')
+      : '<div style="color:#6b7689">None recorded yet — no signal-generating engine is wired to recordSignal() yet.</div>');
+
+    html += section('Recent WS Messages', recentMsgs.length
+      ? recentMsgs.slice().reverse().map(m => `<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid #1a2233">
+          <span style="color:${m.dir==='out'?'#a78bfa':'#1fdf9b'}">${m.dir==='out'?'↑':'↓'} ${(m.msg && (m.msg.msg_type||Object.keys(m.msg)[0]))||'?'}</span>
+          <span style="color:#6b7689">${m.latencyMs!=null ? m.latencyMs+'ms' : ''}</span>
+        </div>`).join('')
+      : '<div style="color:#6b7689">No messages yet.</div>');
+
+    html += section('Recent Errors', errors.length
+      ? errors.slice().reverse().map(e => `<div style="color:#ff4d6a;padding:2px 0;border-bottom:1px solid #1a2233">[${e.source}] ${e.message}</div>`).join('')
+      : '<div style="color:#1fdf9b">None.</div>');
+
+    html += section('Performance', 
+      kv('Market States Recorded', perf.marketStateCount) +
+      kv('WS Log Entries', perf.wsLogCount) +
+      kv('Errors', perf.errorCount) +
+      kv('Est. Memory', perf.memoryEstimateBytes ? (perf.memoryEstimateBytes/1024).toFixed(1)+' KB' : '—')
+    );
+
+    body.innerHTML = html;
+  };
+
+  window.addEventListener('keydown', e => { if (e.ctrlKey && e.shiftKey && e.key === 'D') { e.preventDefault(); window.mfxToggleDebugPanel(); } });
+  setInterval(() => { if (document.getElementById('mfxDebugPanel').style.display !== 'none') window.mfxRenderDebugPanel(); }, 500);
+})();
+</script>
 </body>
 </html>

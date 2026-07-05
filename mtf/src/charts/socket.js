@@ -30,6 +30,20 @@ export function connect() {
   try { ws = new WebSocket(url); }
   catch (e) { setConnState("dead"); endpointIdx++; scheduleReconnect(); return; }
 
+  // Developer AI Mode — wrap .send() once here so every outgoing message
+  // from this module (candle/tick history requests, forget_all) is
+  // recorded automatically, the same pattern used for the main
+  // dashboard's separate gridWs connection. These are two genuinely
+  // different WebSocket connections; both report into the same shared
+  // window.__mfxDebug recorder.
+  if (typeof window !== 'undefined' && window.__mfxDebug) {
+    const realSend = ws.send.bind(ws);
+    ws.send = (data) => {
+      try { const parsed = JSON.parse(data); window.__mfxDebug.recordOutgoing(parsed.req_id ?? null, parsed); } catch (_) {}
+      return realSend(data);
+    };
+  }
+
   const timeout = setTimeout(() => {
     if (ws && ws.readyState !== WebSocket.OPEN) {
       try { ws.close(); } catch (_) {}
@@ -47,10 +61,12 @@ export function connect() {
     // currently aliased as the "active" analysis timeframe.
     const allPanels = Object.values(AppState.timeframePanels);
     const isReconnect = allPanels.length > 0 && allPanels[0].viewT0 != null;
+    if (isReconnect && typeof window !== 'undefined' && window.__mfxDebug) window.__mfxDebug.recordReconnect();
     allPanels.forEach(p => requestPanelData(p, { preserveView: isReconnect }));
   };
   ws.onmessage = ev => {
     let msg; try { msg = JSON.parse(ev.data); } catch (_) { return; }
+    if (typeof window !== 'undefined' && window.__mfxDebug) window.__mfxDebug.recordIncoming(msg.req_id ?? null, msg);
     if (msg.req_id && pending[msg.req_id]) {
       pending[msg.req_id](msg);
       if (!msg.subscription) delete pending[msg.req_id];
@@ -68,6 +84,7 @@ function scheduleReconnect() {
 }
 
 function setConnState(state) {
+  if (typeof window !== 'undefined' && window.__mfxDebug) window.__mfxDebug.setConnectionStatus(state);
   eventBus.emit('connection:changed', state);
 }
 

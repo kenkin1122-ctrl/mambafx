@@ -21,6 +21,7 @@
 import { AppState } from './core/AppState.js';
 import { eventBus } from './core/EventBus.js';
 import { historyManager } from './core/HistoryManager.js';
+import { installGlobal as installDebugRecorder } from './core/debugRecorder.js';
 import { HTF_TFS, LTF_TFS } from './core/constants.js';
 import { Panel } from './charts/Panel.js';
 import { connect } from './charts/socket.js';
@@ -47,6 +48,7 @@ import { $ } from './utils/dom.js';
 let booted = false;
 
 function boot() {
+  installDebugRecorder();
   // 1. Panels
   AppState.registerPanel('htf', new Panel('mtfHtf', 'htf', HTF_TFS));
   AppState.registerPanel('ltf', new Panel('mtfLtf', 'ltf', LTF_TFS));
