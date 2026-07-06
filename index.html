@@ -585,6 +585,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button id="navAggression" onclick="showPage('aggression')">🔥 Aggression Bot</button>
     <button id="navMtf" onclick="showPage('mtf')">🧭 MTF Structure</button>
     <button id="navNjanja" onclick="showPage('njanja')">🏛 Njanja Analysis</button>
+    <button id="navRfaBot" onclick="showPage('rfabot')">📊 Rise/Fall Autobot</button>
   </nav>
 
   <!-- ============ PAGE 1: LIVE TRACKER ============ -->
@@ -2245,6 +2246,70 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     Measured from the real tick-rule (up-tick vs down-tick), not simulated volume. A high score with low intensity is directional but quiet; a high score with high intensity is a genuine forceful push. Synthetic indices are random walks — this describes what already happened in the candle, it does not predict the next one.
   </footer>
 </div><!-- /page-aggression -->
+<div id="page-rfabot" class="page">
+  <div class="grid-layout">
+    <div class="grid-side">
+      <div class="grid-card">
+        <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">📊 Rise/Fall Autobot</h3>
+        <div class="gc-sub" style="margin-bottom:10px">Scans every Volatility Index simultaneously, determines who controls each market, and trades Rise/Fall only at a significant zone with confirming rejection and candle-body signals. Uses the Trading Grid connection — connect there first.</div>
+        <button id="rfaArmBtn" class="gc-btn" onclick="rfaToggleArm()" style="width:100%;margin-bottom:10px">▶ Arm & Scan</button>
+        <div id="rfaScanStatus" class="gc-sub" style="margin-bottom:12px">Not scanning.</div>
+
+        <label for="rfaStake">Base Stake (USD)</label>
+        <input type="number" id="rfaStake" value="1.00" min="0.35" step="0.01" style="width:100%;margin-bottom:8px">
+
+        <label for="rfaDuration">Duration (ticks)</label>
+        <input type="number" id="rfaDuration" value="5" min="1" step="1" style="width:100%;margin-bottom:8px">
+
+        <label for="rfaThreshold">Confidence Threshold</label>
+        <input type="number" id="rfaThreshold" value="0.55" min="0" max="1" step="0.01" style="width:100%;margin-bottom:8px">
+
+        <label for="rfaMaxLevel">Max Martingale Level (0 = no limit)</label>
+        <input type="number" id="rfaMaxLevel" value="0" min="0" step="1" style="width:100%;margin-bottom:8px">
+
+        <label for="rfaStopLoss">Stop Loss (USD, blank = off)</label>
+        <input type="number" id="rfaStopLoss" min="0" step="0.01" style="width:100%;margin-bottom:8px">
+
+        <label for="rfaTargetProfit">Target Profit (USD, blank = off)</label>
+        <input type="number" id="rfaTargetProfit" min="0" step="0.01" style="width:100%;margin-bottom:8px">
+
+        <div class="gc-sub" style="margin-top:6px">Martingale multiplier is shared with every other bot on this page — see the Martingale Multiplier control above. Tick-delay between trades is fixed at 1 tick, per spec, and isn't user-configurable.</div>
+      </div>
+
+      <div class="grid-card">
+        <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Session Stats</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div class="em-card"><div class="em-lab">Won</div><div id="rfaStatWon" class="em-val up">0</div></div>
+          <div class="em-card"><div class="em-lab">Lost</div><div id="rfaStatLost" class="em-val down">0</div></div>
+          <div class="em-card"><div class="em-lab">Win Rate</div><div id="rfaStatWinRate" class="em-val">—</div></div>
+          <div class="em-card"><div class="em-lab">Profit</div><div id="rfaStatProfit" class="em-val">0.00</div></div>
+          <div class="em-card"><div class="em-lab">ROI</div><div id="rfaStatROI" class="em-val">—</div></div>
+          <div class="em-card"><div class="em-lab">Current Market</div><div id="rfaStatMarket" class="em-val acc">—</div></div>
+          <div class="em-card" style="grid-column:1/3"><div class="em-lab">Martingale Level</div><div id="rfaStatLevel" class="em-val">0</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-main">
+      <div class="grid-card" style="margin-bottom:16px">
+        <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Market Ranking — Who Controls Each Market Right Now</h3>
+        <table class="sig-table">
+          <thead><tr><th class="l">Market</th><th class="l">Direction</th><th class="l">Confidence</th><th class="l">Control</th><th class="l">Top Reasons</th></tr></thead>
+          <tbody id="rfaRankBody"><tr><td colspan="5" class="sig-empty">Not scanning yet.</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="grid-card">
+        <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Trade Log</h3>
+        <table class="sig-table">
+          <thead><tr><th class="l">Time</th><th class="l">Market</th><th class="l">Dir</th><th class="l">Stake</th><th class="l">Conf.</th><th class="l">P/L</th><th class="l">Status</th></tr></thead>
+          <tbody id="rfaTradeBody"><tr><td colspan="7" class="sig-empty">No trades yet.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="page-njanja" class="page">
 <header>
   <div class="brand">
@@ -4039,8 +4104,8 @@ function startTfTimers(){
 }
 
 function showPage(which){
-  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot", aggression:"page-aggression", mtf:"page-mtf", njanja:"page-njanja" };
-  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot", aggression:"navAggression", mtf:"navMtf", njanja:"navNjanja" };
+  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot", aggression:"page-aggression", mtf:"page-mtf", njanja:"page-njanja", rfabot:"page-rfabot" };
+  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot", aggression:"navAggression", mtf:"navMtf", njanja:"navNjanja", rfabot:"navRfaBot" };
   Object.keys(pages).forEach(k => {
     document.getElementById(pages[k]).classList.toggle("active", k===which);
     const nav = document.getElementById(navs[k]); if (nav) nav.classList.toggle("active", k===which);
@@ -4102,6 +4167,9 @@ function showPage(which){
   }
   if (which === "njanja"){
     if (typeof window.mtfPageInit === "function") window.mtfPageInit();
+  }
+  if (which === "rfabot"){
+    if (typeof rfaPageInit === "function") rfaPageInit();
   }
 }
 
@@ -4275,7 +4343,539 @@ function computeZones(arr){
   return { demand: trim(demand), supply: trim(supply) };
 }
 
-// Fair Value Gap (3-candle imbalance).
+// ══════════════════════════════════════════════════════════════════════
+// Rise/Fall Autobot — Market Control & Confidence Engine
+// ══════════════════════════════════════════════════════════════════════
+// Pure, testable functions. Reuses findSwings/computeSR/computeZones (the
+// existing S/R and supply/demand engines, previously used only for the
+// Analysis Tool's chart drawing) and the existing per-tick indSnapshot
+// (EMA/MACD/ADX/+DI/-DI) — nothing here recomputes an indicator that
+// already exists elsewhere in the app.
+
+const RFA_ADX_TREND_THRESHOLD = 20;   // below this, ADX says "no trend" -> neutral regardless of other signals
+const RFA_ZONE_TOLERANCE_FRAC = 0.02; // price within 2% of the candle range counts as "at" a zone
+const RFA_MAX_SCORE = 9;              // rough ceiling given the point contributions below; confidence = score/this, clamped to 1
+
+/** Step 1 — Market Control Engine: who currently controls the market? */
+function rfaMarketControl(candles, ind){
+  if (!candles || candles.length < 20 || !ind) return { bias: 'neutral', bullScore: 0, bearScore: 0, reasons: ['Insufficient candle history'] };
+
+  const { highs, lows } = findSwings(candles, 2);
+  const structureBias = rfaStructureBias(highs, lows);
+
+  const emaBull = ind.ema5 != null && ind.ema10 != null && ind.ema20 != null && ind.ema5 > ind.ema10 && ind.ema10 > ind.ema20;
+  const emaBear = ind.ema5 != null && ind.ema10 != null && ind.ema20 != null && ind.ema5 < ind.ema10 && ind.ema10 < ind.ema20;
+  const macdBull = ind.macd != null && ind.macdSig != null && ind.macd > ind.macdSig;
+  const macdBear = ind.macd != null && ind.macdSig != null && ind.macd < ind.macdSig;
+  const diBull = ind.pdi != null && ind.ndi != null && ind.pdi > ind.ndi;
+  const diBear = ind.pdi != null && ind.ndi != null && ind.ndi > ind.pdi;
+  const adxTrending = ind.adx != null && ind.adx >= RFA_ADX_TREND_THRESHOLD;
+
+  const reasons = [];
+  let bull = 0, bear = 0;
+  if (structureBias === 'bullish') { bull++; reasons.push('Higher highs / higher lows structure'); }
+  if (structureBias === 'bearish') { bear++; reasons.push('Lower highs / lower lows structure'); }
+  if (emaBull) { bull++; reasons.push('EMA alignment bullish (5 > 10 > 20)'); }
+  if (emaBear) { bear++; reasons.push('EMA alignment bearish (5 < 10 < 20)'); }
+  if (macdBull) { bull++; reasons.push('MACD bullish (line above signal)'); }
+  if (macdBear) { bear++; reasons.push('MACD bearish (line below signal)'); }
+  if (diBull && adxTrending) { bull++; reasons.push(`+DI > -DI with ADX confirming trend (${ind.adx.toFixed(1)})`); }
+  if (diBear && adxTrending) { bear++; reasons.push(`-DI > +DI with ADX confirming trend (${ind.adx.toFixed(1)})`); }
+
+  // ADX below threshold overrides everything else — per spec, weak trend
+  // strength means consolidation regardless of what the other signals say.
+  if (!adxTrending) return { bias: 'neutral', bullScore: bull, bearScore: bear, reasons: ['ADX below trend threshold (' + RFA_ADX_TREND_THRESHOLD + ') — consolidation likely, no trade'] };
+
+  if (bull >= 3 && bull > bear) return { bias: 'bullish', bullScore: bull, bearScore: bear, reasons };
+  if (bear >= 3 && bear > bull) return { bias: 'bearish', bullScore: bull, bearScore: bear, reasons };
+  return { bias: 'neutral', bullScore: bull, bearScore: bear, reasons: ['Mixed signals — no clear market control'] };
+}
+
+/** HH/HL vs LH/LL from the last two swing highs and last two swing lows. Returns null (not "neutral") when there isn't enough swing history to judge — a real absence of information, not a directional claim. */
+function rfaStructureBias(highs, lows){
+  if (highs.length < 2 || lows.length < 2) return null;
+  const h = highs.slice(-2), l = lows.slice(-2);
+  const higherHigh = h[1].price > h[0].price, higherLow = l[1].price > l[0].price;
+  const lowerHigh = h[1].price < h[0].price, lowerLow = l[1].price < l[0].price;
+  if (higherHigh && higherLow) return 'bullish';
+  if (lowerHigh && lowerLow) return 'bearish';
+  return null;
+}
+
+/** Step 2/3 — is current price actually AT a significant zone right now? The bot must never trade mid-swing. */
+function rfaZoneProximity(candles, currentCandle){
+  if (!candles || candles.length < 8) return { inZone: false };
+  const { support, resistance } = computeSR(candles);
+  const { demand, supply } = computeZones(candles);
+  const range = Math.max(...candles.map(c => c.high)) - Math.min(...candles.map(c => c.low)) || 1;
+  const tol = range * RFA_ZONE_TOLERANCE_FRAC;
+
+  // Support/demand are checked against the candle's LOW, and
+  // resistance/supply against its HIGH — not the close. A rejection at a
+  // zone shows up as a WICK reaching it (that's the entire premise of
+  // Step 4's rejection analysis); checking only the close would miss the
+  // exact case of "price wicked down into support and closed back up,"
+  // which is the strongest, most common form of a valid rejection signal.
+  const lowSide = currentCandle.low, highSide = currentCandle.high;
+  const atSupport = support.find(s => Math.abs(lowSide - s.price) <= tol) || null;
+  const atResistance = resistance.find(r => Math.abs(highSide - r.price) <= tol) || null;
+  const atDemand = demand.find(d => lowSide >= d.bot - tol && lowSide <= d.top + tol) || null;
+  const atSupply = supply.find(s => highSide >= s.bot - tol && highSide <= s.top + tol) || null;
+
+  return { atSupport, atResistance, atDemand, atSupply, inZone: !!(atSupport || atResistance || atDemand || atSupply) };
+}
+
+/** Step 4 — rejection analysis: was the attempted move accepted or rejected? */
+function rfaRejectionAnalysis(candle){
+  const range = (candle.high - candle.low) || 1e-9;
+  const body = Math.abs(candle.close - candle.open);
+  const upperWick = candle.high - Math.max(candle.open, candle.close);
+  const lowerWick = Math.min(candle.open, candle.close) - candle.low;
+  return {
+    longUpperWick: upperWick > body * 1.2 && upperWick > range * 0.3,
+    longLowerWick: lowerWick > body * 1.2 && lowerWick > range * 0.3,
+    upperWick, lowerWick, body, range,
+  };
+}
+
+/** Step 5 — candle body analysis: body size, position, close location, wick-to-body ratio. */
+function rfaCandleBodyAnalysis(candle){
+  const range = (candle.high - candle.low) || 1e-9;
+  const body = Math.abs(candle.close - candle.open);
+  const bullish = candle.close >= candle.open;
+  const bodyRatio = body / range;
+  const closeNearHigh = (candle.high - candle.close) / range < 0.15;
+  const closeNearLow = (candle.close - candle.low) / range < 0.15;
+  const smallUpperWick = (candle.high - Math.max(candle.open, candle.close)) / range < 0.15;
+  const smallLowerWick = (Math.min(candle.open, candle.close) - candle.low) / range < 0.15;
+
+  let quality = 0;
+  if (bullish) { if (bodyRatio > 0.5) quality++; if (closeNearHigh) quality++; if (smallUpperWick) quality++; }
+  else { if (bodyRatio > 0.5) quality++; if (closeNearLow) quality++; if (smallLowerWick) quality++; }
+
+  return { bullish, bodyRatio, closeNearHigh, closeNearLow, smallUpperWick, smallLowerWick, quality };
+}
+
+/**
+ * Step 1-6 combined: the full confidence score for ONE market's current
+ * state. Returns null direction (never trade) unless: market control is
+ * NOT neutral, price is genuinely at a significant zone, and enough
+ * confirming signals stack up. Every point in the score has a stated
+ * reason — this is the "why" the Developer AI Mode debug recorder's
+ * signal audit is designed to carry, so a trade can always be traced back
+ * to the exact conditions that produced it.
+ */
+function rfaComputeConfidence(candles, ind){
+  const control = rfaMarketControl(candles, ind);
+  if (control.bias === 'neutral') return { direction: null, confidence: 0, marketControl: control, reasons: control.reasons };
+
+  const current = candles[candles.length - 1];
+  // Zones computed from history EXCLUDING the still-forming candle — a
+  // zone derived partly from the very candle being judged against it
+  // would be circular.
+  const zones = rfaZoneProximity(candles.slice(0, -1), current);
+  if (!zones.inZone) {
+    return { direction: null, confidence: 0, marketControl: control, zones, reasons: control.reasons.concat('Price is not currently at a significant zone — no trade until it reaches one') };
+  }
+
+  const rejection = rfaRejectionAnalysis(current);
+  const body = rfaCandleBodyAnalysis(current);
+  const direction = control.bias === 'bullish' ? 'RISE' : 'FALL';
+  const reasons = control.reasons.slice();
+  let score = control.bias === 'bullish' ? control.bullScore : control.bearScore;
+
+  if (direction === 'RISE') {
+    if (zones.atSupport) { score++; reasons.push('Price at support — buyers historically present here'); }
+    if (zones.atDemand) { score += 2; reasons.push('Price at demand zone — institutional buying origin'); }
+    if (rejection.longLowerWick) { score++; reasons.push('Long lower wick — sellers rejected, buyers absorbed the selling pressure'); }
+    if (body.bullish && body.quality >= 2) { score++; reasons.push('Strong bullish candle body — large body, close near the high, small upper wick'); }
+  } else {
+    if (zones.atResistance) { score++; reasons.push('Price at resistance — sellers historically present here'); }
+    if (zones.atSupply) { score += 2; reasons.push('Price at supply zone — institutional selling origin'); }
+    if (rejection.longUpperWick) { score++; reasons.push('Long upper wick — buyers rejected, sellers regained control'); }
+    if (!body.bullish && body.quality >= 2) { score++; reasons.push('Strong bearish candle body — large body, close near the low, small lower wick'); }
+  }
+
+  const confidence = Math.min(1, score / RFA_MAX_SCORE);
+  return { direction, confidence, score, marketControl: control, zones, rejection, bodyAnalysis: body, reasons };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Rise/Fall Autobot — Multi-Market Scanner, Execution, Martingale,
+// Switching Logic, Risk Management
+// ══════════════════════════════════════════════════════════════════════
+
+/** Per-symbol DMI/ADX tracker. dmiUpdate() (used by the single-symbol
+ * Indicator Charts page) is a module-level singleton — calling it once
+ * per scanned market would corrupt shared state across symbols. This
+ * factory gives each scanned market its own independent accumulator,
+ * built from the exact same formula, without touching the existing
+ * global _dmi/dmiUpdate at all. */
+function rfaMakeDmiTracker(){
+  const d = { pdm:0, ndm:0, tr:0, pdi:0, ndi:0, adx:0, prevHigh:null, prevLow:null, prevClose:null, n:0 };
+  return function(price){
+    const h=price, l=price;
+    if(d.prevClose==null){d.prevHigh=h;d.prevLow=l;d.prevClose=price;return null;}
+    const per=14;
+    const trv=Math.max(h-l,Math.abs(h-d.prevClose),Math.abs(l-d.prevClose));
+    const updm=h>d.prevHigh?Math.max(h-d.prevHigh,0):0;
+    const undm=l<d.prevLow?Math.max(d.prevLow-l,0):0;
+    const posm=updm>undm?updm:0;
+    const negm=undm>updm?undm:0;
+    const k=1-1/per;
+    d.tr=d.n<per?d.tr+trv:d.tr*k+trv;
+    d.pdm=d.n<per?d.pdm+posm:d.pdm*k+posm;
+    d.ndm=d.n<per?d.ndm+negm:d.ndm*k+negm;
+    d.n++;
+    if(d.n<per||d.tr===0){d.prevHigh=h;d.prevLow=l;d.prevClose=price;return null;}
+    d.pdi=(d.pdm/d.tr)*100;
+    d.ndi=(d.ndm/d.tr)*100;
+    const sum=d.pdi+d.ndi;
+    const dx=sum>0?Math.abs(d.pdi-d.ndi)/sum*100:0;
+    d.adx=d.n===per?dx:d.adx*k+dx*(1-k);
+    d.prevHigh=h;d.prevLow=l;d.prevClose=price;
+    return{pdi:d.pdi,ndi:d.ndi,adx:d.adx};
+  };
+}
+
+const RFA_MARKETS = Object.keys(MARKETS);
+let rfaMarketState = {};
+RFA_MARKETS.forEach(sym => { rfaMarketState[sym] = { candles: [], dmiFn: rfaMakeDmiTracker(), confidence: null, lastUpdated: null }; });
+
+let rfaWs = null;
+let rfaReqId = 500000; // a high, distinct range so these req_ids never collide with gridWs's own counter
+let rfaConnected = false;
+let rfaReconnectTimer = null;
+
+function rfaConnect(){
+  if (rfaWs && (rfaWs.readyState === 0 || rfaWs.readyState === 1)) return; // already connecting/open
+  try { rfaWs = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`); }
+  catch(e){ rfaScheduleReconnect(); return; }
+  rfaWs.onopen = () => {
+    rfaConnected = true;
+    gridSet('rfaScanStatus', 'Scanning ' + RFA_MARKETS.length + ' markets…');
+    // Staggered, not fired all at once — the same lesson learned building
+    // the MTF Dashboard's 10-panel subscriptions: firing many concurrent
+    // ticks_history+subscribe requests on one connection risks some being
+    // silently rate-limited.
+    RFA_MARKETS.forEach((sym, i) => {
+      setTimeout(() => {
+        if (rfaWs && rfaWs.readyState === 1) {
+          rfaWs.send(JSON.stringify({ ticks_history: sym, style: 'candles', granularity: 60, count: 60, end: 'latest', subscribe: 1, req_id: ++rfaReqId }));
+        }
+      }, i * 150);
+    });
+  };
+  rfaWs.onmessage = ev => {
+    let msg; try { msg = JSON.parse(ev.data); } catch(_) { return; }
+    rfaHandleMsg(msg);
+  };
+  rfaWs.onerror = () => {};
+  rfaWs.onclose = () => { rfaConnected = false; rfaScheduleReconnect(); };
+}
+function rfaScheduleReconnect(){
+  if (rfaReconnectTimer) clearTimeout(rfaReconnectTimer);
+  rfaReconnectTimer = setTimeout(rfaConnect, 3000);
+}
+function rfaDisconnect(){
+  if (rfaReconnectTimer) { clearTimeout(rfaReconnectTimer); rfaReconnectTimer = null; }
+  if (rfaWs) { try { rfaWs.close(); } catch(_){} rfaWs = null; }
+  rfaConnected = false;
+}
+
+function rfaHandleMsg(msg){
+  if (msg.error) return;
+  if (msg.msg_type === 'candles' && msg.echo_req && msg.echo_req.ticks_history){
+    const sym = msg.echo_req.ticks_history;
+    const st = rfaMarketState[sym];
+    if (!st || !Array.isArray(msg.candles)) return;
+    st.candles = msg.candles.map(c => ({ epoch:+c.epoch, open:+c.open, high:+c.high, low:+c.low, close:+c.close }));
+    rfaRecomputeConfidence(sym);
+    return;
+  }
+  if (msg.msg_type === 'ohlc' && msg.ohlc){
+    const sym = msg.ohlc.symbol;
+    const st = rfaMarketState[sym];
+    if (!st) return;
+    const epoch = Number(msg.ohlc.open_time != null ? msg.ohlc.open_time : msg.ohlc.epoch);
+    const c = { epoch, open:+msg.ohlc.open, high:+msg.ohlc.high, low:+msg.ohlc.low, close:+msg.ohlc.close };
+    const last = st.candles[st.candles.length - 1];
+    if (last && last.epoch === epoch) st.candles[st.candles.length - 1] = c;
+    else if (!last || epoch > last.epoch) { st.candles.push(c); if (st.candles.length > 100) st.candles.shift(); }
+    rfaRecomputeConfidence(sym);
+    // Tick-delay counter: a new candle/tick for the CURRENTLY LOCKED
+    // market counts down the mandatory one-tick wait after a completed
+    // contract before the bot evaluates again.
+    if (sym === rfaCurrentMarket && rfaWaitingTicks > 0) rfaWaitingTicks--;
+    rfaEvaluateAndTrade();
+  }
+}
+
+function rfaRecomputeConfidence(sym){
+  const st = rfaMarketState[sym];
+  if (!st || st.candles.length < 20) return;
+  const closes = st.candles.map(c => c.close);
+  const m = macd(closes);
+  const dmi = st.dmiFn(closes[closes.length - 1]);
+  st.confidence = rfaComputeConfidence(st.candles, {
+    ema5: emaLast(closes, 5), ema10: emaLast(closes, 10), ema20: emaLast(closes, 20),
+    macd: m ? m.macd : null, macdSig: m ? m.signal : null,
+    pdi: dmi ? dmi.pdi : null, ndi: dmi ? dmi.ndi : null, adx: dmi ? dmi.adx : null,
+  });
+  st.lastUpdated = Date.now();
+}
+
+// ── Trading state ───────────────────────────────────────────────────────
+let rfaArmed = false;
+let rfaCurrentMarket = null;   // symbol the bot is locked onto during an active Martingale sequence
+let rfaMartingaleLevel = 0;    // 0 = base stake, no active sequence
+let rfaCurrentStake = null;
+let rfaWaitingTicks = 0;
+let rfaOpenContracts = {};     // id -> row, mirrors ouOpenContracts/adxOpenContracts
+let rfaTrades = [];
+let _rfaMult = null;
+function rfaMult(){ return _rfaMult || (_rfaMult = makeMultiplier(() => $("rfaStake"))); }
+
+let rfaStats = { won: 0, lost: 0, profit: 0, sessionStartBalance: null };
+
+const RFA_TICK_DELAY = 1; // "wait exactly one tick" per spec — not user-configurable, it's a stated rule, not a tunable
+
+function rfaConfidenceThreshold(){
+  const el = $("rfaThreshold");
+  const v = el ? parseFloat(el.value) : 0.55;
+  return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.55;
+}
+function rfaMaxMartingaleLevel(){
+  const el = $("rfaMaxLevel");
+  const v = el ? parseInt(el.value, 10) : 0;
+  return Number.isFinite(v) && v > 0 ? v : Infinity; // 0 or blank = no limit
+}
+function rfaStopLoss(){ const el = $("rfaStopLoss"); const v = el ? parseFloat(el.value) : NaN; return Number.isFinite(v) && v > 0 ? v : null; }
+function rfaTargetProfit(){ const el = $("rfaTargetProfit"); const v = el ? parseFloat(el.value) : NaN; return Number.isFinite(v) && v > 0 ? v : null; }
+
+/** Step 12/13 — pick the single highest-confidence market above threshold, across ALL scanned markets. */
+function rfaPickBestMarket(){
+  let best = null;
+  RFA_MARKETS.forEach(sym => {
+    const st = rfaMarketState[sym];
+    if (!st || !st.confidence || !st.confidence.direction) return;
+    if (st.confidence.confidence < rfaConfidenceThreshold()) return;
+    if (!best || st.confidence.confidence > best.confidence) best = { symbol: sym, direction: st.confidence.direction, confidence: st.confidence.confidence, info: st.confidence };
+  });
+  return best;
+}
+
+function rfaRiskLimitReached(){
+  const sl = rfaStopLoss(), tp = rfaTargetProfit();
+  if (sl != null && rfaStats.profit <= -sl) return 'Stop loss reached (' + rfaStats.profit.toFixed(2) + ')';
+  if (tp != null && rfaStats.profit >= tp) return 'Target profit reached (' + rfaStats.profit.toFixed(2) + ')';
+  return null;
+}
+
+/** Step 12/13/14 — the central decision loop, called on every live tick for the locked market (or any market, when unlocked). */
+function rfaEvaluateAndTrade(){
+  if (!rfaArmed) return;
+
+  const limitHit = rfaRiskLimitReached();
+  if (limitHit) { rfaArmed = false; gridSet('rfaScanStatus', 'Stopped — ' + limitHit); rfaRenderAll(); return; }
+
+  if (rfaWaitingTicks > 0) return; // Step: tick-delay between trades
+
+  // Switching lock (Step 13): a Martingale sequence in progress must stay
+  // on its current market until it ends in a win. It must NOT free-switch
+  // mid-sequence even if another market now scores higher.
+  if (rfaCurrentMarket && rfaMartingaleLevel > 0) {
+    const st = rfaMarketState[rfaCurrentMarket];
+    if (st && st.confidence && st.confidence.direction) {
+      rfaExecuteTrade(rfaCurrentMarket, st.confidence.direction, st.confidence);
+    } else {
+      gridSet('rfaScanStatus', 'Locked on ' + rfaCurrentMarket + ' (Martingale level ' + rfaMartingaleLevel + ') — waiting for a valid setup to continue the sequence.');
+    }
+    return;
+  }
+
+  // No active sequence — free to (re-)select across all markets.
+  const best = rfaPickBestMarket();
+  if (!best) { gridSet('rfaScanStatus', 'Scanning — no market currently meets the confidence threshold.'); return; }
+  rfaCurrentMarket = best.symbol;
+  rfaExecuteTrade(best.symbol, best.direction, best.info);
+}
+
+function rfaValidateProposal(p){
+  const errors = [];
+  if (typeof p.amount !== 'number' || !Number.isFinite(p.amount) || p.amount <= 0) errors.push('amount must be a positive number');
+  if (typeof p.duration !== 'number' || !Number.isInteger(p.duration) || p.duration <= 0) errors.push('duration must be a positive integer');
+  if (!p.underlying_symbol || typeof p.underlying_symbol !== 'string') errors.push('symbol is missing');
+  if (p.contract_type !== 'CALL' && p.contract_type !== 'PUT') errors.push('contract_type must be CALL (Rise) or PUT (Fall)');
+  if (p.basis !== 'stake' && p.basis !== 'payout') errors.push('basis must be "stake" or "payout"');
+  return { ok: errors.length === 0, errors };
+}
+
+function rfaExecuteTrade(symbol, direction, confidenceInfo){
+  if (typeof gridWs === 'undefined' || !gridWs || gridWs.readyState !== 1 || !gridAuthed){
+    gridSet('rfaScanStatus', 'Connect on Trading Grid first.'); return;
+  }
+  const stake = Math.max(0.35, rfaCurrentStake != null ? rfaCurrentStake : rfaMult().getNext('martingale'));
+  const dur = parseInt(($("rfaDuration") || { value:'5' }).value || '5', 10);
+  const contractType = direction === 'RISE' ? 'CALL' : 'PUT';
+  const reqId = ++gridReqId;
+
+  const proposalMsg = {
+    proposal:1, req_id:reqId,
+    amount:stake, basis:'stake',
+    contract_type:contractType,
+    currency:gridCurrency,
+    duration:dur, duration_unit:'t',
+    underlying_symbol:symbol,
+  };
+  const validation = rfaValidateProposal(proposalMsg);
+  if (!validation.ok){ gridSet('rfaScanStatus', 'Proposal rejected before sending: ' + validation.errors.join('; ')); return; }
+
+  if (window.__mfxDebug) window.__mfxDebug.recordSignal({
+    engine: 'RiseFallAutobot', signal: contractType, confidence: confidenceInfo ? confidenceInfo.confidence : null,
+    marketState: confidenceInfo && confidenceInfo.marketControl ? confidenceInfo.marketControl.bias : null,
+    reasons: confidenceInfo ? confidenceInfo.reasons : [],
+  });
+
+  rfaCurrentStake = stake;
+  rfaWaitingTicks = RFA_TICK_DELAY + 1; // +1 because the tick that just fired this evaluation shouldn't itself count down
+  const row = { id: 'pending-' + reqId, symbol, contractType, dir: direction, stake, status: 'proposal', time: Math.floor(Date.now()/1000), confidence: confidenceInfo ? confidenceInfo.confidence : null };
+  rfaTrades.unshift(row);
+
+  gridPending[reqId] = (proposal, err) => {
+    if (err){ row.status = 'rejected: ' + (err.message || err.code || 'error'); rfaRenderAll(); return; }
+    if (!proposal || !proposal.id || proposal.ask_price == null){ row.status = 'rejected: no price'; rfaRenderAll(); return; }
+    const buyReqId = ++gridReqId;
+    row.status = 'open'; rfaRenderAll();
+    gridPending[buyReqId] = (buy, buyErr) => {
+      if (buyErr){ row.status = 'buy failed: ' + (buyErr.message || buyErr.code || 'error'); rfaRenderAll(); return; }
+      if (buy){
+        row.id = String(buy.contract_id);
+        row.buyPrice = buy.buy_price;
+        row.status = 'open';
+        rfaOpenContracts[row.id] = row;
+        rfaRenderAll();
+      }
+    };
+    gridWs.send(JSON.stringify({ buy: proposal.id, price: proposal.ask_price, req_id: buyReqId }));
+  };
+  gridWs.send(JSON.stringify(proposalMsg));
+  rfaRenderAll();
+}
+
+/** Called from gridUpdateContract when a contract this bot opened settles. Mirrors ouSettleContract/adxSettle exactly. */
+function rfaSettleContract(id, won){
+  const row = rfaOpenContracts[id];
+  delete rfaOpenContracts[id];
+  if (!row) return;
+
+  rfaMult().record(row.stake, won);
+  rfaStats.won += won ? 1 : 0;
+  rfaStats.lost += won ? 0 : 1;
+  rfaStats.profit += won ? ((row.payout != null ? row.payout : row.stake) - row.stake) : -row.stake;
+
+  if (won) {
+    // Step 13: a win ends the Martingale sequence — reset to base stake,
+    // unlock the market, and re-evaluate everything from scratch next tick.
+    rfaMartingaleLevel = 0;
+    rfaCurrentStake = null;
+    rfaCurrentMarket = null;
+  } else {
+    rfaMartingaleLevel++;
+    if (rfaMartingaleLevel >= rfaMaxMartingaleLevel()) {
+      // Safety limit reached — stop rather than keep escalating stake indefinitely.
+      rfaArmed = false;
+      gridSet('rfaScanStatus', 'Stopped — max Martingale level (' + rfaMaxMartingaleLevel() + ') reached.');
+    }
+    // rfaCurrentStake stays set to whatever getNext('martingale') computes
+    // on the NEXT trade for this same locked market — handled naturally
+    // since rfaExecuteTrade always calls rfaMult().getNext('martingale')
+    // when rfaCurrentStake is null; setting it null here lets the
+    // multiplier decide the next stake from its own recorded history.
+    rfaCurrentStake = null;
+  }
+  rfaRenderAll();
+}
+
+function rfaToggleArm(){
+  rfaArmed = !rfaArmed;
+  const btn = $("rfaArmBtn");
+  if (btn) { btn.textContent = rfaArmed ? '⏸ Disarm' : '▶ Arm & Scan'; btn.classList.toggle('active', rfaArmed); }
+  if (rfaArmed) { rfaStats.sessionStartBalance = gridBalance; rfaConnect(); }
+  rfaRenderAll();
+}
+
+function rfaRenderAll(){
+  const statusEl = $("rfaScanStatus");
+  // Market ranking table — every scanned market, sorted by confidence, so
+  // "why did it pick THIS one" is always visible, not just the winner.
+  const rankBody = $("rfaRankBody");
+  if (rankBody){
+    const rows = RFA_MARKETS
+      .map(sym => ({ sym, st: rfaMarketState[sym] }))
+      .filter(r => r.st && r.st.confidence)
+      .sort((a,b) => (b.st.confidence.confidence||0) - (a.st.confidence.confidence||0));
+    if (!rows.length){
+      rankBody.innerHTML = '<tr><td colspan="5" class="sig-empty">Waiting for market data…</td></tr>';
+    } else {
+      rankBody.innerHTML = rows.map(({sym, st}) => {
+        const c = st.confidence;
+        const isLocked = sym === rfaCurrentMarket;
+        const dirTxt = c.direction || '—';
+        const dirCls = c.direction === 'RISE' ? 'cell-pos' : c.direction === 'FALL' ? 'cell-neg' : 'cell-mut';
+        return `<tr${isLocked ? ' style="background:rgba(86,182,255,0.08)"' : ''}>
+          <td class="l">${MARKETS[sym]||sym}${isLocked ? ' 🔒' : ''}</td>
+          <td class="${dirCls}" style="font-weight:700">${dirTxt}</td>
+          <td>${(c.confidence*100).toFixed(0)}%</td>
+          <td class="cell-mut">${c.marketControl ? c.marketControl.bias : '—'}</td>
+          <td class="cell-mut" style="font-size:9.5px">${(c.reasons||[]).slice(0,2).join('; ')}</td>
+        </tr>`;
+      }).join('');
+    }
+  }
+  // Stats
+  const setTxt = (id, v) => { const e = $(id); if (e) e.textContent = v; };
+  const resolved = rfaStats.won + rfaStats.lost;
+  setTxt('rfaStatWon', rfaStats.won);
+  setTxt('rfaStatLost', rfaStats.lost);
+  setTxt('rfaStatWinRate', resolved ? ((rfaStats.won/resolved)*100).toFixed(1)+'%' : '—');
+  setTxt('rfaStatProfit', (rfaStats.profit>=0?'+':'')+rfaStats.profit.toFixed(2));
+  setTxt('rfaStatROI', rfaStats.sessionStartBalance ? ((rfaStats.profit/rfaStats.sessionStartBalance)*100).toFixed(2)+'%' : '—');
+  setTxt('rfaStatMarket', rfaCurrentMarket ? (MARKETS[rfaCurrentMarket]||rfaCurrentMarket) : '—');
+  setTxt('rfaStatLevel', rfaMartingaleLevel);
+
+  // Trade log
+  const body = $("rfaTradeBody");
+  if (body){
+    if (!rfaTrades.length){
+      body.innerHTML = '<tr><td colspan="7" class="sig-empty">No trades yet.</td></tr>';
+    } else {
+      body.innerHTML = rfaTrades.slice(0,50).map(t => {
+        const dirCls = t.dir === 'RISE' ? 'cell-pos' : 'cell-neg';
+        const pCls = t.pnl==null ? 'cell-mut' : t.pnl>=0 ? 'cell-pos' : 'cell-neg';
+        const sCls = t.status==='won' ? 'cell-pos' : t.status==='lost' ? 'cell-neg' : /reject|failed/.test(t.status) ? 'cell-warn' : 'cell-mut';
+        return `<tr>
+          <td class="l">${fmtTime(t.time)}</td>
+          <td class="l">${MARKETS[t.symbol]||t.symbol}</td>
+          <td class="${dirCls}" style="font-weight:700">${t.dir}</td>
+          <td>${t.stake!=null?Number(t.stake).toFixed(2):'—'}</td>
+          <td>${t.confidence!=null?(t.confidence*100).toFixed(0)+'%':'—'}</td>
+          <td class="${pCls}">${t.pnl!=null?(t.pnl>=0?'+':'')+t.pnl.toFixed(2):'—'}</td>
+          <td class="${sCls} l">${t.status}</td>
+        </tr>`;
+      }).join('');
+    }
+  }
+}
+
+function rfaPageInit(){
+  if (window._rfaBooted) { rfaRenderAll(); return; }
+  window._rfaBooted = true;
+  rfaConnect();
+  rfaRenderAll();
+}
+
+
 // Bullish FVG: candle[i-1].high < candle[i+1].low  -> gap between them.
 // Bearish FVG: candle[i-1].low  > candle[i+1].high -> gap between them.
 // Fair Value Gap (3-candle imbalance), UNMITIGATED only.
@@ -6858,7 +7458,8 @@ function gridUpdateContract(c){
     || (typeof engTrades !== 'undefined' ? engTrades.find(t => t.id === id) : null)
     || (typeof window._dabTrades !== 'undefined' ? window._dabTrades.find(t => t.id === id) : null)
     || (typeof ouTrades !== 'undefined' ? ouTrades.find(t => t.id === id) : null)
-    || (typeof adxTrades !== 'undefined' ? adxTrades.find(t => t.id === id) : null);
+    || (typeof adxTrades !== 'undefined' ? adxTrades.find(t => t.id === id) : null)
+    || (typeof rfaTrades !== 'undefined' ? rfaTrades.find(t => t.id === id) : null);
   if (!row) return;
   if (c.buy_price != null) row.stake = Number(c.buy_price);
   if (c.entry_tick_display_value != null) row.entry = Number(c.entry_tick_display_value);
@@ -6905,6 +7506,9 @@ function gridUpdateContract(c){
     // ADX Bot settlement
     if (typeof adxOpenContracts !== 'undefined' && adxOpenContracts[id])
       if (typeof adxSettle === 'function') adxSettle(id, won);
+    // Rise/Fall Autobot settlement
+    if (typeof rfaOpenContracts !== 'undefined' && rfaOpenContracts[id])
+      if (typeof rfaSettleContract === 'function') rfaSettleContract(id, won);
     // Accounts page P/L tracking
     if (typeof acctOnTrade === 'function'){
       const tradePnl = row.pnl != null ? row.pnl : (won ? (row.payout||0) - (row.stake||0) : -(row.stake||0));
