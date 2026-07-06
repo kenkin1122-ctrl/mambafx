@@ -2258,6 +2258,9 @@ table.an-table tbody tr:last-child td{border-bottom:none}
         <label for="rfaStake">Base Stake (USD)</label>
         <input type="number" id="rfaStake" value="1.00" min="0.35" step="0.01" style="width:100%;margin-bottom:8px">
 
+        <label for="rfaMaxConcurrent">Max Concurrent Markets</label>
+        <input type="number" id="rfaMaxConcurrent" value="3" min="1" step="1" style="width:100%;margin-bottom:8px">
+
         <label for="rfaMaxLevel">Max Martingale Level (0 = no limit)</label>
         <input type="number" id="rfaMaxLevel" value="0" min="0" step="1" style="width:100%;margin-bottom:8px">
 
@@ -2267,7 +2270,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
         <label for="rfaTargetProfit">Target Profit Per Market (USD, blank = switch after every win)</label>
         <input type="number" id="rfaTargetProfit" min="0" step="0.01" style="width:100%;margin-bottom:8px">
 
-        <div class="gc-sub" style="margin-top:6px">Duration is fixed at 1 tick and contract type is always Rise/Fall — neither is configurable. Martingale multiplier is shared with every other bot on this page — see the Martingale Multiplier control above. Tick-delay between trades is fixed at 1 tick, per spec. Target Profit is per-market: the bot keeps trading its current market — through as many win/reset Martingale cycles as it takes — until that market's own accumulated profit reaches this figure, then switches. Stop Loss is the one session-wide hard stop.</div>
+        <div class="gc-sub" style="margin-top:6px">The bot can trade up to Max Concurrent Markets at once — each qualifying volatility index gets its own independent Martingale sequence, running simultaneously with the others. Duration is fixed at 1 tick; contract type is always Rise/Fall — neither is configurable. Each market's Martingale multiplier is shared with every other bot on this page — see the Martingale Multiplier control above. Tick-delay between trades is fixed at 1 tick, per spec, applied per-market. Target Profit is per-market: a market keeps trading — through as many win/reset Martingale cycles as it takes — until its own accumulated profit reaches this figure, then it's released and a fresh market fills the open slot. If a market hits Max Martingale Level, only that market is abandoned — the others keep running. Stop Loss is the one session-wide hard stop, checked against total profit across every active market.</div>
       </div>
 
       <div class="grid-card">
@@ -2278,10 +2281,16 @@ table.an-table tbody tr:last-child td{border-bottom:none}
           <div class="em-card"><div class="em-lab">Win Rate</div><div id="rfaStatWinRate" class="em-val">—</div></div>
           <div class="em-card"><div class="em-lab">Profit</div><div id="rfaStatProfit" class="em-val">0.00</div></div>
           <div class="em-card"><div class="em-lab">ROI</div><div id="rfaStatROI" class="em-val">—</div></div>
-          <div class="em-card"><div class="em-lab">Current Market</div><div id="rfaStatMarket" class="em-val acc">—</div></div>
-          <div class="em-card"><div class="em-lab">Martingale Level</div><div id="rfaStatLevel" class="em-val">0</div></div>
-          <div class="em-card"><div class="em-lab">Current Market Profit</div><div id="rfaStatMarketProfit" class="em-val">0.00</div></div>
+          <div class="em-card"><div class="em-lab">Active Markets</div><div id="rfaStatActiveCount" class="em-val acc">0 / 3</div></div>
         </div>
+      </div>
+
+      <div class="grid-card">
+        <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Active Markets</h3>
+        <table class="sig-table">
+          <thead><tr><th class="l">Market</th><th class="l">Level</th><th class="l">Stake</th><th class="l">Market Profit</th></tr></thead>
+          <tbody id="rfaActiveBody"><tr><td colspan="4" class="sig-empty">No markets currently active.</td></tr></tbody>
+        </table>
       </div>
     </div>
 
@@ -3444,6 +3453,844 @@ const BEFORE_N = 3;             // ticks captured before the run starts
 const AFTER_N  = 0;             // after-ticks removed — only B-window (B-3,B-2,B-1) is stored
 let signalRecords = [];          // newest first — B-window (before) only
 
+// ══════════════════════════════════════════════════════════════════════
+// Market State Discovery Engine — Phase 2.1: Run/Event Detector
+// ══════════════════════════════════════════════════════════════════════
+// Locked architecture (see project notes): this module ONLY detects
+// completed 5-Rise Events and pushes them onto an ephemeral Temporary
+// Queue. It does not label, does not persist, does not touch
+// EventDatabase directly — that split is deliberate, per the agreed
+// pipeline: Detector -> Temporary Queue -> Event Database -> Retrospective
+// Labeler -> QA Engine -> Version Validator -> MarketStates.
+//
+// EVENT DEFINITION (exact, per spec): Run Start is the first tick of the
+// first sequence of five consecutive STRICTLY increasing prices. An equal
+// price invalidates the candidate run (not just "fails to extend it" —
+// the whole candidate resets, and the equal-price tick becomes the new
+// anchor). Any downward movement invalidates it the same way.
+//
+// WHY THE DETECTOR WAITS FOR THE RUN TO BREAK BEFORE EMITTING ANYTHING:
+// EventDatabase is immutable once written, and the schema includes Actual
+// Run Length. If the detector fired the instant the 5th consecutive rise
+// occurred, it would have to guess or later mutate that field once the
+// run kept extending past 5 — which immutability forbids. So instead, a
+// qualifying run (reached at least 5) is tracked until it actually ENDS
+// (a non-increasing tick arrives), and only THEN is the complete, final
+// event emitted with its true Actual Run Length. This means there is a
+// necessary lag between "the 5th rise happens" and "the event exists" —
+// that lag is what makes the immutable record honest rather than a
+// best-guess at write time.
+//
+// NO OVERLAPPING EVENTS: once a qualifying run ends and its event is
+// emitted, detection resets fresh from the very next tick — the ending
+// tick becomes the new baseline, not a new run's anchor. A single long
+// monotonic rise of, say, 20 ticks therefore produces exactly ONE event
+// (Actual Run Length 20), not 16 overlapping 5-tick events. This is a
+// deliberate design decision, not an oversight — stated here so it's a
+// choice on record, not an implicit assumption.
+
+let msdRunState = { anchorEpoch: null, anchorPrice: null, count: 0, lastPrice: null, peakReached: false, qualifiedEventId: null };
+let msdQualifiedQueue = []; // fires the INSTANT a run reaches 5 — downstream consumers (e.g. the future Retrospective Labeler) can start work immediately, since the lookback window they care about is entirely in the PAST relative to Run Start and doesn't depend on how long the run keeps extending
+let msdEventQueue = [];     // Temporary Queue — the FINAL, immutable record, only pushed once the run actually ends. This is what ever reaches EventDatabase.
+let msdEventSeq = 0;        // per-session ordinal, kept for human-readable ordering/debugging — NOT the sole source of uniqueness (see msdSessionId below)
+
+// A bare incrementing counter resets to 0 on every page reload — combined
+// with Date.now(), two events from DIFFERENT sessions could theoretically
+// collide at the same millisecond with the same low sequence number. This
+// session ID is generated ONCE per page load and folded into every Event
+// ID, so uniqueness no longer depends on the counter surviving a reload —
+// it depends on this random value never repeating across sessions, which
+// crypto-grade randomness makes practically certain.
+const msdSessionId = (function(){
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    return Array.from(crypto.getRandomValues(new Uint8Array(4)), b => b.toString(16).padStart(2, '0')).join('');
+  }
+  return Math.random().toString(16).slice(2, 10); // fallback only if the Web Crypto API is unavailable
+})();
+
+function msdRandomSuffix(){
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    return Array.from(crypto.getRandomValues(new Uint8Array(4)), b => b.toString(16).padStart(2, '0')).join('');
+  }
+  return Math.random().toString(16).slice(2, 10);
+}
+
+/** evt_<sessionId>_<perSessionOrdinal>_<epochMillis>_<randomSuffix> — session id + fresh randomness make this globally unique across reloads/sessions, not just within one; the ordinal and timestamp remain for human-readable ordering/debugging. */
+function msdGenerateEventId(){
+  return 'evt_' + msdSessionId + '_' + (++msdEventSeq) + '_' + Date.now() + '_' + msdRandomSuffix();
+}
+
+// Debug counters — simple, read-only, no side effects on detection itself.
+let msdDebugCounters = { ticksProcessed: 0, qualifiedCount: 0, completedCount: 0 };
+
+const MSD_RUN_LENGTH = 5; // "5-consecutive-tick Rise" per spec — not user-configurable, it's the event definition itself
+
+// Feature schema version: bump this constant whenever indSnapshot/makeSnap()'s
+// engineered-feature shape changes (e.g. adding new indicators). Every
+// snapshot already labeled keeps whatever version it was tagged with
+// forever — the permanent store is immutable, so old experiments stay
+// reproducible against the exact feature set they were actually run
+// against, even after the feature engine has moved on.
+const MSD_FEATURE_SCHEMA_VERSION = 'v1';
+
+// The canonical engineered-feature key set for the CURRENT version. Update
+// this alongside makeSnap()'s actual shape whenever the feature engine
+// changes. Deliberately does NOT include labeling metadata (eventId,
+// leadTime, etc.) — those vary per-snapshot by design and would make a
+// schema fingerprint meaningless if included.
+const MSD_KNOWN_FEATURE_KEYS = ['epoch','price','macd','signal','hist','chop','cci','bbPctB','bbUpper','bbMid','bbLower','pdi','ndi','adx','rsi','atr','ema5','ema10','ema20','stochK','stochD','roc'];
+
+/**
+ * Deterministic, dependency-free string hash (FNV-1a). Doesn't need
+ * cryptographic strength — only needs to reliably differ when the input
+ * differs and stay stable when it doesn't.
+ */
+function msdSimpleHash(str){
+  let hash = 0x811c9dc5; // FNV offset basis
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193); // FNV prime
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * Computes a Feature Fingerprint from whichever known feature keys are
+ * ACTUALLY present on a raw snapshot — sorted, so key insertion order
+ * never affects the result. This exists specifically to catch the
+ * failure mode the Version Validator (next phase) is built around: a
+ * human can forget to bump MSD_FEATURE_SCHEMA_VERSION after changing the
+ * feature engine, but the fingerprint is computed from reality, not
+ * maintained by hand, so it will differ even when the version string
+ * didn't get updated.
+ */
+function msdComputeFeatureFingerprint(rawSnapshot){
+  const presentKeys = MSD_KNOWN_FEATURE_KEYS.filter(k => Object.prototype.hasOwnProperty.call(rawSnapshot, k));
+  return msdSimpleHash(presentKeys.slice().sort().join('|'));
+}
+
+/**
+ * Feed one live tick into the Run/Event Detector. Call this on every tick,
+ * same cadence as recordIndicatorTick() — detection needs to see every
+ * tick, not a sampled subset.
+ * @param {number} epoch
+ * @param {number} price
+ * @returns {{qualified: object|null, completed: object|null}} either or both may be non-null on the SAME tick (a run that qualifies and then immediately breaks on the very next tick are two separate calls, but a caller checking both fields on every call never misses either one)
+ */
+function msdOnTick(epoch, price){
+  msdDebugCounters.ticksProcessed++;
+
+  if (msdRunState.lastPrice === null){
+    // First tick ever seen — nothing to compare against yet. It becomes
+    // the anchor of the first candidate run.
+    msdRunState = { anchorEpoch: epoch, anchorPrice: price, count: 1, lastPrice: price, peakReached: false, qualifiedEventId: null };
+    return { qualified: null, completed: null };
+  }
+
+  const rising = price > msdRunState.lastPrice;
+
+  if (rising) {
+    msdRunState.count++;
+    msdRunState.lastPrice = price;
+    let qualifiedEvent = null;
+    if (msdRunState.count >= MSD_RUN_LENGTH && !msdRunState.peakReached) {
+      // Transition moment: THIS tick is the one that first satisfies the
+      // 5-rise definition. Assign the Event ID now — the Completed record
+      // later reuses this exact ID rather than generating a new one, so
+      // early (Qualified-triggered) processing and the eventual permanent
+      // record are correlatable.
+      msdRunState.peakReached = true;
+      msdRunState.qualifiedEventId = msdGenerateEventId();
+      qualifiedEvent = {
+        eventId: msdRunState.qualifiedEventId,
+        runStartEpoch: msdRunState.anchorEpoch,
+        runStartPrice: msdRunState.anchorPrice,
+        qualifiedAtEpoch: epoch,
+        qualifiedAtPrice: price,
+        qualifiedAtCount: msdRunState.count, // always MSD_RUN_LENGTH (5) at the moment of qualification
+        qualifiedAt: Date.now(),
+      };
+      msdQualifiedQueue.push(qualifiedEvent);
+      msdDebugCounters.qualifiedCount++;
+    }
+    return { qualified: qualifiedEvent, completed: null }; // still extending — not finalized, regardless of how long it's already run
+  }
+
+  // Non-increasing tick (equal OR down) — the candidate run ends here.
+  let completedEvent = null;
+  if (msdRunState.peakReached) {
+    completedEvent = {
+      eventId: msdRunState.qualifiedEventId, // SAME id assigned at qualification — never regenerated
+      runStartEpoch: msdRunState.anchorEpoch,
+      runStartPrice: msdRunState.anchorPrice,
+      runEndEpoch: epoch,                 // the epoch of the breaking tick, i.e. one past the true end of the rise
+      runEndPrice: msdRunState.lastPrice, // the LAST price that was actually still part of the rise
+      actualRunLength: msdRunState.count, // confirmed final length — never guessed, never later mutated
+      detectedAt: Date.now(),
+    };
+    msdEventQueue.push(completedEvent);
+    msdDebugCounters.completedCount++;
+  }
+
+  // Fresh candidate starts at the breaking tick itself, per "no overlap."
+  msdRunState = { anchorEpoch: epoch, anchorPrice: price, count: 1, lastPrice: price, peakReached: false, qualifiedEventId: null };
+  return { qualified: null, completed: completedEvent };
+}
+
+/** Drains and returns every QUALIFIED event queued since the last drain — intended for the future Retrospective Labeler to begin early processing. */
+function msdDrainQualifiedQueue(){
+  const drained = msdQualifiedQueue;
+  msdQualifiedQueue = [];
+  return drained;
+}
+
+/** Drains and returns every COMPLETED (final, immutable) event queued since the last drain — the only queue that ever feeds EventDatabase. */
+function msdDrainEventQueue(){
+  const drained = msdEventQueue;
+  msdEventQueue = [];
+  return drained;
+}
+
+/** Read-only snapshot of simple debug counters — ticks processed, qualified/completed event counts, and current queue depths. Safe to call anytime; never mutates detector state. */
+function msdGetDebugCounters(){
+  return {
+    ticksProcessed: msdDebugCounters.ticksProcessed,
+    qualifiedCount: msdDebugCounters.qualifiedCount,
+    completedCount: msdDebugCounters.completedCount,
+    qualifiedQueueDepth: msdQualifiedQueue.length,
+    eventQueueDepth: msdEventQueue.length,
+    currentRunCount: msdRunState.count,
+    currentRunQualified: msdRunState.peakReached,
+  };
+}
+
+/** Test/debug only — resets ALL detector state (run state, both queues, counters) without touching any other Prediction Bot state. Never called from production code paths. */
+function msdResetDetectorState(){
+  msdRunState = { anchorEpoch: null, anchorPrice: null, count: 0, lastPrice: null, peakReached: false, qualifiedEventId: null };
+  msdQualifiedQueue = [];
+  msdEventQueue = [];
+  msdDebugCounters = { ticksProcessed: 0, qualifiedCount: 0, completedCount: 0 };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Market State Discovery Engine — Phase 2.2: Event Database
+// ══════════════════════════════════════════════════════════════════════
+// The first PERMANENT store in the locked architecture. IndexedDB-backed —
+// not localStorage, whose ~5-10MB ceiling and lack of indexing cannot
+// support a permanently growing, queryable historical record.
+//
+// APPEND-ONLY BY CONSTRUCTION: every write uses IndexedDB's add() (which
+// FAILS on a duplicate key) rather than put() (which would silently
+// overwrite). eventId is the store's keyPath, so a duplicate Event ID is
+// REJECTED, not merged — matching "immutable once stored." No update or
+// delete function is exposed anywhere in this module's public API, by
+// design, not merely by convention.
+//
+// SCOPE, per instruction: this module covers ONLY the Temporary Queue
+// (msdEventQueue, already built in Phase 2.1) and this permanent Event
+// Database. It does NOT touch the Retrospective Labeler, QA Engine,
+// Version Validator, or MarketStates — those remain later phases.
+
+const MSD_EVENT_DB_NAME    = 'mfx_msd_events';
+const MSD_EVENT_DB_VERSION = 1;
+const MSD_EVENT_STORE      = 'EventDatabase';
+
+let _msdEventDbPromise = null;
+
+/** Opens (and lazily creates, on first use) the Event Database. Cached — subsequent calls reuse the same open connection rather than reopening. */
+function msdOpenEventDatabase(){
+  if (_msdEventDbPromise) return _msdEventDbPromise;
+  _msdEventDbPromise = new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') { reject(new Error('IndexedDB is not available in this environment')); return; }
+    const req = indexedDB.open(MSD_EVENT_DB_NAME, MSD_EVENT_DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(MSD_EVENT_STORE)) {
+        const store = db.createObjectStore(MSD_EVENT_STORE, { keyPath: 'eventId' });
+        store.createIndex('runStartEpoch', 'runStartEpoch', { unique: false });
+        store.createIndex('detectedAt', 'detectedAt', { unique: false });
+      }
+    };
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror   = (e) => reject(e.target.error);
+  });
+  return _msdEventDbPromise;
+}
+
+/**
+ * Appends ONE completed event to the permanent Event Database. Uses
+ * add() — never put() — so this can never silently mutate an existing
+ * record; a duplicate Event ID is rejected outright.
+ * @param {object} event a COMPLETED event record (see msdOnTick's `completed` field)
+ * @returns {Promise<{ok:boolean, error?:string}>}
+ */
+async function msdWriteEvent(event){
+  if (!event || !event.eventId) return { ok:false, error:'event is missing eventId' };
+  try {
+    const db = await msdOpenEventDatabase();
+    return await new Promise((resolve) => {
+      const tx = db.transaction(MSD_EVENT_STORE, 'readwrite');
+      const store = tx.objectStore(MSD_EVENT_STORE);
+      const req = store.add(event);
+      req.onsuccess = () => resolve({ ok:true });
+      req.onerror   = (e) => { e.preventDefault(); resolve({ ok:false, error:'duplicate or invalid eventId — write rejected (append-only store)' }); };
+    });
+  } catch (e) {
+    return { ok:false, error: e.message };
+  }
+}
+
+/**
+ * Drains the Temporary Queue (msdEventQueue, from Phase 2.1) and persists
+ * every completed event into the Event Database. The ONLY intended path
+ * from the ephemeral queue into the permanent store.
+ * @returns {Promise<{written:number, rejected:number, errors:string[]}>}
+ */
+async function msdPersistQueuedEvents(){
+  const events = msdDrainEventQueue();
+  let written = 0, rejected = 0;
+  const errors = [];
+  for (const ev of events) {
+    const result = await msdWriteEvent(ev);
+    if (result.ok) written++; else { rejected++; errors.push(result.error); }
+  }
+  return { written, rejected, errors };
+}
+
+/** Read-only: fetch a single event by its Event ID, or null if not found. */
+async function msdGetEvent(eventId){
+  const db = await msdOpenEventDatabase();
+  return new Promise((resolve) => {
+    const req = db.transaction(MSD_EVENT_STORE, 'readonly').objectStore(MSD_EVENT_STORE).get(eventId);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror   = () => resolve(null);
+  });
+}
+
+/** Read-only: total count of permanently stored events. */
+async function msdGetEventCount(){
+  const db = await msdOpenEventDatabase();
+  return new Promise((resolve) => {
+    const req = db.transaction(MSD_EVENT_STORE, 'readonly').objectStore(MSD_EVENT_STORE).count();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror   = () => resolve(0);
+  });
+}
+
+/** Read-only: every stored event. Fine to load in full at today's volume; will need pagination once this grows in later phases — noted, not solved here, since nothing yet needs it. */
+async function msdGetAllEvents(){
+  const db = await msdOpenEventDatabase();
+  return new Promise((resolve) => {
+    const req = db.transaction(MSD_EVENT_STORE, 'readonly').objectStore(MSD_EVENT_STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror   = () => resolve([]);
+  });
+}
+
+/** Test/debug only — closes and fully deletes the Event Database so tests start from a clean slate. Never called from production code paths. */
+function msdResetEventDatabase(){
+  if (_msdEventDbPromise) _msdEventDbPromise.then(db => db.close()).catch(() => {});
+  _msdEventDbPromise = null;
+  return new Promise((resolve) => {
+    if (typeof indexedDB === 'undefined') { resolve(); return; }
+    const req = indexedDB.deleteDatabase(MSD_EVENT_DB_NAME);
+    req.onsuccess = () => resolve();
+    req.onerror   = () => resolve();
+    req.onblocked = () => resolve();
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Market State Discovery Engine — Phase 2.3: Retrospective Labeler
+// ══════════════════════════════════════════════════════════════════════
+// Consumes QUALIFIED events, not Completed ones — the lookback window
+// this walks is entirely in the PAST relative to Run Start, so labeling
+// doesn't need to wait for the run to finish extending. This is exactly
+// the latency win the Qualified/Completed split (Phase 2.1) was built to
+// enable.
+//
+// Walks backward through indHistory (the existing rolling per-tick
+// snapshot buffer, capped at IND_HIST_MAX=256) over a CONFIGURABLE
+// lookback window — not the old hardcoded BEFORE_N=3 — and builds one
+// labeled Market State Snapshot per historical tick in that window, each
+// carrying its own Lead Time (ticks until Run Start). Every existing
+// engineered feature on the raw indHistory entry is preserved untouched;
+// this only adds labeling metadata around it.
+//
+// DEFERRED actualRunLength, NOT a mutation: a Qualified event doesn't yet
+// know its final run length — only the later Completed event does. So
+// snapshots built at Qualified time start with actualRunLength=null and
+// sit in msdPendingLabeledSnapshots (keyed by Event ID) until the
+// matching Completed event arrives and msdFinalizeLabelsForCompletedEvent
+// fills it in. This is filling in a still-pending candidate, not mutating
+// an already-immutable record — nothing here has reached MarketStates
+// yet, and won't until QA Engine + Version Validator (next phases) clear
+// it.
+//
+// NEGATIVE SAMPLING: drawn only from indHistory positions falling OUTSIDE
+// every currently-known positive event's lookback window (tracked in
+// msdPositiveWindows, covering ALL positive windows seen so far, not just
+// the most recent), at a configurable class-balance ratio.
+//
+// SCOPE: this module's output feeds the QA Engine (next phase). It does
+// NOT write to MarketStates directly.
+
+let msdLookbackWindow = 20;     // configurable — ticks to look back before Run Start
+let msdClassBalanceRatio = 1;   // configurable — negative snapshots per positive snapshot
+let msdSnapshotSeq = 0;         // per-session ordinal for Snapshot IDs, same pattern as Event IDs
+let msdPositiveWindows = [];    // [{startEpoch, endEpoch}] — every positive event's window, for negative-sampling exclusion
+let msdPendingLabeledSnapshots = {}; // eventId -> snapshots[], awaiting actualRunLength from the matching Completed event
+
+function msdSetLookbackWindow(n){ if (Number.isInteger(n) && n > 0) msdLookbackWindow = n; }
+function msdSetClassBalanceRatio(r){ if (Number.isFinite(r) && r > 0) msdClassBalanceRatio = r; }
+
+function msdGenerateSnapshotId(){
+  return 'snap_' + msdSessionId + '_' + (++msdSnapshotSeq) + '_' + Date.now() + '_' + msdRandomSuffix();
+}
+
+function msdBuildLabeledSnapshot(raw, meta){
+  return Object.assign({}, raw, { // every existing engineered feature, untouched, spread first so meta below always wins on any name collision
+    snapshotId: msdGenerateSnapshotId(),
+    eventId: meta.eventId,
+    stateId: 'unknown', // per spec: Initially Unknown, later Cluster ID
+    runStartTick: meta.runStartTick,
+    leadTime: meta.leadTime,
+    outcome: meta.outcome,           // 'positive' | 'negative'
+    direction: meta.direction,       // 'RISE' for positives, null for negatives
+    actualRunLength: meta.actualRunLength != null ? meta.actualRunLength : null, // positives: filled in later by msdFinalizeLabelsForCompletedEvent; negatives: always null
+    featureVersion: meta.featureVersion,
+    featureFingerprint: msdComputeFeatureFingerprint(raw),
+    timestamp: Date.now(),
+  });
+}
+
+/**
+ * Labels one Qualified event's lookback window against indHistory. Uses
+ * ONLY information available at each snapshot's own tick — each
+ * indHistory entry already IS a point-in-time snapshot; this only adds
+ * labeling metadata, never reaches into the future relative to that tick.
+ * @returns {{snapshots: object[], error: string|null}}
+ */
+function msdLabelQualifiedEvent(qualifiedEvent, featureVersion){
+  const runStartEpoch = qualifiedEvent.runStartEpoch;
+  const runStartIdx = indHistory.findIndex(s => s.epoch === runStartEpoch);
+  if (runStartIdx === -1) {
+    // Run Start has already scrolled out of the rolling buffer — a real,
+    // expected limitation given indHistory's cap. Reported explicitly
+    // rather than silently producing an empty or wrong result.
+    return { snapshots: [], error: 'runStart not found in indHistory (scrolled out of the rolling buffer)' };
+  }
+
+  const lookbackStart = Math.max(0, runStartIdx - msdLookbackWindow);
+  const snapshots = [];
+  for (let i = lookbackStart; i < runStartIdx; i++) {
+    snapshots.push(msdBuildLabeledSnapshot(indHistory[i], {
+      eventId: qualifiedEvent.eventId,
+      leadTime: runStartIdx - i, // ticks until Run Start
+      outcome: 'positive',
+      direction: 'RISE',
+      runStartTick: runStartEpoch,
+      actualRunLength: null, // not yet known — filled in on completion
+      featureVersion,
+    }));
+  }
+
+  if (snapshots.length) {
+    msdPositiveWindows.push({ startEpoch: indHistory[lookbackStart].epoch, endEpoch: runStartEpoch });
+    msdPendingLabeledSnapshots[qualifiedEvent.eventId] = snapshots;
+  }
+  return { snapshots, error: null };
+}
+
+/**
+ * Called once the matching Completed event arrives — fills in the true
+ * Actual Run Length on every pending snapshot for that Event ID, and
+ * returns them ready for the QA Engine. Returns null if no pending
+ * snapshots exist for this event (e.g. Run Start had already scrolled out
+ * of indHistory when the event qualified, so nothing was ever labeled).
+ */
+function msdFinalizeLabelsForCompletedEvent(completedEvent){
+  const pending = msdPendingLabeledSnapshots[completedEvent.eventId];
+  if (!pending) return null;
+  delete msdPendingLabeledSnapshots[completedEvent.eventId];
+  pending.forEach(s => { s.actualRunLength = completedEvent.actualRunLength; });
+  return pending;
+}
+
+/**
+ * Samples up to `count` negative snapshots from indHistory positions
+ * falling outside EVERY currently-known positive window. Never draws
+ * from inside one, regardless of how many positive windows exist.
+ */
+function msdSampleNegativeSnapshots(count, featureVersion){
+  const eligible = [];
+  for (let i = 0; i < indHistory.length; i++) {
+    const epoch = indHistory[i].epoch;
+    const insideAnyPositiveWindow = msdPositiveWindows.some(w => epoch >= w.startEpoch && epoch <= w.endEpoch);
+    if (!insideAnyPositiveWindow) eligible.push(i);
+  }
+  const pool = eligible.slice();
+  const chosenIdx = [];
+  const n = Math.min(count, pool.length);
+  for (let k = 0; k < n; k++) {
+    const j = Math.floor(Math.random() * pool.length);
+    chosenIdx.push(pool[j]);
+    pool.splice(j, 1);
+  }
+  return chosenIdx.map(i => msdBuildLabeledSnapshot(indHistory[i], {
+    eventId: null, leadTime: null, outcome: 'negative', direction: null, runStartTick: null, actualRunLength: null, featureVersion,
+  }));
+}
+
+/** Test/debug only — resets all Labeler state without touching the Detector, Event Database, or any other Prediction Bot state. Never called from production code paths. */
+function msdResetLabelerState(){
+  msdPositiveWindows = [];
+  msdPendingLabeledSnapshots = {};
+  msdSnapshotSeq = 0;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Market State Discovery Engine — Phase 2.4: QA Engine
+// ══════════════════════════════════════════════════════════════════════
+// General data-integrity checks against a batch of candidate labeled
+// snapshots BEFORE they reach MarketStates. Deliberately does NOT check
+// feature schema/version consistency — that's the Version Validator's
+// job (next phase), kept as a separate stage per the locked pipeline.
+//
+// Checks implemented, per the agreed list:
+//   - Missing values / NaN / Infinity in any known numeric feature
+//   - Duplicate Snapshot IDs within the batch being checked
+//   - Invalid timestamps (non-positive, or non-finite epoch)
+//   - Impossible Lead Times (must be a positive integer for a positive
+//     snapshot, and must not exceed the configured lookback window)
+//   - Impossible Run Lengths (must be >= the 5-tick event definition
+//     itself, for positive snapshots whose actualRunLength is known)
+//   - Tick ordering (no duplicate/non-monotonic epochs within the batch)
+//
+// "Duplicate Event IDs" and "price consistency" are each handled
+// separately below, for reasons stated at each one specifically.
+
+const MSD_NUMERIC_FEATURE_KEYS = ['price','macd','signal','hist','chop','cci','bbPctB','bbUpper','bbMid','bbLower','pdi','ndi','adx','rsi','atr','ema5','ema10','ema20','stochK','stochD','roc'];
+
+/** Checks ONE candidate snapshot in isolation. @returns {{ok:boolean, errors:string[]}} */
+function msdQaCheckSnapshot(snapshot, opts){
+  opts = opts || {};
+  const errors = [];
+
+  MSD_NUMERIC_FEATURE_KEYS.forEach(key => {
+    const v = snapshot[key];
+    if (v === undefined || v === null) errors.push('missing value: ' + key);
+    else if (typeof v === 'number' && !Number.isFinite(v)) errors.push('NaN or Infinity: ' + key);
+  });
+
+  if (!Number.isFinite(snapshot.epoch) || snapshot.epoch < 0) errors.push('invalid timestamp (epoch)');
+
+  if (snapshot.outcome === 'positive') {
+    if (!Number.isInteger(snapshot.leadTime) || snapshot.leadTime < 1) errors.push('impossible Lead Time (must be a positive integer for a positive snapshot)');
+    if (opts.maxLookback != null && snapshot.leadTime > opts.maxLookback) errors.push('Lead Time exceeds the configured lookback window');
+    if (snapshot.actualRunLength != null && (!Number.isInteger(snapshot.actualRunLength) || snapshot.actualRunLength < MSD_RUN_LENGTH)) {
+      errors.push('impossible Actual Run Length (must be >= ' + MSD_RUN_LENGTH + ')');
+    }
+  }
+
+  return { ok: errors.length === 0, errors };
+}
+
+/**
+ * Checks a BATCH of candidate snapshots together, so batch-level
+ * concerns (duplicate Snapshot IDs, tick ordering) can be caught in
+ * addition to the per-snapshot checks above. Never mutates the input
+ * array or assumes it arrives pre-sorted.
+ * @returns {{passed: object[], failed: {snapshot:object, errors:string[]}[]}}
+ */
+function msdQaCheckBatch(snapshots, opts){
+  const passed = [];
+  const failedByObject = new Map(); // keyed by object IDENTITY, not by snapshotId string — two distinct objects sharing a (duplicate) id must never collide into one entry
+  const firstSeenBySnapshotId = new Map(); // snapshotId -> the FIRST object seen with that id, so both occurrences of a duplicate get flagged, not just the second
+
+  function fail(snap, reason){
+    if (!failedByObject.has(snap)) failedByObject.set(snap, { snapshot: snap, errors: [] });
+    failedByObject.get(snap).errors.push(reason);
+  }
+
+  snapshots.forEach(snap => {
+    const perSnapshot = msdQaCheckSnapshot(snap, opts);
+    perSnapshot.errors.forEach(e => fail(snap, e));
+
+    if (firstSeenBySnapshotId.has(snap.snapshotId)) {
+      // Second (or later) occurrence: flag it AND retroactively flag the
+      // first occurrence too — a duplicate makes BOTH copies suspect, not
+      // just whichever one happened to arrive later.
+      fail(snap, 'duplicate Snapshot ID within this batch');
+      fail(firstSeenBySnapshotId.get(snap.snapshotId), 'duplicate Snapshot ID within this batch');
+    } else {
+      firstSeenBySnapshotId.set(snap.snapshotId, snap);
+    }
+  });
+
+  // Tick ordering: sort a COPY by epoch (never mutate the caller's array,
+  // never assume it's already sorted) and flag any duplicate/non-monotonic
+  // epoch found in that sorted sequence.
+  const sorted = snapshots.slice().sort((a, b) => a.epoch - b.epoch);
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].epoch <= sorted[i - 1].epoch) {
+      fail(sorted[i], 'tick ordering violation (duplicate or non-monotonic epoch within batch)');
+      fail(sorted[i - 1], 'tick ordering violation (duplicate or non-monotonic epoch within batch)');
+    }
+  }
+
+  snapshots.forEach(snap => {
+    if (!failedByObject.has(snap)) passed.push(snap);
+  });
+
+  return { passed, failed: Array.from(failedByObject.values()) };
+}
+
+/**
+ * "Duplicate Event IDs" is handled separately from the batch check above,
+ * and deliberately ASYNC: a positive event legitimately produces MANY
+ * snapshots sharing the SAME Event ID — that's correct, not a violation.
+ * What this checks instead is whether the Event ID already exists in the
+ * PERMANENT Event Database (Phase 2.2) — i.e., this batch is attempting
+ * to (re-)process an event that has already been through the pipeline
+ * before, which the append-only store would reject anyway, but catching
+ * it here gives a clear reason rather than a generic write failure later.
+ */
+async function msdQaCheckEventNotAlreadyPersisted(eventId){
+  if (!eventId) return { ok: true, errors: [] }; // negative snapshots carry no eventId — nothing to check
+  const existing = await msdGetEvent(eventId);
+  return existing ? { ok: false, errors: ['Event ID already exists in the permanent Event Database'] } : { ok: true, errors: [] };
+}
+
+/**
+ * "Price consistency" (no impossible single-tick jumps) needs a
+ * threshold, and I don't have empirical, live Volatility 100 (1s) data
+ * to calibrate one responsibly from here — an arbitrary hardcoded number
+ * risks being either too loose (catches nothing) or too strict (flags
+ * normal volatility as corrupt). This is implemented as an explicit,
+ * OPT-IN check with a caller-supplied threshold rather than a silently
+ * assumed default, specifically so it doesn't quietly reject real data
+ * on a guessed number. Flagging this rather than pretending a made-up
+ * threshold is authoritative.
+ */
+function msdQaCheckPriceConsistency(snapshots, maxFractionalJump){
+  if (maxFractionalJump == null) return { passed: snapshots.slice(), failed: [] }; // opt-in only — no-op unless a threshold is explicitly supplied
+  const sorted = snapshots.slice().sort((a, b) => a.epoch - b.epoch);
+  const badIds = new Set();
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = sorted[i - 1].price, cur = sorted[i].price;
+    if (prev > 0 && Math.abs(cur - prev) / prev > maxFractionalJump) {
+      badIds.add(sorted[i].snapshotId);
+      badIds.add(sorted[i - 1].snapshotId);
+    }
+  }
+  const passed = snapshots.filter(s => !badIds.has(s.snapshotId));
+  const failed = snapshots.filter(s => badIds.has(s.snapshotId)).map(s => ({ snapshot: s, errors: ['price jump exceeds the configured maxFractionalJump'] }));
+  return { passed, failed };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Market State Discovery Engine — Phase 2.5: Version Validator
+// ══════════════════════════════════════════════════════════════════════
+// Checks feature schema version consistency specifically — kept separate
+// from the QA Engine's general data-integrity checks, per the locked
+// pipeline ordering. Contains a tiny Feature Registry: declared version
+// string -> that version's canonical known-feature-key list, from which
+// its expected fingerprint is computed once and cached.
+//
+// Pipeline per snapshot: Declared Version -> Registry Lookup -> Expected
+// Fingerprint -> Compare (against the snapshot's OWN computed
+// featureFingerprint) -> Pass/Fail.
+//
+// This is what makes schema evolution clean: introducing v2 means adding
+// ONE new registry entry (msdRegisterFeatureVersion), never rewriting the
+// comparison logic itself, and NEVER redefining what an already-registered
+// version means — v1's definition stays exactly what it was, forever,
+// which is what keeps old experiments reproducible against the schema
+// they were actually captured under.
+
+const MSD_FEATURE_REGISTRY = {
+  v1: MSD_KNOWN_FEATURE_KEYS.slice(), // the CURRENT version's canonical key list, at the time v1 was defined
+};
+const _msdExpectedFingerprintCache = {};
+
+/** Computes (once, then caches) the expected fingerprint for a registered version — from that version's canonical key list, never from any live snapshot. */
+function msdGetExpectedFingerprint(version){
+  if (Object.prototype.hasOwnProperty.call(_msdExpectedFingerprintCache, version)) return _msdExpectedFingerprintCache[version];
+  const keys = MSD_FEATURE_REGISTRY[version];
+  if (!keys) { _msdExpectedFingerprintCache[version] = null; return null; } // unregistered version — nothing to compare against
+  const fp = msdSimpleHash(keys.slice().sort().join('|'));
+  _msdExpectedFingerprintCache[version] = fp;
+  return fp;
+}
+
+/** Declared Version -> Registry Lookup -> Expected Fingerprint -> Compare -> Pass/Fail, for ONE labeled snapshot. */
+function msdValidateVersion(snapshot){
+  const declaredVersion = snapshot.featureVersion;
+  if (!declaredVersion) return { ok: false, error: 'snapshot has no declared featureVersion' };
+
+  const expectedFingerprint = msdGetExpectedFingerprint(declaredVersion);
+  if (expectedFingerprint == null) return { ok: false, error: 'declared version "' + declaredVersion + '" is not registered in the Feature Registry' };
+
+  if (snapshot.featureFingerprint !== expectedFingerprint) {
+    return {
+      ok: false,
+      error: 'fingerprint mismatch for declared version "' + declaredVersion + '" — feature schema likely changed without bumping the version (expected ' + expectedFingerprint + ', got ' + snapshot.featureFingerprint + ')',
+    };
+  }
+  return { ok: true };
+}
+
+/** Validates a BATCH of snapshots (typically QA-passed ones already) against the Feature Registry. */
+function msdValidateVersionBatch(snapshots){
+  const passed = [];
+  const failed = [];
+  snapshots.forEach(s => {
+    const result = msdValidateVersion(s);
+    if (result.ok) passed.push(s); else failed.push({ snapshot: s, error: result.error });
+  });
+  return { passed, failed };
+}
+
+/**
+ * Registers a NEW version's canonical feature-key list — call this
+ * exactly once, when introducing v2/v3/etc. Refuses to redefine an
+ * already-registered version, since that would retroactively change what
+ * an earlier version's fingerprint means — exactly the drift this whole
+ * mechanism exists to prevent.
+ */
+function msdRegisterFeatureVersion(version, keys){
+  if (MSD_FEATURE_REGISTRY[version]) return { ok: false, error: 'version "' + version + '" is already registered — cannot redefine it' };
+  MSD_FEATURE_REGISTRY[version] = keys.slice();
+  delete _msdExpectedFingerprintCache[version];
+  return { ok: true };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Market State Discovery Engine — Phase 2.6: MarketStates
+// ══════════════════════════════════════════════════════════════════════
+// The final permanent store in the locked pipeline. IndexedDB-backed,
+// append-only by construction — same add()-not-put() pattern as
+// EventDatabase (Phase 2.2). msdProcessLabeledSnapshots() is the ONLY
+// intended entry point that writes here: it runs a batch through the QA
+// Engine, then the Version Validator, in that exact order, and only
+// snapshots clearing BOTH ever reach this store.
+
+const MSD_STATE_DB_NAME    = 'mfx_msd_states';
+const MSD_STATE_DB_VERSION = 1;
+const MSD_STATE_STORE      = 'MarketStates';
+
+let _msdStateDbPromise = null;
+
+/** Opens (and lazily creates, on first use) the MarketStates database. Cached — subsequent calls reuse the same open connection. */
+function msdOpenStateDatabase(){
+  if (_msdStateDbPromise) return _msdStateDbPromise;
+  _msdStateDbPromise = new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') { reject(new Error('IndexedDB is not available in this environment')); return; }
+    const req = indexedDB.open(MSD_STATE_DB_NAME, MSD_STATE_DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(MSD_STATE_STORE)) {
+        const store = db.createObjectStore(MSD_STATE_STORE, { keyPath: 'snapshotId' });
+        store.createIndex('eventId', 'eventId', { unique: false });
+        store.createIndex('leadTime', 'leadTime', { unique: false });
+        store.createIndex('outcome', 'outcome', { unique: false });
+        store.createIndex('featureVersion', 'featureVersion', { unique: false });
+      }
+    };
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror   = (e) => reject(e.target.error);
+  });
+  return _msdStateDbPromise;
+}
+
+/** Appends ONE fully-cleared snapshot to MarketStates. Uses add(), never put() — a duplicate Snapshot ID is rejected, not merged. */
+async function msdWriteMarketState(snapshot){
+  if (!snapshot || !snapshot.snapshotId) return { ok: false, error: 'snapshot is missing snapshotId' };
+  try {
+    const db = await msdOpenStateDatabase();
+    return await new Promise((resolve) => {
+      const req = db.transaction(MSD_STATE_STORE, 'readwrite').objectStore(MSD_STATE_STORE).add(snapshot);
+      req.onsuccess = () => resolve({ ok: true });
+      req.onerror   = (e) => { e.preventDefault(); resolve({ ok: false, error: 'duplicate or invalid snapshotId — write rejected (append-only store)' }); };
+    });
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+/**
+ * THE full pipeline entry point. Runs a batch of candidate labeled
+ * snapshots through QA Engine -> Version Validator, IN THAT ORDER, and
+ * writes only what clears BOTH into the permanent MarketStates store.
+ * This is the only function anywhere that should ever call
+ * msdWriteMarketState — everything else is a stage feeding into it.
+ */
+async function msdProcessLabeledSnapshots(snapshots, opts){
+  const qaResult = msdQaCheckBatch(snapshots, opts);
+  const versionResult = msdValidateVersionBatch(qaResult.passed);
+
+  let written = 0;
+  const dbErrors = [];
+  for (const snap of versionResult.passed) {
+    const result = await msdWriteMarketState(snap);
+    if (result.ok) written++; else dbErrors.push({ snapshotId: snap.snapshotId, error: result.error });
+  }
+
+  return {
+    written,
+    qaRejected: qaResult.failed.length,
+    versionRejected: versionResult.failed.length,
+    dbRejected: dbErrors.length,
+    qaErrors: qaResult.failed,
+    versionErrors: versionResult.failed,
+    dbErrors,
+  };
+}
+
+/** Read-only: fetch a single market state by its Snapshot ID, or null if not found. */
+async function msdGetMarketState(snapshotId){
+  const db = await msdOpenStateDatabase();
+  return new Promise((resolve) => {
+    const req = db.transaction(MSD_STATE_STORE, 'readonly').objectStore(MSD_STATE_STORE).get(snapshotId);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror   = () => resolve(null);
+  });
+}
+
+/** Read-only: total count of permanently stored market states. */
+async function msdGetMarketStateCount(){
+  const db = await msdOpenStateDatabase();
+  return new Promise((resolve) => {
+    const req = db.transaction(MSD_STATE_STORE, 'readonly').objectStore(MSD_STATE_STORE).count();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror   = () => resolve(0);
+  });
+}
+
+/** Read-only: every stored market state. Fine at today's volume; will need pagination once this grows substantially — noted, not solved here. */
+async function msdGetAllMarketStates(){
+  const db = await msdOpenStateDatabase();
+  return new Promise((resolve) => {
+    const req = db.transaction(MSD_STATE_STORE, 'readonly').objectStore(MSD_STATE_STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror   = () => resolve([]);
+  });
+}
+
+/** Test/debug only — closes and fully deletes MarketStates so tests start from a clean slate. Never called from production code paths. */
+function msdResetStateDatabase(){
+  if (_msdStateDbPromise) _msdStateDbPromise.then(db => db.close()).catch(() => {});
+  _msdStateDbPromise = null;
+  return new Promise((resolve) => {
+    if (typeof indexedDB === 'undefined') { resolve(); return; }
+    const req = indexedDB.deleteDatabase(MSD_STATE_DB_NAME);
+    req.onsuccess = () => resolve();
+    req.onerror   = () => resolve();
+    req.onblocked = () => resolve();
+  });
+}
+
 // Build a compact full-indicator snapshot for one tick.
 function makeSnap(epoch, price){
   return {
@@ -3461,6 +4308,9 @@ function makeSnap(epoch, price){
 }
 
 function recordIndicatorTick(epoch, price){
+  const msdResult = msdOnTick(epoch, price); // Market State Discovery Engine — Phase 2.1 detector, pure observer, no effect on existing pipeline
+  if (msdResult.qualified) msdLabelQualifiedEvent(msdResult.qualified, MSD_FEATURE_SCHEMA_VERSION); // Phase 2.3 — begins labeling immediately, doesn't wait for the run to finish
+  if (msdResult.completed) msdFinalizeLabelsForCompletedEvent(msdResult.completed); // Phase 2.3 — fills in the true Actual Run Length once known
   const closes = ticks.map(t => t.price);
   const m   = macd(closes);
   const ch  = choppiness(closes);
@@ -4601,7 +5451,7 @@ function rfaHandleMsg(msg){
     // Tick-delay counter: a new candle/tick for the CURRENTLY LOCKED
     // market counts down the mandatory one-tick wait after a completed
     // contract before the bot evaluates again.
-    if (sym === rfaCurrentMarket && rfaWaitingTicks > 0) rfaWaitingTicks--;
+    if (rfaActiveMarkets[sym] && rfaActiveMarkets[sym].waitingTicks > 0) rfaActiveMarkets[sym].waitingTicks--;
     rfaEvaluateAndTrade();
   }
 }
@@ -4622,22 +5472,25 @@ function rfaRecomputeConfidence(sym){
 
 // ── Trading state ───────────────────────────────────────────────────────
 let rfaArmed = false;
-let rfaCurrentMarket = null;   // symbol the bot is locked onto
-let rfaMartingaleLevel = 0;    // 0 = base stake, no active loss sequence
-let rfaCurrentStake = null;
-let rfaWaitingTicks = 0;
-let rfaTradeInFlight = false;  // true from the moment a trade is placed until it actually settles — closes the race where a stop condition registers after firing but before settlement
-let rfaMarketProfit = 0;       // profit accumulated on the CURRENTLY LOCKED market since it was selected — resets whenever the bot switches to a different market
+// Concurrent markets: symbol -> { mult, martingaleLevel, currentStake,
+// marketProfit, tradeInFlight, waitingTicks }. Replaces the earlier
+// single rfaCurrentMarket design — up to rfaMaxConcurrentMarkets() markets
+// can each run their own independent Martingale sequence at once, as long
+// as each independently meets the entry criteria.
+let rfaActiveMarkets = {};
 let rfaOpenContracts = {};     // id -> row, mirrors ouOpenContracts/adxOpenContracts
 let rfaTrades = [];
-let _rfaMult = null;
-function rfaMult(){ return _rfaMult || (_rfaMult = makeMultiplier(() => $("rfaStake"))); }
 
 let rfaStats = { won: 0, lost: 0, profit: 0, sessionStartBalance: null };
 
-const RFA_TICK_DELAY = 1;    // "wait exactly one tick" per spec — fixed, not user-configurable
+const RFA_TICK_DELAY = 1;     // "wait exactly one tick" per spec — fixed, not user-configurable
 const RFA_DURATION_TICKS = 1; // duration is always 1 tick — fixed, not user-configurable, not shown in the UI
 
+function rfaMaxConcurrentMarkets(){
+  const el = $("rfaMaxConcurrent");
+  const v = el ? parseInt(el.value, 10) : 3;
+  return Number.isFinite(v) && v > 0 ? v : 3; // spec asks for "at least 3" — default 3, user-adjustable upward (or downward)
+}
 function rfaMaxMartingaleLevel(){
   const el = $("rfaMaxLevel");
   const v = el ? parseInt(el.value, 10) : 0;
@@ -4646,56 +5499,67 @@ function rfaMaxMartingaleLevel(){
 function rfaStopLoss(){ const el = $("rfaStopLoss"); const v = el ? parseFloat(el.value) : NaN; return Number.isFinite(v) && v > 0 ? v : null; }
 function rfaTargetProfit(){ const el = $("rfaTargetProfit"); const v = el ? parseFloat(el.value) : NaN; return Number.isFinite(v) && v > 0 ? v : null; }
 
-/** Step 12 — pick the single highest-confidence market with a VALID direction, across ALL scanned markets. No configurable minimum bar anymore: a null direction (neutral control, or price not at a zone) already excludes a market on its own — that's not a separate threshold, it's what "no trade" means. */
-function rfaPickBestMarket(){
-  let best = null;
-  RFA_MARKETS.forEach(sym => {
-    const st = rfaMarketState[sym];
-    if (!st || !st.confidence || !st.confidence.direction) return;
-    if (!best || st.confidence.confidence > best.confidence) best = { symbol: sym, direction: st.confidence.direction, confidence: st.confidence.confidence, info: st.confidence };
-  });
-  return best;
+/** Creates a market's concurrent-trading slot on first use — its own Martingale multiplier instance, so escalating stake on one market never affects another's. */
+function rfaGetSlot(sym){
+  if (!rfaActiveMarkets[sym]) {
+    rfaActiveMarkets[sym] = { mult: makeMultiplier(() => $("rfaStake")), martingaleLevel: 0, currentStake: null, marketProfit: 0, tradeInFlight: false, waitingTicks: 0 };
+  }
+  return rfaActiveMarkets[sym];
 }
 
-/** Stop Loss remains the one hard, session-wide safety stop. Target Profit no longer stops the bot — see rfaSettleContract for its new role as a per-market rotation trigger. */
+/** Step 12 — pick up to N highest-confidence markets with a valid direction, excluding any already active. Ranked, not just "first N that qualify." */
+function rfaPickTopMarkets(n, excludeSymbols){
+  const exclude = new Set(excludeSymbols || []);
+  const candidates = [];
+  RFA_MARKETS.forEach(sym => {
+    if (exclude.has(sym)) return;
+    const st = rfaMarketState[sym];
+    if (!st || !st.confidence || !st.confidence.direction) return;
+    candidates.push({ symbol: sym, direction: st.confidence.direction, confidence: st.confidence.confidence, info: st.confidence });
+  });
+  candidates.sort((a, b) => b.confidence - a.confidence);
+  return candidates.slice(0, n);
+}
+
+/** Stop Loss remains the one hard, session-wide safety stop, checked against TOTAL profit across every concurrent market. */
 function rfaRiskLimitReached(){
   const sl = rfaStopLoss();
   if (sl != null && rfaStats.profit <= -sl) return 'Stop loss reached (' + rfaStats.profit.toFixed(2) + ')';
   return null;
 }
 
-/** Step 12/13/14 — the central decision loop. */
+/** Step 9-14 — the central decision loop: continue every already-active market independently, then fill any open concurrent slots with fresh qualifying markets. */
 function rfaEvaluateAndTrade(){
   if (!rfaArmed) return;
-  if (rfaTradeInFlight) return; // a previous trade hasn't settled yet — never fire a second one on top of it, regardless of what the tick counter says
 
   const limitHit = rfaRiskLimitReached();
   if (limitHit) { rfaArmed = false; gridSet('rfaScanStatus', 'Stopped — ' + limitHit); rfaRenderAll(); return; }
 
-  if (rfaWaitingTicks > 0) return; // one-tick pause after the PREVIOUS contract's settlement, per spec
-
-  // Switching lock (Step 13, redesigned): the bot stays on its current
-  // market — through however many win/reset Martingale cycles it takes —
-  // until that market's accumulated profit reaches the configured Target
-  // Profit. Only then does it release the lock and re-evaluate globally.
-  // A losing sequence in progress obviously also keeps it locked, same as
-  // before.
-  if (rfaCurrentMarket) {
-    const st = rfaMarketState[rfaCurrentMarket];
+  // Continue every market that's already active — each one independently,
+  // gated by its OWN in-flight/tick-delay state, not a single shared one.
+  Object.keys(rfaActiveMarkets).forEach(sym => {
+    const slot = rfaActiveMarkets[sym];
+    if (slot.tradeInFlight) return;
+    if (slot.waitingTicks > 0) return;
+    const st = rfaMarketState[sym];
     if (st && st.confidence && st.confidence.direction) {
-      rfaExecuteTrade(rfaCurrentMarket, st.confidence.direction, st.confidence);
-    } else {
-      gridSet('rfaScanStatus', 'Locked on ' + rfaCurrentMarket + ' (level ' + rfaMartingaleLevel + ', profit ' + rfaMarketProfit.toFixed(2) + ') — waiting for a valid setup to continue.');
+      rfaExecuteTrade(sym, st.confidence.direction, st.confidence);
     }
-    return;
-  }
+  });
 
-  // Unlocked — free to select fresh across all markets.
-  const best = rfaPickBestMarket();
-  if (!best) { gridSet('rfaScanStatus', 'Scanning — no market currently shows a valid setup.'); return; }
-  rfaCurrentMarket = best.symbol;
-  rfaMarketProfit = 0;
-  rfaExecuteTrade(best.symbol, best.direction, best.info);
+  // Fill any remaining concurrent slots with fresh qualifying markets —
+  // "at least 3 different volatilities as long as they meet the criteria."
+  const activeSymbols = Object.keys(rfaActiveMarkets);
+  const openSlots = rfaMaxConcurrentMarkets() - activeSymbols.length;
+  if (openSlots > 0) {
+    const picks = rfaPickTopMarkets(openSlots, activeSymbols);
+    picks.forEach(p => {
+      rfaGetSlot(p.symbol);
+      rfaExecuteTrade(p.symbol, p.direction, p.info);
+    });
+    if (!picks.length && !activeSymbols.length) gridSet('rfaScanStatus', 'Scanning — no market currently shows a valid setup.');
+    else gridSet('rfaScanStatus', Object.keys(rfaActiveMarkets).length + ' / ' + rfaMaxConcurrentMarkets() + ' concurrent market(s) active.');
+  }
 }
 
 function rfaValidateProposal(p){
@@ -4712,7 +5576,8 @@ function rfaExecuteTrade(symbol, direction, confidenceInfo){
   if (typeof gridWs === 'undefined' || !gridWs || gridWs.readyState !== 1 || !gridAuthed){
     gridSet('rfaScanStatus', 'Connect on Trading Grid first.'); return;
   }
-  const stake = Math.max(0.35, rfaCurrentStake != null ? rfaCurrentStake : rfaMult().getNext('martingale'));
+  const slot = rfaGetSlot(symbol);
+  const stake = Math.max(0.35, slot.currentStake != null ? slot.currentStake : slot.mult.getNext('martingale'));
   const contractType = direction === 'RISE' ? 'CALL' : 'PUT';
   const reqId = ++gridReqId;
 
@@ -4733,18 +5598,18 @@ function rfaExecuteTrade(symbol, direction, confidenceInfo){
     reasons: confidenceInfo ? confidenceInfo.reasons : [],
   });
 
-  rfaCurrentStake = stake;
-  rfaTradeInFlight = true; // cleared only in rfaSettleContract, or immediately below on a rejection/failure — never left stuck
+  slot.currentStake = stake;
+  slot.tradeInFlight = true; // cleared only in rfaSettleContract, or immediately below on a rejection/failure — never left stuck
   const row = { id: 'pending-' + reqId, symbol, contractType, dir: direction, stake, status: 'proposal', time: Math.floor(Date.now()/1000), confidence: confidenceInfo ? confidenceInfo.confidence : null };
   rfaTrades.unshift(row);
 
   gridPending[reqId] = (proposal, err) => {
-    if (err){ row.status = 'rejected: ' + (err.message || err.code || 'error'); rfaTradeInFlight = false; rfaRenderAll(); return; }
-    if (!proposal || !proposal.id || proposal.ask_price == null){ row.status = 'rejected: no price'; rfaTradeInFlight = false; rfaRenderAll(); return; }
+    if (err){ row.status = 'rejected: ' + (err.message || err.code || 'error'); slot.tradeInFlight = false; rfaRenderAll(); return; }
+    if (!proposal || !proposal.id || proposal.ask_price == null){ row.status = 'rejected: no price'; slot.tradeInFlight = false; rfaRenderAll(); return; }
     const buyReqId = ++gridReqId;
     row.status = 'open'; rfaRenderAll();
     gridPending[buyReqId] = (buy, buyErr) => {
-      if (buyErr){ row.status = 'buy failed: ' + (buyErr.message || buyErr.code || 'error'); rfaTradeInFlight = false; rfaRenderAll(); return; }
+      if (buyErr){ row.status = 'buy failed: ' + (buyErr.message || buyErr.code || 'error'); slot.tradeInFlight = false; rfaRenderAll(); return; }
       if (buy){
         row.id = String(buy.contract_id);
         row.buyPrice = buy.buy_price;
@@ -4764,39 +5629,37 @@ function rfaSettleContract(id, won){
   const row = rfaOpenContracts[id];
   delete rfaOpenContracts[id];
   if (!row) return;
+  const slot = rfaActiveMarkets[row.symbol];
+  if (!slot) return; // shouldn't happen — defensive guard against a settlement for a market that's already been abandoned
 
-  rfaTradeInFlight = false; // closes the original race: this runs synchronously before any subsequent tick's evaluation can fire
-  rfaWaitingTicks = RFA_TICK_DELAY; // the one-tick pause starts AFTER settlement, not after firing — matches "after every completed contract, wait exactly one tick"
+  slot.tradeInFlight = false;
+  slot.waitingTicks = RFA_TICK_DELAY;
 
-  rfaMult().record(row.stake, won);
+  slot.mult.record(row.stake, won);
   rfaStats.won += won ? 1 : 0;
   rfaStats.lost += won ? 0 : 1;
   const tradePnl = won ? ((row.payout != null ? row.payout : row.stake) - row.stake) : -row.stake;
   rfaStats.profit += tradePnl;
-  rfaMarketProfit += tradePnl;
+  slot.marketProfit += tradePnl;
 
   if (won) {
-    // A win always resets the Martingale sequence to base stake. Whether
-    // it also releases the market lock now depends on the per-market
-    // profit target (redesigned switching rule): stay on this market,
-    // grinding through further win/reset cycles, until it has accumulated
-    // that much profit — only then move on and re-evaluate everything.
-    // With no target set, revert to switching after every win, same as
-    // the original behavior.
-    rfaMartingaleLevel = 0;
-    rfaCurrentStake = null;
+    slot.martingaleLevel = 0;
+    slot.currentStake = null;
     const target = rfaTargetProfit();
-    if (target == null || rfaMarketProfit >= target) {
-      rfaCurrentMarket = null;
-      rfaMarketProfit = 0;
+    if (target == null || slot.marketProfit >= target) {
+      delete rfaActiveMarkets[row.symbol]; // frees a concurrent slot for a fresh market next evaluation
     }
   } else {
-    rfaMartingaleLevel++;
-    if (rfaMartingaleLevel >= rfaMaxMartingaleLevel()) {
-      rfaArmed = false;
-      gridSet('rfaScanStatus', 'Stopped — max Martingale level (' + rfaMaxMartingaleLevel() + ') reached.');
+    slot.martingaleLevel++;
+    if (slot.martingaleLevel >= rfaMaxMartingaleLevel()) {
+      // Abandon just THIS market's sequence rather than halting the whole
+      // bot — with multiple markets running concurrently, one hitting its
+      // own safety limit shouldn't stop the others.
+      delete rfaActiveMarkets[row.symbol];
+      gridSet('rfaScanStatus', (MARKETS[row.symbol] || row.symbol) + ': max Martingale level reached — abandoning this market, others continue.');
+    } else {
+      slot.currentStake = null;
     }
-    rfaCurrentStake = null;
   }
   rfaRenderAll();
 }
@@ -4810,9 +5673,7 @@ function rfaToggleArm(){
 }
 
 function rfaRenderAll(){
-  const statusEl = $("rfaScanStatus");
-  // Market ranking table — every scanned market, sorted by confidence, so
-  // "why did it pick THIS one" is always visible, not just the winner.
+  // Market ranking table — every scanned market, sorted by confidence.
   const rankBody = $("rfaRankBody");
   if (rankBody){
     const rows = RFA_MARKETS
@@ -4824,11 +5685,11 @@ function rfaRenderAll(){
     } else {
       rankBody.innerHTML = rows.map(({sym, st}) => {
         const c = st.confidence;
-        const isLocked = sym === rfaCurrentMarket;
+        const isActive = !!rfaActiveMarkets[sym];
         const dirTxt = c.direction || '—';
         const dirCls = c.direction === 'RISE' ? 'cell-pos' : c.direction === 'FALL' ? 'cell-neg' : 'cell-mut';
-        return `<tr${isLocked ? ' style="background:rgba(86,182,255,0.08)"' : ''}>
-          <td class="l">${MARKETS[sym]||sym}${isLocked ? ' 🔒' : ''}</td>
+        return `<tr${isActive ? ' style="background:rgba(86,182,255,0.08)"' : ''}>
+          <td class="l">${MARKETS[sym]||sym}${isActive ? ' 🔒' : ''}</td>
           <td class="${dirCls}" style="font-weight:700">${dirTxt}</td>
           <td>${(c.confidence*100).toFixed(0)}%</td>
           <td class="cell-mut">${c.marketControl ? c.marketControl.bias : '—'}</td>
@@ -4837,7 +5698,27 @@ function rfaRenderAll(){
       }).join('');
     }
   }
-  // Stats
+
+  // Active markets table — replaces the single "current market" stat now that several can run at once.
+  const activeBody = $("rfaActiveBody");
+  if (activeBody){
+    const syms = Object.keys(rfaActiveMarkets);
+    if (!syms.length){
+      activeBody.innerHTML = '<tr><td colspan="4" class="sig-empty">No markets currently active.</td></tr>';
+    } else {
+      activeBody.innerHTML = syms.map(sym => {
+        const slot = rfaActiveMarkets[sym];
+        const target = rfaTargetProfit();
+        return `<tr>
+          <td class="l">${MARKETS[sym]||sym}</td>
+          <td>${slot.martingaleLevel}</td>
+          <td>${slot.currentStake != null ? slot.currentStake.toFixed(2) : '—'}</td>
+          <td class="${slot.marketProfit>=0?'cell-pos':'cell-neg'}">${(slot.marketProfit>=0?'+':'')+slot.marketProfit.toFixed(2)}${target!=null ? ' / '+target.toFixed(2) : ''}</td>
+        </tr>`;
+      }).join('');
+    }
+  }
+
   const setTxt = (id, v) => { const e = $(id); if (e) e.textContent = v; };
   const resolved = rfaStats.won + rfaStats.lost;
   setTxt('rfaStatWon', rfaStats.won);
@@ -4845,9 +5726,7 @@ function rfaRenderAll(){
   setTxt('rfaStatWinRate', resolved ? ((rfaStats.won/resolved)*100).toFixed(1)+'%' : '—');
   setTxt('rfaStatProfit', (rfaStats.profit>=0?'+':'')+rfaStats.profit.toFixed(2));
   setTxt('rfaStatROI', rfaStats.sessionStartBalance ? ((rfaStats.profit/rfaStats.sessionStartBalance)*100).toFixed(2)+'%' : '—');
-  setTxt('rfaStatMarket', rfaCurrentMarket ? (MARKETS[rfaCurrentMarket]||rfaCurrentMarket) : '—');
-  setTxt('rfaStatLevel', rfaMartingaleLevel);
-  setTxt('rfaStatMarketProfit', (rfaMarketProfit>=0?'+':'')+rfaMarketProfit.toFixed(2) + (rfaTargetProfit()!=null ? ' / ' + rfaTargetProfit().toFixed(2) : ''));
+  setTxt('rfaStatActiveCount', Object.keys(rfaActiveMarkets).length + ' / ' + rfaMaxConcurrentMarkets());
 
   // Trade log
   const body = $("rfaTradeBody");
