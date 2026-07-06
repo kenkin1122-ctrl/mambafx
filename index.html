@@ -2258,22 +2258,16 @@ table.an-table tbody tr:last-child td{border-bottom:none}
         <label for="rfaStake">Base Stake (USD)</label>
         <input type="number" id="rfaStake" value="1.00" min="0.35" step="0.01" style="width:100%;margin-bottom:8px">
 
-        <label for="rfaDuration">Duration (ticks)</label>
-        <input type="number" id="rfaDuration" value="5" min="1" step="1" style="width:100%;margin-bottom:8px">
-
-        <label for="rfaThreshold">Confidence Threshold</label>
-        <input type="number" id="rfaThreshold" value="0.55" min="0" max="1" step="0.01" style="width:100%;margin-bottom:8px">
-
         <label for="rfaMaxLevel">Max Martingale Level (0 = no limit)</label>
         <input type="number" id="rfaMaxLevel" value="0" min="0" step="1" style="width:100%;margin-bottom:8px">
 
         <label for="rfaStopLoss">Stop Loss (USD, blank = off)</label>
         <input type="number" id="rfaStopLoss" min="0" step="0.01" style="width:100%;margin-bottom:8px">
 
-        <label for="rfaTargetProfit">Target Profit (USD, blank = off)</label>
+        <label for="rfaTargetProfit">Target Profit Per Market (USD, blank = switch after every win)</label>
         <input type="number" id="rfaTargetProfit" min="0" step="0.01" style="width:100%;margin-bottom:8px">
 
-        <div class="gc-sub" style="margin-top:6px">Martingale multiplier is shared with every other bot on this page — see the Martingale Multiplier control above. Tick-delay between trades is fixed at 1 tick, per spec, and isn't user-configurable.</div>
+        <div class="gc-sub" style="margin-top:6px">Duration is fixed at 1 tick and contract type is always Rise/Fall — neither is configurable. Martingale multiplier is shared with every other bot on this page — see the Martingale Multiplier control above. Tick-delay between trades is fixed at 1 tick, per spec. Target Profit is per-market: the bot keeps trading its current market — through as many win/reset Martingale cycles as it takes — until that market's own accumulated profit reaches this figure, then switches. Stop Loss is the one session-wide hard stop.</div>
       </div>
 
       <div class="grid-card">
@@ -2285,7 +2279,8 @@ table.an-table tbody tr:last-child td{border-bottom:none}
           <div class="em-card"><div class="em-lab">Profit</div><div id="rfaStatProfit" class="em-val">0.00</div></div>
           <div class="em-card"><div class="em-lab">ROI</div><div id="rfaStatROI" class="em-val">—</div></div>
           <div class="em-card"><div class="em-lab">Current Market</div><div id="rfaStatMarket" class="em-val acc">—</div></div>
-          <div class="em-card" style="grid-column:1/3"><div class="em-lab">Martingale Level</div><div id="rfaStatLevel" class="em-val">0</div></div>
+          <div class="em-card"><div class="em-lab">Martingale Level</div><div id="rfaStatLevel" class="em-val">0</div></div>
+          <div class="em-card"><div class="em-lab">Current Market Profit</div><div id="rfaStatMarketProfit" class="em-val">0.00</div></div>
         </div>
       </div>
     </div>
@@ -4627,10 +4622,12 @@ function rfaRecomputeConfidence(sym){
 
 // ── Trading state ───────────────────────────────────────────────────────
 let rfaArmed = false;
-let rfaCurrentMarket = null;   // symbol the bot is locked onto during an active Martingale sequence
-let rfaMartingaleLevel = 0;    // 0 = base stake, no active sequence
+let rfaCurrentMarket = null;   // symbol the bot is locked onto
+let rfaMartingaleLevel = 0;    // 0 = base stake, no active loss sequence
 let rfaCurrentStake = null;
 let rfaWaitingTicks = 0;
+let rfaTradeInFlight = false;  // true from the moment a trade is placed until it actually settles — closes the race where a stop condition registers after firing but before settlement
+let rfaMarketProfit = 0;       // profit accumulated on the CURRENTLY LOCKED market since it was selected — resets whenever the bot switches to a different market
 let rfaOpenContracts = {};     // id -> row, mirrors ouOpenContracts/adxOpenContracts
 let rfaTrades = [];
 let _rfaMult = null;
@@ -4638,13 +4635,9 @@ function rfaMult(){ return _rfaMult || (_rfaMult = makeMultiplier(() => $("rfaSt
 
 let rfaStats = { won: 0, lost: 0, profit: 0, sessionStartBalance: null };
 
-const RFA_TICK_DELAY = 1; // "wait exactly one tick" per spec — not user-configurable, it's a stated rule, not a tunable
+const RFA_TICK_DELAY = 1;    // "wait exactly one tick" per spec — fixed, not user-configurable
+const RFA_DURATION_TICKS = 1; // duration is always 1 tick — fixed, not user-configurable, not shown in the UI
 
-function rfaConfidenceThreshold(){
-  const el = $("rfaThreshold");
-  const v = el ? parseFloat(el.value) : 0.55;
-  return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.55;
-}
 function rfaMaxMartingaleLevel(){
   const el = $("rfaMaxLevel");
   const v = el ? parseInt(el.value, 10) : 0;
@@ -4653,51 +4646,55 @@ function rfaMaxMartingaleLevel(){
 function rfaStopLoss(){ const el = $("rfaStopLoss"); const v = el ? parseFloat(el.value) : NaN; return Number.isFinite(v) && v > 0 ? v : null; }
 function rfaTargetProfit(){ const el = $("rfaTargetProfit"); const v = el ? parseFloat(el.value) : NaN; return Number.isFinite(v) && v > 0 ? v : null; }
 
-/** Step 12/13 — pick the single highest-confidence market above threshold, across ALL scanned markets. */
+/** Step 12 — pick the single highest-confidence market with a VALID direction, across ALL scanned markets. No configurable minimum bar anymore: a null direction (neutral control, or price not at a zone) already excludes a market on its own — that's not a separate threshold, it's what "no trade" means. */
 function rfaPickBestMarket(){
   let best = null;
   RFA_MARKETS.forEach(sym => {
     const st = rfaMarketState[sym];
     if (!st || !st.confidence || !st.confidence.direction) return;
-    if (st.confidence.confidence < rfaConfidenceThreshold()) return;
     if (!best || st.confidence.confidence > best.confidence) best = { symbol: sym, direction: st.confidence.direction, confidence: st.confidence.confidence, info: st.confidence };
   });
   return best;
 }
 
+/** Stop Loss remains the one hard, session-wide safety stop. Target Profit no longer stops the bot — see rfaSettleContract for its new role as a per-market rotation trigger. */
 function rfaRiskLimitReached(){
-  const sl = rfaStopLoss(), tp = rfaTargetProfit();
+  const sl = rfaStopLoss();
   if (sl != null && rfaStats.profit <= -sl) return 'Stop loss reached (' + rfaStats.profit.toFixed(2) + ')';
-  if (tp != null && rfaStats.profit >= tp) return 'Target profit reached (' + rfaStats.profit.toFixed(2) + ')';
   return null;
 }
 
-/** Step 12/13/14 — the central decision loop, called on every live tick for the locked market (or any market, when unlocked). */
+/** Step 12/13/14 — the central decision loop. */
 function rfaEvaluateAndTrade(){
   if (!rfaArmed) return;
+  if (rfaTradeInFlight) return; // a previous trade hasn't settled yet — never fire a second one on top of it, regardless of what the tick counter says
 
   const limitHit = rfaRiskLimitReached();
   if (limitHit) { rfaArmed = false; gridSet('rfaScanStatus', 'Stopped — ' + limitHit); rfaRenderAll(); return; }
 
-  if (rfaWaitingTicks > 0) return; // Step: tick-delay between trades
+  if (rfaWaitingTicks > 0) return; // one-tick pause after the PREVIOUS contract's settlement, per spec
 
-  // Switching lock (Step 13): a Martingale sequence in progress must stay
-  // on its current market until it ends in a win. It must NOT free-switch
-  // mid-sequence even if another market now scores higher.
-  if (rfaCurrentMarket && rfaMartingaleLevel > 0) {
+  // Switching lock (Step 13, redesigned): the bot stays on its current
+  // market — through however many win/reset Martingale cycles it takes —
+  // until that market's accumulated profit reaches the configured Target
+  // Profit. Only then does it release the lock and re-evaluate globally.
+  // A losing sequence in progress obviously also keeps it locked, same as
+  // before.
+  if (rfaCurrentMarket) {
     const st = rfaMarketState[rfaCurrentMarket];
     if (st && st.confidence && st.confidence.direction) {
       rfaExecuteTrade(rfaCurrentMarket, st.confidence.direction, st.confidence);
     } else {
-      gridSet('rfaScanStatus', 'Locked on ' + rfaCurrentMarket + ' (Martingale level ' + rfaMartingaleLevel + ') — waiting for a valid setup to continue the sequence.');
+      gridSet('rfaScanStatus', 'Locked on ' + rfaCurrentMarket + ' (level ' + rfaMartingaleLevel + ', profit ' + rfaMarketProfit.toFixed(2) + ') — waiting for a valid setup to continue.');
     }
     return;
   }
 
-  // No active sequence — free to (re-)select across all markets.
+  // Unlocked — free to select fresh across all markets.
   const best = rfaPickBestMarket();
-  if (!best) { gridSet('rfaScanStatus', 'Scanning — no market currently meets the confidence threshold.'); return; }
+  if (!best) { gridSet('rfaScanStatus', 'Scanning — no market currently shows a valid setup.'); return; }
   rfaCurrentMarket = best.symbol;
+  rfaMarketProfit = 0;
   rfaExecuteTrade(best.symbol, best.direction, best.info);
 }
 
@@ -4716,7 +4713,6 @@ function rfaExecuteTrade(symbol, direction, confidenceInfo){
     gridSet('rfaScanStatus', 'Connect on Trading Grid first.'); return;
   }
   const stake = Math.max(0.35, rfaCurrentStake != null ? rfaCurrentStake : rfaMult().getNext('martingale'));
-  const dur = parseInt(($("rfaDuration") || { value:'5' }).value || '5', 10);
   const contractType = direction === 'RISE' ? 'CALL' : 'PUT';
   const reqId = ++gridReqId;
 
@@ -4725,7 +4721,7 @@ function rfaExecuteTrade(symbol, direction, confidenceInfo){
     amount:stake, basis:'stake',
     contract_type:contractType,
     currency:gridCurrency,
-    duration:dur, duration_unit:'t',
+    duration:RFA_DURATION_TICKS, duration_unit:'t',
     underlying_symbol:symbol,
   };
   const validation = rfaValidateProposal(proposalMsg);
@@ -4738,17 +4734,17 @@ function rfaExecuteTrade(symbol, direction, confidenceInfo){
   });
 
   rfaCurrentStake = stake;
-  rfaWaitingTicks = RFA_TICK_DELAY + 1; // +1 because the tick that just fired this evaluation shouldn't itself count down
+  rfaTradeInFlight = true; // cleared only in rfaSettleContract, or immediately below on a rejection/failure — never left stuck
   const row = { id: 'pending-' + reqId, symbol, contractType, dir: direction, stake, status: 'proposal', time: Math.floor(Date.now()/1000), confidence: confidenceInfo ? confidenceInfo.confidence : null };
   rfaTrades.unshift(row);
 
   gridPending[reqId] = (proposal, err) => {
-    if (err){ row.status = 'rejected: ' + (err.message || err.code || 'error'); rfaRenderAll(); return; }
-    if (!proposal || !proposal.id || proposal.ask_price == null){ row.status = 'rejected: no price'; rfaRenderAll(); return; }
+    if (err){ row.status = 'rejected: ' + (err.message || err.code || 'error'); rfaTradeInFlight = false; rfaRenderAll(); return; }
+    if (!proposal || !proposal.id || proposal.ask_price == null){ row.status = 'rejected: no price'; rfaTradeInFlight = false; rfaRenderAll(); return; }
     const buyReqId = ++gridReqId;
     row.status = 'open'; rfaRenderAll();
     gridPending[buyReqId] = (buy, buyErr) => {
-      if (buyErr){ row.status = 'buy failed: ' + (buyErr.message || buyErr.code || 'error'); rfaRenderAll(); return; }
+      if (buyErr){ row.status = 'buy failed: ' + (buyErr.message || buyErr.code || 'error'); rfaTradeInFlight = false; rfaRenderAll(); return; }
       if (buy){
         row.id = String(buy.contract_id);
         row.buyPrice = buy.buy_price;
@@ -4769,29 +4765,37 @@ function rfaSettleContract(id, won){
   delete rfaOpenContracts[id];
   if (!row) return;
 
+  rfaTradeInFlight = false; // closes the original race: this runs synchronously before any subsequent tick's evaluation can fire
+  rfaWaitingTicks = RFA_TICK_DELAY; // the one-tick pause starts AFTER settlement, not after firing — matches "after every completed contract, wait exactly one tick"
+
   rfaMult().record(row.stake, won);
   rfaStats.won += won ? 1 : 0;
   rfaStats.lost += won ? 0 : 1;
-  rfaStats.profit += won ? ((row.payout != null ? row.payout : row.stake) - row.stake) : -row.stake;
+  const tradePnl = won ? ((row.payout != null ? row.payout : row.stake) - row.stake) : -row.stake;
+  rfaStats.profit += tradePnl;
+  rfaMarketProfit += tradePnl;
 
   if (won) {
-    // Step 13: a win ends the Martingale sequence — reset to base stake,
-    // unlock the market, and re-evaluate everything from scratch next tick.
+    // A win always resets the Martingale sequence to base stake. Whether
+    // it also releases the market lock now depends on the per-market
+    // profit target (redesigned switching rule): stay on this market,
+    // grinding through further win/reset cycles, until it has accumulated
+    // that much profit — only then move on and re-evaluate everything.
+    // With no target set, revert to switching after every win, same as
+    // the original behavior.
     rfaMartingaleLevel = 0;
     rfaCurrentStake = null;
-    rfaCurrentMarket = null;
+    const target = rfaTargetProfit();
+    if (target == null || rfaMarketProfit >= target) {
+      rfaCurrentMarket = null;
+      rfaMarketProfit = 0;
+    }
   } else {
     rfaMartingaleLevel++;
     if (rfaMartingaleLevel >= rfaMaxMartingaleLevel()) {
-      // Safety limit reached — stop rather than keep escalating stake indefinitely.
       rfaArmed = false;
       gridSet('rfaScanStatus', 'Stopped — max Martingale level (' + rfaMaxMartingaleLevel() + ') reached.');
     }
-    // rfaCurrentStake stays set to whatever getNext('martingale') computes
-    // on the NEXT trade for this same locked market — handled naturally
-    // since rfaExecuteTrade always calls rfaMult().getNext('martingale')
-    // when rfaCurrentStake is null; setting it null here lets the
-    // multiplier decide the next stake from its own recorded history.
     rfaCurrentStake = null;
   }
   rfaRenderAll();
@@ -4843,6 +4847,7 @@ function rfaRenderAll(){
   setTxt('rfaStatROI', rfaStats.sessionStartBalance ? ((rfaStats.profit/rfaStats.sessionStartBalance)*100).toFixed(2)+'%' : '—');
   setTxt('rfaStatMarket', rfaCurrentMarket ? (MARKETS[rfaCurrentMarket]||rfaCurrentMarket) : '—');
   setTxt('rfaStatLevel', rfaMartingaleLevel);
+  setTxt('rfaStatMarketProfit', (rfaMarketProfit>=0?'+':'')+rfaMarketProfit.toFixed(2) + (rfaTargetProfit()!=null ? ' / ' + rfaTargetProfit().toFixed(2) : ''));
 
   // Trade log
   const body = $("rfaTradeBody");
