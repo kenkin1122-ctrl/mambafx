@@ -586,6 +586,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button id="navMtf" onclick="showPage('mtf')">🧭 MTF Structure</button>
     <button id="navNjanja" onclick="showPage('njanja')">🏛 Njanja Analysis</button>
     <button id="navRfaBot" onclick="showPage('rfabot')">📊 Rise/Fall Autobot</button>
+    <button id="navMsdExplorer" onclick="showPage('msdexplorer')">🔬 Database Explorer</button>
   </nav>
 
   <!-- ============ PAGE 1: LIVE TRACKER ============ -->
@@ -2309,6 +2310,68 @@ table.an-table tbody tr:last-child td{border-bottom:none}
           <thead><tr><th class="l">Time</th><th class="l">Market</th><th class="l">Dir</th><th class="l">Stake</th><th class="l">Conf.</th><th class="l">P/L</th><th class="l">Status</th></tr></thead>
           <tbody id="rfaTradeBody"><tr><td colspan="7" class="sig-empty">No trades yet.</td></tr></tbody>
         </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="page-msdexplorer" class="page">
+  <div class="grid-card" style="margin-bottom:16px">
+    <h2 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">🔬 Market State Discovery — Database Explorer</h2>
+    <div class="gc-sub" style="margin-bottom:12px">Read-only view of the permanent MarketStates and EventDatabase stores. This page never writes to either — its only purpose is verifying the data acquisition pipeline before the Experiment Dataset Builder and Machine Learning phases are built.</div>
+    <button class="gc-btn" onclick="msdExplorerRefresh()">🔄 Refresh</button>
+    <span id="msdExplorerStatus" class="gc-sub" style="margin-left:10px"></span>
+  </div>
+
+  <div class="grid-card" style="margin-bottom:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Overview</h3>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+      <div class="em-card"><div class="em-lab">Total Snapshots</div><div id="msdStatTotalSnapshots" class="em-val acc">—</div></div>
+      <div class="em-card"><div class="em-lab">Total Events</div><div id="msdStatTotalEvents" class="em-val acc">—</div></div>
+      <div class="em-card"><div class="em-lab">Positive Snapshots</div><div id="msdStatPositive" class="em-val up">—</div></div>
+      <div class="em-card"><div class="em-lab">Negative Snapshots</div><div id="msdStatNegative" class="em-val down">—</div></div>
+    </div>
+  </div>
+
+  <div class="grid-layout">
+    <div class="grid-side">
+      <div class="grid-card" style="margin-bottom:16px">
+        <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Feature Schema Versions</h3>
+        <table class="sig-table"><thead><tr><th class="l">Version</th><th class="l">Snapshots</th></tr></thead>
+          <tbody id="msdVersionBody"><tr><td colspan="2" class="sig-empty">No data yet.</td></tr></tbody></table>
+      </div>
+
+      <div class="grid-card" style="margin-bottom:16px">
+        <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Run Length Distribution</h3>
+        <table class="sig-table"><thead><tr><th class="l">Actual Run Length</th><th class="l">Events</th></tr></thead>
+          <tbody id="msdRunLengthBody"><tr><td colspan="2" class="sig-empty">No data yet.</td></tr></tbody></table>
+      </div>
+
+      <div class="grid-card">
+        <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Lead Time Distribution</h3>
+        <table class="sig-table"><thead><tr><th class="l">Lead Time (ticks)</th><th class="l">Snapshots</th></tr></thead>
+          <tbody id="msdLeadTimeBody"><tr><td colspan="2" class="sig-empty">No data yet.</td></tr></tbody></table>
+      </div>
+    </div>
+
+    <div class="grid-main">
+      <div class="grid-card" style="margin-bottom:16px">
+        <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">QA / Version Rejection Reasons (this session)</h3>
+        <div class="gc-sub" style="margin-bottom:8px">Session-scoped, resets on reload — not a permanent store, since the locked architecture names exactly four permanent ones and a rejection tally doesn't need to survive a reload to serve its purpose.</div>
+        <table class="sig-table"><thead><tr><th class="l">Reason</th><th class="l">Stage</th><th class="l">Count</th></tr></thead>
+          <tbody id="msdRejectionBody"><tr><td colspan="3" class="sig-empty">No rejections recorded this session.</td></tr></tbody></table>
+      </div>
+
+      <div class="grid-card" style="margin-bottom:16px">
+        <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Event Frequency Over Time (by hour)</h3>
+        <table class="sig-table"><thead><tr><th class="l">Hour (UTC)</th><th class="l">Events</th></tr></thead>
+          <tbody id="msdEventFreqBody"><tr><td colspan="2" class="sig-empty">No data yet.</td></tr></tbody></table>
+      </div>
+
+      <div class="grid-card">
+        <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Database Growth (snapshots per day)</h3>
+        <table class="sig-table"><thead><tr><th class="l">Day (UTC)</th><th class="l">Snapshots</th></tr></thead>
+          <tbody id="msdGrowthBody"><tr><td colspan="2" class="sig-empty">No data yet.</td></tr></tbody></table>
       </div>
     </div>
   </div>
@@ -4291,6 +4354,161 @@ function msdResetStateDatabase(){
   });
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// Market State Discovery Engine — Phase 3: Rejection Stats (session-scoped)
+// ══════════════════════════════════════════════════════════════════════
+// Purely additive observation of msdProcessLabeledSnapshots()'s own,
+// completely unmodified return value — this does NOT touch the QA
+// Engine's or Version Validator's logic in any way, and cannot change any
+// pass/fail decision. Deliberately session-scoped (resets on page
+// reload), NOT persisted to a new permanent store — the locked
+// architecture names exactly four permanent stores, and a rejection tally
+// is exactly the kind of thing that doesn't need to survive a reload to
+// serve its purpose (verifying the CURRENT session's pipeline health).
+
+let msdQaRejectionTally = {};      // reason string -> count, this session
+let msdVersionRejectionTally = {}; // reason string -> count, this session
+
+function msdRecordRejectionStats(pipelineResult){
+  if (!pipelineResult) return;
+  (pipelineResult.qaErrors || []).forEach(({ errors }) => {
+    errors.forEach(e => { msdQaRejectionTally[e] = (msdQaRejectionTally[e] || 0) + 1; });
+  });
+  (pipelineResult.versionErrors || []).forEach(({ error }) => {
+    msdVersionRejectionTally[error] = (msdVersionRejectionTally[error] || 0) + 1;
+  });
+}
+
+/** Read-only snapshot of this session's rejection tallies. */
+function msdGetRejectionStats(){
+  return { qa: Object.assign({}, msdQaRejectionTally), version: Object.assign({}, msdVersionRejectionTally) };
+}
+
+/** Test/debug only — never called from production code paths. */
+function msdResetRejectionStats(){
+  msdQaRejectionTally = {};
+  msdVersionRejectionTally = {};
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Market State Discovery Engine — Phase 3: Database Explorer aggregation
+// ══════════════════════════════════════════════════════════════════════
+// PURE READ-ONLY. Every function below only calls existing read
+// accessors (msdGetAllMarketStates, msdGetAllEvents, msdGetMarketStateCount,
+// msdGetEventCount) and msdGetRejectionStats() — none of which write
+// anything. Nothing here can alter MarketStates, EventDatabase, or any
+// other stored data. This is deliberately kept as pure aggregation with
+// no side effects, so "does this dashboard modify the database" has an
+// obviously-true answer just from reading this code, not something that
+// has to be taken on faith.
+//
+// SCALE NOTE, stated honestly: this loads the full contents of both
+// stores into memory to compute distributions. Fine at today's volume
+// (same caveat already noted on msdGetAllMarketStates/msdGetAllEvents
+// themselves); will need incremental/indexed aggregation once either
+// store grows substantially. Not solved here, since nothing yet needs it.
+
+function msdBucketBy(items, keyFn){
+  const buckets = {};
+  items.forEach(item => {
+    const key = keyFn(item);
+    if (key == null) return;
+    buckets[key] = (buckets[key] || 0) + 1;
+  });
+  return buckets;
+}
+
+/**
+ * Computes every statistic the Database Explorer displays, in one
+ * read-only pass. Safe to call as often as desired — it never writes.
+ */
+async function msdComputeDashboardStats(){
+  const [allStates, allEvents, stateCount, eventCount] = await Promise.all([
+    msdGetAllMarketStates(),
+    msdGetAllEvents(),
+    msdGetMarketStateCount(),
+    msdGetEventCount(),
+  ]);
+
+  const positiveCount = allStates.filter(s => s.outcome === 'positive').length;
+  const negativeCount = allStates.filter(s => s.outcome === 'negative').length;
+
+  const versionCounts = msdBucketBy(allStates, s => s.featureVersion);
+
+  // Lead Time distribution: positives only — negatives carry no Lead Time by design.
+  const leadTimeDist = msdBucketBy(allStates.filter(s => s.outcome === 'positive'), s => s.leadTime);
+
+  // Run Length distribution: from the Event Database, not MarketStates —
+  // actualRunLength is a property of the EVENT, and every positive
+  // snapshot belonging to the same event shares the same value, so
+  // counting from Events avoids over-weighting events with wide lookback
+  // windows (more snapshots) relative to narrow ones.
+  const runLengthDist = msdBucketBy(allEvents, e => e.actualRunLength);
+
+  // Event frequency over time: bucketed by hour, from each event's own detectedAt.
+  const eventFrequencyByHour = msdBucketBy(allEvents, e => new Date(e.detectedAt).toISOString().slice(0, 13));
+
+  // Database growth: snapshot count bucketed by calendar day, from each snapshot's own timestamp.
+  const growthByDay = msdBucketBy(allStates, s => new Date(s.timestamp).toISOString().slice(0, 10));
+
+  return {
+    totalSnapshots: stateCount,
+    totalEvents: eventCount,
+    positiveCount,
+    negativeCount,
+    versionCounts,
+    leadTimeDist,
+    runLengthDist,
+    eventFrequencyByHour,
+    growthByDay,
+    rejectionStats: msdGetRejectionStats(),
+  };
+}
+
+/** Renders the Database Explorer page from a fresh, read-only computation. Call on page show and on manual refresh. */
+async function msdExplorerRefresh(){
+  const statusEl = $("msdExplorerStatus");
+  if (statusEl) statusEl.textContent = 'Loading…';
+  let stats;
+  try {
+    stats = await msdComputeDashboardStats();
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Error: ' + e.message;
+    return;
+  }
+  if (statusEl) statusEl.textContent = 'Last refreshed ' + new Date().toLocaleTimeString();
+
+  const setTxt = (id, v) => { const e = $(id); if (e) e.textContent = v; };
+  setTxt('msdStatTotalSnapshots', stats.totalSnapshots);
+  setTxt('msdStatTotalEvents', stats.totalEvents);
+  setTxt('msdStatPositive', stats.positiveCount);
+  setTxt('msdStatNegative', stats.negativeCount);
+
+  function renderTable(id, dict, sortNumeric, emptyColspan){
+    const body = $(id);
+    if (!body) return;
+    const keys = Object.keys(dict);
+    if (!keys.length) { body.innerHTML = `<tr><td colspan="${emptyColspan}" class="sig-empty">No data yet.</td></tr>`; return; }
+    const sorted = sortNumeric ? keys.sort((a,b) => Number(a) - Number(b)) : keys.sort();
+    body.innerHTML = sorted.map(k => `<tr><td class="l">${k}</td><td>${dict[k]}</td></tr>`).join('');
+  }
+
+  renderTable('msdVersionBody', stats.versionCounts, false, 2);
+  renderTable('msdRunLengthBody', stats.runLengthDist, true, 2);
+  renderTable('msdLeadTimeBody', stats.leadTimeDist, true, 2);
+  renderTable('msdEventFreqBody', stats.eventFrequencyByHour, false, 2);
+  renderTable('msdGrowthBody', stats.growthByDay, false, 2);
+
+  const rejectionBody = $("msdRejectionBody");
+  if (rejectionBody) {
+    const rows = [];
+    Object.entries(stats.rejectionStats.qa).forEach(([reason, count]) => rows.push({ reason, stage: 'QA Engine', count }));
+    Object.entries(stats.rejectionStats.version).forEach(([reason, count]) => rows.push({ reason, stage: 'Version Validator', count }));
+    if (!rows.length) rejectionBody.innerHTML = '<tr><td colspan="3" class="sig-empty">No rejections recorded this session.</td></tr>';
+    else rejectionBody.innerHTML = rows.map(r => `<tr><td class="l">${r.reason}</td><td class="l">${r.stage}</td><td>${r.count}</td></tr>`).join('');
+  }
+}
+
 // Build a compact full-indicator snapshot for one tick.
 function makeSnap(epoch, price){
   return {
@@ -4310,7 +4528,22 @@ function makeSnap(epoch, price){
 function recordIndicatorTick(epoch, price){
   const msdResult = msdOnTick(epoch, price); // Market State Discovery Engine — Phase 2.1 detector, pure observer, no effect on existing pipeline
   if (msdResult.qualified) msdLabelQualifiedEvent(msdResult.qualified, MSD_FEATURE_SCHEMA_VERSION); // Phase 2.3 — begins labeling immediately, doesn't wait for the run to finish
-  if (msdResult.completed) msdFinalizeLabelsForCompletedEvent(msdResult.completed); // Phase 2.3 — fills in the true Actual Run Length once known
+  if (msdResult.completed) {
+    // DEFECT FIX: these two steps existed and were fully tested in
+    // isolation (Phases 2.2/2.6), but were never actually connected to
+    // the live tick flow — meaning EventDatabase and MarketStates were
+    // never populated during real operation, only in tests.
+    // Fire-and-forget (recordIndicatorTick must stay synchronous), with
+    // .catch() so a storage failure can never throw into the existing
+    // pipeline.
+    msdPersistQueuedEvents().catch(() => {});
+    const finalizedSnapshots = msdFinalizeLabelsForCompletedEvent(msdResult.completed); // Phase 2.3 — fills in the true Actual Run Length once known
+    if (finalizedSnapshots && finalizedSnapshots.length) {
+      msdProcessLabeledSnapshots(finalizedSnapshots)
+        .then(result => msdRecordRejectionStats(result))
+        .catch(() => {});
+    }
+  }
   const closes = ticks.map(t => t.price);
   const m   = macd(closes);
   const ch  = choppiness(closes);
@@ -4949,8 +5182,8 @@ function startTfTimers(){
 }
 
 function showPage(which){
-  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot", aggression:"page-aggression", mtf:"page-mtf", njanja:"page-njanja", rfabot:"page-rfabot" };
-  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot", aggression:"navAggression", mtf:"navMtf", njanja:"navNjanja", rfabot:"navRfaBot" };
+  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot", aggression:"page-aggression", mtf:"page-mtf", njanja:"page-njanja", rfabot:"page-rfabot", msdexplorer:"page-msdexplorer" };
+  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot", aggression:"navAggression", mtf:"navMtf", njanja:"navNjanja", rfabot:"navRfaBot", msdexplorer:"navMsdExplorer" };
   Object.keys(pages).forEach(k => {
     document.getElementById(pages[k]).classList.toggle("active", k===which);
     const nav = document.getElementById(navs[k]); if (nav) nav.classList.toggle("active", k===which);
@@ -5015,6 +5248,9 @@ function showPage(which){
   }
   if (which === "rfabot"){
     if (typeof rfaPageInit === "function") rfaPageInit();
+  }
+  if (which === "msdexplorer"){
+    if (typeof msdExplorerRefresh === "function") msdExplorerRefresh();
   }
 }
 
