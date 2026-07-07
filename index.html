@@ -587,6 +587,9 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button id="navNjanja" onclick="showPage('njanja')">🏛 Njanja Analysis</button>
     <button id="navRfaBot" onclick="showPage('rfabot')">📊 Rise/Fall Autobot</button>
     <button id="navMsdExplorer" onclick="showPage('msdexplorer')">🔬 Database Explorer</button>
+    <button id="navMsdFeatures" onclick="showPage('msdfeatures')">📶 Feature Completeness</button>
+    <button id="navMsdEvents" onclick="showPage('msdevents')">📋 Positive Event Browser</button>
+    <button id="navMsdInspector" onclick="showPage('msdinspector')">🔎 Snapshot Inspector</button>
   </nav>
 
   <!-- ============ PAGE 1: LIVE TRACKER ============ -->
@@ -2333,6 +2336,26 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     </div>
   </div>
 
+  <div class="grid-card" style="margin-bottom:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Pipeline Health</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Ticks-received through detector counters are lifetime totals for this session (reset on reload). DB sizes and write-timing figures reflect the current state of the permanent stores directly.</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+      <div class="em-card"><div class="em-lab">Ticks Received</div><div id="msdPhTicks" class="em-val">—</div></div>
+      <div class="em-card"><div class="em-lab">Events Qualified</div><div id="msdPhQualified" class="em-val">—</div></div>
+      <div class="em-card"><div class="em-lab">Events Completed</div><div id="msdPhCompleted" class="em-val">—</div></div>
+      <div class="em-card"><div class="em-lab">Current Queue Size</div><div id="msdPhQueueSize" class="em-val">—</div></div>
+      <div class="em-card"><div class="em-lab">Snapshots Generated</div><div id="msdPhGenerated" class="em-val">—</div></div>
+      <div class="em-card"><div class="em-lab">Snapshots Passed QA</div><div id="msdPhPassedQa" class="em-val up">—</div></div>
+      <div class="em-card"><div class="em-lab">Snapshots Failed QA</div><div id="msdPhFailedQa" class="em-val down">—</div></div>
+      <div class="em-card"><div class="em-lab">Snapshots Stored</div><div id="msdPhStored" class="em-val acc">—</div></div>
+      <div class="em-card"><div class="em-lab">Event DB Size</div><div id="msdPhEventDbSize" class="em-val">—</div></div>
+      <div class="em-card"><div class="em-lab">Market State DB Size</div><div id="msdPhStateDbSize" class="em-val">—</div></div>
+      <div class="em-card"><div class="em-lab">Avg Write Time</div><div id="msdPhAvgWrite" class="em-val">—</div></div>
+      <div class="em-card"><div class="em-lab">Max Write Time</div><div id="msdPhMaxWrite" class="em-val">—</div></div>
+      <div class="em-card"><div class="em-lab">Write Failures</div><div id="msdPhWriteFailures" class="em-val down">—</div></div>
+    </div>
+  </div>
+
   <div class="grid-layout">
     <div class="grid-side">
       <div class="grid-card" style="margin-bottom:16px">
@@ -2348,9 +2371,10 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       </div>
 
       <div class="grid-card">
-        <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Lead Time Distribution</h3>
-        <table class="sig-table"><thead><tr><th class="l">Lead Time (ticks)</th><th class="l">Snapshots</th></tr></thead>
-          <tbody id="msdLeadTimeBody"><tr><td colspan="2" class="sig-empty">No data yet.</td></tr></tbody></table>
+        <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Positive Rate per Lead Time</h3>
+        <div class="gc-sub" style="margin-bottom:8px">Negatives are a shared pool (they carry no Lead Time of their own — drawn from outside every positive window), used as one background-rate denominator for every row. This is the first real statistical signal: at which Lead Time does being close to Run Start actually lift the positive rate above background.</div>
+        <table class="sig-table"><thead><tr><th class="l">Lead Time (ticks)</th><th class="l">Positive</th><th class="l">Negative</th><th class="l">Positive Rate</th></tr></thead>
+          <tbody id="msdLeadTimeBody"><tr><td colspan="4" class="sig-empty">No data yet.</td></tr></tbody></table>
       </div>
     </div>
 
@@ -2374,6 +2398,51 @@ table.an-table tbody tr:last-child td{border-bottom:none}
           <tbody id="msdGrowthBody"><tr><td colspan="2" class="sig-empty">No data yet.</td></tr></tbody></table>
       </div>
     </div>
+  </div>
+</div>
+
+<div id="page-msdfeatures" class="page">
+  <div class="grid-card" style="margin-bottom:16px">
+    <h2 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">📶 Feature Completeness</h2>
+    <div class="gc-sub" style="margin-bottom:12px">For every engineered feature, the fraction of ALL stored snapshots where it holds a genuinely valid value — read-only, computed fresh from MarketStates. Sorted worst-first, so unreliable features are immediately visible at the top.</div>
+    <button class="gc-btn" onclick="msdFeaturesRefresh()">🔄 Refresh</button>
+    <span id="msdFeaturesStatus" class="gc-sub" style="margin-left:10px"></span>
+  </div>
+  <div class="grid-card">
+    <table class="sig-table"><thead><tr><th class="l">Feature</th><th class="l">Completeness</th></tr></thead>
+      <tbody id="msdFeaturesBody"><tr><td colspan="2" class="sig-empty">No data yet.</td></tr></tbody></table>
+  </div>
+</div>
+
+<div id="page-msdevents" class="page">
+  <div class="grid-card" style="margin-bottom:16px">
+    <h2 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">📋 Positive Event Browser</h2>
+    <div class="gc-sub" style="margin-bottom:12px">Every stored positive event. Click a row to see its snapshots; click a Snapshot ID to open it in the Inspector.</div>
+    <button class="gc-btn" onclick="msdEventsRefresh()">🔄 Refresh</button>
+    <span id="msdEventsStatus" class="gc-sub" style="margin-left:10px"></span>
+  </div>
+  <div class="grid-card">
+    <table class="sig-table"><thead><tr><th class="l">Event</th><th class="l">Run Length</th><th class="l">Lead Times</th><th class="l">Snapshots</th><th class="l">Run Start</th></tr></thead>
+      <tbody id="msdEventsBody"><tr><td colspan="5" class="sig-empty">No data yet.</td></tr></tbody></table>
+  </div>
+  <div class="grid-card" id="msdEventDetailCard" style="display:none;margin-top:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Snapshots for <span id="msdEventDetailTitle"></span></h3>
+    <table class="sig-table"><thead><tr><th class="l">Snapshot ID</th><th class="l">Lead Time</th><th class="l">Outcome</th></tr></thead>
+      <tbody id="msdEventDetailBody"></tbody></table>
+  </div>
+</div>
+
+<div id="page-msdinspector" class="page">
+  <div class="grid-card" style="margin-bottom:16px">
+    <h2 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">🔎 Snapshot Inspector</h2>
+    <div class="gc-sub" style="margin-bottom:12px">Every stored field for one snapshot — every engineered feature plus every labeling field. Paste a Snapshot ID, or arrive here by clicking one in the Positive Event Browser.</div>
+    <input type="text" id="msdInspectorInput" placeholder="Paste a Snapshot ID…" style="width:100%;max-width:480px;margin-bottom:8px">
+    <button class="gc-btn" onclick="msdInspectorRefresh()">🔎 Inspect</button>
+    <span id="msdInspectorStatus" class="gc-sub" style="margin-left:10px"></span>
+  </div>
+  <div class="grid-card">
+    <table class="sig-table"><thead><tr><th class="l">Field</th><th class="l">Value</th></tr></thead>
+      <tbody id="msdInspectorBody"><tr><td colspan="2" class="sig-empty">No snapshot selected.</td></tr></tbody></table>
   </div>
 </div>
 
@@ -3789,9 +3858,11 @@ function msdOpenEventDatabase(){
  */
 async function msdWriteEvent(event){
   if (!event || !event.eventId) return { ok:false, error:'event is missing eventId' };
+  const _t0 = msdNowMs();
+  let result;
   try {
     const db = await msdOpenEventDatabase();
-    return await new Promise((resolve) => {
+    result = await new Promise((resolve) => {
       const tx = db.transaction(MSD_EVENT_STORE, 'readwrite');
       const store = tx.objectStore(MSD_EVENT_STORE);
       const req = store.add(event);
@@ -3799,8 +3870,11 @@ async function msdWriteEvent(event){
       req.onerror   = (e) => { e.preventDefault(); resolve({ ok:false, error:'duplicate or invalid eventId — write rejected (append-only store)' }); };
     });
   } catch (e) {
-    return { ok:false, error: e.message };
+    result = { ok:false, error: e.message };
   }
+  msdRecordWriteTime(msdPipelineHealth.eventWriteTimes, msdNowMs() - _t0);
+  if (!result.ok) msdPipelineHealth.writeFailures++;
+  return result;
 }
 
 /**
@@ -3912,6 +3986,7 @@ function msdGenerateSnapshotId(){
 }
 
 function msdBuildLabeledSnapshot(raw, meta){
+  msdPipelineHealth.snapshotsGenerated++;
   return Object.assign({}, raw, { // every existing engineered feature, untouched, spread first so meta below always wins on any name collision
     snapshotId: msdGenerateSnapshotId(),
     eventId: meta.eventId,
@@ -4270,16 +4345,21 @@ function msdOpenStateDatabase(){
 /** Appends ONE fully-cleared snapshot to MarketStates. Uses add(), never put() — a duplicate Snapshot ID is rejected, not merged. */
 async function msdWriteMarketState(snapshot){
   if (!snapshot || !snapshot.snapshotId) return { ok: false, error: 'snapshot is missing snapshotId' };
+  const _t0 = msdNowMs();
+  let result;
   try {
     const db = await msdOpenStateDatabase();
-    return await new Promise((resolve) => {
+    result = await new Promise((resolve) => {
       const req = db.transaction(MSD_STATE_STORE, 'readwrite').objectStore(MSD_STATE_STORE).add(snapshot);
       req.onsuccess = () => resolve({ ok: true });
       req.onerror   = (e) => { e.preventDefault(); resolve({ ok: false, error: 'duplicate or invalid snapshotId — write rejected (append-only store)' }); };
     });
   } catch (e) {
-    return { ok: false, error: e.message };
+    result = { ok: false, error: e.message };
   }
+  msdRecordWriteTime(msdPipelineHealth.stateWriteTimes, msdNowMs() - _t0);
+  if (!result.ok) msdPipelineHealth.writeFailures++;
+  return result;
 }
 
 /**
@@ -4377,6 +4457,11 @@ function msdRecordRejectionStats(pipelineResult){
   (pipelineResult.versionErrors || []).forEach(({ error }) => {
     msdVersionRejectionTally[error] = (msdVersionRejectionTally[error] || 0) + 1;
   });
+  // Derived directly from the pipeline's own existing, unmodified fields:
+  // everything that passed QA either got written or failed ONLY at
+  // version validation — both cases mean it cleared QA.
+  msdPipelineHealth.snapshotsPassedQa += (pipelineResult.written || 0) + (pipelineResult.versionRejected || 0);
+  msdPipelineHealth.snapshotsFailedQa += (pipelineResult.qaRejected || 0);
 }
 
 /** Read-only snapshot of this session's rejection tallies. */
@@ -4388,6 +4473,66 @@ function msdGetRejectionStats(){
 function msdResetRejectionStats(){
   msdQaRejectionTally = {};
   msdVersionRejectionTally = {};
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Market State Discovery Engine — Phase 3: Pipeline Health Metrics
+// ══════════════════════════════════════════════════════════════════════
+// Additive instrumentation only. Every counter/timer here OBSERVES an
+// existing operation's outcome — none of it can change whether a write
+// succeeds, whether a snapshot passes QA, or any other pass/fail
+// decision anywhere in the pipeline. Session-scoped, same reasoning as
+// the rejection tally: doesn't need to survive a reload to serve its
+// purpose of monitoring whether ticks are actually turning into stored
+// data right now. Write-time sample arrays are capped so a long session
+// can't grow them unbounded.
+
+const MSD_WRITE_TIME_SAMPLE_CAP = 500;
+
+let msdPipelineHealth = {
+  snapshotsGenerated: 0,
+  snapshotsPassedQa: 0,
+  snapshotsFailedQa: 0,
+  eventWriteTimes: [],
+  stateWriteTimes: [],
+  writeFailures: 0,
+};
+
+function msdNowMs(){ return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now(); }
+
+function msdRecordWriteTime(list, ms){
+  list.push(ms);
+  if (list.length > MSD_WRITE_TIME_SAMPLE_CAP) list.shift();
+}
+
+/** Combines the existing detector debug counters, existing DB size accessors, and the new pipeline-health tallies into one read-only snapshot. */
+async function msdGetPipelineHealth(){
+  const detectorCounters = msdGetDebugCounters();
+  const [eventDbSize, stateDbSize] = await Promise.all([msdGetEventCount(), msdGetMarketStateCount()]);
+  const allWriteTimes = msdPipelineHealth.eventWriteTimes.concat(msdPipelineHealth.stateWriteTimes);
+  const averageWriteTimeMs = allWriteTimes.length ? allWriteTimes.reduce((s, t) => s + t, 0) / allWriteTimes.length : null;
+  const maximumWriteTimeMs = allWriteTimes.length ? Math.max(...allWriteTimes) : null;
+
+  return {
+    ticksReceived: detectorCounters.ticksProcessed,
+    eventsQualified: detectorCounters.qualifiedCount,
+    eventsCompleted: detectorCounters.completedCount,
+    snapshotsGenerated: msdPipelineHealth.snapshotsGenerated,
+    snapshotsPassedQa: msdPipelineHealth.snapshotsPassedQa,
+    snapshotsFailedQa: msdPipelineHealth.snapshotsFailedQa,
+    snapshotsStored: stateDbSize,
+    currentQueueSize: detectorCounters.eventQueueDepth,
+    eventDbSize,
+    stateDbSize,
+    averageWriteTimeMs,
+    maximumWriteTimeMs,
+    writeFailures: msdPipelineHealth.writeFailures,
+  };
+}
+
+/** Test/debug only — never called from production code paths. */
+function msdResetPipelineHealth(){
+  msdPipelineHealth = { snapshotsGenerated: 0, snapshotsPassedQa: 0, snapshotsFailedQa: 0, eventWriteTimes: [], stateWriteTimes: [], writeFailures: 0 };
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -4419,6 +4564,68 @@ function msdBucketBy(items, keyFn){
 }
 
 /**
+ * Positive Rate per Lead Time: for each Lead Time value, how many
+ * positive snapshots were recorded at that Lead Time, against the SAME
+ * shared pool of negative snapshots (negatives carry no Lead Time of
+ * their own — they're drawn from outside every positive window, so they
+ * serve as one shared "background rate" denominator for every Lead Time
+ * bucket, not something bucketed by Lead Time itself). This is the
+ * actual first statistical signal in the whole database: does being N
+ * ticks from Run Start make a snapshot MORE likely to be positive than
+ * the background rate, and at which Lead Time does that lift first
+ * become real.
+ */
+function msdComputePositiveRatePerLeadTime(allStates){
+  const positives = allStates.filter(s => s.outcome === 'positive');
+  const totalNegatives = allStates.filter(s => s.outcome === 'negative').length;
+  const byLeadTime = msdBucketBy(positives, s => s.leadTime);
+  return Object.keys(byLeadTime)
+    .map(lt => {
+      const positiveCount = byLeadTime[lt];
+      const denom = positiveCount + totalNegatives;
+      return {
+        leadTime: Number(lt),
+        positive: positiveCount,
+        negative: totalNegatives,
+        positiveRate: denom > 0 ? (positiveCount / denom) * 100 : null,
+      };
+    })
+    .sort((a, b) => a.leadTime - b.leadTime);
+}
+
+
+/**
+ * Feature Completeness — for every known engineered feature, the
+ * fraction of ALL stored snapshots where it holds a genuinely valid
+ * (present, finite, non-NaN) value. Immediately surfaces which features
+ * are unreliable across the actual captured history, not just in theory.
+ */
+function msdComputeFeatureCompleteness(allStates){
+  const total = allStates.length;
+  const result = {};
+  MSD_KNOWN_FEATURE_KEYS.forEach(key => {
+    if (key === 'epoch' || key === 'price') return; // not "engineered features" in the sense this metric cares about
+    let validCount = 0;
+    allStates.forEach(s => {
+      const v = s[key];
+      if (v !== undefined && v !== null && Number.isFinite(v)) validCount++;
+    });
+    result[key] = total > 0 ? validCount / total : null;
+  });
+  return result;
+}
+
+/** Indexed lookup: every MarketStates snapshot belonging to one event, using the eventId index created when the store was set up — not a full-table scan. */
+async function msdGetSnapshotsForEvent(eventId){
+  const db = await msdOpenStateDatabase();
+  return new Promise((resolve) => {
+    const req = db.transaction(MSD_STATE_STORE, 'readonly').objectStore(MSD_STATE_STORE).index('eventId').getAll(eventId);
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror   = () => resolve([]);
+  });
+}
+
+/**
  * Computes every statistic the Database Explorer displays, in one
  * read-only pass. Safe to call as often as desired — it never writes.
  */
@@ -4436,7 +4643,12 @@ async function msdComputeDashboardStats(){
   const versionCounts = msdBucketBy(allStates, s => s.featureVersion);
 
   // Lead Time distribution: positives only — negatives carry no Lead Time by design.
+  // Superseded by leadTimeStats below (positive/negative/rate per lead
+  // time) — kept as a plain count too since it's cheap and some callers
+  // may still want the simpler shape.
   const leadTimeDist = msdBucketBy(allStates.filter(s => s.outcome === 'positive'), s => s.leadTime);
+  const positiveRatePerLeadTime = msdComputePositiveRatePerLeadTime(allStates);
+  const featureCompleteness = msdComputeFeatureCompleteness(allStates);
 
   // Run Length distribution: from the Event Database, not MarketStates —
   // actualRunLength is a property of the EVENT, and every positive
@@ -4451,6 +4663,8 @@ async function msdComputeDashboardStats(){
   // Database growth: snapshot count bucketed by calendar day, from each snapshot's own timestamp.
   const growthByDay = msdBucketBy(allStates, s => new Date(s.timestamp).toISOString().slice(0, 10));
 
+  const pipelineHealth = await msdGetPipelineHealth();
+
   return {
     totalSnapshots: stateCount,
     totalEvents: eventCount,
@@ -4462,6 +4676,10 @@ async function msdComputeDashboardStats(){
     eventFrequencyByHour,
     growthByDay,
     rejectionStats: msdGetRejectionStats(),
+    pipelineHealth,
+    positiveRatePerLeadTime,
+    featureCompleteness,
+    allEvents, // exposed for the Positive Event Browser view
   };
 }
 
@@ -4495,9 +4713,36 @@ async function msdExplorerRefresh(){
 
   renderTable('msdVersionBody', stats.versionCounts, false, 2);
   renderTable('msdRunLengthBody', stats.runLengthDist, true, 2);
-  renderTable('msdLeadTimeBody', stats.leadTimeDist, true, 2);
+  const leadTimeBody = $("msdLeadTimeBody");
+  if (leadTimeBody) {
+    if (!stats.positiveRatePerLeadTime.length) {
+      leadTimeBody.innerHTML = '<tr><td colspan="4" class="sig-empty">No data yet.</td></tr>';
+    } else {
+      leadTimeBody.innerHTML = stats.positiveRatePerLeadTime.map(row => `<tr>
+        <td class="l">${row.leadTime}</td>
+        <td>${row.positive}</td>
+        <td>${row.negative}</td>
+        <td>${row.positiveRate != null ? row.positiveRate.toFixed(1) + '%' : '—'}</td>
+      </tr>`).join('');
+    }
+  }
   renderTable('msdEventFreqBody', stats.eventFrequencyByHour, false, 2);
   renderTable('msdGrowthBody', stats.growthByDay, false, 2);
+
+  const ph = stats.pipelineHealth;
+  setTxt('msdPhTicks', ph.ticksReceived);
+  setTxt('msdPhQualified', ph.eventsQualified);
+  setTxt('msdPhCompleted', ph.eventsCompleted);
+  setTxt('msdPhQueueSize', ph.currentQueueSize);
+  setTxt('msdPhGenerated', ph.snapshotsGenerated);
+  setTxt('msdPhPassedQa', ph.snapshotsPassedQa);
+  setTxt('msdPhFailedQa', ph.snapshotsFailedQa);
+  setTxt('msdPhStored', ph.snapshotsStored);
+  setTxt('msdPhEventDbSize', ph.eventDbSize);
+  setTxt('msdPhStateDbSize', ph.stateDbSize);
+  setTxt('msdPhAvgWrite', ph.averageWriteTimeMs != null ? ph.averageWriteTimeMs.toFixed(2) + ' ms' : '—');
+  setTxt('msdPhMaxWrite', ph.maximumWriteTimeMs != null ? ph.maximumWriteTimeMs.toFixed(2) + ' ms' : '—');
+  setTxt('msdPhWriteFailures', ph.writeFailures);
 
   const rejectionBody = $("msdRejectionBody");
   if (rejectionBody) {
@@ -4507,6 +4752,99 @@ async function msdExplorerRefresh(){
     if (!rows.length) rejectionBody.innerHTML = '<tr><td colspan="3" class="sig-empty">No rejections recorded this session.</td></tr>';
     else rejectionBody.innerHTML = rows.map(r => `<tr><td class="l">${r.reason}</td><td class="l">${r.stage}</td><td>${r.count}</td></tr>`).join('');
   }
+}
+
+/** Feature Completeness page — worst-first, so unreliable features surface immediately. */
+async function msdFeaturesRefresh(){
+  const statusEl = $("msdFeaturesStatus");
+  if (statusEl) statusEl.textContent = 'Loading…';
+  let allStates;
+  try { allStates = await msdGetAllMarketStates(); }
+  catch (e) { if (statusEl) statusEl.textContent = 'Error: ' + e.message; return; }
+  if (statusEl) statusEl.textContent = 'Last refreshed ' + new Date().toLocaleTimeString();
+
+  const completeness = msdComputeFeatureCompleteness(allStates);
+  const body = $("msdFeaturesBody");
+  if (!body) return;
+  const rows = Object.entries(completeness).sort((a, b) => (a[1] ?? 1) - (b[1] ?? 1));
+  if (!rows.length) { body.innerHTML = '<tr><td colspan="2" class="sig-empty">No data yet.</td></tr>'; return; }
+  body.innerHTML = rows.map(([key, frac]) => {
+    const pct = frac == null ? null : frac * 100;
+    const cls = pct == null ? 'cell-mut' : pct >= 99.5 ? 'cell-pos' : pct >= 90 ? '' : 'cell-neg';
+    return `<tr><td class="l">${key}</td><td class="${cls}">${pct != null ? pct.toFixed(1) + '%' : '—'}</td></tr>`;
+  }).join('');
+}
+
+/** Positive Event Browser page — click a row to see its snapshots, click a snapshot to open the Inspector. */
+async function msdEventsRefresh(){
+  const statusEl = $("msdEventsStatus");
+  if (statusEl) statusEl.textContent = 'Loading…';
+  let allEvents, allStates;
+  try {
+    [allEvents, allStates] = await Promise.all([msdGetAllEvents(), msdGetAllMarketStates()]);
+  } catch (e) { if (statusEl) statusEl.textContent = 'Error: ' + e.message; return; }
+  if (statusEl) statusEl.textContent = 'Last refreshed ' + new Date().toLocaleTimeString();
+
+  const body = $("msdEventsBody");
+  if (!body) return;
+  if (!allEvents.length) { body.innerHTML = '<tr><td colspan="5" class="sig-empty">No events stored yet.</td></tr>'; return; }
+
+  body.innerHTML = allEvents.map(ev => {
+    const snaps = allStates.filter(s => s.eventId === ev.eventId);
+    const leadTimes = snaps.map(s => s.leadTime).filter(lt => lt != null);
+    const ltRange = leadTimes.length ? `${Math.min(...leadTimes)}–${Math.max(...leadTimes)}` : '—';
+    const runStart = new Date(ev.runStartEpoch * 1000 || ev.runStartEpoch).toLocaleString();
+    return `<tr style="cursor:pointer" onclick="msdShowEventSnapshots('${ev.eventId}')">
+      <td class="l">${ev.eventId}</td><td>${ev.actualRunLength ?? '—'}</td><td>${ltRange}</td><td>${snaps.length}</td><td class="l">${runStart}</td>
+    </tr>`;
+  }).join('');
+}
+
+/** Click handler for an event row — shows its snapshots inline, each linking to the Inspector. */
+async function msdShowEventSnapshots(eventId){
+  const card = $("msdEventDetailCard");
+  const title = $("msdEventDetailTitle");
+  const body = $("msdEventDetailBody");
+  if (!card || !body) return;
+  card.style.display = 'block';
+  if (title) title.textContent = eventId;
+  const snaps = await msdGetSnapshotsForEvent(eventId);
+  if (!snaps.length) { body.innerHTML = '<tr><td colspan="3" class="sig-empty">No snapshots found for this event.</td></tr>'; return; }
+  body.innerHTML = snaps.slice().sort((a, b) => (a.leadTime ?? 0) - (b.leadTime ?? 0)).map(s => `<tr>
+    <td class="l"><a href="#" onclick="msdOpenSnapshotInspector('${s.snapshotId}');return false;">${s.snapshotId}</a></td>
+    <td>${s.leadTime ?? '—'}</td><td class="l">${s.outcome}</td>
+  </tr>`).join('');
+}
+
+/** Navigates to the Snapshot Inspector page with a specific Snapshot ID pre-loaded. */
+function msdOpenSnapshotInspector(snapshotId){
+  const input = $("msdInspectorInput");
+  if (input) input.value = snapshotId;
+  if (typeof showPage === 'function') showPage('msdinspector');
+  msdInspectorRefresh();
+}
+
+/** Snapshot Inspector page — every stored field for one snapshot, however many exist. */
+async function msdInspectorRefresh(){
+  const input = $("msdInspectorInput");
+  const statusEl = $("msdInspectorStatus");
+  const body = $("msdInspectorBody");
+  if (!body) return;
+  const snapshotId = input ? input.value.trim() : '';
+  if (!snapshotId) { body.innerHTML = '<tr><td colspan="2" class="sig-empty">No snapshot selected.</td></tr>'; return; }
+
+  if (statusEl) statusEl.textContent = 'Loading…';
+  let snapshot;
+  try { snapshot = await msdGetMarketState(snapshotId); }
+  catch (e) { if (statusEl) statusEl.textContent = 'Error: ' + e.message; return; }
+
+  if (!snapshot) {
+    if (statusEl) statusEl.textContent = 'Not found.';
+    body.innerHTML = '<tr><td colspan="2" class="sig-empty">No snapshot found with that ID.</td></tr>';
+    return;
+  }
+  if (statusEl) statusEl.textContent = 'Found ' + Object.keys(snapshot).length + ' fields.';
+  body.innerHTML = Object.keys(snapshot).sort().map(key => `<tr><td class="l">${key}</td><td class="l">${JSON.stringify(snapshot[key])}</td></tr>`).join('');
 }
 
 // Build a compact full-indicator snapshot for one tick.
@@ -4527,7 +4865,29 @@ function makeSnap(epoch, price){
 
 function recordIndicatorTick(epoch, price){
   const msdResult = msdOnTick(epoch, price); // Market State Discovery Engine — Phase 2.1 detector, pure observer, no effect on existing pipeline
-  if (msdResult.qualified) msdLabelQualifiedEvent(msdResult.qualified, MSD_FEATURE_SCHEMA_VERSION); // Phase 2.3 — begins labeling immediately, doesn't wait for the run to finish
+  if (msdResult.qualified) {
+    msdLabelQualifiedEvent(msdResult.qualified, MSD_FEATURE_SCHEMA_VERSION); // Phase 2.3 — begins labeling immediately, doesn't wait for the run to finish
+    // DEFECT FIX: msdSampleNegativeSnapshots existed and was fully tested
+    // in isolation (Phase 2.3), but — same class of gap as the
+    // EventDatabase/MarketStates fix below — was never actually called
+    // anywhere in the live pipeline. This is why the Database Explorer
+    // showed 0 negative snapshots: nothing was ever generating them.
+    // Negatives don't need to wait for event completion (they carry no
+    // actualRunLength to fill in), so they're sampled and pushed through
+    // immediately, right alongside the positives just labeled.
+    const positivesJustLabeled = msdPendingLabeledSnapshots[msdResult.qualified.eventId];
+    if (positivesJustLabeled && positivesJustLabeled.length) {
+      const negativeCount = Math.round(positivesJustLabeled.length * msdClassBalanceRatio);
+      if (negativeCount > 0) {
+        const negatives = msdSampleNegativeSnapshots(negativeCount, MSD_FEATURE_SCHEMA_VERSION);
+        if (negatives.length) {
+          msdProcessLabeledSnapshots(negatives)
+            .then(result => msdRecordRejectionStats(result))
+            .catch(() => {});
+        }
+      }
+    }
+  }
   if (msdResult.completed) {
     // DEFECT FIX: these two steps existed and were fully tested in
     // isolation (Phases 2.2/2.6), but were never actually connected to
@@ -5182,8 +5542,8 @@ function startTfTimers(){
 }
 
 function showPage(which){
-  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot", aggression:"page-aggression", mtf:"page-mtf", njanja:"page-njanja", rfabot:"page-rfabot", msdexplorer:"page-msdexplorer" };
-  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot", aggression:"navAggression", mtf:"navMtf", njanja:"navNjanja", rfabot:"navRfaBot", msdexplorer:"navMsdExplorer" };
+  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot", aggression:"page-aggression", mtf:"page-mtf", njanja:"page-njanja", rfabot:"page-rfabot", msdexplorer:"page-msdexplorer", msdfeatures:"page-msdfeatures", msdevents:"page-msdevents", msdinspector:"page-msdinspector" };
+  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot", aggression:"navAggression", mtf:"navMtf", njanja:"navNjanja", rfabot:"navRfaBot", msdexplorer:"navMsdExplorer", msdfeatures:"navMsdFeatures", msdevents:"navMsdEvents", msdinspector:"navMsdInspector" };
   Object.keys(pages).forEach(k => {
     document.getElementById(pages[k]).classList.toggle("active", k===which);
     const nav = document.getElementById(navs[k]); if (nav) nav.classList.toggle("active", k===which);
@@ -5251,6 +5611,15 @@ function showPage(which){
   }
   if (which === "msdexplorer"){
     if (typeof msdExplorerRefresh === "function") msdExplorerRefresh();
+  }
+  if (which === "msdfeatures"){
+    if (typeof msdFeaturesRefresh === "function") msdFeaturesRefresh();
+  }
+  if (which === "msdevents"){
+    if (typeof msdEventsRefresh === "function") msdEventsRefresh();
+  }
+  if (which === "msdinspector"){
+    if (typeof msdInspectorRefresh === "function") msdInspectorRefresh();
   }
 }
 
