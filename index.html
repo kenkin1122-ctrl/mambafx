@@ -590,6 +590,12 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button id="navMsdFeatures" onclick="showPage('msdfeatures')">📶 Feature Completeness</button>
     <button id="navMsdEvents" onclick="showPage('msdevents')">📋 Positive Event Browser</button>
     <button id="navMsdInspector" onclick="showPage('msdinspector')">🔎 Snapshot Inspector</button>
+    <button id="navMsdDistribution" onclick="showPage('msddistribution')">📊 Feature Distribution</button>
+    <button id="navMsdCorrelation" onclick="showPage('msdcorrelation')">🔗 Correlation Explorer</button>
+    <button id="navMsdSearch" onclick="showPage('msdsearch')">🔍 Market State Search</button>
+    <button id="navMsdExperiment" onclick="showPage('msdexperiment')">🧪 Experiment Runner</button>
+    <button id="navMsdKnowledge" onclick="showPage('msdknowledge')">🧠 Knowledge Base</button>
+    <button id="navMsdValidation" onclick="showPage('msdvalidation')">✅ Research Validation Suite</button>
   </nav>
 
   <!-- ============ PAGE 1: LIVE TRACKER ============ -->
@@ -2446,6 +2452,256 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   </div>
 </div>
 
+<div id="page-msddistribution" class="page">
+  <div class="grid-card" style="margin-bottom:16px">
+    <h2 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">📊 Feature Distribution Explorer</h2>
+    <div class="gc-sub" style="margin-bottom:12px">Mean, median, std, min/max, and a histogram for every engineered feature — overall and split by class — plus Cohen's d as the statistical-separation figure. Sorted by |separation| descending, so the features that naturally distinguish successful market states surface first. Click a row to see its histogram. Read-only, before any model is trained.</div>
+    <button class="gc-btn" onclick="msdDistributionRefresh()">🔄 Refresh</button>
+    <span id="msdDistributionStatus" class="gc-sub" style="margin-left:10px"></span>
+  </div>
+  <div class="grid-card" style="margin-bottom:16px">
+    <table class="sig-table">
+      <thead><tr><th class="l">Feature</th><th class="l">Mean</th><th class="l">Median</th><th class="l">Std</th><th class="l">Min</th><th class="l">Max</th><th class="l">Pos. Mean</th><th class="l">Neg. Mean</th><th class="l">Separation (d)</th></tr></thead>
+      <tbody id="msdDistributionBody"><tr><td colspan="9" class="sig-empty">No data yet.</td></tr></tbody>
+    </table>
+  </div>
+  <div class="grid-card" id="msdHistogramCard" style="display:none">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Histogram: <span id="msdHistogramTitle"></span></h3>
+    <table class="sig-table"><thead><tr><th class="l">Range</th><th class="l">Count</th></tr></thead>
+      <tbody id="msdHistogramBody"></tbody></table>
+  </div>
+</div>
+
+<div id="page-msdcorrelation" class="page">
+  <div class="grid-card" style="margin-bottom:16px">
+    <h2 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">🔗 Correlation Explorer</h2>
+    <div class="gc-sub" style="margin-bottom:12px">Pearson (linear), Spearman (monotonic), and binned Mutual Information between every pair of engineered features. High redundancy between two features means one may not add predictive value beyond the other — useful for guiding future feature engineering, not just model input selection.</div>
+    <button class="gc-btn" onclick="msdCorrelationRefresh()">🔄 Refresh</button>
+    <span id="msdCorrelationStatus" class="gc-sub" style="margin-left:10px"></span>
+  </div>
+  <div class="grid-card">
+    <table class="sig-table">
+      <thead><tr><th class="l">Feature A</th><th class="l">Feature B</th><th class="l">Pearson</th><th class="l">Spearman</th><th class="l">Mutual Info (bits)</th><th class="l">Pairs</th></tr></thead>
+      <tbody id="msdCorrelationBody"><tr><td colspan="6" class="sig-empty">No data yet.</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="page-msdsearch" class="page">
+  <div class="grid-card" style="margin-bottom:16px">
+    <h2 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">🔍 Market State Search Tool</h2>
+    <div class="gc-sub" style="margin-bottom:12px">Query the permanent Market State Database directly. Add one or more conditions (all must hold — AND, not OR), then search.</div>
+    <div id="msdSearchConditions"></div>
+    <button class="gc-btn" onclick="msdSearchAddCondition()">➕ Add Condition</button>
+    <button class="gc-btn" onclick="msdSearchRun()" style="margin-left:8px">🔍 Search</button>
+    <span id="msdSearchStatus" class="gc-sub" style="margin-left:10px"></span>
+  </div>
+  <div class="grid-card" style="margin-bottom:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Results</h3>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px">
+      <div class="em-card"><div class="em-lab">Matching Market States</div><div id="msdSearchMatchCount" class="em-val acc">—</div></div>
+      <div class="em-card"><div class="em-lab">Win Rate</div><div id="msdSearchWinRate" class="em-val up">—</div></div>
+    </div>
+    <div class="grid-layout">
+      <div class="grid-side">
+        <h4 style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Run Length Distribution</h4>
+        <table class="sig-table"><thead><tr><th class="l">Run Length</th><th class="l">Count</th></tr></thead>
+          <tbody id="msdSearchRunLengthBody"><tr><td colspan="2" class="sig-empty">No search yet.</td></tr></tbody></table>
+      </div>
+      <div class="grid-main">
+        <h4 style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Lead Time Distribution</h4>
+        <table class="sig-table"><thead><tr><th class="l">Lead Time</th><th class="l">Count</th></tr></thead>
+          <tbody id="msdSearchLeadTimeBody"><tr><td colspan="2" class="sig-empty">No search yet.</td></tr></tbody></table>
+      </div>
+    </div>
+  </div>
+  <div class="grid-card">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Historical Examples</h3>
+    <table class="sig-table"><thead><tr><th class="l">Snapshot ID</th><th class="l">Outcome</th><th class="l">Lead Time</th></tr></thead>
+      <tbody id="msdSearchExamplesBody"><tr><td colspan="3" class="sig-empty">No search yet.</td></tr></tbody></table>
+  </div>
+</div>
+
+<div id="page-msdexperiment" class="page">
+  <div class="grid-card" style="margin-bottom:16px">
+    <h2 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">🧪 Experiment Dataset Builder</h2>
+    <div class="gc-sub" style="margin-bottom:12px">Builds a Training/Validation/Test dataset from the permanent Market State Database according to one Research Configuration, and permanently records that configuration as an Experiment — the dataset itself is temporary and rebuildable on demand; the config is what makes it reproducible. Chronological split (earliest trains, latest tests) — never randomized, since that would leak future information into training.</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
+      <div><label for="msdExpFeatureVersion">Feature Version</label>
+        <input type="text" id="msdExpFeatureVersion" value="v1" style="width:100%"></div>
+      <div><label for="msdExpLeadTime">Lead Time ("all" or a number)</label>
+        <input type="text" id="msdExpLeadTime" value="all" style="width:100%"></div>
+      <div><label for="msdExpSamplingRatio">Sampling Ratio (negatives per positive)</label>
+        <input type="number" id="msdExpSamplingRatio" value="1" min="0" step="0.1" style="width:100%"></div>
+      <div><label for="msdExpRandomSeed">Random Seed</label>
+        <input type="number" id="msdExpRandomSeed" value="42" step="1" style="width:100%"></div>
+      <div><label for="msdExpTrainingSplit">Training Split (fraction)</label>
+        <input type="number" id="msdExpTrainingSplit" value="0.7" min="0.1" max="0.9" step="0.05" style="width:100%"></div>
+      <div><label for="msdExpValidationSplit">Validation Split of remainder (Test gets the rest)</label>
+        <input type="number" id="msdExpValidationSplit" value="0.5" min="0.1" max="0.9" step="0.05" style="width:100%"></div>
+      <div></div>
+      <div></div>
+    </div>
+    <button class="gc-btn" onclick="msdRunExperimentUi()">🧪 Run Experiment</button>
+    <span id="msdExperimentStatus" class="gc-sub" style="margin-left:10px"></span>
+  </div>
+
+  <div class="grid-card" id="msdExperimentResultCard" style="margin-bottom:16px;display:none">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Latest Result</h3>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px">
+      <div class="em-card"><div class="em-lab">Train</div><div id="msdExpTrainCount" class="em-val">—</div></div>
+      <div class="em-card"><div class="em-lab">Validation</div><div id="msdExpValCount" class="em-val">—</div></div>
+      <div class="em-card"><div class="em-lab">Test</div><div id="msdExpTestCount" class="em-val">—</div></div>
+      <div class="em-card"><div class="em-lab">Positives Used</div><div id="msdExpPositiveCount" class="em-val up">—</div></div>
+      <div class="em-card"><div class="em-lab">Negatives Sampled</div><div id="msdExpNegativeCount" class="em-val down">—</div></div>
+    </div>
+  </div>
+
+  <div class="grid-card" id="msdDiscoveryCard" style="margin-bottom:16px;display:none">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Statistical Discovery Engine</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Runs automatically on every experiment's dataset, before any training would proceed. Notable findings (Mutual Information clearing the threshold) are permanently recorded to KnowledgeBase.</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px">
+      <div class="em-card"><div class="em-lab">Sample Count</div><div id="msdDiscoverySampleCount" class="em-val">—</div></div>
+      <div class="em-card"><div class="em-lab">Positive Rate</div><div id="msdDiscoveryPositiveRate" class="em-val">—</div></div>
+      <div class="em-card"><div class="em-lab">95% Confidence Interval</div><div id="msdDiscoveryCI" class="em-val">—</div></div>
+    </div>
+    <div class="em-card" style="margin-bottom:12px"><div class="em-lab">Training Gate</div><div id="msdDiscoveryGate" class="em-val">—</div></div>
+    <table class="sig-table"><thead><tr><th class="l">Feature</th><th class="l">Mutual Info</th><th class="l">Information Gain</th><th class="l">Stability (std)</th><th class="l">Completeness</th><th class="l">Missing %</th><th class="l">Variance</th><th class="l">Max |Corr|</th></tr></thead>
+      <tbody id="msdDiscoveryFeaturesBody"><tr><td colspan="8" class="sig-empty">No data yet.</td></tr></tbody></table>
+  </div>
+
+  <div class="grid-card" id="msdMlCard" style="margin-bottom:16px;display:none">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Machine Learning</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Trains the same XGBoost/LightGBM/CatBoost tree approximations used elsewhere in this app — not a second implementation — on this experiment's Training set. Best model chosen by Validation AUC (never Test, to avoid leaking test information into model selection); Test metrics below are the honest, held-out figure. Results are recorded permanently to KnowledgeBase.</div>
+    <button class="gc-btn" onclick="msdTrainModelUi()">🤖 Train Models</button>
+    <span id="msdMlStatus" class="gc-sub" style="margin-left:10px"></span>
+    <table class="sig-table" style="margin-top:10px"><thead><tr><th class="l">Model</th><th class="l">Val AUC</th><th class="l">Val F1</th><th class="l">Test AUC</th><th class="l">Test F1</th><th class="l">Test Accuracy</th></tr></thead>
+      <tbody id="msdMlResultsBody"><tr><td colspan="6" class="sig-empty">Not trained yet.</td></tr></tbody></table>
+  </div>
+
+  <div class="grid-card" style="margin-bottom:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Automated Lead-Time Discovery</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Replaces manually trying one Lead Time at a time: builds a separate experiment, runs discovery, and trains all three models for EACH Lead Time listed below, then ranks them by trained-model Test AUC (not statistical Mutual Information — that's a different, existing ranking) to identify the earliest reliably predictive horizon. Each Lead Time gets its own independently-reproducible Experiment record. This can take a while — it's training up to 3 models per Lead Time.</div>
+    <label for="msdSweepLeadTimes">Lead Times to test (comma-separated)</label>
+    <input type="text" id="msdSweepLeadTimes" value="1,2,3,5,8" style="width:100%;max-width:400px;margin-bottom:8px">
+    <br><button class="gc-btn" onclick="msdRunLeadTimeSweepUi()">🔬 Run Sweep</button>
+    <span id="msdSweepStatus" class="gc-sub" style="margin-left:10px"></span>
+    <table class="sig-table" style="margin-top:10px"><thead><tr><th class="l">Lead Time</th><th class="l">Samples</th><th class="l">Best Model</th><th class="l">Test AUC</th><th class="l">Test Brier</th><th class="l">Optimal?</th></tr></thead>
+      <tbody id="msdSweepResultsBody"><tr><td colspan="6" class="sig-empty">Not run yet.</td></tr></tbody></table>
+  </div>
+
+  <div class="grid-card">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Experiment History</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Every experiment ever run — permanent, append-only. Reproducibility no longer depends on re-entering the same config: each experiment freezes the exact snapshot IDs it used, so it can be rebuilt exactly even after MarketStates has grown. Click "Verify" to confirm.</div>
+    <table class="sig-table">
+      <thead><tr><th class="l">Experiment</th><th class="l">Feature Ver.</th><th class="l">Lead Time</th><th class="l">Seed</th><th class="l">Split</th><th class="l">Train/Val/Test</th><th class="l">Winning Model</th><th class="l">Date</th><th class="l">Reproducibility</th></tr></thead>
+      <tbody id="msdExperimentHistoryBody"><tr><td colspan="9" class="sig-empty">No experiments yet.</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="page-msdknowledge" class="page">
+  <div class="grid-card" style="margin-bottom:16px">
+    <h2 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">🧠 Knowledge Base</h2>
+    <div class="gc-sub" style="margin-bottom:12px">Every notable discovery ever made, permanent and append-only — "Experiment #18 discovers Lead Time 12, Mutual Information 0.18, Feature ADX" never disappears once found. Feature Ranking and Lead Time Ranking are derived fresh from this on every load, never stored separately.</div>
+    <button class="gc-btn" onclick="msdKnowledgeRefresh()">🔄 Refresh</button>
+    <span id="msdKnowledgeStatus" class="gc-sub" style="margin-left:10px"></span>
+  </div>
+
+  <div class="grid-layout">
+    <div class="grid-side">
+      <div class="grid-card" style="margin-bottom:16px">
+        <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Feature Ranking</h3>
+        <div class="gc-sub" style="margin-bottom:8px">Each feature's single best (highest MI) finding across every experiment.</div>
+        <table class="sig-table"><thead><tr><th class="l">Feature</th><th class="l">Best MI</th><th class="l">Lead Time</th></tr></thead>
+          <tbody id="msdFeatureRankingBody"><tr><td colspan="3" class="sig-empty">No findings yet.</td></tr></tbody></table>
+      </div>
+      <div class="grid-card">
+        <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Lead Time Ranking</h3>
+        <div class="gc-sub" style="margin-bottom:8px">Each Lead Time's single best finding — which horizon has produced the strongest signal so far.</div>
+        <table class="sig-table"><thead><tr><th class="l">Lead Time</th><th class="l">Best MI</th><th class="l">Feature</th></tr></thead>
+          <tbody id="msdLeadTimeRankingBody"><tr><td colspan="3" class="sig-empty">No findings yet.</td></tr></tbody></table>
+      </div>
+    </div>
+    <div class="grid-main">
+      <div class="grid-card" style="margin-bottom:16px">
+        <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Market State Ranking</h3>
+        <div class="gc-sub" style="margin-bottom:8px">MarketStates is immutable — clustering never writes a Cluster ID back into a stored snapshot; every stateId stays 'unknown' forever, exactly as recorded. This is computed fresh on demand, same as Feature/Lead Time Ranking. Plain k-means on ADX, RSI, MACD, ATR, +DI, -DI (standardized), seeded for reproducibility.</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin-bottom:10px">
+          <div><label for="msdClusterK">Number of clusters (k)</label><input type="number" id="msdClusterK" value="4" min="2" step="1" style="width:100%"></div>
+          <div><label for="msdClusterSeed">Random Seed</label><input type="number" id="msdClusterSeed" value="1" step="1" style="width:100%"></div>
+          <button class="gc-btn" onclick="msdRunMarketStateClustering()">🧩 Run Clustering</button>
+        </div>
+        <span id="msdClusterStatus" class="gc-sub"></span>
+        <table class="sig-table" style="margin-top:10px"><thead><tr><th class="l">Cluster</th><th class="l">Size</th><th class="l">Positive Rate</th><th class="l">95% CI</th></tr></thead>
+          <tbody id="msdClusterRankingBody"><tr><td colspan="4" class="sig-empty">Not run yet.</td></tr></tbody></table>
+      </div>
+      <div class="grid-card">
+        <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Historical Discoveries</h3>
+        <div class="gc-sub" style="margin-bottom:8px">Every notable finding ever recorded, most recent first.</div>
+        <table class="sig-table"><thead><tr><th class="l">Experiment</th><th class="l">Feature</th><th class="l">Lead Time</th><th class="l">Mutual Info</th><th class="l">Stability</th><th class="l">Discovered</th></tr></thead>
+          <tbody id="msdHistoricalDiscoveriesBody"><tr><td colspan="6" class="sig-empty">No findings yet.</td></tr></tbody></table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="page-msdvalidation" class="page">
+  <div class="grid-card" style="margin-bottom:16px">
+    <h2 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">✅ Research Validation Suite</h2>
+    <div class="gc-sub" style="margin-bottom:12px">Everything here answers "should I trust this before training a model" — not model performance itself. Dataset Validation and Statistical Discovery diagnostics run automatically on every experiment (see the Experiment Runner page); the tools below are deliberately manual, since they're heavier and shouldn't run on every click.</div>
+  </div>
+
+  <div class="grid-card" style="margin-bottom:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Latest Dataset Validation</h3>
+    <div class="gc-sub" style="margin-bottom:8px">From the most recent experiment run on the Experiment Runner page.</div>
+    <table class="sig-table"><thead><tr><th class="l">Check</th><th class="l">Result</th><th class="l">Status</th></tr></thead>
+      <tbody id="msdValidationDatasetBody"><tr><td colspan="3" class="sig-empty">Run an experiment first.</td></tr></tbody></table>
+  </div>
+
+  <div class="grid-card" style="margin-bottom:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Reproducibility Stress Test</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Re-runs the latest experiment's exact config N times against the current database and confirms every run is byte-identical — dataset, discovery, and feature ranking alike.</div>
+    <button class="gc-btn" onclick="msdRunReproducibilityStressTest()">🔁 Run Stress Test (5x)</button>
+    <span id="msdStressTestStatus" class="gc-sub" style="margin-left:10px"></span>
+  </div>
+
+  <div class="grid-card" style="margin-bottom:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Negative Dataset Audit</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Negative sampling was wired in after positive sampling — this specifically checks for the ways a later, separate mechanism could go wrong: window violations, homogeneity, and class balance, against the CURRENT full database.</div>
+    <button class="gc-btn" onclick="msdRunNegativeAudit()">🔍 Run Audit</button>
+    <span id="msdNegAuditStatus" class="gc-sub" style="margin-left:10px"></span>
+    <div id="msdNegAuditResults" style="margin-top:12px;display:none">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px">
+        <div class="em-card"><div class="em-lab">Positives</div><div id="msdNegAuditPos" class="em-val up">—</div></div>
+        <div class="em-card"><div class="em-lab">Negatives</div><div id="msdNegAuditNeg" class="em-val down">—</div></div>
+        <div class="em-card"><div class="em-lab">Class Balance</div><div id="msdNegAuditBalance" class="em-val">—</div></div>
+        <div class="em-card"><div class="em-lab">Window Violations</div><div id="msdNegAuditViolations" class="em-val">—</div></div>
+      </div>
+      <table class="sig-table"><thead><tr><th class="l">Feature</th><th class="l">Negative Std</th><th class="l">Positive Std</th><th class="l">Diverse Enough?</th></tr></thead>
+        <tbody id="msdNegAuditDiversityBody"></tbody></table>
+    </div>
+  </div>
+
+  <div class="grid-card" style="margin-bottom:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Knowledge Base Repeatability</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Groups every finding by feature + Lead Time and checks whether the Mutual Information score has been consistent across separate experiments — only repeatable discoveries should influence future model design.</div>
+    <button class="gc-btn" onclick="msdRunKnowledgeRepeatabilityCheck()">🔁 Check Repeatability</button>
+    <span id="msdKbRepeatStatus" class="gc-sub" style="margin-left:10px"></span>
+    <table class="sig-table" style="margin-top:10px"><thead><tr><th class="l">Feature</th><th class="l">Lead Time</th><th class="l">Occurrences</th><th class="l">Mean MI</th><th class="l">Std MI</th><th class="l">Repeatable?</th></tr></thead>
+      <tbody id="msdKbRepeatBody"><tr><td colspan="6" class="sig-empty">Not checked yet.</td></tr></tbody></table>
+  </div>
+
+  <div class="grid-card">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Benchmark Against Random Chance</h3>
+    <div class="gc-sub" style="margin-bottom:8px">For the latest experiment's features, shuffles the outcome labels 200 times (seeded, reproducible) and reports what fraction of random shuffles scored as high as the real signal. A low fraction means the signal is unlikely to be chance — a high one means the data needs improving before the model does.</div>
+    <button class="gc-btn" onclick="msdRunRandomChanceBenchmark()">🎲 Run Benchmark</button>
+    <span id="msdBenchmarkStatus" class="gc-sub" style="margin-left:10px"></span>
+    <table class="sig-table" style="margin-top:10px"><thead><tr><th class="l">Feature</th><th class="l">Real MI</th><th class="l">Shuffled Mean MI</th><th class="l">p-value</th><th class="l">Significant?</th></tr></thead>
+      <tbody id="msdBenchmarkBody"><tr><td colspan="5" class="sig-empty">Not run yet.</td></tr></tbody></table>
+  </div>
+</div>
+
 <div id="page-njanja" class="page">
 <header>
   <div class="brand">
@@ -3998,6 +4254,7 @@ function msdBuildLabeledSnapshot(raw, meta){
     actualRunLength: meta.actualRunLength != null ? meta.actualRunLength : null, // positives: filled in later by msdFinalizeLabelsForCompletedEvent; negatives: always null
     featureVersion: meta.featureVersion,
     featureFingerprint: msdComputeFeatureFingerprint(raw),
+    lookbackWindow: meta.lookbackWindow, // the ACTUAL window used to capture this snapshot — previously never recorded, making it impossible to later filter or verify by it
     timestamp: Date.now(),
   });
 }
@@ -4030,6 +4287,7 @@ function msdLabelQualifiedEvent(qualifiedEvent, featureVersion){
       runStartTick: runStartEpoch,
       actualRunLength: null, // not yet known — filled in on completion
       featureVersion,
+      lookbackWindow: msdLookbackWindow,
     }));
   }
 
@@ -4076,7 +4334,7 @@ function msdSampleNegativeSnapshots(count, featureVersion){
     pool.splice(j, 1);
   }
   return chosenIdx.map(i => msdBuildLabeledSnapshot(indHistory[i], {
-    eventId: null, leadTime: null, outcome: 'negative', direction: null, runStartTick: null, actualRunLength: null, featureVersion,
+    eventId: null, leadTime: null, outcome: 'negative', direction: null, runStartTick: null, actualRunLength: null, featureVersion, lookbackWindow: msdLookbackWindow,
   }));
 }
 
@@ -4615,7 +4873,1471 @@ function msdComputeFeatureCompleteness(allStates){
   return result;
 }
 
-/** Indexed lookup: every MarketStates snapshot belonging to one event, using the eventId index created when the store was set up — not a full-table scan. */
+// ══════════════════════════════════════════════════════════════════════
+// Market State Discovery Engine — Phase 3: Feature Distribution Explorer
+// ══════════════════════════════════════════════════════════════════════
+// Pure, read-only statistics. Uses SAMPLE standard deviation (n-1,
+// Bessel's correction) throughout, consistently — stated explicitly since
+// population-vs-sample std is a common source of silent inconsistency.
+
+/** Extracts only the genuinely valid (present, finite) values of one field across a set of snapshots. */
+function msdValidValues(states, key){
+  return states.map(s => s[key]).filter(v => v != null && Number.isFinite(v));
+}
+
+/** Basic descriptive statistics for one array of already-filtered numeric values. */
+function msdBasicStats(values){
+  const n = values.length;
+  if (n === 0) return { count: 0, mean: null, median: null, std: null, min: null, max: null };
+  const sorted = values.slice().sort((a, b) => a - b);
+  const sum = values.reduce((a, b) => a + b, 0);
+  const mean = sum / n;
+  const mid = Math.floor(n / 2);
+  const median = n % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+  const variance = n > 1 ? values.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (n - 1) : 0;
+  const std = Math.sqrt(variance);
+  return { count: n, mean, median, std, min: sorted[0], max: sorted[n - 1] };
+}
+
+/** Even-width histogram over [min, max] with the given bin count. Returns bin edges and counts, not just counts, so the UI can label ranges correctly. */
+function msdHistogram(values, binCount){
+  binCount = binCount || 10;
+  const n = values.length;
+  if (n === 0) return { bins: [], counts: [] };
+  const min = Math.min(...values), max = Math.max(...values);
+  const bins = [];
+  for (let i = 0; i <= binCount; i++) bins.push(min + (max - min) * (i / binCount));
+  const counts = new Array(binCount).fill(0);
+  if (max === min) { counts[0] = n; return { bins, counts }; } // degenerate: every value identical
+  values.forEach(v => {
+    let idx = Math.floor(((v - min) / (max - min)) * binCount);
+    if (idx >= binCount) idx = binCount - 1; // the max value itself falls exactly on the top edge
+    if (idx < 0) idx = 0;
+    counts[idx]++;
+  });
+  return { bins, counts };
+}
+
+/**
+ * Cohen's d — standardized mean difference between the positive-class and
+ * negative-class values of one feature, using the pooled sample standard
+ * deviation. This is the "statistical separation between classes"
+ * figure: how many pooled standard deviations apart the two class means
+ * are. Larger magnitude = a feature that more naturally distinguishes
+ * successful market states, independent of the feature's raw scale.
+ */
+function msdCohensD(positiveValues, negativeValues){
+  const nPos = positiveValues.length, nNeg = negativeValues.length;
+  if (nPos < 2 || nNeg < 2) return null;
+  const statsPos = msdBasicStats(positiveValues), statsNeg = msdBasicStats(negativeValues);
+  const pooledVariance = ((nPos - 1) * statsPos.std * statsPos.std + (nNeg - 1) * statsNeg.std * statsNeg.std) / (nPos + nNeg - 2);
+  const pooledStd = Math.sqrt(pooledVariance);
+  if (pooledStd === 0) return null; // no variance in either class — separation is undefined, not zero
+  return (statsPos.mean - statsNeg.mean) / pooledStd;
+}
+
+/** Full distribution report for ONE feature: overall stats, per-class stats, histogram, and class separation. */
+function msdComputeFeatureDistribution(allStates, key, binCount){
+  const allValues = msdValidValues(allStates, key);
+  const positiveValues = msdValidValues(allStates.filter(s => s.outcome === 'positive'), key);
+  const negativeValues = msdValidValues(allStates.filter(s => s.outcome === 'negative'), key);
+  return {
+    feature: key,
+    overall: msdBasicStats(allValues),
+    positive: msdBasicStats(positiveValues),
+    negative: msdBasicStats(negativeValues),
+    histogram: msdHistogram(allValues, binCount),
+    cohensD: msdCohensD(positiveValues, negativeValues),
+  };
+}
+
+/** Distribution reports for every known engineered feature at once, sorted by |Cohen's d| descending — the features that separate classes best appear first. */
+function msdComputeAllFeatureDistributions(allStates, binCount){
+  const reports = MSD_KNOWN_FEATURE_KEYS
+    .filter(key => key !== 'epoch' && key !== 'price')
+    .map(key => msdComputeFeatureDistribution(allStates, key, binCount));
+  return reports.sort((a, b) => Math.abs(b.cohensD ?? 0) - Math.abs(a.cohensD ?? 0));
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Market State Discovery Engine — Phase 3: Correlation Explorer
+// ══════════════════════════════════════════════════════════════════════
+
+/** Pairs up two fields across a set of snapshots, keeping only rows where BOTH are valid finite numbers. */
+function msdPairedValues(states, keyA, keyB){
+  const xs = [], ys = [];
+  states.forEach(s => {
+    const a = s[keyA], b = s[keyB];
+    if (a != null && Number.isFinite(a) && b != null && Number.isFinite(b)) { xs.push(a); ys.push(b); }
+  });
+  return { xs, ys };
+}
+
+/** Pearson correlation coefficient. Null (not 0) when undefined — fewer than 2 valid pairs, or zero variance in either variable. */
+function msdPearsonCorrelation(xs, ys){
+  const n = xs.length;
+  if (n < 2) return null;
+  const meanX = xs.reduce((a, b) => a + b, 0) / n;
+  const meanY = ys.reduce((a, b) => a + b, 0) / n;
+  let num = 0, denX = 0, denY = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - meanX, dy = ys[i] - meanY;
+    num += dx * dy; denX += dx * dx; denY += dy * dy;
+  }
+  if (denX === 0 || denY === 0) return null;
+  return num / Math.sqrt(denX * denY);
+}
+
+/** Average (fractional) ranks, 1-indexed, with ties resolved to the mean rank of the tied group — the standard convention Spearman correlation requires. */
+function msdRank(values){
+  const indexed = values.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v);
+  const ranks = new Array(values.length);
+  let i = 0;
+  while (i < indexed.length) {
+    let j = i;
+    while (j + 1 < indexed.length && indexed[j + 1].v === indexed[i].v) j++;
+    const avgRank = (i + 1 + j + 1) / 2; // average of the 1-indexed positions i+1..j+1
+    for (let k = i; k <= j; k++) ranks[indexed[k].i] = avgRank;
+    i = j + 1;
+  }
+  return ranks;
+}
+
+/** Spearman rank correlation — Pearson correlation computed on ranks instead of raw values. Captures monotonic, not just linear, relationships. */
+function msdSpearmanCorrelation(xs, ys){
+  if (xs.length < 2) return null;
+  return msdPearsonCorrelation(msdRank(xs), msdRank(ys));
+}
+
+/**
+ * Binned Mutual Information estimate, in bits. Continuous variables are
+ * discretized into equal-width bins (default 8) before computing MI from
+ * the joint histogram — a standard, simple approach for exploratory MI
+ * estimation without needing a full continuous-KDE estimator. Bin count
+ * is a genuine parameter, not a hidden assumption: coarser bins
+ * under-detect real dependence, finer bins overfit noise as if it were
+ * dependence — stated here so the number itself isn't read as more
+ * precise than a binned estimate actually is.
+ */
+function msdMutualInformation(xs, ys, binCount){
+  binCount = binCount || 8;
+  const n = xs.length;
+  if (n < 2) return null;
+  const xMin = Math.min(...xs), xMax = Math.max(...xs);
+  const yMin = Math.min(...ys), yMax = Math.max(...ys);
+  function binOf(v, lo, hi){
+    if (hi === lo) return 0;
+    let idx = Math.floor(((v - lo) / (hi - lo)) * binCount);
+    if (idx >= binCount) idx = binCount - 1;
+    if (idx < 0) idx = 0;
+    return idx;
+  }
+  const jointCounts = new Map();
+  const xCounts = new Array(binCount).fill(0), yCounts = new Array(binCount).fill(0);
+  for (let i = 0; i < n; i++) {
+    const xi = binOf(xs[i], xMin, xMax), yi = binOf(ys[i], yMin, yMax);
+    const key = xi + ',' + yi;
+    jointCounts.set(key, (jointCounts.get(key) || 0) + 1);
+    xCounts[xi]++; yCounts[yi]++;
+  }
+  let mi = 0;
+  jointCounts.forEach((count, key) => {
+    const [xi, yi] = key.split(',').map(Number);
+    const pxy = count / n, px = xCounts[xi] / n, py = yCounts[yi] / n;
+    if (pxy > 0 && px > 0 && py > 0) mi += pxy * Math.log2(pxy / (px * py));
+  });
+  return mi;
+}
+
+/** Full pairwise correlation matrix (Pearson, Spearman, MI) across every known engineered feature. Read-only, computed fresh each call. */
+function msdComputeCorrelationMatrix(allStates, binCount){
+  const keys = MSD_KNOWN_FEATURE_KEYS.filter(k => k !== 'epoch' && k !== 'price');
+  const results = [];
+  for (let i = 0; i < keys.length; i++) {
+    for (let j = i + 1; j < keys.length; j++) {
+      const { xs, ys } = msdPairedValues(allStates, keys[i], keys[j]);
+      results.push({
+        featureA: keys[i],
+        featureB: keys[j],
+        pairCount: xs.length,
+        pearson: msdPearsonCorrelation(xs, ys),
+        spearman: msdSpearmanCorrelation(xs, ys),
+        mutualInformation: msdMutualInformation(xs, ys, binCount),
+      });
+    }
+  }
+  return results;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Market State Discovery Engine — Phase 3: Market State Search Tool
+// ══════════════════════════════════════════════════════════════════════
+// Query the permanent MarketStates store directly with arbitrary
+// conditions. Read-only — filters an in-memory copy, never touches
+// stored data. Conditions can compare a feature against a constant
+// (ADX > 25), a range (RSI between 40 and 60), OR another feature on the
+// SAME snapshot (MACD > Signal) — both forms share one evaluator so
+// adding a new operator only needs to happen in one place.
+
+/** Evaluates ONE condition against ONE snapshot. Returns false (not a crash) if a referenced field is missing or non-finite — a condition can never match on absent data. */
+function msdEvaluateCondition(snapshot, condition){
+  const left = snapshot[condition.feature];
+  if (left == null || !Number.isFinite(left)) return false;
+
+  if (condition.op === 'between') {
+    const [lo, hi] = condition.value;
+    return left >= lo && left <= hi;
+  }
+
+  let right;
+  if (condition.compareFeature) {
+    right = snapshot[condition.compareFeature];
+    if (right == null || !Number.isFinite(right)) return false;
+  } else {
+    right = condition.value;
+  }
+
+  switch (condition.op) {
+    case '>':  return left > right;
+    case '>=': return left >= right;
+    case '<':  return left < right;
+    case '<=': return left <= right;
+    case '=':
+    case '==': return left === right;
+    default:   return false;
+  }
+}
+
+/** A snapshot matches only if it satisfies EVERY supplied condition (logical AND across the whole list). */
+function msdMatchesAllConditions(snapshot, conditions){
+  return conditions.every(c => msdEvaluateCondition(snapshot, c));
+}
+
+/**
+ * Runs a full search: match count, win rate, Run Length distribution
+ * (from the events those positive matches belong to), Lead Time
+ * distribution, and a capped sample of historical examples. Read-only —
+ * operates entirely on the arrays passed in, never queries or writes
+ * anything itself.
+ */
+function msdSearchMarketStates(allStates, allEvents, conditions, exampleLimit){
+  exampleLimit = exampleLimit || 20;
+  const matches = allStates.filter(s => msdMatchesAllConditions(s, conditions));
+  const positiveMatches = matches.filter(s => s.outcome === 'positive');
+  const winRate = matches.length ? positiveMatches.length / matches.length : null;
+
+  const matchedEventIds = new Set(positiveMatches.map(s => s.eventId).filter(id => id != null));
+  const matchedEvents = allEvents.filter(e => matchedEventIds.has(e.eventId));
+  const runLengthDist = msdBucketBy(matchedEvents, e => e.actualRunLength);
+  const leadTimeDist = msdBucketBy(positiveMatches, s => s.leadTime);
+
+  return {
+    matchCount: matches.length,
+    winRate,
+    runLengthDist,
+    leadTimeDist,
+    examples: matches.slice(0, exampleLimit),
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Market State Discovery Engine — Phase 2.5+2.6: Experiments store & Experiment Dataset Builder
+// ══════════════════════════════════════════════════════════════════════
+// The THIRD of the four locked permanent stores. Append-only, same
+// add()-not-put() pattern as EventDatabase/MarketStates. Each record is
+// the full Research Configuration behind one experiment — this is what
+// makes an experiment reproducible six months later, not just today.
+//
+// TRAIN/VALIDATION/TEST are fully built here. RESEARCH/CLUSTER/
+// FEATURE-ANALYSIS datasets are defined, callable stubs only — nothing
+// downstream consumes them yet, and building unused branches now just
+// adds unmaintained surface area. Explicitly flagged, not silently
+// incomplete.
+//
+// DETERMINISM: sampling and class-balance shuffling use a seeded PRNG
+// (mulberry32) keyed by the Research Configuration's own randomSeed — the
+// same config, run twice against the same database state, produces a
+// byte-identical dataset. The train/validation/test SPLIT itself is
+// deliberately NOT randomized — it's chronological (earliest snapshots
+// train, latest test), matching the existing Prediction Bot's own
+// chrono-split philosophy: randomly splitting time-series data leaks
+// future information into training, which the "never use future
+// information" principle this whole engine is built around forbids.
+
+const MSD_EXPERIMENT_DB_NAME    = 'mfx_msd_experiments';
+const MSD_EXPERIMENT_DB_VERSION = 1;
+const MSD_EXPERIMENT_STORE      = 'Experiments';
+
+let _msdExperimentDbPromise = null;
+let msdExperimentSeq = 0;
+
+function msdOpenExperimentDatabase(){
+  if (_msdExperimentDbPromise) return _msdExperimentDbPromise;
+  _msdExperimentDbPromise = new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') { reject(new Error('IndexedDB is not available in this environment')); return; }
+    const req = indexedDB.open(MSD_EXPERIMENT_DB_NAME, MSD_EXPERIMENT_DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(MSD_EXPERIMENT_STORE)) {
+        db.createObjectStore(MSD_EXPERIMENT_STORE, { keyPath: 'experimentId' });
+      }
+    };
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror   = (e) => reject(e.target.error);
+  });
+  return _msdExperimentDbPromise;
+}
+
+function msdGenerateExperimentId(){
+  return 'exp_' + msdSessionId + '_' + (++msdExperimentSeq) + '_' + Date.now() + '_' + msdRandomSuffix();
+}
+
+/**
+ * Dataset Fingerprint — a hash of the three snapshot-ID lists, WITH split
+ * boundaries encoded (delimiters between train/val/test), so "the same
+ * IDs but assigned to a different split" also changes the fingerprint,
+ * not just "the same IDs somewhere in the dataset." Order within each
+ * split is preserved as-is (chronological, per msdBuildExperimentDataset)
+ * rather than sorted, since a genuine rebuild should reproduce the same
+ * order too, not just the same membership.
+ */
+function msdComputeDatasetFingerprint(dataset){
+  const trainIds = dataset.trainSet.map(s => s.snapshotId);
+  const valIds = dataset.valSet.map(s => s.snapshotId);
+  const testIds = dataset.testSet.map(s => s.snapshotId);
+  const combined = trainIds.join(',') + '|VAL|' + valIds.join(',') + '|TEST|' + testIds.join(',');
+  return msdSimpleHash(combined);
+}
+
+/**
+ * Rebuilds an experiment's EXACT dataset from its frozen snapshot IDs —
+ * bypassing msdBuildExperimentDataset's config-based re-derivation
+ * entirely. Correct even if MarketStates has grown substantially since:
+ * MarketStates is immutable and append-only, so a snapshot fetched by ID
+ * today is guaranteed identical to what it was at experiment time. This
+ * is what "reproducible" actually means here — a direct lookup, not a
+ * recomputation that could drift as the database grows.
+ */
+async function msdRebuildExperimentDataset(experimentRecord){
+  if (!experimentRecord.trainSnapshotIds) {
+    return { dataset: null, missingCount: 0, missingIds: [], error: 'This experiment record predates frozen-ID reproduction (no trainSnapshotIds stored) — it cannot be exactly rebuilt.' };
+  }
+  const fetchAll = async (ids) => {
+    const results = await Promise.all(ids.map(id => msdGetMarketState(id)));
+    const missing = ids.filter((id, i) => results[i] == null);
+    return { snapshots: results.filter(s => s != null), missing };
+  };
+  const [trainResult, valResult, testResult] = await Promise.all([
+    fetchAll(experimentRecord.trainSnapshotIds || []),
+    fetchAll(experimentRecord.valSnapshotIds || []),
+    fetchAll(experimentRecord.testSnapshotIds || []),
+  ]);
+  const dataset = { trainSet: trainResult.snapshots, valSet: valResult.snapshots, testSet: testResult.snapshots, meta: {} };
+  const missingIds = trainResult.missing.concat(valResult.missing, testResult.missing);
+  return { dataset, missingCount: missingIds.length, missingIds, error: null };
+}
+
+/** Verifies an experiment can still be reproduced exactly: rebuilds from frozen IDs and confirms the fingerprint matches what was recorded at experiment time. */
+async function msdVerifyExperimentReproducibility(experimentRecord){
+  const rebuild = await msdRebuildExperimentDataset(experimentRecord);
+  if (rebuild.error) return { reproducible: false, reason: rebuild.error };
+  if (rebuild.missingCount > 0) return { reproducible: false, reason: rebuild.missingCount + ' snapshot(s) referenced by this experiment are missing from MarketStates.', missingIds: rebuild.missingIds };
+  const rebuiltFingerprint = msdComputeDatasetFingerprint(rebuild.dataset);
+  const matches = rebuiltFingerprint === experimentRecord.datasetFingerprint;
+  return { reproducible: matches, reason: matches ? null : 'Fingerprint mismatch: rebuilt dataset does not match the original.', rebuiltFingerprint, originalFingerprint: experimentRecord.datasetFingerprint };
+}
+
+/** Appends ONE experiment record. Uses add(), never put() — a duplicate Experiment ID is rejected, not merged. */
+async function msdWriteExperiment(record){
+  if (!record || !record.experimentId) return { ok: false, error: 'record is missing experimentId' };
+  try {
+    const db = await msdOpenExperimentDatabase();
+    return await new Promise((resolve) => {
+      const req = db.transaction(MSD_EXPERIMENT_STORE, 'readwrite').objectStore(MSD_EXPERIMENT_STORE).add(record);
+      req.onsuccess = () => resolve({ ok: true });
+      req.onerror   = (e) => { e.preventDefault(); resolve({ ok: false, error: 'duplicate or invalid experimentId — write rejected (append-only store)' }); };
+    });
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function msdGetAllExperiments(){
+  const db = await msdOpenExperimentDatabase();
+  return new Promise((resolve) => {
+    const req = db.transaction(MSD_EXPERIMENT_STORE, 'readonly').objectStore(MSD_EXPERIMENT_STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror   = () => resolve([]);
+  });
+}
+
+/** Test/debug only — closes and fully deletes Experiments so tests start from a clean slate. Never called from production code paths. */
+function msdResetExperimentDatabase(){
+  if (_msdExperimentDbPromise) _msdExperimentDbPromise.then(db => db.close()).catch(() => {});
+  _msdExperimentDbPromise = null;
+  return new Promise((resolve) => {
+    if (typeof indexedDB === 'undefined') { resolve(); return; }
+    const req = indexedDB.deleteDatabase(MSD_EXPERIMENT_DB_NAME);
+    req.onsuccess = () => resolve();
+    req.onerror   = () => resolve();
+    req.onblocked = () => resolve();
+  });
+}
+
+/** mulberry32 — a small, fast, deterministic PRNG. Same seed, same sequence, every time, in every browser. Not cryptographic — doesn't need to be, only reproducible. */
+function msdSeededRandom(seed){
+  let state = seed >>> 0;
+  return function(){
+    state |= 0; state = (state + 0x6D2B79F5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Deterministic Fisher-Yates shuffle, driven entirely by the supplied seeded RNG function — never Math.random(). */
+function msdSeededShuffle(arr, rng){
+  const copy = arr.slice();
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = copy[i]; copy[i] = copy[j]; copy[j] = tmp;
+  }
+  return copy;
+}
+
+/**
+ * Builds a Training/Validation/Test dataset from the permanent
+ * MarketStates store according to one Research Configuration. Pure,
+ * read-only against the database — never writes a snapshot, only reads
+ * and filters. Given the same allStates and the same config, this always
+ * returns byte-identical results.
+ *
+ * Research Configuration fields: leadTime (a specific tick value, or
+ * 'all'), featureVersion (required — datasets are never built across
+ * mismatched schema versions), samplingRatio (negatives sampled per
+ * positive), randomSeed (integer), trainingSplit. Lookback Window is
+ * deliberately NOT a config input here — it's derived by msdRunExperiment
+ * from the actual built dataset (the widest Lead Time observed among its
+ * positives), since a user-typed value could never be verified against
+ * what the Labeler's own capture-time setting (msdLookbackWindow)
+ * actually was when the referenced snapshots were captured.
+ * (fraction, e.g. 0.7).
+ */
+function msdBuildExperimentDataset(allStates, config){
+  let filtered = allStates.filter(s => s.featureVersion === config.featureVersion);
+  if (config.leadTime != null && config.leadTime !== 'all') {
+    filtered = filtered.filter(s => s.outcome === 'negative' || s.leadTime === config.leadTime);
+  }
+
+  const positives = filtered.filter(s => s.outcome === 'positive');
+  const negatives = filtered.filter(s => s.outcome === 'negative');
+
+  const rng = msdSeededRandom(config.randomSeed);
+  const shuffledPositives = msdSeededShuffle(positives, rng);
+  const shuffledNegatives = msdSeededShuffle(negatives, rng);
+
+  const targetNegativeCount = Math.round(shuffledPositives.length * config.samplingRatio);
+  const sampledNegatives = shuffledNegatives.slice(0, targetNegativeCount);
+
+  // Chronological split — deliberately NOT touched by the seeded shuffle
+  // above, which only decided WHICH negatives get sampled, not the
+  // eventual train/val/test assignment.
+  const combined = shuffledPositives.concat(sampledNegatives).slice().sort((a, b) => a.timestamp - b.timestamp);
+  const trainCount = Math.floor(combined.length * config.trainingSplit);
+  const trainSet = combined.slice(0, trainCount);
+  const remaining = combined.slice(trainCount);
+  // Validation/Test split of the remainder — independently configurable
+  // via config.validationSplit (fraction of the remainder going to
+  // validation; test gets the rest). Defaults to exactly 0.5, preserving
+  // the original fixed 50/50 behavior for any caller that doesn't specify
+  // it — this is additive, not a breaking change.
+  const validationSplit = config.validationSplit != null ? config.validationSplit : 0.5;
+  const valCount = Math.floor(remaining.length * validationSplit);
+  const valSet = remaining.slice(0, valCount);
+  const testSet = remaining.slice(valCount);
+
+  return {
+    trainSet, valSet, testSet,
+    meta: { positiveCount: shuffledPositives.length, negativeSampledCount: sampledNegatives.length, negativeAvailableCount: shuffledNegatives.length, validationSplit },
+  };
+}
+
+// Defined stubs only — not built out this pass, since nothing downstream
+// consumes them yet. Each throws clearly rather than silently returning
+// an empty or misleading result if called before it's implemented.
+function msdBuildResearchDataset(){ throw new Error('Research Dataset builder is not yet implemented — defined as a stub for a future phase.'); }
+function msdBuildClusterDataset(){ throw new Error('Cluster Dataset builder is not yet implemented — defined as a stub for a future phase.'); }
+function msdBuildFeatureAnalysisDataset(){ throw new Error('Feature-Analysis Dataset builder is not yet implemented — defined as a stub for a future phase.'); }
+
+/**
+ * Runs one full experiment: builds the dataset, then writes the
+ * Research Configuration (plus resulting sample counts) as a permanent
+ * Experiment Record. The dataset itself is NOT persisted anywhere — it's
+ * temporary by design, rebuildable on demand from the same config against
+ * the same (or a later, larger) database state.
+ */
+async function msdRunExperiment(config){
+  const allStates = await msdGetAllMarketStates();
+  const dataset = msdBuildExperimentDataset(allStates, config);
+  const experimentId = msdGenerateExperimentId();
+
+  const allSnapshots = dataset.trainSet.concat(dataset.valSet, dataset.testSet);
+  const datasetFingerprint = msdComputeDatasetFingerprint(dataset);
+  // Every snapshot was filtered to config.featureVersion inside
+  // msdBuildExperimentDataset, so they should all share one
+  // featureFingerprint — checked explicitly rather than assumed, since a
+  // mismatch here would itself be a real anomaly worth surfacing, not
+  // silently picking whichever value happens to come first.
+  const distinctFingerprints = new Set(allSnapshots.map(s => s.featureFingerprint));
+  const featureFingerprint = distinctFingerprints.size === 1 ? allSnapshots[0].featureFingerprint
+    : distinctFingerprints.size === 0 ? null
+    : 'INCONSISTENT:' + Array.from(distinctFingerprints).join(',');
+
+  // Lookback Window: DERIVED from what's actually in the dataset (the
+  // widest Lead Time observed among its positive snapshots), not taken
+  // from a user-typed form value. The Labeler's real capture-time setting
+  // (msdLookbackWindow) is a separate, independent global that may have
+  // changed over the life of the app and isn't recorded per-snapshot —
+  // there is no way to verify a typed number against it. A derived value
+  // is always an honest fact about this dataset; a typed one could
+  // silently be fiction.
+  const positiveLeadTimes = allSnapshots.filter(s => s.outcome === 'positive' && Number.isFinite(s.leadTime)).map(s => s.leadTime);
+  const derivedLookbackWindow = positiveLeadTimes.length ? Math.max(...positiveLeadTimes) : null;
+
+  const record = {
+    experimentId,
+    lookbackWindow: derivedLookbackWindow,
+    leadTime: config.leadTime ?? 'all',
+    featureVersion: config.featureVersion,
+    samplingRatio: config.samplingRatio,
+    randomSeed: config.randomSeed,
+    trainingSplit: config.trainingSplit,
+    validationSplit: dataset.meta.validationSplit,
+    date: Date.now(),
+    trainCount: dataset.trainSet.length,
+    valCount: dataset.valSet.length,
+    testCount: dataset.testSet.length,
+    positiveCount: dataset.meta.positiveCount,
+    negativeSampledCount: dataset.meta.negativeSampledCount,
+    // Reproducibility (Task 1): frozen exact membership, immune to MarketStates growth.
+    trainSnapshotIds: dataset.trainSet.map(s => s.snapshotId),
+    valSnapshotIds: dataset.valSet.map(s => s.snapshotId),
+    testSnapshotIds: dataset.testSet.map(s => s.snapshotId),
+    datasetFingerprint,
+    featureFingerprint,
+  };
+  const writeResult = await msdWriteExperiment(record);
+  return { experimentId, dataset, record, writeResult };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Market State Discovery Engine — Statistical Discovery Engine
+// ══════════════════════════════════════════════════════════════════════
+// Runs on an experiment's dataset BEFORE any model training proceeds.
+// Computes Sample Count, Positive Rate, a Wilson-score Confidence
+// Interval, per-feature Mutual Information / Information Gain against the
+// outcome label, and per-feature Stability (via seeded bootstrap
+// resampling — reproducible, same seed/data always gives the same
+// stability figure). Produces a readyForTraining gate, and records
+// NOTABLE findings (those clearing a configurable threshold) permanently
+// into KnowledgeBase — the fourth and final locked permanent store.
+//
+// NOTE ON NAMING: "Mutual Information" and "Information Gain" are the
+// SAME quantity here — H(outcome) - H(outcome|feature) — just named
+// differently in two research traditions (information theory vs.
+// decision-tree ML) that both appear in the original spec. This isn't
+// two independent measurements; msdInformationGain is a documented alias
+// of msdFeatureOutcomeMI, not a separate computation, and both names are
+// exposed in the results so neither term goes unanswered.
+
+/** Wilson score confidence interval for a binomial proportion — appropriate for small samples and rates near 0 or 1, where a naive normal approximation gets misleading. Returns fractions (0-1). */
+function msdWilsonScoreInterval(successCount, totalCount, z){
+  z = z || 1.96; // 95% confidence by default
+  if (totalCount === 0) return { lower: null, upper: null };
+  const p = successCount / totalCount;
+  const n = totalCount;
+  const denom = 1 + (z * z) / n;
+  const center = p + (z * z) / (2 * n);
+  const margin = z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n));
+  return { lower: Math.max(0, (center - margin) / denom), upper: Math.min(1, (center + margin) / denom) };
+}
+
+/** Sample Count, Positive Rate, and its Wilson Confidence Interval for one set of snapshots. */
+function msdComputeSampleStatistics(snapshots){
+  const positiveCount = snapshots.filter(s => s.outcome === 'positive').length;
+  const negativeCount = snapshots.filter(s => s.outcome === 'negative').length;
+  const totalCount = positiveCount + negativeCount;
+  return {
+    positiveCount, negativeCount, totalCount,
+    positiveRate: totalCount > 0 ? positiveCount / totalCount : null,
+    confidenceInterval: msdWilsonScoreInterval(positiveCount, totalCount),
+  };
+}
+
+/**
+ * Mutual Information between one continuous feature (binned) and a
+ * BINARY outcome (1 = positive, 0 = negative). This is the same
+ * computation msdInformationGain exposes under its ML-literature name.
+ */
+function msdFeatureOutcomeMI(featureValues, outcomes, binCount){
+  binCount = binCount || 8;
+  const n = featureValues.length;
+  if (n < 2 || outcomes.length !== n) return null;
+  const min = Math.min(...featureValues), max = Math.max(...featureValues);
+  function binOf(v){
+    if (max === min) return 0;
+    let idx = Math.floor(((v - min) / (max - min)) * binCount);
+    if (idx >= binCount) idx = binCount - 1;
+    if (idx < 0) idx = 0;
+    return idx;
+  }
+  const jointCounts = new Map();
+  const binCounts = new Array(binCount).fill(0);
+  let posCount = 0;
+  for (let i = 0; i < n; i++) {
+    const b = binOf(featureValues[i]);
+    const o = outcomes[i];
+    const key = b + ',' + o;
+    jointCounts.set(key, (jointCounts.get(key) || 0) + 1);
+    binCounts[b]++;
+    if (o === 1) posCount++;
+  }
+  const pPos = posCount / n, pNeg = 1 - pPos;
+  let mi = 0;
+  jointCounts.forEach((count, key) => {
+    const [b, o] = key.split(',').map(Number);
+    const pxy = count / n;
+    const px = binCounts[b] / n;
+    const py = o === 1 ? pPos : pNeg;
+    if (pxy > 0 && px > 0 && py > 0) mi += pxy * Math.log2(pxy / (px * py));
+  });
+  return mi;
+}
+
+/** Documented alias of msdFeatureOutcomeMI — see the module docblock above for why these are the same quantity under two names, not two measurements. */
+function msdInformationGain(featureValues, outcomes, binCount){
+  return msdFeatureOutcomeMI(featureValues, outcomes, binCount);
+}
+
+/**
+ * Feature Stability: resamples (with replacement) the feature/outcome
+ * pairs via a SEEDED rng (never Math.random — same seed, same data,
+ * same stability figure every time), recomputes MI on each resample, and
+ * reports the standard deviation across resamples. LOW = the observed
+ * relationship holds up under resampling noise. HIGH = it may be an
+ * artifact of this specific dataset's composition, not a genuine pattern.
+ */
+function msdFeatureStability(featureValues, outcomes, randomSeed, resampleCount, binCount){
+  resampleCount = resampleCount || 20;
+  const n = featureValues.length;
+  if (n < 10) return null; // too few samples for a meaningful bootstrap
+  const rng = msdSeededRandom(randomSeed);
+  const miValues = [];
+  for (let r = 0; r < resampleCount; r++) {
+    const sf = [], so = [];
+    for (let i = 0; i < n; i++) {
+      const idx = Math.floor(rng() * n);
+      sf.push(featureValues[idx]); so.push(outcomes[idx]);
+    }
+    const mi = msdFeatureOutcomeMI(sf, so, binCount);
+    if (mi != null) miValues.push(mi);
+  }
+  if (miValues.length < 2) return null;
+  const meanMi = miValues.reduce((a, b) => a + b, 0) / miValues.length;
+  const variance = miValues.reduce((a, b) => a + (b - meanMi) * (b - meanMi), 0) / (miValues.length - 1);
+  return { meanMi, stdDevMi: Math.sqrt(variance), resamples: miValues.length };
+}
+
+const MSD_MIN_SAMPLE_COUNT_FOR_TRAINING = 30; // stated, configurable-by-editing-here minimum; small enough not to block early experimentation, large enough that a handful of noisy samples isn't mistaken for a real signal
+
+/**
+ * Runs the full Statistical Discovery Engine against one experiment's
+ * dataset (train+val+test combined — discovery should see everything
+ * collected for this experiment, not just the training slice). Read-only,
+ * writes nothing itself.
+ */
+function msdRunStatisticalDiscovery(dataset, config){
+  config = config || {};
+  const allSnapshots = dataset.trainSet.concat(dataset.valSet, dataset.testSet);
+  const sampleStats = msdComputeSampleStatistics(allSnapshots);
+  const outcomes = allSnapshots.map(s => s.outcome === 'positive' ? 1 : 0);
+
+  const keys = MSD_KNOWN_FEATURE_KEYS.filter(k => k !== 'epoch' && k !== 'price');
+  const featureReports = keys.map(key => {
+    const raw = allSnapshots.map(s => s[key]);
+    const validIdx = [];
+    raw.forEach((v, i) => { if (v != null && Number.isFinite(v)) validIdx.push(i); });
+    if (validIdx.length < 10) return { feature: key, sampleCount: validIdx.length, mutualInformation: null, informationGain: null, stability: null };
+    const values = validIdx.map(i => raw[i]);
+    const outs = validIdx.map(i => outcomes[i]);
+    const mi = msdFeatureOutcomeMI(values, outs, config.binCount || 8);
+    const stability = msdFeatureStability(values, outs, config.randomSeed || 1, config.resampleCount || 20, config.binCount || 8);
+    return { feature: key, sampleCount: validIdx.length, mutualInformation: mi, informationGain: mi, stability };
+  }).sort((a, b) => (b.mutualInformation ?? 0) - (a.mutualInformation ?? 0));
+
+  const minSampleCount = config.minSampleCount != null ? config.minSampleCount : MSD_MIN_SAMPLE_COUNT_FOR_TRAINING;
+  const readyForTraining = sampleStats.totalCount >= minSampleCount;
+  const reasons = [];
+  if (!readyForTraining) reasons.push('Sample count (' + sampleStats.totalCount + ') is below the configured minimum (' + minSampleCount + ')');
+
+  return { sampleStats, featureReports, readyForTraining, reasons };
+}
+
+// ── KnowledgeBase: the fourth and final locked permanent store ─────────
+// Append-only, same add()-not-put() pattern as every other permanent
+// store. One record per NOTABLE discovery (a feature/lead-time
+// combination clearing a configurable threshold) — curated, not a raw
+// dump of every feature from every experiment, which would just be as
+// noisy as the Experiments store itself.
+
+const MSD_KNOWLEDGE_DB_NAME    = 'mfx_msd_knowledge';
+const MSD_KNOWLEDGE_DB_VERSION = 1;
+const MSD_KNOWLEDGE_STORE      = 'KnowledgeBase';
+const MSD_DEFAULT_NOTABLE_MI_THRESHOLD = 0.05; // stated, configurable default — arbitrary but explicit, not a silent assumption
+
+let _msdKnowledgeDbPromise = null;
+let msdFindingSeq = 0;
+
+function msdOpenKnowledgeDatabase(){
+  if (_msdKnowledgeDbPromise) return _msdKnowledgeDbPromise;
+  _msdKnowledgeDbPromise = new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') { reject(new Error('IndexedDB is not available in this environment')); return; }
+    const req = indexedDB.open(MSD_KNOWLEDGE_DB_NAME, MSD_KNOWLEDGE_DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(MSD_KNOWLEDGE_STORE)) {
+        const store = db.createObjectStore(MSD_KNOWLEDGE_STORE, { keyPath: 'findingId' });
+        store.createIndex('feature', 'feature', { unique: false });
+        store.createIndex('leadTime', 'leadTime', { unique: false });
+      }
+    };
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror   = (e) => reject(e.target.error);
+  });
+  return _msdKnowledgeDbPromise;
+}
+
+function msdGenerateFindingId(){
+  return 'find_' + msdSessionId + '_' + (++msdFindingSeq) + '_' + Date.now() + '_' + msdRandomSuffix();
+}
+
+/** Appends ONE finding. Uses add(), never put() — a duplicate Finding ID is rejected, not merged. */
+async function msdWriteFinding(finding){
+  if (!finding || !finding.findingId) return { ok: false, error: 'finding is missing findingId' };
+  try {
+    const db = await msdOpenKnowledgeDatabase();
+    return await new Promise((resolve) => {
+      const req = db.transaction(MSD_KNOWLEDGE_STORE, 'readwrite').objectStore(MSD_KNOWLEDGE_STORE).add(finding);
+      req.onsuccess = () => resolve({ ok: true });
+      req.onerror   = (e) => { e.preventDefault(); resolve({ ok: false, error: 'duplicate or invalid findingId — write rejected (append-only store)' }); };
+    });
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function msdGetAllFindings(){
+  const db = await msdOpenKnowledgeDatabase();
+  return new Promise((resolve) => {
+    const req = db.transaction(MSD_KNOWLEDGE_STORE, 'readonly').objectStore(MSD_KNOWLEDGE_STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror   = () => resolve([]);
+  });
+}
+
+/**
+ * Returns the ACTUAL winning model for an experiment, if training has
+ * happened — a genuine, on-demand join against KnowledgeBase, computed
+ * fresh every call, never stored on the Experiment record itself. This
+ * is deliberate: Experiments is written BEFORE training occurs (a
+ * separate, later step) and is append-only, so there is no way to
+ * retroactively bake "which model won" into that record without
+ * mutating an immutable store. Returns null if no model has been
+ * trained for this experiment yet — an honest "not yet known," not a
+ * stale placeholder.
+ */
+async function msdGetWinningModelForExperiment(experimentId){
+  const findings = await msdGetAllFindings();
+  return findings.find(f => f.type === 'model_performance' && f.experimentId === experimentId && f.isBest === true) || null;
+}
+
+/** Test/debug only — never called from production code paths. */
+function msdResetKnowledgeDatabase(){
+  if (_msdKnowledgeDbPromise) _msdKnowledgeDbPromise.then(db => db.close()).catch(() => {});
+  _msdKnowledgeDbPromise = null;
+  return new Promise((resolve) => {
+    if (typeof indexedDB === 'undefined') { resolve(); return; }
+    const req = indexedDB.deleteDatabase(MSD_KNOWLEDGE_DB_NAME);
+    req.onsuccess = () => resolve();
+    req.onerror   = () => resolve();
+    req.onblocked = () => resolve();
+  });
+}
+
+/**
+ * Filters a discovery result down to notable findings (MI clearing the
+ * threshold) and permanently records each one — "Experiment #18
+ * discovers Lead Time 12, Mutual Information 0.18, Feature ADX Slope"
+ * should never disappear once discovered. leadTime is read from the
+ * experiment RECORD (the config it was actually run with), not
+ * recomputed here.
+ */
+async function msdRecordNotableFindings(experimentId, leadTime, discoveryResult, notableThreshold){
+  const threshold = notableThreshold != null ? notableThreshold : MSD_DEFAULT_NOTABLE_MI_THRESHOLD;
+  const notable = discoveryResult.featureReports.filter(r => r.mutualInformation != null && r.mutualInformation >= threshold);
+  const results = [];
+  for (const r of notable) {
+    const finding = {
+      findingId: msdGenerateFindingId(),
+      experimentId,
+      leadTime,
+      feature: r.feature,
+      mutualInformation: r.mutualInformation,
+      stability: r.stability ? r.stability.stdDevMi : null,
+      discoveredAt: Date.now(),
+    };
+    const writeResult = await msdWriteFinding(finding);
+    results.push({ finding, writeResult });
+  }
+  return results;
+}
+
+/** Feature Ranking — every distinct feature's best (highest MI) finding across all of KnowledgeBase. Derived on demand, never persisted as its own store. */
+function msdComputeFeatureRanking(findings){
+  const byFeature = {};
+  findings.filter(f => f.feature != null && f.mutualInformation != null).forEach(f => {
+    if (!byFeature[f.feature] || f.mutualInformation > byFeature[f.feature].mutualInformation) byFeature[f.feature] = f;
+  });
+  return Object.values(byFeature).sort((a, b) => b.mutualInformation - a.mutualInformation);
+}
+
+/** Lead Time Ranking — every distinct Lead Time's best finding across all of KnowledgeBase. Derived on demand. */
+function msdComputeLeadTimeRanking(findings){
+  const byLeadTime = {};
+  findings.filter(f => f.feature != null && f.mutualInformation != null).forEach(f => {
+    const key = String(f.leadTime);
+    if (!byLeadTime[key] || f.mutualInformation > byLeadTime[key].mutualInformation) byLeadTime[key] = f;
+  });
+  return Object.values(byLeadTime).sort((a, b) => b.mutualInformation - a.mutualInformation);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Market State Discovery Engine — Market State Clustering & Ranking
+// ══════════════════════════════════════════════════════════════════════
+// Completes the locked ranking chain: Feature Ranking -> Lead Time
+// Ranking -> Market State Ranking -> Historical Discoveries.
+//
+// MarketStates is immutable — every snapshot's stateId field stays
+// literally 'unknown' forever, exactly as stored. Clustering does NOT
+// retroactively assign Cluster IDs back into the permanent store; that
+// would mutate history. Instead, exactly like Feature/Lead-Time Ranking,
+// clustering is a DERIVED view computed fresh from MarketStates on
+// demand — cluster assignments live only in the result object this
+// function returns, never written anywhere permanent.
+//
+// Plain k-means, standardized (z-score) features, seeded RNG for
+// deterministic initialization (same seed + same data = same clusters,
+// every time — matching the reproducibility standard the rest of this
+// system holds itself to). Nothing exotic: this is the honest, standard
+// algorithm, not a custom invention.
+
+/** Standardizes a feature matrix (z-score per column) so no single feature's scale dominates distance calculations. Returns {standardized, means, stds} — means/stds kept so a caller could invert the transform if ever needed. */
+function msdStandardizeFeatures(matrix){
+  const n = matrix.length;
+  if (!n) return { standardized: [], means: [], stds: [] };
+  const dims = matrix[0].length;
+  const means = new Array(dims).fill(0);
+  const stds = new Array(dims).fill(0);
+  for (let d = 0; d < dims; d++) {
+    let sum = 0;
+    for (let i = 0; i < n; i++) sum += matrix[i][d];
+    means[d] = sum / n;
+  }
+  for (let d = 0; d < dims; d++) {
+    let sumSq = 0;
+    for (let i = 0; i < n; i++) sumSq += (matrix[i][d] - means[d]) ** 2;
+    stds[d] = Math.sqrt(sumSq / n) || 1; // guard against divide-by-zero for a constant feature
+  }
+  const standardized = matrix.map(row => row.map((v, d) => (v - means[d]) / stds[d]));
+  return { standardized, means, stds };
+}
+
+function msdEuclideanDistance(a, b){
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) sum += (a[i] - b[i]) ** 2;
+  return Math.sqrt(sum);
+}
+
+/**
+ * Plain k-means. Seeded initialization (k distinct points chosen via the
+ * seeded RNG, not Math.random) for reproducibility. Runs until
+ * assignments stop changing or maxIterations is hit.
+ * @returns {{ assignments: number[], centroids: number[][], iterations: number }}
+ */
+function msdKMeans(standardizedMatrix, k, randomSeed, maxIterations){
+  maxIterations = maxIterations || 50;
+  const n = standardizedMatrix.length;
+  if (n === 0 || k <= 0 || k > n) return { assignments: [], centroids: [], iterations: 0 };
+
+  const rng = msdSeededRandom(randomSeed);
+  // Seeded, distinct initial centroids (simple random selection from the
+  // data itself, not k-means++ — plain and honest, not oversold as more
+  // sophisticated than it is).
+  const usedIdx = new Set();
+  const centroids = [];
+  while (centroids.length < k) {
+    const idx = Math.floor(rng() * n);
+    if (!usedIdx.has(idx)) { usedIdx.add(idx); centroids.push(standardizedMatrix[idx].slice()); }
+  }
+
+  let assignments = new Array(n).fill(-1);
+  let iterations = 0;
+  for (; iterations < maxIterations; iterations++) {
+    const newAssignments = standardizedMatrix.map(point => {
+      let best = 0, bestDist = Infinity;
+      centroids.forEach((c, ci) => {
+        const dist = msdEuclideanDistance(point, c);
+        if (dist < bestDist) { bestDist = dist; best = ci; }
+      });
+      return best;
+    });
+
+    const changed = newAssignments.some((a, i) => a !== assignments[i]);
+    assignments = newAssignments;
+    if (!changed && iterations > 0) break;
+
+    // Recompute centroids as the mean of their assigned points.
+    const sums = Array.from({ length: k }, () => new Array(standardizedMatrix[0].length).fill(0));
+    const counts = new Array(k).fill(0);
+    standardizedMatrix.forEach((point, i) => {
+      const c = assignments[i];
+      counts[c]++;
+      point.forEach((v, d) => { sums[c][d] += v; });
+    });
+    for (let c = 0; c < k; c++) {
+      if (counts[c] === 0) continue; // an empty cluster keeps its previous centroid rather than becoming NaN
+      centroids[c] = sums[c].map(v => v / counts[c]);
+    }
+  }
+
+  return { assignments, centroids, iterations };
+}
+
+const MSD_CLUSTER_FEATURE_KEYS = ['adx', 'rsi', 'macd', 'atr', 'pdi', 'ndi']; // a deliberately small, stated subset — clustering on all 20 features would let noisy/near-duplicate features dominate distance; kept explicit so the choice is visible, not buried
+
+/**
+ * Clusters MarketStates snapshots into k Market States and ranks each
+ * cluster by its positive rate. Entirely derived — reads MarketStates,
+ * writes nothing, mutates nothing. Returns cluster assignments alongside
+ * the ranking so a caller can drill into which snapshots belong to which
+ * cluster without a second pass.
+ */
+function msdComputeMarketStateRanking(snapshots, k, randomSeed){
+  const validRows = snapshots.filter(s => MSD_CLUSTER_FEATURE_KEYS.every(key => s[key] != null && Number.isFinite(s[key])));
+  if (validRows.length < k) return { clusters: [], assignments: [], usableSnapshotCount: validRows.length, error: 'Not enough complete snapshots (' + validRows.length + ') to form ' + k + ' clusters.' };
+
+  const matrix = validRows.map(s => MSD_CLUSTER_FEATURE_KEYS.map(key => s[key]));
+  const { standardized } = msdStandardizeFeatures(matrix);
+  const { assignments, centroids, iterations } = msdKMeans(standardized, k, randomSeed);
+
+  const clusters = [];
+  for (let c = 0; c < k; c++) {
+    const members = validRows.filter((_, i) => assignments[i] === c);
+    const positiveCount = members.filter(s => s.outcome === 'positive').length;
+    const negativeCount = members.filter(s => s.outcome === 'negative').length;
+    const total = positiveCount + negativeCount;
+    clusters.push({
+      clusterId: 'cluster_' + c,
+      size: members.length,
+      positiveCount, negativeCount,
+      positiveRate: total > 0 ? positiveCount / total : null,
+      confidenceInterval: msdWilsonScoreInterval(positiveCount, total),
+      snapshotIds: members.map(s => s.snapshotId),
+      centroid: centroids[c],
+    });
+  }
+  clusters.sort((a, b) => (b.positiveRate ?? -1) - (a.positiveRate ?? -1));
+
+  return { clusters, assignments, usableSnapshotCount: validRows.length, iterations, error: null };
+}
+
+/**
+ * Records notable clusters as permanent KnowledgeBase findings — type:
+ * 'market_state_discovery'. "Notable" means a stated bar: at least
+ * MSD_MIN_CLUSTER_SIZE members (a 2-snapshot cluster tells you nothing
+ * repeatable) AND a Wilson interval that doesn't straddle 50% (if the
+ * confidence interval spans both sides of a coin flip, the cluster
+ * hasn't actually demonstrated a lean either way yet). This mirrors the
+ * same "don't flood the store with noise" reasoning already applied to
+ * statistical MI findings.
+ */
+const MSD_MIN_CLUSTER_SIZE_FOR_DISCOVERY = 10;
+
+async function msdRecordClusterDiscoveries(k, randomSeed){
+  const allStates = await msdGetAllMarketStates();
+  const ranking = msdComputeMarketStateRanking(allStates, k, randomSeed);
+  if (ranking.error) return { written: [], error: ranking.error };
+
+  const written = [];
+  for (const c of ranking.clusters) {
+    const ci = c.confidenceInterval;
+    const spansCoinFlip = ci.lower != null && ci.upper != null && ci.lower < 0.5 && ci.upper > 0.5;
+    if (c.size < MSD_MIN_CLUSTER_SIZE_FOR_DISCOVERY || spansCoinFlip) continue;
+    const finding = {
+      findingId: msdGenerateFindingId(),
+      type: 'market_state_discovery',
+      clusterId: c.clusterId,
+      k, randomSeed,
+      size: c.size,
+      positiveRate: c.positiveRate,
+      confidenceIntervalLower: ci.lower,
+      confidenceIntervalUpper: ci.upper,
+      snapshotIds: c.snapshotIds,
+      discoveredAt: Date.now(),
+    };
+    const writeResult = await msdWriteFinding(finding);
+    written.push({ finding, writeResult });
+  }
+  return { written, error: null };
+}
+
+/** Ranks recorded cluster discoveries by positive rate — derived on demand from KnowledgeBase, same pattern as every other ranking view. */
+function msdComputeMarketStateDiscoveryRanking(findings){
+  return findings.filter(f => f.type === 'market_state_discovery').slice().sort((a, b) => (b.positiveRate ?? -1) - (a.positiveRate ?? -1));
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Market State Discovery Engine — Machine Learning
+// ══════════════════════════════════════════════════════════════════════
+// Per the locked architecture: Statistical Discovery Engine -> Machine
+// Learning -> KnowledgeBase. Reuses the EXISTING, already-tested
+// pbXGBoost / pbLightGBM / pbCatBoost gradient-boosted-tree
+// approximations and pbMetrics evaluation from the Prediction Bot
+// verbatim — this is exactly the same in-browser JS approximation
+// architecture already documented and used elsewhere in this app, not a
+// second, competing ML implementation. Nothing here claims to be a real
+// XGBoost/LightGBM/CatBoost binding; it's the same honest approximation,
+// applied to a properly-built, leakage-checked Experiment Dataset
+// instead of raw signal records.
+
+/** Converts a set of MarketStates snapshots into an X/y matrix pair for training. Missing/invalid feature values are 0-filled — stated explicitly, since silently imputing zero is a real modeling choice, not a neutral default. */
+function msdBuildFeatureMatrix(snapshots, featureKeys){
+  const X = snapshots.map(s => featureKeys.map(k => (s[k] != null && Number.isFinite(s[k])) ? s[k] : 0));
+  const y = snapshots.map(s => s.outcome === 'positive' ? 1 : 0);
+  return { X, y };
+}
+
+/** Explicit hyperparameter defaults, matching each model function's own internal defaults exactly. Stated here (not left implicit) specifically so the ACTUAL values used in a training run can be captured and stored, not silently discarded. */
+const MSD_MODEL_DEFAULT_HYPERPARAMS = {
+  XGBoost:  { nTrees: 50, lr: 0.1,  maxDepth: 4, lambda: 1, gamma: 0, nBins: 16 },
+  LightGBM: { nTrees: 50, lr: 0.1,  numLeaves: 16, nBins: 32, minChildSamples: 5 },
+  CatBoost: { nTrees: 50, lr: 0.05, depth: 4, l2: 3, nBins: 12 },
+};
+const MSD_DEFAULT_CLASSIFICATION_THRESHOLD = 0.5;
+
+/**
+ * Trains all three tree approximations on an experiment's Training set,
+ * selects the best by VALIDATION AUC (never test — that would leak test
+ * information into model selection), and reports final metrics on the
+ * untouched Test set. One inference pass covers both validation and test
+ * (concatenated, then split back apart) — reuses the existing functions'
+ * own scoring logic rather than reimplementing tree prediction.
+ */
+function msdTrainModel(dataset, options){
+  options = options || {};
+  const threshold = options.threshold != null ? options.threshold : MSD_DEFAULT_CLASSIFICATION_THRESHOLD;
+  const featureKeys = MSD_KNOWN_FEATURE_KEYS.filter(k => k !== 'epoch' && k !== 'price');
+  const { X: Xtr, y: ytr } = msdBuildFeatureMatrix(dataset.trainSet, featureKeys);
+  const { X: Xval, y: yval } = msdBuildFeatureMatrix(dataset.valSet, featureKeys);
+  const { X: Xte, y: yte } = msdBuildFeatureMatrix(dataset.testSet, featureKeys);
+
+  if (Xtr.length < 10) return { error: 'Too few training samples (' + Xtr.length + ') to train meaningfully.', modelResults: [] };
+  if (Xval.length < 2 || Xte.length < 2) return { error: 'Too few validation (' + Xval.length + ') or test (' + Xte.length + ') samples to evaluate meaningfully.', modelResults: [] };
+
+  const combinedEvalX = Xval.concat(Xte);
+  const combinedEvalY = yval.concat(yte); // yte is accepted by pbXGBoost/etc but not used internally to compute scores — passed through only for signature consistency
+  const nVal = Xval.length;
+
+  const runners = [
+    { name: 'XGBoost', fn: pbXGBoost, opts: options.xgbOptions || {} },
+    { name: 'LightGBM', fn: pbLightGBM, opts: options.lgbOptions || {} },
+    { name: 'CatBoost', fn: pbCatBoost, opts: options.cbOptions || {} },
+  ];
+
+  const modelResults = runners.map(r => {
+    const result = r.fn(Xtr, ytr, combinedEvalX, combinedEvalY, r.opts);
+    const valScores = result.scores.slice(0, nVal);
+    const testScores = result.scores.slice(nVal);
+    return {
+      name: r.name,
+      valMetrics: pbMetrics(valScores, yval, threshold),
+      testMetrics: pbMetrics(testScores, yte, threshold),
+      featureImportance: result.imp,
+      // The ACTUAL hyperparameters this run used — stated defaults merged
+      // with any explicit override — not just "whatever the function
+      // happened to default to internally, now lost."
+      hyperparametersUsed: Object.assign({}, MSD_MODEL_DEFAULT_HYPERPARAMS[r.name], r.opts),
+    };
+  });
+
+  let bestIdx = 0;
+  modelResults.forEach((m, i) => { if (m.valMetrics.auc > modelResults[bestIdx].valMetrics.auc) bestIdx = i; });
+
+  return { error: null, modelResults, bestModelName: modelResults[bestIdx].name, featureKeys, threshold };
+}
+
+/**
+ * Records each model's TEST performance as a KnowledgeBase finding —
+ * additive: a NEW 'type' field distinguishes these from the existing
+ * statistical MI findings, which have no 'type' at all (treated as
+ * 'statistical_mi' implicitly). Every ranking/repeatability function that
+ * reads KnowledgeBase has been updated to filter on feature+mutualInformation
+ * presence specifically, so these new entries can't corrupt them.
+ */
+/**
+ * Records each model's TEST performance as a KnowledgeBase finding.
+ * Takes the FULL experiment record (not just its ID) so Lead Time and
+ * Feature Version can be denormalized directly onto the finding — per
+ * the audit, joining back through experimentId every time a finding is
+ * inspected is worse than storing what's already known at write time.
+ */
+async function msdRecordModelPerformance(experimentRecord, trainResult){
+  if (trainResult.error) return [];
+  const results = [];
+  for (const m of trainResult.modelResults) {
+    const finding = {
+      findingId: msdGenerateFindingId(),
+      experimentId: experimentRecord.experimentId,
+      type: 'model_performance',
+      modelName: m.name,
+      leadTime: experimentRecord.leadTime,
+      featureVersion: experimentRecord.featureVersion,
+      hyperparameters: m.hyperparametersUsed,
+      threshold: trainResult.threshold,
+      valAuc: m.valMetrics.auc, valF1: m.valMetrics.f1, valAccuracy: m.valMetrics.acc,
+      testAuc: m.testMetrics.auc, testF1: m.testMetrics.f1, testAccuracy: m.testMetrics.acc,
+      testPrecision: m.testMetrics.prec, testRecall: m.testMetrics.rec, testBrier: m.testMetrics.brier,
+      isBest: m.name === trainResult.bestModelName,
+      discoveredAt: Date.now(),
+    };
+    const writeResult = await msdWriteFinding(finding);
+    results.push({ finding, writeResult });
+  }
+  return results;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Market State Discovery Engine — Automated Lead-Time Discovery
+// ══════════════════════════════════════════════════════════════════════
+// Replaces the manual "type one Lead Time, run, repeat" workflow. Reuses
+// msdRunExperiment, msdRunStatisticalDiscovery, and msdTrainModel
+// verbatim for each candidate Lead Time — this is orchestration, not a
+// second implementation of any of those three.
+//
+// Ranks by the best model's TEST AUC across Lead Times. This is
+// deliberately a DIFFERENT ranking from msdComputeLeadTimeRanking (which
+// ranks by Mutual Information — a statistical association measure).
+// Trained-model predictive accuracy and raw statistical association are
+// not the same question, and conflating them under one ranking would
+// blur a real distinction rather than clarify it.
+
+/**
+ * Runs one full experiment -> discovery -> training cycle per candidate
+ * Lead Time. Each Lead Time gets its own Experiment record (so every
+ * individual run remains independently reproducible via Task 1's
+ * frozen-ID mechanism) — the sweep itself is not a new architectural
+ * primitive, just a loop over the existing single-experiment pipeline.
+ */
+async function msdRunLeadTimeSweep(baseConfig, leadTimes, options){
+  options = options || {};
+  const results = [];
+  for (const leadTime of leadTimes) {
+    const config = Object.assign({}, baseConfig, { leadTime });
+    const experimentResult = await msdRunExperiment(config);
+    if (!experimentResult.writeResult.ok) {
+      results.push({ leadTime, experimentId: experimentResult.experimentId, error: 'Failed to write experiment record: ' + experimentResult.writeResult.error });
+      continue;
+    }
+    const discovery = msdRunStatisticalDiscovery(experimentResult.dataset, { randomSeed: config.randomSeed, minSampleCount: options.minSampleCount });
+    const trainResult = msdTrainModel(experimentResult.dataset, options.trainOptions);
+
+    if (trainResult.error) {
+      results.push({ leadTime, experimentId: experimentResult.experimentId, sampleCount: discovery.sampleStats.totalCount, readyForTraining: discovery.readyForTraining, error: trainResult.error });
+      continue;
+    }
+    const best = trainResult.modelResults.find(m => m.name === trainResult.bestModelName);
+    results.push({
+      leadTime,
+      experimentId: experimentResult.experimentId,
+      sampleCount: discovery.sampleStats.totalCount,
+      positiveRate: discovery.sampleStats.positiveRate,
+      readyForTraining: discovery.readyForTraining,
+      bestModelName: trainResult.bestModelName,
+      bestModelTestMetrics: best.testMetrics,
+      allModelResults: trainResult.modelResults,
+      error: null,
+    });
+  }
+
+  const rankable = results.filter(r => !r.error && r.bestModelTestMetrics != null);
+  rankable.sort((a, b) => b.bestModelTestMetrics.auc - a.bestModelTestMetrics.auc);
+  const optimalLeadTime = rankable.length ? rankable[0].leadTime : null;
+
+  return { results, optimalLeadTime };
+}
+
+/** Records each successfully-trained Lead Time's best-model result as a distinct, permanent KnowledgeBase finding — type: 'lead_time_discovery', separate from both statistical MI findings and per-model performance findings. */
+async function msdRecordLeadTimeSweepResults(sweepResult){
+  const written = [];
+  for (const r of sweepResult.results) {
+    if (r.error || !r.bestModelTestMetrics) continue;
+    const finding = {
+      findingId: msdGenerateFindingId(),
+      experimentId: r.experimentId,
+      type: 'lead_time_discovery',
+      leadTime: r.leadTime,
+      bestModelName: r.bestModelName,
+      testAuc: r.bestModelTestMetrics.auc,
+      testF1: r.bestModelTestMetrics.f1,
+      testBrier: r.bestModelTestMetrics.brier,
+      isOptimal: r.leadTime === sweepResult.optimalLeadTime,
+      discoveredAt: Date.now(),
+    };
+    const writeResult = await msdWriteFinding(finding);
+    written.push({ finding, writeResult });
+  }
+  return written;
+}
+
+/** Ranks Lead-Time sweep findings by trained-model test AUC — distinct from msdComputeLeadTimeRanking (statistical MI-based). Derived on demand, never persisted separately. */
+function msdComputeLeadTimeDiscoveryRanking(findings){
+  return findings.filter(f => f.type === 'lead_time_discovery').slice().sort((a, b) => b.testAuc - a.testAuc);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Market State Discovery Engine — Pre-ML Validation Suite
+// ══════════════════════════════════════════════════════════════════════
+// Everything in this section is read-only diagnostic tooling, built
+// specifically to answer "should I trust this before training a model,"
+// not to change any upstream behavior. Nothing here writes to a
+// permanent store except where explicitly noted (the reproducibility
+// stress test and random-chance benchmark write nothing at all).
+
+/**
+ * Dataset Validator — runs every check requested before trusting an
+ * Experiment Dataset Builder result: totals, class balance, Lead Time
+ * distribution, feature-version consistency, duplicate Snapshot IDs, and
+ * data leakage (chronological ordering across the train/val/test split —
+ * leakage here specifically means a later split containing an EARLIER
+ * timestamp than an earlier split, which would let future information
+ * reach training).
+ */
+function msdValidateDataset(dataset, config){
+  const allSnapshots = dataset.trainSet.concat(dataset.valSet, dataset.testSet);
+  const checks = [];
+
+  const totalObservations = allSnapshots.length;
+  checks.push({ name: 'Total Observations', value: totalObservations, ok: totalObservations > 0 });
+
+  const positiveCount = allSnapshots.filter(s => s.outcome === 'positive').length;
+  const negativeCount = allSnapshots.filter(s => s.outcome === 'negative').length;
+  checks.push({ name: 'Positive Samples', value: positiveCount, ok: positiveCount > 0 });
+  checks.push({ name: 'Negative Samples', value: negativeCount, ok: negativeCount > 0 });
+
+  const ratio = positiveCount > 0 ? negativeCount / positiveCount : null;
+  const expectedRatio = config.samplingRatio;
+  // Tolerant, not exact — the actual ratio depends on how many negatives
+  // were AVAILABLE to sample, which can fall short of the target.
+  const ratioOk = ratio != null && expectedRatio != null && Math.abs(ratio - expectedRatio) <= expectedRatio * 0.5 + 0.5;
+  checks.push({ name: 'Positive:Negative Ratio', value: ratio, expected: expectedRatio, ok: ratioOk });
+
+  const leadTimeDist = msdBucketBy(allSnapshots.filter(s => s.outcome === 'positive'), s => s.leadTime);
+  checks.push({ name: 'Lead Time Distribution', value: leadTimeDist, ok: Object.keys(leadTimeDist).length > 0 });
+
+  const versions = new Set(allSnapshots.map(s => s.featureVersion));
+  const versionOk = versions.size <= 1 && (versions.size === 0 || versions.has(config.featureVersion));
+  checks.push({ name: 'Feature Version Consistency', value: Array.from(versions), ok: versionOk });
+
+  const seen = new Set();
+  let duplicateCount = 0;
+  allSnapshots.forEach(s => { if (seen.has(s.snapshotId)) duplicateCount++; else seen.add(s.snapshotId); });
+  checks.push({ name: 'No Duplicated Snapshots', value: duplicateCount, ok: duplicateCount === 0 });
+
+  const maxTrainTs = dataset.trainSet.length ? Math.max(...dataset.trainSet.map(s => s.timestamp)) : -Infinity;
+  const minValTs   = dataset.valSet.length   ? Math.min(...dataset.valSet.map(s => s.timestamp))   : Infinity;
+  const maxValTs   = dataset.valSet.length   ? Math.max(...dataset.valSet.map(s => s.timestamp))   : -Infinity;
+  const minTestTs  = dataset.testSet.length  ? Math.min(...dataset.testSet.map(s => s.timestamp))  : Infinity;
+  const noLeakage = maxTrainTs <= minValTs && maxValTs <= minTestTs;
+  checks.push({ name: 'No Data Leakage (chronological order across splits)', value: { maxTrainTs, minValTs, maxValTs, minTestTs }, ok: noLeakage });
+
+  checks.push({
+    name: 'Train/Val/Test Split',
+    value: totalObservations > 0 ? { train: dataset.trainSet.length / totalObservations, val: dataset.valSet.length / totalObservations, test: dataset.testSet.length / totalObservations } : null,
+    ok: dataset.trainSet.length > 0,
+  });
+
+  return { checks, allOk: checks.every(c => c.ok) };
+}
+
+/**
+ * Reproducibility Stress Test — builds the SAME dataset and runs the
+ * SAME Statistical Discovery Engine pass, `repeatCount` times, from the
+ * SAME source data and config, and confirms every run is byte-identical.
+ * Any inconsistency here means something upstream isn't as deterministic
+ * as it needs to be, and should be investigated before trusting anything
+ * downstream — never silently tolerated.
+ */
+function msdStressTestReproducibility(allStates, config, repeatCount){
+  repeatCount = repeatCount || 3;
+  const runs = [];
+  for (let i = 0; i < repeatCount; i++) {
+    const dataset = msdBuildExperimentDataset(allStates, config);
+    const discovery = msdRunStatisticalDiscovery(dataset, { randomSeed: config.randomSeed });
+    const featureRanking = msdComputeFeatureRanking(discovery.featureReports.map(r => ({ feature: r.feature, mutualInformation: r.mutualInformation ?? -1, leadTime: config.leadTime })));
+    runs.push({ datasetJson: JSON.stringify(dataset), discoveryJson: JSON.stringify(discovery), rankingJson: JSON.stringify(featureRanking) });
+  }
+  return {
+    repeatCount,
+    datasetsIdentical: runs.every(r => r.datasetJson === runs[0].datasetJson),
+    discoveriesIdentical: runs.every(r => r.discoveryJson === runs[0].discoveryJson),
+    rankingsIdentical: runs.every(r => r.rankingJson === runs[0].rankingJson),
+  };
+}
+
+/**
+ * Extends an already-computed discovery result with Feature Completeness,
+ * Missing-value percentage, Feature Variance, and a Max |Correlation|
+ * summary against every other feature — reusing the existing Feature
+ * Distribution / Correlation Explorer computations rather than
+ * reimplementing them, so there is exactly one source of truth for each.
+ */
+function msdExtendDiscoveryWithFeatureDiagnostics(discovery, allSnapshots){
+  const completeness = msdComputeFeatureCompleteness(allSnapshots);
+  const correlationMatrix = msdComputeCorrelationMatrix(allSnapshots, 8);
+  discovery.featureReports.forEach(report => {
+    const key = report.feature;
+    report.completeness = completeness[key] != null ? completeness[key] : null;
+    report.missingPct = completeness[key] != null ? (1 - completeness[key]) * 100 : null;
+    const values = msdValidValues(allSnapshots, key);
+    const stats = msdBasicStats(values);
+    report.variance = stats.std != null ? stats.std * stats.std : null;
+    const related = correlationMatrix.filter(r => r.featureA === key || r.featureB === key);
+    report.maxAbsCorrelation = related.length ? Math.max(...related.map(r => Math.abs(r.pearson ?? 0))) : null;
+  });
+  return discovery;
+}
+
+/**
+ * Negative Dataset Audit — negative sampling was wired in AFTER positive
+ * sampling, so this specifically checks the things that could go wrong
+ * with a later, separately-added mechanism: do negatives genuinely fall
+ * outside every positive event's window (reconstructed here from stored
+ * positive snapshots' own epochs, per event — the ground truth for what
+ * a window actually covered), are they spread over a meaningful span of
+ * time rather than clustered in one narrow slice, and is their feature
+ * spread (std dev) comparable to positives rather than suspiciously flat.
+ */
+async function msdAuditNegativeSampling(){
+  const allStates = await msdGetAllMarketStates();
+  const positives = allStates.filter(s => s.outcome === 'positive');
+  const negatives = allStates.filter(s => s.outcome === 'negative');
+
+  const eventWindows = {};
+  positives.forEach(p => {
+    if (p.eventId == null) return;
+    if (!eventWindows[p.eventId]) eventWindows[p.eventId] = { min: Infinity, max: -Infinity };
+    eventWindows[p.eventId].min = Math.min(eventWindows[p.eventId].min, p.epoch);
+    eventWindows[p.eventId].max = Math.max(eventWindows[p.eventId].max, p.epoch);
+  });
+  const windows = Object.values(eventWindows);
+  const violatingNegatives = negatives.filter(n => windows.some(w => n.epoch >= w.min && n.epoch <= w.max));
+
+  const diversityChecks = ['adx', 'rsi', 'atr', 'macd'].map(key => {
+    const negValues = msdValidValues(negatives, key);
+    const posValues = msdValidValues(positives, key);
+    const negStats = msdBasicStats(negValues);
+    const posStats = msdBasicStats(posValues);
+    // A negative std dev much smaller than the positive one suggests
+    // negatives are suspiciously homogeneous (clustered in one regime)
+    // rather than representative of diverse market conditions.
+    const diverseEnough = negStats.std != null && posStats.std != null && posStats.std > 0
+      ? (negStats.std / posStats.std) > 0.3
+      : null;
+    return { feature: key, negativeCount: negValues.length, negativeStd: negStats.std, positiveStd: posStats.std, diverseEnough };
+  });
+
+  const negEpochs = negatives.map(n => n.epoch);
+  const epochSpread = negEpochs.length ? Math.max(...negEpochs) - Math.min(...negEpochs) : 0;
+
+  return {
+    totalPositives: positives.length,
+    totalNegatives: negatives.length,
+    classBalance: positives.length > 0 ? negatives.length / positives.length : null,
+    violatingWindowCount: violatingNegatives.length, // MUST be 0 — any nonzero value means a real bug
+    violatingSnapshotIds: violatingNegatives.map(n => n.snapshotId),
+    diversityChecks,
+    epochSpread,
+  };
+}
+
+/**
+ * Knowledge Base Repeatability — groups every finding by feature+LeadTime
+ * and reports how consistent the Mutual Information score has been
+ * across however many separate experiments discovered it. A feature/lead
+ * time combination that shows up with wildly different MI values across
+ * experiments is more likely noise than a genuine, repeatable pattern —
+ * only the latter should influence future model design.
+ */
+async function msdValidateKnowledgeBaseRepeatability(){
+  const findings = (await msdGetAllFindings()).filter(f => f.feature != null && f.mutualInformation != null);
+  const grouped = {};
+  findings.forEach(f => {
+    const key = f.feature + '|' + f.leadTime;
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(f.mutualInformation);
+  });
+  return Object.entries(grouped).map(([key, mis]) => {
+    const [feature, leadTime] = key.split('|');
+    const stats = msdBasicStats(mis);
+    return {
+      feature, leadTime, occurrences: mis.length,
+      meanMi: stats.mean, stdMi: stats.std,
+      // "repeatable" needs at least 2 independent observations to say anything at all,
+      // and a spread meaningfully smaller than the mean signal itself.
+      repeatable: mis.length > 1 && stats.std != null && stats.mean > 0 && stats.std < stats.mean * 0.5,
+    };
+  }).sort((a, b) => b.meanMi - a.meanMi);
+}
+
+/**
+ * Benchmark Against Random Chance — a permutation test. Shuffles the
+ * outcome labels (via the seeded RNG, never Math.random) `permutations`
+ * times, recomputing the feature-outcome MI against each shuffled
+ * version, and reports what fraction of those RANDOM shuffles scored as
+ * high or higher than the REAL, unshuffled MI. A low fraction (e.g. <5%)
+ * means the observed signal is unlikely to be chance; a high fraction
+ * means the "signal" is statistically indistinguishable from noise —
+ * in which case the data needs improving, not the model.
+ */
+function msdBenchmarkAgainstRandomChance(values, outcomes, randomSeed, permutations, binCount){
+  permutations = permutations || 100;
+  const realMi = msdFeatureOutcomeMI(values, outcomes, binCount || 8);
+  if (realMi == null) return null;
+  const rng = msdSeededRandom(randomSeed);
+  const shuffledMis = [];
+  for (let p = 0; p < permutations; p++) {
+    const shuffledOutcomes = msdSeededShuffle(outcomes, rng);
+    const mi = msdFeatureOutcomeMI(values, shuffledOutcomes, binCount || 8);
+    if (mi != null) shuffledMis.push(mi);
+  }
+  if (!shuffledMis.length) return { realMi, shuffledMeanMi: null, pValue: null, permutations: 0, significant: null };
+  const countGreaterOrEqual = shuffledMis.filter(m => m >= realMi).length;
+  const pValue = countGreaterOrEqual / shuffledMis.length;
+  const shuffledMeanMi = shuffledMis.reduce((a, b) => a + b, 0) / shuffledMis.length;
+  return { realMi, shuffledMeanMi, pValue, permutations: shuffledMis.length, significant: pValue < 0.05 };
+}
+
+
 async function msdGetSnapshotsForEvent(eventId){
   const db = await msdOpenStateDatabase();
   return new Promise((resolve) => {
@@ -4845,6 +6567,579 @@ async function msdInspectorRefresh(){
   }
   if (statusEl) statusEl.textContent = 'Found ' + Object.keys(snapshot).length + ' fields.';
   body.innerHTML = Object.keys(snapshot).sort().map(key => `<tr><td class="l">${key}</td><td class="l">${JSON.stringify(snapshot[key])}</td></tr>`).join('');
+}
+
+/** Feature Distribution Explorer page. */
+async function msdDistributionRefresh(){
+  const statusEl = $("msdDistributionStatus");
+  if (statusEl) statusEl.textContent = 'Loading…';
+  let allStates;
+  try { allStates = await msdGetAllMarketStates(); }
+  catch (e) { if (statusEl) statusEl.textContent = 'Error: ' + e.message; return; }
+  if (statusEl) statusEl.textContent = 'Last refreshed ' + new Date().toLocaleTimeString();
+
+  const reports = msdComputeAllFeatureDistributions(allStates, 10);
+  window._msdLastDistributionReports = reports; // read by msdShowHistogram, avoids recomputing on every click
+  const body = $("msdDistributionBody");
+  if (!body) return;
+  if (!reports.length) { body.innerHTML = '<tr><td colspan="9" class="sig-empty">No data yet.</td></tr>'; return; }
+  const fmt = (v, d) => v == null ? '—' : v.toFixed(d == null ? 2 : d);
+  body.innerHTML = reports.map(r => `<tr style="cursor:pointer" onclick="msdShowHistogram('${r.feature}')">
+    <td class="l">${r.feature}</td>
+    <td>${fmt(r.overall.mean)}</td><td>${fmt(r.overall.median)}</td><td>${fmt(r.overall.std)}</td>
+    <td>${fmt(r.overall.min)}</td><td>${fmt(r.overall.max)}</td>
+    <td>${fmt(r.positive.mean)}</td><td>${fmt(r.negative.mean)}</td>
+    <td class="${r.cohensD != null && Math.abs(r.cohensD) >= 0.5 ? 'cell-pos' : ''}">${fmt(r.cohensD, 3)}</td>
+  </tr>`).join('');
+}
+
+/** Click handler for a distribution row — shows that feature's histogram. */
+function msdShowHistogram(feature){
+  const report = (window._msdLastDistributionReports || []).find(r => r.feature === feature);
+  const card = $("msdHistogramCard");
+  const title = $("msdHistogramTitle");
+  const body = $("msdHistogramBody");
+  if (!card || !body || !report) return;
+  card.style.display = 'block';
+  if (title) title.textContent = feature;
+  const { bins, counts } = report.histogram;
+  if (!counts.length) { body.innerHTML = '<tr><td colspan="2" class="sig-empty">No data.</td></tr>'; return; }
+  const maxCount = Math.max(...counts) || 1;
+  body.innerHTML = counts.map((count, i) => {
+    const barWidth = Math.round((count / maxCount) * 100);
+    return `<tr><td class="l">${bins[i].toFixed(2)} – ${bins[i+1].toFixed(2)}</td><td><div style="display:flex;align-items:center;gap:6px"><div style="background:var(--accent,#56b6ff);height:10px;width:${barWidth}%;min-width:2px"></div><span>${count}</span></div></td></tr>`;
+  }).join('');
+}
+
+/** Correlation Explorer page. */
+async function msdCorrelationRefresh(){
+  const statusEl = $("msdCorrelationStatus");
+  if (statusEl) statusEl.textContent = 'Loading…';
+  let allStates;
+  try { allStates = await msdGetAllMarketStates(); }
+  catch (e) { if (statusEl) statusEl.textContent = 'Error: ' + e.message; return; }
+  if (statusEl) statusEl.textContent = 'Last refreshed ' + new Date().toLocaleTimeString();
+
+  const matrix = msdComputeCorrelationMatrix(allStates, 8);
+  const body = $("msdCorrelationBody");
+  if (!body) return;
+  if (!matrix.length) { body.innerHTML = '<tr><td colspan="6" class="sig-empty">No data yet.</td></tr>'; return; }
+  const sorted = matrix.slice().sort((a, b) => Math.abs(b.pearson ?? 0) - Math.abs(a.pearson ?? 0));
+  const fmt = (v, d) => v == null ? '—' : v.toFixed(d == null ? 3 : d);
+  body.innerHTML = sorted.map(r => `<tr>
+    <td class="l">${r.featureA}</td><td class="l">${r.featureB}</td>
+    <td class="${r.pearson != null && Math.abs(r.pearson) >= 0.8 ? 'cell-warn' : ''}">${fmt(r.pearson)}</td>
+    <td>${fmt(r.spearman)}</td><td>${fmt(r.mutualInformation)}</td><td>${r.pairCount}</td>
+  </tr>`).join('');
+}
+
+// ── Market State Search Tool ────────────────────────────────────────────
+let msdSearchConditionCount = 0;
+
+function msdSearchAddCondition(){
+  const container = $("msdSearchConditions");
+  if (!container) return;
+  const idx = msdSearchConditionCount++;
+  const row = document.createElement('div');
+  row.id = 'msdSearchCond' + idx;
+  row.style.cssText = 'display:flex;gap:6px;margin-bottom:6px;align-items:center';
+  row.innerHTML = `
+    <input type="text" placeholder="feature (e.g. adx)" id="msdCondFeature${idx}" style="width:130px">
+    <select id="msdCondOp${idx}">
+      <option value=">">&gt;</option><option value=">=">&gt;=</option>
+      <option value="<">&lt;</option><option value="<=">&lt;=</option>
+      <option value="=">=</option><option value="between">between</option>
+    </select>
+    <input type="text" placeholder="value (or feature name)" id="msdCondValue${idx}" style="width:150px">
+    <input type="text" placeholder="value2 (only for 'between')" id="msdCondValue2_${idx}" style="width:150px">
+    <button class="gc-btn" onclick="document.getElementById('msdSearchCond${idx}').remove()">✕</button>
+  `;
+  container.appendChild(row);
+}
+
+/** Reads every condition row currently in the builder into the {feature, op, value|compareFeature} shape msdEvaluateCondition expects. */
+function msdSearchReadConditions(){
+  const container = $("msdSearchConditions");
+  if (!container) return [];
+  const conditions = [];
+  Array.from(container.children).forEach(row => {
+    const idx = row.id.replace('msdSearchCond', '');
+    const feature = $('msdCondFeature' + idx).value.trim();
+    const op = $('msdCondOp' + idx).value;
+    const rawValue = $('msdCondValue' + idx).value.trim();
+    if (!feature || !rawValue) return;
+    if (op === 'between') {
+      const rawValue2 = $('msdCondValue2_' + idx).value.trim();
+      const lo = parseFloat(rawValue), hi = parseFloat(rawValue2);
+      if (Number.isFinite(lo) && Number.isFinite(hi)) conditions.push({ feature, op: 'between', value: [lo, hi] });
+      return;
+    }
+    const asNumber = parseFloat(rawValue);
+    if (Number.isFinite(asNumber) && String(asNumber) === rawValue) conditions.push({ feature, op, value: asNumber });
+    else conditions.push({ feature, op, compareFeature: rawValue }); // not a plain number -> treat as another feature's name (e.g. MACD > Signal)
+  });
+  return conditions;
+}
+
+async function msdSearchRun(){
+  const statusEl = $("msdSearchStatus");
+  const conditions = msdSearchReadConditions();
+  if (!conditions.length) { if (statusEl) statusEl.textContent = 'Add at least one valid condition first.'; return; }
+  if (statusEl) statusEl.textContent = 'Searching…';
+
+  let allStates, allEvents;
+  try {
+    [allStates, allEvents] = await Promise.all([msdGetAllMarketStates(), msdGetAllEvents()]);
+  } catch (e) { if (statusEl) statusEl.textContent = 'Error: ' + e.message; return; }
+
+  const result = msdSearchMarketStates(allStates, allEvents, conditions, 20);
+  if (statusEl) statusEl.textContent = conditions.length + ' condition(s) applied.';
+
+  const setTxt = (id, v) => { const e = $(id); if (e) e.textContent = v; };
+  setTxt('msdSearchMatchCount', result.matchCount);
+  setTxt('msdSearchWinRate', result.winRate != null ? (result.winRate * 100).toFixed(1) + '%' : '—');
+
+  function renderDist(id, dict, emptyMsg){
+    const body = $(id);
+    if (!body) return;
+    const keys = Object.keys(dict).sort((a, b) => Number(a) - Number(b));
+    body.innerHTML = keys.length
+      ? keys.map(k => `<tr><td class="l">${k}</td><td>${dict[k]}</td></tr>`).join('')
+      : `<tr><td colspan="2" class="sig-empty">${emptyMsg}</td></tr>`;
+  }
+  renderDist('msdSearchRunLengthBody', result.runLengthDist, 'No matches.');
+  renderDist('msdSearchLeadTimeBody', result.leadTimeDist, 'No matches.');
+
+  const examplesBody = $("msdSearchExamplesBody");
+  if (examplesBody) {
+    examplesBody.innerHTML = result.examples.length
+      ? result.examples.map(s => `<tr>
+          <td class="l"><a href="#" onclick="msdOpenSnapshotInspector('${s.snapshotId}');return false;">${s.snapshotId}</a></td>
+          <td class="l">${s.outcome}</td><td>${s.leadTime ?? '—'}</td>
+        </tr>`).join('')
+      : '<tr><td colspan="3" class="sig-empty">No matches.</td></tr>';
+  }
+}
+
+/** Reads the Research Configuration form, runs the experiment, shows the result, and refreshes history. */
+async function msdRunExperimentUi(){
+  const statusEl = $("msdExperimentStatus");
+  const getVal = id => { const e = $(id); return e ? e.value : ''; };
+
+  const featureVersion = getVal('msdExpFeatureVersion').trim() || 'v1';
+  const leadTimeRaw = getVal('msdExpLeadTime').trim();
+  const leadTime = leadTimeRaw.toLowerCase() === 'all' || leadTimeRaw === '' ? 'all' : parseInt(leadTimeRaw, 10);
+  const samplingRatio = parseFloat(getVal('msdExpSamplingRatio')) || 1;
+  const randomSeed = parseInt(getVal('msdExpRandomSeed'), 10) || 0;
+  const trainingSplit = parseFloat(getVal('msdExpTrainingSplit')) || 0.7;
+  const validationSplit = parseFloat(getVal('msdExpValidationSplit')) || 0.5;
+
+  if (leadTime !== 'all' && !Number.isFinite(leadTime)) {
+    if (statusEl) statusEl.textContent = 'Lead Time must be "all" or a whole number.';
+    return;
+  }
+  if (trainingSplit <= 0 || trainingSplit >= 1) {
+    if (statusEl) statusEl.textContent = 'Training Split must be between 0 and 1 (exclusive).';
+    return;
+  }
+  if (validationSplit <= 0 || validationSplit >= 1) {
+    if (statusEl) statusEl.textContent = 'Validation Split must be between 0 and 1 (exclusive).';
+    return;
+  }
+
+  if (statusEl) statusEl.textContent = 'Running…';
+  let result;
+  try {
+    result = await msdRunExperiment({ featureVersion, leadTime, samplingRatio, randomSeed, trainingSplit, validationSplit });
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Error: ' + e.message;
+    return;
+  }
+
+  if (!result.writeResult.ok) {
+    if (statusEl) statusEl.textContent = 'Dataset built, but the Experiment Record failed to save: ' + result.writeResult.error;
+  } else {
+    if (statusEl) statusEl.textContent = 'Experiment ' + result.experimentId + ' recorded.';
+  }
+
+  const resultCard = $("msdExperimentResultCard");
+  if (resultCard) resultCard.style.display = 'block';
+  const setTxt = (id, v) => { const e = $(id); if (e) e.textContent = v; };
+  setTxt('msdExpTrainCount', result.dataset.trainSet.length);
+  setTxt('msdExpValCount', result.dataset.valSet.length);
+  setTxt('msdExpTestCount', result.dataset.testSet.length);
+  setTxt('msdExpPositiveCount', result.dataset.meta.positiveCount);
+  setTxt('msdExpNegativeCount', result.dataset.meta.negativeSampledCount);
+
+  // Statistical Discovery Engine — runs on every experiment's dataset
+  // before training would proceed. Displays the gate result and the
+  // per-feature statistics, then permanently records whatever clears the
+  // notable threshold into KnowledgeBase.
+  const discovery = msdRunStatisticalDiscovery(result.dataset, { randomSeed: result.record.randomSeed });
+  const allExperimentSnapshots = result.dataset.trainSet.concat(result.dataset.valSet, result.dataset.testSet);
+  msdExtendDiscoveryWithFeatureDiagnostics(discovery, allExperimentSnapshots);
+  msdRenderDiscoveryResult(discovery);
+  const recordedFindings = await msdRecordNotableFindings(result.experimentId, result.record.leadTime, discovery);
+  if (statusEl) statusEl.textContent += ' — ' + recordedFindings.length + ' notable finding(s) recorded to KnowledgeBase.';
+
+  // Dataset Validator — runs automatically on every experiment, surfaced on the Research Validation Suite page.
+  const datasetValidation = msdValidateDataset(result.dataset, result.record);
+  window._msdLastDatasetValidation = datasetValidation;
+
+  // Stored for the Research Validation Suite page — reproducibility
+  // stress-testing and the random-chance benchmark both need the exact
+  // config and dataset this experiment was actually run with.
+  window._msdLastExperiment = { config: { featureVersion, leadTime, samplingRatio, randomSeed, trainingSplit, validationSplit }, result, discovery };
+
+  // A fresh experiment invalidates any previously-trained model results for the OLD dataset — hide until retrained.
+  const mlCard = $("msdMlCard");
+  if (mlCard) mlCard.style.display = 'none';
+
+  await msdExperimentHistoryRefresh();
+}
+
+/** Trains all three tree approximations on the latest experiment's dataset, per the locked Statistical Discovery Engine -> Machine Learning -> KnowledgeBase chain. */
+async function msdTrainModelUi(){
+  const statusEl = $("msdMlStatus");
+  const last = window._msdLastExperiment;
+  if (!last) { if (statusEl) statusEl.textContent = 'Run an experiment first.'; return; }
+  if (statusEl) statusEl.textContent = 'Training XGBoost, LightGBM, CatBoost…';
+
+  const trainResult = msdTrainModel(last.result.dataset);
+  const mlCard = $("msdMlCard");
+  if (mlCard) mlCard.style.display = 'block';
+
+  if (trainResult.error) {
+    if (statusEl) statusEl.textContent = trainResult.error;
+    const body = $("msdMlResultsBody");
+    if (body) body.innerHTML = '<tr><td colspan="6" class="sig-empty">' + trainResult.error + '</td></tr>';
+    return;
+  }
+
+  const body = $("msdMlResultsBody");
+  if (body) {
+    const fmt = v => v == null ? '—' : v.toFixed(3);
+    body.innerHTML = trainResult.modelResults.map(m => `<tr${m.name === trainResult.bestModelName ? ' style="background:rgba(86,182,255,0.08)"' : ''}>
+      <td class="l">${m.name}${m.name === trainResult.bestModelName ? ' ⭐' : ''}</td>
+      <td>${fmt(m.valMetrics.auc)}</td><td>${fmt(m.valMetrics.f1)}</td>
+      <td>${fmt(m.testMetrics.auc)}</td><td>${fmt(m.testMetrics.f1)}</td><td>${fmt(m.testMetrics.acc)}</td>
+    </tr>`).join('');
+  }
+
+  const recorded = await msdRecordModelPerformance(last.result.record, trainResult);
+  if (statusEl) statusEl.textContent = 'Best: ' + trainResult.bestModelName + ' — ' + recorded.length + ' result(s) recorded to KnowledgeBase.';
+}
+
+/** Reads the Lead Time list from the form, runs the automated sweep, records results, and renders the comparison table. */
+async function msdRunLeadTimeSweepUi(){
+  const statusEl = $("msdSweepStatus");
+  const last = window._msdLastExperiment;
+  if (!last) { if (statusEl) statusEl.textContent = 'Run at least one experiment first (for a base Feature Version/Sampling Ratio/Seed/Split to sweep with).'; return; }
+
+  const raw = ($("msdSweepLeadTimes") || { value: '' }).value;
+  const leadTimes = raw.split(',').map(s => parseInt(s.trim(), 10)).filter(n => Number.isFinite(n));
+  if (!leadTimes.length) { if (statusEl) statusEl.textContent = 'Enter at least one valid Lead Time.'; return; }
+
+  if (statusEl) statusEl.textContent = 'Running ' + leadTimes.length + ' experiments (this trains up to 3 models each)…';
+  const baseConfig = last.config;
+  const sweep = await msdRunLeadTimeSweep(baseConfig, leadTimes, { trainOptions: {} });
+
+  const body = $("msdSweepResultsBody");
+  if (body) {
+    body.innerHTML = sweep.results.map(r => {
+      if (r.error) return `<tr><td>${r.leadTime}</td><td colspan="5" class="cell-neg">${r.error}</td></tr>`;
+      return `<tr${r.leadTime === sweep.optimalLeadTime ? ' style="background:rgba(86,182,255,0.08)"' : ''}>
+        <td>${r.leadTime}</td><td>${r.sampleCount}</td><td class="l">${r.bestModelName}</td>
+        <td>${r.bestModelTestMetrics.auc.toFixed(3)}</td><td>${r.bestModelTestMetrics.brier != null ? r.bestModelTestMetrics.brier.toFixed(3) : '—'}</td>
+        <td>${r.leadTime === sweep.optimalLeadTime ? '⭐ Optimal' : '—'}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  const recorded = await msdRecordLeadTimeSweepResults(sweep);
+  if (statusEl) statusEl.textContent = 'Optimal Lead Time: ' + (sweep.optimalLeadTime ?? 'none found') + ' — ' + recorded.length + ' result(s) recorded to KnowledgeBase.';
+  await msdExperimentHistoryRefresh();
+}
+
+/** Renders the Statistical Discovery Engine's gate decision and per-feature statistics. */
+function msdRenderDiscoveryResult(discovery){
+  const card = $("msdDiscoveryCard");
+  if (card) card.style.display = 'block';
+  const gateEl = $("msdDiscoveryGate");
+  if (gateEl) {
+    gateEl.textContent = discovery.readyForTraining ? '✅ Ready for training' : '⛔ Not ready: ' + discovery.reasons.join('; ');
+    gateEl.className = discovery.readyForTraining ? 'em-val up' : 'em-val down';
+  }
+  const setTxt = (id, v) => { const e = $(id); if (e) e.textContent = v; };
+  setTxt('msdDiscoverySampleCount', discovery.sampleStats.totalCount);
+  setTxt('msdDiscoveryPositiveRate', discovery.sampleStats.positiveRate != null ? (discovery.sampleStats.positiveRate * 100).toFixed(1) + '%' : '—');
+  const ci = discovery.sampleStats.confidenceInterval;
+  setTxt('msdDiscoveryCI', ci.lower != null ? '[' + (ci.lower*100).toFixed(1) + '%, ' + (ci.upper*100).toFixed(1) + '%]' : '—');
+
+  const body = $("msdDiscoveryFeaturesBody");
+  if (body) {
+    if (!discovery.featureReports.length) {
+      body.innerHTML = '<tr><td colspan="8" class="sig-empty">No features to report.</td></tr>';
+    } else {
+      const fmt = (v, d) => v == null ? '—' : v.toFixed(d == null ? 3 : d);
+      body.innerHTML = discovery.featureReports.map(r => `<tr>
+        <td class="l">${r.feature}</td>
+        <td>${fmt(r.mutualInformation)}</td>
+        <td>${fmt(r.informationGain)}</td>
+        <td>${r.stability ? fmt(r.stability.stdDevMi) : '—'}</td>
+        <td>${r.completeness != null ? (r.completeness*100).toFixed(1)+'%' : '—'}</td>
+        <td class="${r.missingPct != null && r.missingPct > 10 ? 'cell-warn' : ''}">${r.missingPct != null ? r.missingPct.toFixed(1)+'%' : '—'}</td>
+        <td>${fmt(r.variance)}</td>
+        <td class="${r.maxAbsCorrelation != null && r.maxAbsCorrelation >= 0.8 ? 'cell-warn' : ''}">${fmt(r.maxAbsCorrelation)}</td>
+      </tr>`).join('');
+    }
+  }
+}
+
+/** Experiment History table — every experiment ever run, permanent and append-only. */
+async function msdExperimentHistoryRefresh(){
+  let experiments;
+  try { experiments = await msdGetAllExperiments(); }
+  catch (e) { return; }
+  const body = $("msdExperimentHistoryBody");
+  if (!body) return;
+  if (!experiments.length) { body.innerHTML = '<tr><td colspan="9" class="sig-empty">No experiments yet.</td></tr>'; return; }
+  const sorted = experiments.slice().sort((a, b) => b.date - a.date); // most recent first
+
+  // One genuine, on-demand join per experiment — never a stored/stale label.
+  const winners = await Promise.all(sorted.map(e => msdGetWinningModelForExperiment(e.experimentId)));
+
+  body.innerHTML = sorted.map((e, i) => {
+    const winner = winners[i];
+    const winnerCell = winner ? `${winner.modelName} (AUC ${winner.testAuc.toFixed(3)})` : '<span class="cell-mut">Not yet trained</span>';
+    return `<tr>
+    <td class="l">${e.experimentId}</td>
+    <td class="l">${e.featureVersion}</td>
+    <td>${e.leadTime}</td>
+    <td>${e.randomSeed}</td>
+    <td>${e.trainingSplit}</td>
+    <td>${e.trainCount}/${e.valCount}/${e.testCount}</td>
+    <td class="l">${winnerCell}</td>
+    <td class="l">${new Date(e.date).toLocaleString()}</td>
+    <td class="l"><a href="#" id="msdVerifyLink_${e.experimentId}" onclick="msdVerifyExperimentUi('${e.experimentId}');return false;">Verify</a></td>
+  </tr>`;
+  }).join('');
+}
+
+/** Runs msdVerifyExperimentReproducibility for one experiment (by ID, looked up fresh from the store) and updates just that row's Verify cell in place. */
+async function msdVerifyExperimentUi(experimentId){
+  const link = $("msdVerifyLink_" + experimentId);
+  if (link) link.textContent = 'Checking…';
+  const experiments = await msdGetAllExperiments();
+  const record = experiments.find(e => e.experimentId === experimentId);
+  if (!record) { if (link) link.textContent = 'Not found'; return; }
+  const result = await msdVerifyExperimentReproducibility(record);
+  if (link) {
+    link.textContent = result.reproducible ? '✅ Reproducible' : '⛔ ' + result.reason;
+    link.className = result.reproducible ? 'cell-pos' : 'cell-neg';
+  }
+}
+
+/** Knowledge Base page — Feature Ranking, Lead Time Ranking, and the full Historical Discoveries list, all derived fresh from the permanent KnowledgeBase store. */
+async function msdKnowledgeRefresh(){
+  const statusEl = $("msdKnowledgeStatus");
+  if (statusEl) statusEl.textContent = 'Loading…';
+  let findings;
+  try { findings = await msdGetAllFindings(); }
+  catch (e) { if (statusEl) statusEl.textContent = 'Error: ' + e.message; return; }
+  if (statusEl) statusEl.textContent = 'Last refreshed ' + new Date().toLocaleTimeString();
+
+  const fmt = (v, d) => v == null ? '—' : v.toFixed(d == null ? 3 : d);
+
+  const featureRankingBody = $("msdFeatureRankingBody");
+  if (featureRankingBody) {
+    const ranking = msdComputeFeatureRanking(findings);
+    featureRankingBody.innerHTML = ranking.length
+      ? ranking.map(f => `<tr><td class="l">${f.feature}</td><td>${fmt(f.mutualInformation)}</td><td>${f.leadTime}</td></tr>`).join('')
+      : '<tr><td colspan="3" class="sig-empty">No findings yet.</td></tr>';
+  }
+
+  const leadTimeRankingBody = $("msdLeadTimeRankingBody");
+  if (leadTimeRankingBody) {
+    const ranking = msdComputeLeadTimeRanking(findings);
+    leadTimeRankingBody.innerHTML = ranking.length
+      ? ranking.map(f => `<tr><td>${f.leadTime}</td><td>${fmt(f.mutualInformation)}</td><td class="l">${f.feature}</td></tr>`).join('')
+      : '<tr><td colspan="3" class="sig-empty">No findings yet.</td></tr>';
+  }
+
+  const historyBody = $("msdHistoricalDiscoveriesBody");
+  if (historyBody) {
+    const sorted = findings.slice().sort((a, b) => b.discoveredAt - a.discoveredAt);
+    historyBody.innerHTML = sorted.length
+      ? sorted.map(f => {
+          if (f.type === 'model_performance') {
+            return `<tr>
+              <td class="l">${f.experimentId}</td>
+              <td class="l">${f.modelName}${f.isBest ? ' ⭐' : ''}</td><td>${f.leadTime ?? '—'}</td>
+              <td>AUC ${fmt(f.testAuc)}</td><td>F1 ${fmt(f.testF1)}</td>
+              <td class="l">${new Date(f.discoveredAt).toLocaleString()}</td>
+            </tr>`;
+          }
+          if (f.type === 'lead_time_discovery') {
+            return `<tr>
+              <td class="l">${f.experimentId}</td>
+              <td class="l">Lead Time ${f.leadTime}${f.isOptimal ? ' ⭐ optimal' : ''} (${f.bestModelName})</td><td>${f.leadTime}</td>
+              <td>AUC ${fmt(f.testAuc)}</td><td>Brier ${fmt(f.testBrier)}</td>
+              <td class="l">${new Date(f.discoveredAt).toLocaleString()}</td>
+            </tr>`;
+          }
+          if (f.type === 'market_state_discovery') {
+            return `<tr>
+              <td class="l">—</td>
+              <td class="l">${f.clusterId} (k=${f.k})</td><td>—</td>
+              <td>${f.positiveRate != null ? (f.positiveRate*100).toFixed(1)+'% positive' : '—'}</td><td>n=${f.size}</td>
+              <td class="l">${new Date(f.discoveredAt).toLocaleString()}</td>
+            </tr>`;
+          }
+          return `<tr>
+            <td class="l">${f.experimentId}</td><td class="l">${f.feature}</td><td>${f.leadTime}</td>
+            <td>${fmt(f.mutualInformation)}</td><td>${fmt(f.stability)}</td>
+            <td class="l">${new Date(f.discoveredAt).toLocaleString()}</td>
+          </tr>`;
+        }).join('')
+      : '<tr><td colspan="6" class="sig-empty">No findings yet.</td></tr>';
+  }
+}
+
+/** Runs Market State clustering against the current full database, on demand — deliberately manual, since it's heavier than the always-fresh Feature/Lead Time rankings above it. */
+async function msdRunMarketStateClustering(){
+  const statusEl = $("msdClusterStatus");
+  const k = parseInt(($("msdClusterK") || { value: '4' }).value, 10) || 4;
+  const seed = parseInt(($("msdClusterSeed") || { value: '1' }).value, 10) || 1;
+  if (statusEl) statusEl.textContent = 'Clustering…';
+
+  let allStates;
+  try { allStates = await msdGetAllMarketStates(); }
+  catch (e) { if (statusEl) statusEl.textContent = 'Error: ' + e.message; return; }
+
+  const ranking = msdComputeMarketStateRanking(allStates, k, seed);
+  const body = $("msdClusterRankingBody");
+  if (ranking.error) {
+    if (statusEl) statusEl.textContent = ranking.error;
+    if (body) body.innerHTML = '<tr><td colspan="4" class="sig-empty">' + ranking.error + '</td></tr>';
+    return;
+  }
+  if (statusEl) statusEl.textContent = 'Clustered ' + ranking.usableSnapshotCount + ' snapshots into ' + ranking.clusters.length + ' Market States (' + ranking.iterations + ' iterations).';
+  if (body) {
+    body.innerHTML = ranking.clusters.map(c => `<tr>
+      <td class="l">${c.clusterId} (${c.snapshotIds.length} snapshots)</td>
+      <td>${c.size}</td>
+      <td class="${c.positiveRate != null && c.positiveRate >= 0.5 ? 'cell-pos' : 'cell-neg'}">${c.positiveRate != null ? (c.positiveRate*100).toFixed(1)+'%' : '—'}</td>
+      <td>${c.confidenceInterval.lower != null ? '[' + (c.confidenceInterval.lower*100).toFixed(1) + '%, ' + (c.confidenceInterval.upper*100).toFixed(1) + '%]' : '—'}</td>
+    </tr>`).join('');
+  }
+}
+
+/** Research Validation Suite page — shows the last experiment's Dataset Validation report; the other four tools are triggered manually. */
+function msdValidationSuiteRefresh(){
+  const body = $("msdValidationDatasetBody");
+  if (!body) return;
+  const validation = window._msdLastDatasetValidation;
+  if (!validation) { body.innerHTML = '<tr><td colspan="3" class="sig-empty">Run an experiment first.</td></tr>'; return; }
+  body.innerHTML = validation.checks.map(c => {
+    const displayValue = typeof c.value === 'object' && c.value !== null ? JSON.stringify(c.value) : (c.value == null ? '—' : String(c.value));
+    return `<tr><td class="l">${c.name}</td><td class="l">${displayValue}</td><td class="${c.ok ? 'cell-pos' : 'cell-neg'}">${c.ok ? '✅ OK' : '⛔ FAIL'}</td></tr>`;
+  }).join('');
+}
+
+/** Reproducibility Stress Test — re-runs the last experiment's exact config 5 times against the current database. */
+async function msdRunReproducibilityStressTest(){
+  const statusEl = $("msdStressTestStatus");
+  const last = window._msdLastExperiment;
+  if (!last) { if (statusEl) statusEl.textContent = 'Run an experiment first.'; return; }
+  if (statusEl) statusEl.textContent = 'Running…';
+  const allStates = await msdGetAllMarketStates();
+  const stress = msdStressTestReproducibility(allStates, last.config, 5);
+  const allIdentical = stress.datasetsIdentical && stress.discoveriesIdentical && stress.rankingsIdentical;
+  if (statusEl) {
+    statusEl.textContent = allIdentical
+      ? '✅ All 5 runs identical — datasets, discovery, and rankings.'
+      : '⛔ INCONSISTENCY DETECTED — datasets:' + stress.datasetsIdentical + ' discovery:' + stress.discoveriesIdentical + ' rankings:' + stress.rankingsIdentical + ' (investigate before trusting anything downstream)';
+    statusEl.className = allIdentical ? 'gc-sub cell-pos' : 'gc-sub cell-neg';
+  }
+}
+
+/** Negative Dataset Audit — checked against the current full database, since negative sampling's correctness is a database-wide property, not specific to one experiment. */
+async function msdRunNegativeAudit(){
+  const statusEl = $("msdNegAuditStatus");
+  if (statusEl) statusEl.textContent = 'Running…';
+  const audit = await msdAuditNegativeSampling();
+  if (statusEl) statusEl.textContent = 'Done.';
+
+  const resultsDiv = $("msdNegAuditResults");
+  if (resultsDiv) resultsDiv.style.display = 'block';
+  const setTxt = (id, v) => { const e = $(id); if (e) e.textContent = v; };
+  setTxt('msdNegAuditPos', audit.totalPositives);
+  setTxt('msdNegAuditNeg', audit.totalNegatives);
+  setTxt('msdNegAuditBalance', audit.classBalance != null ? audit.classBalance.toFixed(2) + ':1' : '—');
+  const violationsEl = $("msdNegAuditViolations");
+  if (violationsEl) {
+    violationsEl.textContent = audit.violatingWindowCount;
+    violationsEl.className = audit.violatingWindowCount === 0 ? 'em-val up' : 'em-val down';
+  }
+
+  const diversityBody = $("msdNegAuditDiversityBody");
+  if (diversityBody) {
+    diversityBody.innerHTML = audit.diversityChecks.map(d => `<tr>
+      <td class="l">${d.feature}</td>
+      <td>${d.negativeStd != null ? d.negativeStd.toFixed(3) : '—'}</td>
+      <td>${d.positiveStd != null ? d.positiveStd.toFixed(3) : '—'}</td>
+      <td class="${d.diverseEnough === false ? 'cell-neg' : d.diverseEnough === true ? 'cell-pos' : ''}">${d.diverseEnough == null ? '—' : d.diverseEnough ? '✅ Yes' : '⚠️ Suspiciously narrow'}</td>
+    </tr>`).join('');
+  }
+}
+
+/** Knowledge Base Repeatability Check. */
+async function msdRunKnowledgeRepeatabilityCheck(){
+  const statusEl = $("msdKbRepeatStatus");
+  if (statusEl) statusEl.textContent = 'Checking…';
+  const report = await msdValidateKnowledgeBaseRepeatability();
+  if (statusEl) statusEl.textContent = 'Checked ' + report.length + ' feature/lead-time combination(s).';
+  const body = $("msdKbRepeatBody");
+  if (!body) return;
+  if (!report.length) { body.innerHTML = '<tr><td colspan="6" class="sig-empty">No findings yet — run some experiments first.</td></tr>'; return; }
+  body.innerHTML = report.map(r => `<tr>
+    <td class="l">${r.feature}</td><td>${r.leadTime}</td><td>${r.occurrences}</td>
+    <td>${r.meanMi.toFixed(3)}</td><td>${r.stdMi != null ? r.stdMi.toFixed(3) : '—'}</td>
+    <td class="${r.repeatable ? 'cell-pos' : 'cell-mut'}">${r.occurrences < 2 ? 'Need more data' : r.repeatable ? '✅ Repeatable' : '⚠️ Inconsistent'}</td>
+  </tr>`).join('');
+}
+
+/** Benchmark Against Random Chance — runs a permutation test for every feature in the latest experiment's discovery. */
+async function msdRunRandomChanceBenchmark(){
+  const statusEl = $("msdBenchmarkStatus");
+  const last = window._msdLastExperiment;
+  if (!last) { if (statusEl) statusEl.textContent = 'Run an experiment first.'; return; }
+  if (statusEl) statusEl.textContent = 'Running 200 permutations per feature…';
+
+  const allSnapshots = last.result.dataset.trainSet.concat(last.result.dataset.valSet, last.result.dataset.testSet);
+  const outcomes = allSnapshots.map(s => s.outcome === 'positive' ? 1 : 0);
+  const rows = [];
+  last.discovery.featureReports.forEach(r => {
+    if (r.mutualInformation == null) return;
+    const raw = allSnapshots.map(s => s[r.feature]);
+    const validIdx = []; raw.forEach((v, i) => { if (v != null && Number.isFinite(v)) validIdx.push(i); });
+    if (validIdx.length < 10) return;
+    const values = validIdx.map(i => raw[i]);
+    const outs = validIdx.map(i => outcomes[i]);
+    const benchmark = msdBenchmarkAgainstRandomChance(values, outs, last.config.randomSeed, 200, 8);
+    if (benchmark) rows.push(Object.assign({ feature: r.feature }, benchmark));
+  });
+
+  if (statusEl) statusEl.textContent = 'Benchmarked ' + rows.length + ' feature(s).';
+  const body = $("msdBenchmarkBody");
+  if (!body) return;
+  if (!rows.length) { body.innerHTML = '<tr><td colspan="5" class="sig-empty">Nothing to benchmark.</td></tr>'; return; }
+  body.innerHTML = rows.sort((a, b) => a.pValue - b.pValue).map(r => `<tr>
+    <td class="l">${r.feature}</td><td>${r.realMi.toFixed(3)}</td><td>${r.shuffledMeanMi != null ? r.shuffledMeanMi.toFixed(3) : '—'}</td>
+    <td>${r.pValue != null ? r.pValue.toFixed(3) : '—'}</td>
+    <td class="${r.significant ? 'cell-pos' : 'cell-neg'}">${r.significant ? '✅ Beats chance' : '⚠️ Not distinguishable from chance'}</td>
+  </tr>`).join('');
 }
 
 // Build a compact full-indicator snapshot for one tick.
@@ -5542,8 +7837,8 @@ function startTfTimers(){
 }
 
 function showPage(which){
-  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot", aggression:"page-aggression", mtf:"page-mtf", njanja:"page-njanja", rfabot:"page-rfabot", msdexplorer:"page-msdexplorer", msdfeatures:"page-msdfeatures", msdevents:"page-msdevents", msdinspector:"page-msdinspector" };
-  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot", aggression:"navAggression", mtf:"navMtf", njanja:"navNjanja", rfabot:"navRfaBot", msdexplorer:"navMsdExplorer", msdfeatures:"navMsdFeatures", msdevents:"navMsdEvents", msdinspector:"navMsdInspector" };
+  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot", aggression:"page-aggression", mtf:"page-mtf", njanja:"page-njanja", rfabot:"page-rfabot", msdexplorer:"page-msdexplorer", msdfeatures:"page-msdfeatures", msdevents:"page-msdevents", msdinspector:"page-msdinspector", msddistribution:"page-msddistribution", msdcorrelation:"page-msdcorrelation", msdsearch:"page-msdsearch", msdexperiment:"page-msdexperiment", msdknowledge:"page-msdknowledge", msdvalidation:"page-msdvalidation" };
+  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot", aggression:"navAggression", mtf:"navMtf", njanja:"navNjanja", rfabot:"navRfaBot", msdexplorer:"navMsdExplorer", msdfeatures:"navMsdFeatures", msdevents:"navMsdEvents", msdinspector:"navMsdInspector", msddistribution:"navMsdDistribution", msdcorrelation:"navMsdCorrelation", msdsearch:"navMsdSearch", msdexperiment:"navMsdExperiment", msdknowledge:"navMsdKnowledge", msdvalidation:"navMsdValidation" };
   Object.keys(pages).forEach(k => {
     document.getElementById(pages[k]).classList.toggle("active", k===which);
     const nav = document.getElementById(navs[k]); if (nav) nav.classList.toggle("active", k===which);
@@ -5620,6 +7915,21 @@ function showPage(which){
   }
   if (which === "msdinspector"){
     if (typeof msdInspectorRefresh === "function") msdInspectorRefresh();
+  }
+  if (which === "msddistribution"){
+    if (typeof msdDistributionRefresh === "function") msdDistributionRefresh();
+  }
+  if (which === "msdcorrelation"){
+    if (typeof msdCorrelationRefresh === "function") msdCorrelationRefresh();
+  }
+  if (which === "msdexperiment"){
+    if (typeof msdExperimentHistoryRefresh === "function") msdExperimentHistoryRefresh();
+  }
+  if (which === "msdknowledge"){
+    if (typeof msdKnowledgeRefresh === "function") msdKnowledgeRefresh();
+  }
+  if (which === "msdvalidation"){
+    if (typeof msdValidationSuiteRefresh === "function") msdValidationSuiteRefresh();
   }
 }
 
@@ -11419,7 +13729,14 @@ function pbMetrics(scores, labels, thr=0.5){
     if(pred===labels[i]) wins+=s; else losses+=(1-s);
   });
   const pf=losses>0?wins/losses:wins>0?Infinity:1;
-  return {acc,prec,rec,f1,auc:Math.max(0,Math.min(1,auc)),pf};
+  // Brier score — mean squared error between predicted probability and
+  // actual outcome (0 or 1). Standard calibration measure: 0 = perfect
+  // calibration, 0.25 = what a constant "always predict 0.5" gets, 1 =
+  // maximally wrong and confident. Added here (not a separate function)
+  // so every existing consumer of pbMetrics gets calibration reporting
+  // for free, not a second, parallel metrics computation.
+  const brier = scores.length ? scores.reduce((sum, s, i) => sum + (s - labels[i]) ** 2, 0) / scores.length : null;
+  return {acc,prec,rec,f1,auc:Math.max(0,Math.min(1,auc)),pf,brier};
 }
 
 /* ── Prediction Bot state ──────────────────────────────────────────── */
