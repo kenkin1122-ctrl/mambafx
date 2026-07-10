@@ -596,6 +596,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button id="navMsdExperiment" onclick="showPage('msdexperiment')">🧪 Experiment Runner</button>
     <button id="navMsdKnowledge" onclick="showPage('msdknowledge')">🧠 Knowledge Base</button>
     <button id="navMsdValidation" onclick="showPage('msdvalidation')">✅ Research Validation Suite</button>
+    <button id="navMsdWorkbench" onclick="showPage('msdworkbench')">🔬 Research Workbench</button>
   </nav>
 
   <!-- ============ PAGE 1: LIVE TRACKER ============ -->
@@ -2699,6 +2700,59 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <span id="msdBenchmarkStatus" class="gc-sub" style="margin-left:10px"></span>
     <table class="sig-table" style="margin-top:10px"><thead><tr><th class="l">Feature</th><th class="l">Real MI</th><th class="l">Shuffled Mean MI</th><th class="l">p-value</th><th class="l">Significant?</th></tr></thead>
       <tbody id="msdBenchmarkBody"><tr><td colspan="5" class="sig-empty">Not run yet.</td></tr></tbody></table>
+  </div>
+</div>
+
+<div id="page-msdworkbench" class="page">
+  <div class="grid-card" style="margin-bottom:16px">
+    <h2 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">🔬 Statistical Research Workbench</h2>
+    <div class="gc-sub" style="margin-bottom:12px">Discoveries are recorded permanently and append-only in KnowledgeBase (type: research_discovery) — maturity is never stored, only derived fresh from every piece of evidence a discoveryKey has accumulated, replayed chronologically. A Research Session runs automatically after every completed experiment. Five analyzers are currently registered: Phase 2 (Single Feature), Phase 3 (Threshold), Phase 4 (Feature Combination), and Phase 5 (Market-State Pattern) — see the three ranking tables below the Discovery Repository.</div>
+    <button class="gc-btn" onclick="msdWorkbenchRefresh()">🔄 Refresh</button>
+    <span id="msdWorkbenchStatus" class="gc-sub" style="margin-left:10px"></span>
+  </div>
+
+  <div class="grid-card" style="margin-bottom:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Research Configuration — Maturity Promotion Rules</h3>
+    <div class="gc-sub" style="margin-bottom:8px">How many INDEPENDENT experiments a discovery needs before advancing. Must be strictly ascending. A discovery can never be promoted past Observation on the strength of a single experiment, regardless of these settings.</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr) auto;gap:10px;align-items:end">
+      <div><label for="msdMaturityCandidate">Candidate (min experiments)</label><input type="number" id="msdMaturityCandidate" value="2" min="1" step="1" style="width:100%"></div>
+      <div><label for="msdMaturityRepeatable">Repeatable (min experiments)</label><input type="number" id="msdMaturityRepeatable" value="4" min="1" step="1" style="width:100%"></div>
+      <div><label for="msdMaturityVerified">Verified (min experiments)</label><input type="number" id="msdMaturityVerified" value="8" min="1" step="1" style="width:100%"></div>
+      <button class="gc-btn" onclick="msdSaveMaturityRulesUi()">💾 Save</button>
+    </div>
+    <span id="msdMaturityRulesStatus" class="gc-sub" style="margin-top:6px;display:block"></span>
+  </div>
+
+  <div class="grid-card">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Discovery Repository</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Every discovery ever recorded, derived fresh from its complete evidence history on every load.</div>
+    <table class="sig-table"><thead><tr><th class="l">Discovery Key</th><th class="l">Type</th><th class="l">Maturity</th><th class="l">Supporting Experiments</th><th class="l">Evidence Count</th><th class="l">First Seen</th></tr></thead>
+      <tbody id="msdDiscoveryRepoBody"><tr><td colspan="6" class="sig-empty">No discoveries yet — waiting for the first completed experiment with enough samples to clear the readyForTraining gate.</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="grid-card" style="margin-top:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Threshold Ranking — Strongest Discovered Cut Points</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Best threshold per feature, ranked by effect size (difference in positive rate between the two sides). Derived fresh from the Discovery Repository above — same maturity/evidence-count computation, filtered to discoveryType "threshold".</div>
+    <table class="sig-table"><thead><tr><th class="l">Feature</th><th class="l">Threshold</th><th class="l">Samples</th><th class="l">Rate (above/below)</th><th class="l">Effect Size</th><th class="l">Stability</th><th class="l">Maturity</th><th class="l">Experiments</th></tr></thead>
+      <tbody id="msdThresholdRankingBody"><tr><td colspan="8" class="sig-empty">No threshold discoveries yet.</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="grid-card" style="margin-top:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Combination Ranking — Strongest Feature Synergies</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Feature pairs whose combined (AND) condition beats BOTH single features' own best rate, ranked by synergy. A pair only appears here if it genuinely outperforms its better half, not merely co-occurs with it.</div>
+    <table class="sig-table"><thead><tr><th class="l">Combined Condition</th><th class="l">Samples</th><th class="l">Combo Rate</th><th class="l">Rate (A alone / B alone)</th><th class="l">Synergy</th><th class="l">Maturity</th><th class="l">Experiments</th></tr></thead>
+      <tbody id="msdComboRankingBody"><tr><td colspan="7" class="sig-empty">No combination discoveries yet.</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="grid-card" style="margin-top:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Market-State Ranking — Strongest Repeatable Regimes</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Clustered regions of ADX/RSI/MACD/ATR/+DI/-DI space whose membership genuinely precedes a run, ranked by lift over the rest of the data. Each row's identity is a canonical qualitative fingerprint (which dimensions run meaningfully high or low), not an arbitrary cluster index — that's what lets the same real regime accumulate evidence across independently-clustered experiments.</div>
+    <table class="sig-table"><thead><tr><th class="l">Market State (feature signature)</th><th class="l">Samples</th><th class="l">Rate (state/rest)</th><th class="l">Lift</th><th class="l">Maturity</th><th class="l">Experiments</th></tr></thead>
+      <tbody id="msdStateRankingBody"><tr><td colspan="6" class="sig-empty">No market-state discoveries yet.</td></tr></tbody>
+    </table>
   </div>
 </div>
 
@@ -5907,6 +5961,737 @@ function msdComputeMarketStateDiscoveryRanking(findings){
 }
 
 // ══════════════════════════════════════════════════════════════════════
+// Statistical Research Workbench — Phase 1: Research Engine Foundation
+// ══════════════════════════════════════════════════════════════════════
+// Discovery Repository is NOT a new physical store. Per the locked
+// architecture, it lives inside the existing KnowledgeBase as a fifth
+// logical record type (type: 'research_discovery') — reusing the exact
+// same append-only add()-not-put() store, msdWriteFinding, and
+// msdGetAllFindings already proven correct for the other four types.
+//
+// APPEND-ONLY MATURITY, NOT MUTABLE MATURITY: a discovery's maturity
+// level and supporting-experiment list are NEVER stored as fields that
+// get updated. Every new piece of evidence for a discoveryKey is a new,
+// immutable record. Maturity is ALWAYS derived by replaying every
+// evidence record sharing that key, chronologically — the same
+// principle already proven for Feature/Lead-Time Ranking. This is what
+// makes "never overwrite previous evidence" and "maintain complete
+// research history" literally true rather than aspirational.
+//
+// THIS PHASE BUILDS THE ENGINE, NOT AN ANALYZER. No feature-specific
+// significance testing happens here — that's Phase 2. This phase
+// provides a pluggable analyzer registry, currently empty, that Phase 2
+// will register the first real analyzer into.
+
+let msdResearchSessionSeq = 0;
+function msdGenerateResearchSessionId(){
+  return 'rs_' + msdSessionId + '_' + (++msdResearchSessionSeq) + '_' + Date.now() + '_' + msdRandomSuffix();
+}
+
+// ── Research Configuration ──────────────────────────────────────────
+// Promotion thresholds: how many INDEPENDENT (distinct experimentId)
+// pieces of evidence a discoveryKey needs to advance. Stated explicitly,
+// not buried — and deliberately configurable, since what counts as
+// "enough repetition" is a genuine scientific judgment call, not a
+// constant to hardcode forever.
+let MSD_MATURITY_PROMOTION_RULES = {
+  candidate:  { minExperiments: 2 },
+  repeatable: { minExperiments: 4 },
+  verified:   { minExperiments: 8 },
+};
+
+/** Updates the promotion thresholds. Refuses a non-ascending rule set — candidate must require fewer experiments than repeatable, which must require fewer than verified — since anything else would make the maturity ladder incoherent. */
+function msdSetMaturityPromotionRules(rules){
+  if (!rules || !rules.candidate || !rules.repeatable || !rules.verified) {
+    return { ok: false, error: 'Rules must specify candidate, repeatable, and verified thresholds.' };
+  }
+  const c = rules.candidate.minExperiments, r = rules.repeatable.minExperiments, v = rules.verified.minExperiments;
+  if (!(Number.isInteger(c) && Number.isInteger(r) && Number.isInteger(v) && c >= 1 && c < r && r < v)) {
+    return { ok: false, error: 'Promotion rules must be strictly ascending positive integers (candidate < repeatable < verified).' };
+  }
+  MSD_MATURITY_PROMOTION_RULES = { candidate: { minExperiments: c }, repeatable: { minExperiments: r }, verified: { minExperiments: v } };
+  return { ok: true };
+}
+function msdGetMaturityPromotionRules(){ return MSD_MATURITY_PROMOTION_RULES; }
+
+// ── Discovery Record storage (extends KnowledgeBase, does not replace it) ──
+
+/**
+ * Writes ONE immutable piece of evidence for a discoveryKey. Never an
+ * update — a discoveryKey accumulates evidence records over time, and
+ * its current state is always derived from all of them together.
+ */
+async function msdRecordDiscoveryEvidence(evidence){
+  const finding = {
+    findingId: msdGenerateFindingId(),
+    type: 'research_discovery',
+    discoveryKey: evidence.discoveryKey,
+    discoveryType: evidence.discoveryType,
+    researchSessionId: evidence.researchSessionId,
+    experimentId: evidence.experimentId,
+    leadTime: evidence.leadTime,
+    featureVersion: evidence.featureVersion,
+    statisticalEvidence: evidence.statisticalEvidence,
+    discoveredAt: Date.now(),
+  };
+  const writeResult = await msdWriteFinding(finding);
+  return { finding, writeResult };
+}
+
+/** Read-only: every research_discovery record, filtered from the shared KnowledgeBase getAll. */
+async function msdGetAllDiscoveryEvidence(){
+  const allFindings = await msdGetAllFindings();
+  return allFindings.filter(f => f.type === 'research_discovery');
+}
+
+/** Groups a set of findings by discoveryKey, each group sorted chronologically. Pure, derived, no side effects. */
+function msdGroupDiscoveryEvidence(findings){
+  const research = findings.filter(f => f.type === 'research_discovery');
+  const byKey = {};
+  research.forEach(f => {
+    if (!byKey[f.discoveryKey]) byKey[f.discoveryKey] = [];
+    byKey[f.discoveryKey].push(f);
+  });
+  Object.values(byKey).forEach(list => list.sort((a, b) => a.discoveredAt - b.discoveredAt));
+  return byKey;
+}
+
+// ── Maturity Engine (generic — works on any discoveryKey's evidence list) ──
+
+/**
+ * Replays one discoveryKey's evidence chronologically, tracking the
+ * running set of DISTINCT experiments that have confirmed it, and
+ * records a promotion event every time the computed level changes.
+ * Repeated evidence from the SAME experiment never counts twice — this
+ * is what makes "never promote based on a single experiment" hold even
+ * if that one experiment's analyzer emits multiple evidence records.
+ */
+function msdComputePromotionHistory(evidenceList){
+  const sorted = evidenceList.slice().sort((a, b) => a.discoveredAt - b.discoveredAt);
+  const rules = MSD_MATURITY_PROMOTION_RULES;
+  const history = [];
+  const seenExperiments = new Set();
+  let lastLevel = null;
+  sorted.forEach(e => {
+    seenExperiments.add(e.experimentId);
+    const n = seenExperiments.size;
+    let level = 'observation';
+    if (n >= rules.verified.minExperiments) level = 'verified';
+    else if (n >= rules.repeatable.minExperiments) level = 'repeatable';
+    else if (n >= rules.candidate.minExperiments) level = 'candidate';
+    if (level !== lastLevel) {
+      history.push({ level, timestamp: e.discoveredAt, supportingExperimentCount: n, triggeringExperimentId: e.experimentId });
+      lastLevel = level;
+    }
+  });
+  return history;
+}
+
+/** The CURRENT maturity level for one discoveryKey — always the last entry of its derived promotion history, computed from the exact same logic, so the two can never disagree. */
+function msdComputeMaturityLevel(evidenceList){
+  const history = msdComputePromotionHistory(evidenceList);
+  return history.length ? history[history.length - 1].level : 'observation';
+}
+
+/** Full, derived summary for one discoveryKey — the Discovery Repository's primary read interface. */
+function msdSummarizeDiscovery(discoveryKey, evidenceList){
+  const sorted = evidenceList.slice().sort((a, b) => a.discoveredAt - b.discoveredAt);
+  const promotionHistory = msdComputePromotionHistory(sorted);
+  return {
+    discoveryKey,
+    discoveryType: sorted[0].discoveryType,
+    maturityLevel: promotionHistory.length ? promotionHistory[promotionHistory.length - 1].level : 'observation',
+    supportingExperimentIds: Array.from(new Set(sorted.map(e => e.experimentId))),
+    evidenceCount: sorted.length,
+    promotionHistory,
+    firstSeenAt: sorted[0].discoveredAt,
+    lastSeenAt: sorted[sorted.length - 1].discoveredAt,
+    latestEvidence: sorted[sorted.length - 1].statisticalEvidence,
+  };
+}
+
+/** Every discovery currently known, summarized — the Discovery Repository's "browse everything" entry point. */
+async function msdGetDiscoverySummaries(){
+  const evidence = await msdGetAllDiscoveryEvidence();
+  const grouped = msdGroupDiscoveryEvidence(evidence);
+  return Object.entries(grouped).map(([key, list]) => msdSummarizeDiscovery(key, list));
+}
+
+// ── Research Session Manager: the automatic-execution entry point ──────
+
+/**
+ * Pluggable analyzer registry. Phase 1 ships with ZERO analyzers — this
+ * phase is the engine, not the science. Phase 2 registers the first real
+ * analyzer (single-feature significance testing) via
+ * msdRegisterDiscoveryAnalyzer. An analyzer is a function:
+ *   (experimentRecord, discoveryResult, trainResult, researchSessionId) => evidence[]
+ * where each evidence item matches msdRecordDiscoveryEvidence's input shape.
+ */
+let msdRegisteredAnalyzers = [];
+function msdRegisterDiscoveryAnalyzer(analyzerFn){
+  msdRegisteredAnalyzers.push(analyzerFn);
+}
+/** Test/debug only — never called from production code paths. */
+function msdResetDiscoveryAnalyzers(){ msdRegisteredAnalyzers = []; }
+
+/**
+ * Runs one Research Session: every registered analyzer gets the
+ * completed experiment's discovery + training results, and whatever
+ * evidence it returns gets permanently recorded. Called automatically
+ * after every completed experiment (wired into the Experiment Runner UI)
+ * — this is the "automatic execution" requirement, satisfied as genuine
+ * plumbing regardless of how many analyzers are registered.
+ */
+/**
+ * SIGNATURE REFACTOR (Phase 3): added `dataset` as a 4th parameter,
+ * passed through to every analyzer as a 5th argument. Additive, not
+ * breaking — analyzers written for the original 4-argument signature
+ * (like Phase 2's msdSingleFeatureAnalyzer) simply ignore the extra
+ * argument. Threshold Discovery needs this because finding an optimal
+ * split point requires the actual per-snapshot feature values and
+ * outcomes, which discoveryResult.featureReports (aggregate stats only)
+ * doesn't carry.
+ */
+async function msdRunResearchSession(experimentRecord, discoveryResult, trainResult, dataset){
+  const researchSessionId = msdGenerateResearchSessionId();
+  const results = [];
+  for (const analyzer of msdRegisteredAnalyzers) {
+    let evidenceList;
+    try {
+      evidenceList = analyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset) || [];
+    } catch (e) {
+      results.push({ error: 'Analyzer threw: ' + e.message });
+      continue;
+    }
+    for (const evidence of evidenceList) {
+      const recorded = await msdRecordDiscoveryEvidence(evidence);
+      results.push(recorded);
+    }
+  }
+  return { researchSessionId, analyzerCount: msdRegisteredAnalyzers.length, recordedCount: results.filter(r => r.writeResult).length, results };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Statistical Research Workbench — Phase 2: Single Feature Discovery
+// ══════════════════════════════════════════════════════════════════════
+// The first real analyzer. Reuses discoveryResult.featureReports (Mutual
+// Information, Stability) and discoveryResult.sampleStats (Positive
+// Rate, Wilson Confidence Interval) verbatim from the Statistical
+// Discovery Engine — no new statistical computation happens here, only
+// re-packaging already-proven numbers into a discoveryKey the Discovery
+// Repository can track across many experiments. Positive Rate and
+// Confidence Interval here are the DATASET's overall base rate — the
+// context a feature's MI should be read against — not a feature-
+// conditional split; that's Phase 3's job (thresholds), deliberately not
+// pulled forward into this phase.
+
+const MSD_SINGLE_FEATURE_MI_THRESHOLD = 0.05; // stated, configurable — matches the existing notable-MI bar used elsewhere, for consistency
+
+function msdSingleFeatureAnalyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, _dataset){
+  // _dataset intentionally unused — Phase 2 only needs the aggregate
+  // featureReports the Statistical Discovery Engine already computed.
+  // Accepting (and ignoring) the 5th argument keeps this analyzer
+  // compatible with the Phase 3 signature refactor above without any
+  // change to its own logic.
+  if (!discoveryResult || !discoveryResult.featureReports) return [];
+  // An underpowered experiment shouldn't seed the repository with noise —
+  // reuses the existing, already-tested readyForTraining gate rather than
+  // inventing a second sample-size check.
+  if (!discoveryResult.readyForTraining) return [];
+
+  const evidence = [];
+  discoveryResult.featureReports.forEach(report => {
+    if (report.mutualInformation == null || report.mutualInformation < MSD_SINGLE_FEATURE_MI_THRESHOLD) return;
+    evidence.push({
+      discoveryKey: 'single_feature:' + report.feature,
+      discoveryType: 'single_feature',
+      researchSessionId,
+      experimentId: experimentRecord.experimentId,
+      leadTime: experimentRecord.leadTime,
+      featureVersion: experimentRecord.featureVersion,
+      statisticalEvidence: {
+        sampleCount: discoveryResult.sampleStats.totalCount,
+        positiveRate: discoveryResult.sampleStats.positiveRate,
+        confidenceIntervalLower: discoveryResult.sampleStats.confidenceInterval.lower,
+        confidenceIntervalUpper: discoveryResult.sampleStats.confidenceInterval.upper,
+        mutualInformation: report.mutualInformation,
+        stability: report.stability ? report.stability.stdDevMi : null,
+      },
+    });
+  });
+  return evidence;
+}
+
+// Registered exactly once, at script load — never inside a function that
+// could run more than once and duplicate the registration.
+msdRegisterDiscoveryAnalyzer(msdSingleFeatureAnalyzer);
+
+// ══════════════════════════════════════════════════════════════════════
+// Statistical Research Workbench — Phase 3: Threshold Discovery
+// ══════════════════════════════════════════════════════════════════════
+// Answers a different question than Phase 2: not "does this feature carry
+// signal" (whole-distribution Mutual Information) but "is there a
+// SPECIFIC cut point where crossing it changes the positive rate enough,
+// with enough samples on both sides, to be worth acting on." This is why
+// msdRunResearchSession was refactored to pass the raw `dataset` through
+// — Phase 2's aggregate featureReports don't carry per-snapshot values.
+//
+// SEARCH METHOD: exact split search over midpoints between consecutive
+// distinct sorted values, scored by weighted Gini information gain — the
+// same criterion this app already uses in featRfImportance/_pbSplit, not
+// a second, competing definition of "good split."
+//
+// MULTIPLICITY CORRECTION: testing every candidate split and keeping the
+// best one is, on its own, statistically biased toward finding a
+// spurious "significant" split even in pure noise (the well-documented
+// "optimal cutpoint" problem, verified directly by this module's own
+// tests before this correction was added — a naive CI-overlap gate let
+// noise through at roughly 25% instead of 5%). This is corrected with a
+// permutation test: shuffle the outcome labels (via this app's existing
+// seeded-RNG pattern, same idea as msdBenchmarkAgainstRandomChance),
+// rerun the identical search on each shuffle, and use the fraction of
+// shuffles that do as well as the real split as the p-value — with the
+// standard add-one correction (Phipson & Smyth 2010) so the estimator
+// isn't biased toward under-counting extremeness.
+
+const MSD_THRESHOLD_MIN_SIDE = 15;       // never accept a split with fewer than this many samples on either side, however high its gain
+const MSD_THRESHOLD_GATE_MI = MSD_SINGLE_FEATURE_MI_THRESHOLD; // reuse Phase 2's notability bar — same "worth testing at all" gate
+const MSD_THRESHOLD_PERMUTATIONS = 30;   // shuffles for the multiplicity-corrected p-value
+const MSD_THRESHOLD_P_GATE = 0.05;       // significance bar on that p-value
+
+/** Weighted Gini information gain for one candidate split point. */
+function msdGiniGainAtSplit(sortedPairs, splitIdx){
+  const n = sortedPairs.length;
+  const left = sortedPairs.slice(0, splitIdx), right = sortedPairs.slice(splitIdx);
+  const giniOf = (arr) => {
+    if (!arr.length) return 0;
+    const pos = arr.filter(([, l]) => l === 1).length / arr.length;
+    return 1 - pos * pos - (1 - pos) * (1 - pos);
+  };
+  const giniParent = giniOf(sortedPairs);
+  const giniLeft = giniOf(left), giniRight = giniOf(right);
+  return giniParent - (left.length / n) * giniLeft - (right.length / n) * giniRight;
+}
+
+/** Best split over pairs already sorted by feature value — a pure function of the label column, so it can be rerun identically on real labels and on every permuted shuffle. */
+function msdBestGainOverSorted(sortedPairs, minSide){
+  let best = null;
+  for (let i = minSide; i <= sortedPairs.length - minSide; i++) {
+    if (sortedPairs[i][0] === sortedPairs[i - 1][0]) continue; // don't split between two equal values
+    const gain = msdGiniGainAtSplit(sortedPairs, i);
+    if (!best || gain > best.gain) best = { gain, idx: i, threshold: (sortedPairs[i][0] + sortedPairs[i - 1][0]) / 2 };
+  }
+  return best;
+}
+
+/** Finds the single best threshold for one feature against the binary outcome, permutation-corrected. Returns null if there isn't enough data or no split leaves MSD_THRESHOLD_MIN_SIDE samples on both sides. */
+function msdFindOptimalThreshold(values, outcomes, minSide, randomSeed){
+  minSide = minSide != null ? minSide : MSD_THRESHOLD_MIN_SIDE;
+  randomSeed = randomSeed != null ? randomSeed : 1;
+  const pairs = [];
+  for (let i = 0; i < values.length; i++) {
+    if (values[i] != null && Number.isFinite(values[i])) pairs.push([values[i], outcomes[i]]);
+  }
+  if (pairs.length < minSide * 2) return null;
+  pairs.sort((a, b) => a[0] - b[0]);
+
+  const best = msdBestGainOverSorted(pairs, minSide);
+  if (!best) return null;
+
+  // Permutation test: value order (pairs' positions) stays fixed; only
+  // the label column is shuffled, then the identical search is rerun.
+  const rng = msdSeededRandom(randomSeed);
+  const labels = pairs.map(p => p[1]);
+  let countGE = 0;
+  for (let p = 0; p < MSD_THRESHOLD_PERMUTATIONS; p++) {
+    const shuffled = msdSeededShuffle(labels, rng); // reuse the app's existing seeded Fisher-Yates
+    const shuffledPairs = pairs.map((p2, i) => [p2[0], shuffled[i]]);
+    const shuffledBest = msdBestGainOverSorted(shuffledPairs, minSide);
+    if (shuffledBest && shuffledBest.gain >= best.gain) countGE++;
+  }
+  // Add-one correction (Phipson & Smyth 2010): the observed data is
+  // itself one valid draw from the null distribution when the null is
+  // true, so it must be counted alongside the permutations, not left
+  // out — omitting it biases the estimator toward smaller p-values.
+  const pValue = (1 + countGE) / (1 + MSD_THRESHOLD_PERMUTATIONS);
+
+  const below = pairs.slice(0, best.idx), above = pairs.slice(best.idx);
+  const belowPos = below.filter(([, l]) => l === 1).length;
+  const abovePos = above.filter(([, l]) => l === 1).length;
+  const belowRate = belowPos / below.length, aboveRate = abovePos / above.length;
+  const belowCI = msdWilsonScoreInterval(belowPos, below.length);
+  const aboveCI = msdWilsonScoreInterval(abovePos, above.length);
+
+  return {
+    threshold: best.threshold, gain: best.gain,
+    direction: aboveRate > belowRate ? 'above' : 'below',
+    belowCount: below.length, aboveCount: above.length,
+    belowPositiveRate: belowRate, abovePositiveRate: aboveRate,
+    belowCI, aboveCI,
+    effectSize: Math.abs(aboveRate - belowRate),
+    pValue,
+    significant: pValue < MSD_THRESHOLD_P_GATE,
+  };
+}
+
+/** Seeded-bootstrap stability for one already-found threshold: what fraction of resamples still agree on direction. Mirrors msdFeatureStability's bootstrap pattern. */
+function msdThresholdStability(values, outcomes, threshold, direction, randomSeed, resampleCount){
+  resampleCount = resampleCount || 20;
+  const pairs = [];
+  for (let i = 0; i < values.length; i++) {
+    if (values[i] != null && Number.isFinite(values[i])) pairs.push([values[i], outcomes[i]]);
+  }
+  const n = pairs.length;
+  if (n < MSD_THRESHOLD_MIN_SIDE * 2) return null;
+  const rng = msdSeededRandom(randomSeed);
+  let agree = 0, counted = 0;
+  for (let r = 0; r < resampleCount; r++) {
+    const sample = [];
+    for (let i = 0; i < n; i++) sample.push(pairs[Math.floor(rng() * n)]);
+    const below = sample.filter(([v]) => v < threshold);
+    const above = sample.filter(([v]) => v >= threshold);
+    if (below.length < 3 || above.length < 3) continue;
+    counted++;
+    const belowRate = below.filter(([, l]) => l === 1).length / below.length;
+    const aboveRate = above.filter(([, l]) => l === 1).length / above.length;
+    if ((aboveRate > belowRate ? 'above' : 'below') === direction) agree++;
+  }
+  return counted > 0 ? agree / counted : null;
+}
+
+/** Phase 3 analyzer: for every feature that already cleared Phase 2's notability bar, searches for its best threshold on THIS experiment's actual dataset, emitting evidence only when the permutation test finds it significant. Gated by the same readyForTraining check Phase 2 uses. */
+function msdThresholdAnalyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset){
+  if (!discoveryResult || !discoveryResult.featureReports || !dataset) return [];
+  if (!discoveryResult.readyForTraining) return [];
+
+  const allSnapshots = dataset.trainSet.concat(dataset.valSet, dataset.testSet);
+  const outcomes = allSnapshots.map(s => s.outcome === 'positive' ? 1 : 0);
+
+  const evidence = [];
+  discoveryResult.featureReports.forEach(report => {
+    if (report.mutualInformation == null || report.mutualInformation < MSD_THRESHOLD_GATE_MI) return;
+    const values = allSnapshots.map(s => s[report.feature]);
+    const result = msdFindOptimalThreshold(values, outcomes, undefined, experimentRecord.randomSeed || 1);
+    if (!result || !result.significant) return;
+
+    const stability = msdThresholdStability(values, outcomes, result.threshold, result.direction, experimentRecord.randomSeed || 1);
+
+    evidence.push({
+      discoveryKey: 'threshold:' + report.feature,
+      discoveryType: 'threshold',
+      researchSessionId,
+      experimentId: experimentRecord.experimentId,
+      leadTime: experimentRecord.leadTime,
+      featureVersion: experimentRecord.featureVersion,
+      statisticalEvidence: {
+        threshold: result.threshold,
+        direction: result.direction, // 'above' or 'below' — which side has the higher positive rate
+        gain: result.gain,
+        belowCount: result.belowCount, aboveCount: result.aboveCount,
+        belowPositiveRate: result.belowPositiveRate, abovePositiveRate: result.abovePositiveRate,
+        belowCIlower: result.belowCI.lower, belowCIupper: result.belowCI.upper,
+        aboveCIlower: result.aboveCI.lower, aboveCIupper: result.aboveCI.upper,
+        effectSize: result.effectSize,
+        pValue: result.pValue,
+        stability,
+        sampleCount: discoveryResult.sampleStats.totalCount,
+      },
+    });
+  });
+  return evidence;
+}
+
+// Registered once, at script load — same pattern as Phase 2.
+msdRegisterDiscoveryAnalyzer(msdThresholdAnalyzer);
+
+/** Generic: best discovery per key of a given discoveryType, ranked by a caller-supplied score function over its latest evidence. Reuses msdGetDiscoverySummaries's maturity/evidence-count computation rather than recomputing it — works for ANY future discoveryType, not just 'threshold'. */
+function msdRankDiscoverySummaries(summaries, discoveryType, scoreFn){
+  return summaries
+    .filter(s => s.discoveryType === discoveryType && s.latestEvidence)
+    .map(s => ({ ...s, score: scoreFn(s.latestEvidence) }))
+    .filter(s => s.score != null)
+    .sort((a, b) => b.score - a.score);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Statistical Research Workbench — Phase 4: Feature Combination Discovery
+// ══════════════════════════════════════════════════════════════════════
+// Asks a different question than Phase 3: not "does this feature have a
+// good threshold" but "does combining two features' thresholds beat
+// EITHER feature alone." Reuses msdFindOptimalThreshold (Phase 3,
+// unmodified) to get each candidate feature's OWN best threshold and
+// direction — never a second, competing 2D search — then tests the AND
+// of those two already-validated conditions.
+//
+// SYNERGY REQUIRED: evidence is only recorded when the combined
+// subgroup's positive rate exceeds BOTH single features' own best-side
+// rate. A combination that merely performs as well as its better half is
+// redundancy, not a discovery (verified directly by this module's own
+// tests: two features that are each individually predictive but combine
+// via a simple max(), with no true synergy, correctly produce nothing).
+//
+// COMBINATORIAL CAP: only the top MSD_COMBO_MAX_FEATURES individually-
+// significant features (by their own effect size) are paired — bounds
+// both runtime and the multiple-comparisons burden of testing many pairs.
+
+const MSD_COMBO_MAX_FEATURES = 8;
+const MSD_COMBO_MIN_SIDE = MSD_THRESHOLD_MIN_SIDE; // reuse Phase 3's minimum-side-size bar
+const MSD_COMBO_PERMUTATIONS = 30;
+const MSD_COMBO_P_GATE = 0.05;
+
+/** Whether one row clears a feature's own already-found threshold, in its own already-found direction. */
+function msdMeetsThreshold(value, threshold, direction){
+  if (value == null || !Number.isFinite(value)) return false;
+  return direction === 'above' ? value >= threshold : value < threshold;
+}
+
+/**
+ * Tests one candidate pair's fixed AND-membership against the outcome,
+ * permutation-corrected exactly like Phase 3 — but since the split is
+ * already fixed by the two features' own thresholds, each permutation
+ * only recomputes the combo-vs-rest positive-rate gap, not a search.
+ * Kept deliberately generic (a membership vector + outcomes, nothing
+ * combo-specific in its signature) so Phase 5 can reuse it unmodified
+ * for cluster-membership significance testing too.
+ */
+function msdEvaluateCombo(membership, outcomes, minSide, randomSeed){
+  const n = membership.length;
+  const inIdx = [], outIdx = [];
+  for (let i = 0; i < n; i++) (membership[i] ? inIdx : outIdx).push(i);
+  if (inIdx.length < minSide || outIdx.length < minSide) return null;
+
+  const rateOf = (idxList, labels) => {
+    let pos = 0; idxList.forEach(i => { if (labels[i] === 1) pos++; });
+    return pos / idxList.length;
+  };
+  const comboRate = rateOf(inIdx, outcomes);
+  const outsideRate = rateOf(outIdx, outcomes);
+  const realGap = Math.abs(comboRate - outsideRate);
+
+  const rng = msdSeededRandom(randomSeed);
+  let countGE = 0;
+  for (let p = 0; p < MSD_COMBO_PERMUTATIONS; p++) {
+    const shuffled = msdSeededShuffle(outcomes, rng); // reuse the app's existing seeded Fisher-Yates
+    const gap = Math.abs(rateOf(inIdx, shuffled) - rateOf(outIdx, shuffled));
+    if (gap >= realGap) countGE++;
+  }
+  const pValue = (1 + countGE) / (1 + MSD_COMBO_PERMUTATIONS);
+
+  const comboPos = inIdx.filter(i => outcomes[i] === 1).length;
+  const comboCI = msdWilsonScoreInterval(comboPos, inIdx.length);
+
+  return {
+    comboCount: inIdx.length, outsideCount: outIdx.length,
+    comboPositiveRate: comboRate, outsideRate,
+    comboCI,
+    pValue, significant: pValue < MSD_COMBO_P_GATE,
+  };
+}
+
+/** Phase 4 analyzer: re-derives each notable feature's own threshold on THIS experiment's dataset (Phase 3, unmodified), tries every pair among the top MSD_COMBO_MAX_FEATURES, and emits evidence only for pairs whose combo beats both single features with a permutation-significant gap. */
+function msdFeatureCombinationAnalyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset){
+  if (!discoveryResult || !discoveryResult.featureReports || !dataset) return [];
+  if (!discoveryResult.readyForTraining) return [];
+
+  const allSnapshots = dataset.trainSet.concat(dataset.valSet, dataset.testSet);
+  const outcomes = allSnapshots.map(s => s.outcome === 'positive' ? 1 : 0);
+  const seed = experimentRecord.randomSeed || 1;
+
+  const candidates = [];
+  discoveryResult.featureReports.forEach(report => {
+    if (report.mutualInformation == null || report.mutualInformation < MSD_THRESHOLD_GATE_MI) return;
+    const values = allSnapshots.map(s => s[report.feature]);
+    const result = msdFindOptimalThreshold(values, outcomes, undefined, seed);
+    if (!result || !result.significant) return;
+    candidates.push({ feature: report.feature, values, threshold: result.threshold, direction: result.direction, ownRate: result.direction === 'above' ? result.abovePositiveRate : result.belowPositiveRate });
+  });
+
+  candidates.sort((a, b) => b.ownRate - a.ownRate);
+  const top = candidates.slice(0, MSD_COMBO_MAX_FEATURES);
+  if (top.length < 2) return [];
+
+  const evidence = [];
+  for (let i = 0; i < top.length; i++) {
+    for (let j = i + 1; j < top.length; j++) {
+      const a = top[i], b = top[j];
+      const membership = allSnapshots.map((_, k) =>
+        msdMeetsThreshold(a.values[k], a.threshold, a.direction) && msdMeetsThreshold(b.values[k], b.threshold, b.direction) ? 1 : 0
+      );
+      const comboSeed = seed + i * 97 + j; // deterministic per pair, reproducible from experimentRecord.randomSeed
+      const result = msdEvaluateCombo(membership, outcomes, MSD_COMBO_MIN_SIDE, comboSeed);
+      if (!result || !result.significant) continue;
+
+      const synergy = result.comboPositiveRate - Math.max(a.ownRate, b.ownRate);
+      if (synergy <= 0) continue; // must beat the BETTER of the two single features, not just co-occur
+
+      const key = [a.feature, b.feature].sort().join('+'); // order-independent
+      evidence.push({
+        discoveryKey: 'combo:' + key,
+        discoveryType: 'combo',
+        researchSessionId,
+        experimentId: experimentRecord.experimentId,
+        leadTime: experimentRecord.leadTime,
+        featureVersion: experimentRecord.featureVersion,
+        statisticalEvidence: {
+          featureA: a.feature, thresholdA: a.threshold, directionA: a.direction, rateAAlone: a.ownRate,
+          featureB: b.feature, thresholdB: b.threshold, directionB: b.direction, rateBAlone: b.ownRate,
+          comboCount: result.comboCount, outsideCount: result.outsideCount,
+          comboPositiveRate: result.comboPositiveRate, outsideRate: result.outsideRate,
+          comboCIlower: result.comboCI.lower, comboCIupper: result.comboCI.upper,
+          synergy,
+          pValue: result.pValue,
+          sampleCount: discoveryResult.sampleStats.totalCount,
+        },
+      });
+    }
+  }
+  return evidence;
+}
+
+msdRegisterDiscoveryAnalyzer(msdFeatureCombinationAnalyzer);
+
+// ══════════════════════════════════════════════════════════════════════
+// Statistical Research Workbench — Phase 5: Market-State Pattern Discovery
+// ══════════════════════════════════════════════════════════════════════
+// Answers: "which market states most consistently precede a run" — a
+// market state here means a region of the 6-dimensional indicator space
+// (the app's existing MSD_CLUSTER_FEATURE_KEYS), found by clustering,
+// not a single feature or pair.
+//
+// REUSE, NOT REINVENTION: clustering itself (msdStandardizeFeatures /
+// msdKMeans, both already defined above for the existing manual "Market
+// State Clustering" tool) is called here automatically instead of from a
+// button — same algorithm, unmodified. Significance testing reuses
+// msdEvaluateCombo (Phase 4) exactly as-is: a cluster's membership
+// depends only on feature values, never on outcome — the same shape of
+// problem Phase 4 already solved for combo membership.
+//
+// THE GENUINELY NEW PROBLEM: k-means cluster labels are arbitrary per
+// run and can't serve as a discoveryKey — "the same real regime" would
+// never accumulate cross-experiment evidence. Fixed with a canonical
+// FINGERPRINT: for each of the 6 features, is this cluster's mean above
+// or below the dataset's overall mean, in standard deviations — but only
+// for dimensions that ALSO show a genuine marginal relationship to the
+// outcome across the whole dataset. That second gate exists because
+// plain k-means partitions on every dimension equally, including ones
+// with no real outcome relationship; without excluding those, the same
+// true regime can intermittently fragment into different fingerprints
+// depending on which irrelevant axis happened to separate two rows that
+// particular run — confirmed directly against real data by this
+// module's own cross-experiment repeatability test (down to checking the
+// exact Cohen's d of the noise draw that was slipping through).
+
+const MSD_STATE_K = 4;                        // matches the existing manual clustering tool's default
+const MSD_STATE_MIN_SIZE = MSD_THRESHOLD_MIN_SIDE; // reuse Phase 3/4's minimum-side-size bar
+const MSD_STATE_FINGERPRINT_Z_GATE = 0.5;     // within an eligible dimension, how far the cluster's mean must sit from the overall mean to earn a high/low label
+const MSD_STATE_DIM_RELEVANCE_GATE = 0.20;    // a dimension must show at least this much marginal separation between positive/negative outcomes, dataset-wide, to be eligible for ANY fingerprint at all
+
+/**
+ * Computes, ONCE per experiment (not per cluster), which of the 6
+ * clustering dimensions have a genuine marginal relationship to the
+ * outcome at all. Without this, a dimension that's pure noise relative
+ * to outcome can still occasionally drive part of a k-means partition,
+ * and its cluster-level z-score can clear MSD_STATE_FINGERPRINT_Z_GATE
+ * as an artifact of that partition rather than saying anything real.
+ */
+function msdComputeDimensionRelevance(matrix, outcomes, featureKeys){
+  const eligible = new Array(featureKeys.length).fill(false);
+  featureKeys.forEach((_, di) => {
+    const posVals = [], negVals = [];
+    matrix.forEach((row, i) => (outcomes[i] === 1 ? posVals : negVals).push(row[di]));
+    if (posVals.length < 5 || negVals.length < 5) return;
+    const mean = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+    const std = (arr, m) => Math.sqrt(arr.reduce((a, b) => a + (b - m) ** 2, 0) / arr.length) || 1e-9;
+    const mPos = mean(posVals), mNeg = mean(negVals);
+    const pooledStd = Math.sqrt((std(posVals, mPos) ** 2 + std(negVals, mNeg) ** 2) / 2) || 1e-9;
+    eligible[di] = Math.abs(mPos - mNeg) / pooledStd >= MSD_STATE_DIM_RELEVANCE_GATE;
+  });
+  return eligible;
+}
+
+/** Canonical, order-independent fingerprint for one cluster, restricted to eligible dimensions. Two clusters describing the same real regime (different experiments, different arbitrary cluster indices) produce the same string. */
+function msdCanonicalizeClusterFingerprint(clusterRawMeans, overallMeans, overallStds, featureKeys, eligible){
+  const parts = [];
+  featureKeys.forEach((key, i) => {
+    if (!eligible[i]) return;
+    const std = overallStds[i] || 1e-9;
+    const z = (clusterRawMeans[i] - overallMeans[i]) / std;
+    if (Math.abs(z) >= MSD_STATE_FINGERPRINT_Z_GATE) parts.push(key + ':' + (z > 0 ? 'high' : 'low'));
+  });
+  return parts.join('|');
+}
+
+/** Phase 5 analyzer: clusters this experiment's dataset (existing k-means, unmodified), tests each cluster's membership via msdEvaluateCombo (Phase 4, reused as-is), and records evidence under a canonical regime fingerprint. */
+function msdMarketStateAnalyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset){
+  if (!discoveryResult || !dataset) return [];
+  if (!discoveryResult.readyForTraining) return [];
+
+  const allSnapshots = dataset.trainSet.concat(dataset.valSet, dataset.testSet);
+  const validRows = allSnapshots.filter(s => MSD_CLUSTER_FEATURE_KEYS.every(k => s[k] != null && Number.isFinite(s[k])));
+  if (validRows.length < MSD_STATE_K * MSD_STATE_MIN_SIZE) return [];
+
+  const outcomesAll = validRows.map(s => s.outcome === 'positive' ? 1 : 0);
+  const matrix = validRows.map(s => MSD_CLUSTER_FEATURE_KEYS.map(k => s[k]));
+
+  const seed = experimentRecord.randomSeed || 1;
+  const { standardized, means: overallMeans, stds: overallStds } = msdStandardizeFeatures(matrix);
+  const eligible = msdComputeDimensionRelevance(matrix, outcomesAll, MSD_CLUSTER_FEATURE_KEYS);
+  const { assignments } = msdKMeans(standardized, MSD_STATE_K, seed);
+  if (!assignments.length) return [];
+
+  // Best evidence per fingerprint WITHIN this experiment — if two
+  // clusters happen to land on the same qualitative fingerprint in one
+  // run, keep only the stronger one rather than emitting duplicate
+  // evidence (the maturity engine tolerates duplicates safely anyway,
+  // since it counts distinct experimentIds, but this keeps the record clean).
+  const bestByFingerprint = {};
+
+  for (let c = 0; c < MSD_STATE_K; c++) {
+    const memberIdx = [];
+    assignments.forEach((a, i) => { if (a === c) memberIdx.push(i); });
+    if (memberIdx.length < MSD_STATE_MIN_SIZE) continue;
+
+    const membership = validRows.map((_, i) => assignments[i] === c ? 1 : 0);
+    const result = msdEvaluateCombo(membership, outcomesAll, MSD_STATE_MIN_SIZE, seed + c * 131);
+    if (!result || !result.significant) continue;
+
+    const lift = result.comboPositiveRate - result.outsideRate;
+    if (lift <= 0) continue; // only "precedes a run MORE than the rest of the data", not less
+
+    const clusterRawMeans = MSD_CLUSTER_FEATURE_KEYS.map((_, di) => {
+      let sum = 0; memberIdx.forEach(i => sum += matrix[i][di]);
+      return sum / memberIdx.length;
+    });
+    const fingerprint = msdCanonicalizeClusterFingerprint(clusterRawMeans, overallMeans, overallStds, MSD_CLUSTER_FEATURE_KEYS, eligible);
+    if (!fingerprint) continue; // no dimension meaningfully differentiates this cluster — not a describable "state"
+
+    const entry = { fingerprint, lift, result, clusterRawMeans };
+    if (!bestByFingerprint[fingerprint] || lift > bestByFingerprint[fingerprint].lift) bestByFingerprint[fingerprint] = entry;
+  }
+
+  return Object.values(bestByFingerprint).map(e => ({
+    discoveryKey: 'market_state:' + e.fingerprint,
+    discoveryType: 'market_state',
+    researchSessionId,
+    experimentId: experimentRecord.experimentId,
+    leadTime: experimentRecord.leadTime,
+    featureVersion: experimentRecord.featureVersion,
+    statisticalEvidence: {
+      fingerprint: e.fingerprint,
+      featureMeans: Object.fromEntries(MSD_CLUSTER_FEATURE_KEYS.map((k, i) => [k, e.clusterRawMeans[i]])),
+      stateCount: e.result.comboCount,
+      statePositiveRate: e.result.comboPositiveRate,
+      outsideRate: e.result.outsideRate,
+      lift: e.lift,
+      pValue: e.result.pValue,
+      sampleCount: discoveryResult.sampleStats ? discoveryResult.sampleStats.totalCount : validRows.length,
+    },
+  }));
+}
+
+msdRegisterDiscoveryAnalyzer(msdMarketStateAnalyzer);
+
+// ══════════════════════════════════════════════════════════════════════
 // Market State Discovery Engine — Machine Learning
 // ══════════════════════════════════════════════════════════════════════
 // Per the locked architecture: Statistical Discovery Engine -> Machine
@@ -6828,6 +7613,14 @@ async function msdTrainModelUi(){
 
   const recorded = await msdRecordModelPerformance(last.result.record, trainResult);
   if (statusEl) statusEl.textContent = 'Best: ' + trainResult.bestModelName + ' — ' + recorded.length + ' result(s) recorded to KnowledgeBase.';
+
+  // Statistical Research Workbench — Phase 1: automatic execution after
+  // every completed experiment. Currently zero analyzers are registered
+  // (Phase 2 registers the first one), so this creates a tracked Research
+  // Session and records zero discoveries — genuine, honest plumbing, not
+  // yet science.
+  const researchSession = await msdRunResearchSession(last.result.record, last.discovery, trainResult, last.result.dataset);
+  if (statusEl) statusEl.textContent += ' — Research session ' + researchSession.researchSessionId + ' (' + researchSession.recordedCount + ' discovery record(s)).';
 }
 
 /** Reads the Lead Time list from the form, runs the automated sweep, records results, and renders the comparison table. */
@@ -6996,6 +7789,32 @@ async function msdKnowledgeRefresh(){
               <td class="l">${new Date(f.discoveredAt).toLocaleString()}</td>
             </tr>`;
           }
+          if (f.type === 'research_discovery') {
+            const se = f.statisticalEvidence || {};
+            const label = f.discoveryType === 'threshold'
+              ? `${f.discoveryKey.replace('threshold:','')} ${se.direction==='above'?'≥':'<'} ${se.threshold!=null?se.threshold.toFixed(3):'?'}`
+              : f.discoveryType === 'combo'
+              ? `${se.featureA}(${se.directionA==='above'?'≥':'<'}${se.thresholdA!=null?se.thresholdA.toFixed(2):'?'}) AND ${se.featureB}(${se.directionB==='above'?'≥':'<'}${se.thresholdB!=null?se.thresholdB.toFixed(2):'?'})`
+              : f.discoveryType === 'market_state'
+              ? f.discoveryKey.replace('market_state:','').replace(/\|/g, ' ')
+              : f.discoveryKey.replace('single_feature:','');
+            const metric = f.discoveryType === 'threshold'
+              ? `Δrate ${se.effectSize!=null?(se.effectSize*100).toFixed(1)+'%':'—'} (p=${fmt(se.pValue)})`
+              : f.discoveryType === 'combo'
+              ? `synergy +${se.synergy!=null?(se.synergy*100).toFixed(1)+'%':'—'} (p=${fmt(se.pValue)})`
+              : f.discoveryType === 'market_state'
+              ? `lift +${se.lift!=null?(se.lift*100).toFixed(1)+'%':'—'} (p=${fmt(se.pValue)})`
+              : `MI ${fmt(se.mutualInformation)}`;
+            const stab = se.stability!=null ? (se.stability<=1 ? (se.stability*100).toFixed(0)+'%' : fmt(se.stability)) : '—';
+            return `<tr>
+              <td class="l">${f.experimentId}</td>
+              <td class="l">${f.discoveryType}: ${label}</td>
+              <td>${f.leadTime ?? '—'}</td>
+              <td>${metric}</td>
+              <td>${stab}</td>
+              <td class="l">${new Date(f.discoveredAt).toLocaleString()}</td>
+            </tr>`;
+          }
           return `<tr>
             <td class="l">${f.experimentId}</td><td class="l">${f.feature}</td><td>${f.leadTime}</td>
             <td>${fmt(f.mutualInformation)}</td><td>${fmt(f.stability)}</td>
@@ -7140,6 +7959,110 @@ async function msdRunRandomChanceBenchmark(){
     <td>${r.pValue != null ? r.pValue.toFixed(3) : '—'}</td>
     <td class="${r.significant ? 'cell-pos' : 'cell-neg'}">${r.significant ? '✅ Beats chance' : '⚠️ Not distinguishable from chance'}</td>
   </tr>`).join('');
+}
+
+/** Research Workbench page — Research Configuration form + Discovery Repository browser, both read fresh on every load. */
+async function msdWorkbenchRefresh(){
+  const statusEl = $("msdWorkbenchStatus");
+  if (statusEl) statusEl.textContent = 'Loading…';
+
+  const rules = msdGetMaturityPromotionRules();
+  const setVal = (id, v) => { const e = $(id); if (e) e.value = v; };
+  setVal('msdMaturityCandidate', rules.candidate.minExperiments);
+  setVal('msdMaturityRepeatable', rules.repeatable.minExperiments);
+  setVal('msdMaturityVerified', rules.verified.minExperiments);
+
+  let summaries;
+  try { summaries = await msdGetDiscoverySummaries(); }
+  catch (e) { if (statusEl) statusEl.textContent = 'Error: ' + e.message; return; }
+  if (statusEl) statusEl.textContent = 'Last refreshed ' + new Date().toLocaleTimeString() + ' — ' + summaries.length + ' discovery key(s).';
+
+  const body = $("msdDiscoveryRepoBody");
+  if (body) {
+    if (!summaries.length) {
+      body.innerHTML = '<tr><td colspan="6" class="sig-empty">No discoveries yet — waiting for the first completed experiment with enough samples to clear the readyForTraining gate.</td></tr>';
+    } else {
+      const maturityClass = { observation: '', candidate: '', repeatable: 'cell-pos', verified: 'cell-pos' };
+      body.innerHTML = summaries.sort((a, b) => b.evidenceCount - a.evidenceCount).map(s => `<tr>
+        <td class="l">${s.discoveryKey}</td>
+        <td class="l">${s.discoveryType}</td>
+        <td class="l ${maturityClass[s.maturityLevel] || ''}">${s.maturityLevel}</td>
+        <td>${s.supportingExperimentIds.length}</td>
+        <td>${s.evidenceCount}</td>
+        <td class="l">${new Date(s.firstSeenAt).toLocaleDateString()}</td>
+      </tr>`).join('');
+    }
+  }
+
+  const thresholdRanking = msdRankDiscoverySummaries(summaries, 'threshold', e => e.effectSize);
+  const thBody = $("msdThresholdRankingBody");
+  if (thBody) {
+    thBody.innerHTML = thresholdRanking.length
+      ? thresholdRanking.map(s => {
+          const e = s.latestEvidence;
+          const maturityClass = { observation: '', candidate: '', repeatable: 'cell-pos', verified: 'cell-pos' };
+          return `<tr>
+            <td class="l">${s.discoveryKey.replace('threshold:','')}</td>
+            <td class="l">${e.direction==='above'?'≥':'<'} ${e.threshold.toFixed(4)}</td>
+            <td>${e.sampleCount ?? '—'}</td>
+            <td>${(e.abovePositiveRate*100).toFixed(1)}% / ${(e.belowPositiveRate*100).toFixed(1)}%</td>
+            <td>${(e.effectSize*100).toFixed(1)}%</td>
+            <td>${e.stability!=null?(e.stability*100).toFixed(0)+'%':'—'}</td>
+            <td class="l ${maturityClass[s.maturityLevel]||''}">${s.maturityLevel}</td>
+            <td>${s.supportingExperimentIds.length}</td>
+          </tr>`;
+        }).join('')
+      : '<tr><td colspan="8" class="sig-empty">No threshold discoveries yet.</td></tr>';
+  }
+
+  const comboRanking = msdRankDiscoverySummaries(summaries, 'combo', e => e.synergy);
+  const comboBody = $("msdComboRankingBody");
+  if (comboBody) {
+    comboBody.innerHTML = comboRanking.length
+      ? comboRanking.map(s => {
+          const e = s.latestEvidence;
+          const maturityClass = { observation: '', candidate: '', repeatable: 'cell-pos', verified: 'cell-pos' };
+          return `<tr>
+            <td class="l">${e.featureA} ${e.directionA==='above'?'≥':'<'} ${e.thresholdA.toFixed(3)}<br>AND ${e.featureB} ${e.directionB==='above'?'≥':'<'} ${e.thresholdB.toFixed(3)}</td>
+            <td>${e.comboCount ?? '—'}</td>
+            <td>${(e.comboPositiveRate*100).toFixed(1)}%</td>
+            <td>${(e.rateAAlone*100).toFixed(1)}% / ${(e.rateBAlone*100).toFixed(1)}%</td>
+            <td>+${(e.synergy*100).toFixed(1)}%</td>
+            <td class="l ${maturityClass[s.maturityLevel]||''}">${s.maturityLevel}</td>
+            <td>${s.supportingExperimentIds.length}</td>
+          </tr>`;
+        }).join('')
+      : '<tr><td colspan="7" class="sig-empty">No combination discoveries yet.</td></tr>';
+  }
+
+  const stateRanking = msdRankDiscoverySummaries(summaries, 'market_state', e => e.lift);
+  const stateBody = $("msdStateRankingBody");
+  if (stateBody) {
+    stateBody.innerHTML = stateRanking.length
+      ? stateRanking.map(s => {
+          const e = s.latestEvidence;
+          const maturityClass = { observation: '', candidate: '', repeatable: 'cell-pos', verified: 'cell-pos' };
+          return `<tr>
+            <td class="l">${s.discoveryKey.replace('market_state:','').replace(/\|/g, '<br>')}</td>
+            <td>${e.stateCount ?? '—'}</td>
+            <td>${(e.statePositiveRate*100).toFixed(1)}% / ${(e.outsideRate*100).toFixed(1)}%</td>
+            <td>+${(e.lift*100).toFixed(1)}%</td>
+            <td class="l ${maturityClass[s.maturityLevel]||''}">${s.maturityLevel}</td>
+            <td>${s.supportingExperimentIds.length}</td>
+          </tr>`;
+        }).join('')
+      : '<tr><td colspan="6" class="sig-empty">No market-state discoveries yet.</td></tr>';
+  }
+}
+
+/** Reads the Research Configuration form and applies new maturity promotion rules, with validation feedback. */
+function msdSaveMaturityRulesUi(){
+  const statusEl = $("msdMaturityRulesStatus");
+  const c = parseInt(($("msdMaturityCandidate") || {}).value, 10);
+  const r = parseInt(($("msdMaturityRepeatable") || {}).value, 10);
+  const v = parseInt(($("msdMaturityVerified") || {}).value, 10);
+  const result = msdSetMaturityPromotionRules({ candidate: { minExperiments: c }, repeatable: { minExperiments: r }, verified: { minExperiments: v } });
+  if (statusEl) statusEl.textContent = result.ok ? '✅ Saved.' : '⛔ ' + result.error;
 }
 
 // Build a compact full-indicator snapshot for one tick.
@@ -7837,8 +8760,8 @@ function startTfTimers(){
 }
 
 function showPage(which){
-  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot", aggression:"page-aggression", mtf:"page-mtf", njanja:"page-njanja", rfabot:"page-rfabot", msdexplorer:"page-msdexplorer", msdfeatures:"page-msdfeatures", msdevents:"page-msdevents", msdinspector:"page-msdinspector", msddistribution:"page-msddistribution", msdcorrelation:"page-msdcorrelation", msdsearch:"page-msdsearch", msdexperiment:"page-msdexperiment", msdknowledge:"page-msdknowledge", msdvalidation:"page-msdvalidation" };
-  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot", aggression:"navAggression", mtf:"navMtf", njanja:"navNjanja", rfabot:"navRfaBot", msdexplorer:"navMsdExplorer", msdfeatures:"navMsdFeatures", msdevents:"navMsdEvents", msdinspector:"navMsdInspector", msddistribution:"navMsdDistribution", msdcorrelation:"navMsdCorrelation", msdsearch:"navMsdSearch", msdexperiment:"navMsdExperiment", msdknowledge:"navMsdKnowledge", msdvalidation:"navMsdValidation" };
+  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot", aggression:"page-aggression", mtf:"page-mtf", njanja:"page-njanja", rfabot:"page-rfabot", msdexplorer:"page-msdexplorer", msdfeatures:"page-msdfeatures", msdevents:"page-msdevents", msdinspector:"page-msdinspector", msddistribution:"page-msddistribution", msdcorrelation:"page-msdcorrelation", msdsearch:"page-msdsearch", msdexperiment:"page-msdexperiment", msdknowledge:"page-msdknowledge", msdvalidation:"page-msdvalidation", msdworkbench:"page-msdworkbench" };
+  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot", aggression:"navAggression", mtf:"navMtf", njanja:"navNjanja", rfabot:"navRfaBot", msdexplorer:"navMsdExplorer", msdfeatures:"navMsdFeatures", msdevents:"navMsdEvents", msdinspector:"navMsdInspector", msddistribution:"navMsdDistribution", msdcorrelation:"navMsdCorrelation", msdsearch:"navMsdSearch", msdexperiment:"navMsdExperiment", msdknowledge:"navMsdKnowledge", msdvalidation:"navMsdValidation", msdworkbench:"navMsdWorkbench" };
   Object.keys(pages).forEach(k => {
     document.getElementById(pages[k]).classList.toggle("active", k===which);
     const nav = document.getElementById(navs[k]); if (nav) nav.classList.toggle("active", k===which);
@@ -7930,6 +8853,9 @@ function showPage(which){
   }
   if (which === "msdvalidation"){
     if (typeof msdValidationSuiteRefresh === "function") msdValidationSuiteRefresh();
+  }
+  if (which === "msdworkbench"){
+    if (typeof msdWorkbenchRefresh === "function") msdWorkbenchRefresh();
   }
 }
 
