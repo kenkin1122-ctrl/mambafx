@@ -2528,6 +2528,8 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <h2 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">🧪 Experiment Dataset Builder</h2>
     <div class="gc-sub" style="margin-bottom:12px">Builds a Training/Validation/Test dataset from the permanent Market State Database according to one Research Configuration, and permanently records that configuration as an Experiment — the dataset itself is temporary and rebuildable on demand; the config is what makes it reproducible. Chronological split (earliest trains, latest tests) — never randomized, since that would leak future information into training.</div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
+      <div><label for="msdExpSymbol">Market (or "all")</label>
+        <select id="msdExpSymbol" style="width:100%" onfocus="msdPopulateExpSymbolSelect()"></select></div>
       <div><label for="msdExpFeatureVersion">Feature Version</label>
         <input type="text" id="msdExpFeatureVersion" value="v1" style="width:100%"></div>
       <div><label for="msdExpLeadTime">Lead Time ("all" or a number)</label>
@@ -2713,45 +2715,80 @@ table.an-table tbody tr:last-child td{border-bottom:none}
 
   <div class="grid-card" style="margin-bottom:16px">
     <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Research Configuration — Maturity Promotion Rules</h3>
-    <div class="gc-sub" style="margin-bottom:8px">How many INDEPENDENT experiments a discovery needs before advancing. Must be strictly ascending. A discovery can never be promoted past Observation on the strength of a single experiment, regardless of these settings.</div>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr) auto;gap:10px;align-items:end">
+    <div class="gc-sub" style="margin-bottom:8px">How many INDEPENDENT experiments a discovery needs before advancing, AND (Phase 1) how consistent its evidence must be at that point via the Evidence Stability Score (0-1). Both must be strictly ascending. A discovery can never be promoted past Observation on the strength of a single experiment, or with evidence that disagrees with itself, regardless of these settings.</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
       <div><label for="msdMaturityCandidate">Candidate (min experiments)</label><input type="number" id="msdMaturityCandidate" value="2" min="1" step="1" style="width:100%"></div>
       <div><label for="msdMaturityRepeatable">Repeatable (min experiments)</label><input type="number" id="msdMaturityRepeatable" value="4" min="1" step="1" style="width:100%"></div>
       <div><label for="msdMaturityVerified">Verified (min experiments)</label><input type="number" id="msdMaturityVerified" value="8" min="1" step="1" style="width:100%"></div>
-      <button class="gc-btn" onclick="msdSaveMaturityRulesUi()">💾 Save</button>
+      <div><label for="msdStabilityCandidate">Candidate (min stability)</label><input type="number" id="msdStabilityCandidate" value="0" min="0" max="1" step="0.05" style="width:100%"></div>
+      <div><label for="msdStabilityRepeatable">Repeatable (min stability)</label><input type="number" id="msdStabilityRepeatable" value="0.4" min="0" max="1" step="0.05" style="width:100%"></div>
+      <div><label for="msdStabilityVerified">Verified (min stability)</label><input type="number" id="msdStabilityVerified" value="0.6" min="0" max="1" step="0.05" style="width:100%"></div>
     </div>
+    <button class="gc-btn" onclick="msdSaveMaturityRulesUi()">💾 Save</button>
     <span id="msdMaturityRulesStatus" class="gc-sub" style="margin-top:6px;display:block"></span>
   </div>
 
   <div class="grid-card">
     <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Discovery Repository</h3>
-    <div class="gc-sub" style="margin-bottom:8px">Every discovery ever recorded, derived fresh from its complete evidence history on every load.</div>
-    <table class="sig-table"><thead><tr><th class="l">Discovery Key</th><th class="l">Type</th><th class="l">Maturity</th><th class="l">Supporting Experiments</th><th class="l">Evidence Count</th><th class="l">First Seen</th></tr></thead>
-      <tbody id="msdDiscoveryRepoBody"><tr><td colspan="6" class="sig-empty">No discoveries yet — waiting for the first completed experiment with enough samples to clear the readyForTraining gate.</td></tr></tbody>
+    <div class="gc-sub" style="margin-bottom:8px">Every discovery ever recorded, derived fresh from its complete evidence history on every load. Stability (Phase 1) measures whether the evidence agrees across experiments; Decay (Phase 3) measures whether it's trending — a discovery can be perfectly stable (low variance) while still decaying (a steady, orderly decline), since these are different statistical questions. Hover a value for its detail breakdown.</div>
+    <table class="sig-table"><thead><tr><th class="l">Discovery Key</th><th class="l">Type</th><th class="l">Maturity</th><th class="l">Supporting Experiments</th><th class="l">Evidence Count</th><th class="l">Stability</th><th class="l">Decay</th><th class="l">First Seen</th></tr></thead>
+      <tbody id="msdDiscoveryRepoBody"><tr><td colspan="8" class="sig-empty">No discoveries yet — waiting for the first completed experiment with enough samples to clear the readyForTraining gate.</td></tr></tbody>
     </table>
   </div>
 
   <div class="grid-card" style="margin-top:16px">
     <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Threshold Ranking — Strongest Discovered Cut Points</h3>
-    <div class="gc-sub" style="margin-bottom:8px">Best threshold per feature, ranked by effect size (difference in positive rate between the two sides). Derived fresh from the Discovery Repository above — same maturity/evidence-count computation, filtered to discoveryType "threshold".</div>
-    <table class="sig-table"><thead><tr><th class="l">Feature</th><th class="l">Threshold</th><th class="l">Samples</th><th class="l">Rate (above/below)</th><th class="l">Effect Size</th><th class="l">Stability</th><th class="l">Maturity</th><th class="l">Experiments</th></tr></thead>
-      <tbody id="msdThresholdRankingBody"><tr><td colspan="8" class="sig-empty">No threshold discoveries yet.</td></tr></tbody>
+    <div class="gc-sub" style="margin-bottom:8px">Best threshold per feature, ranked by <b>Evidence Score</b> (a weighted geometric mean of effect size, statistical confidence, repeatability, stability, sample size, and consistency across markets/lead times — hover a score to see its factor breakdown), not raw positive rate. Derived fresh from the Discovery Repository above, filtered to discoveryType "threshold".</div>
+    <table class="sig-table"><thead><tr><th class="l">Feature</th><th class="l">Threshold</th><th class="l">Samples</th><th class="l">Rate (above/below)</th><th class="l">Effect Size</th><th class="l">Stability</th><th class="l">Maturity</th><th class="l">Experiments</th><th class="l">Evidence Score</th></tr></thead>
+      <tbody id="msdThresholdRankingBody"><tr><td colspan="9" class="sig-empty">No threshold discoveries yet.</td></tr></tbody>
     </table>
   </div>
 
   <div class="grid-card" style="margin-top:16px">
     <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Combination Ranking — Strongest Feature Synergies</h3>
-    <div class="gc-sub" style="margin-bottom:8px">Feature pairs whose combined (AND) condition beats BOTH single features' own best rate, ranked by synergy. A pair only appears here if it genuinely outperforms its better half, not merely co-occurs with it.</div>
-    <table class="sig-table"><thead><tr><th class="l">Combined Condition</th><th class="l">Samples</th><th class="l">Combo Rate</th><th class="l">Rate (A alone / B alone)</th><th class="l">Synergy</th><th class="l">Maturity</th><th class="l">Experiments</th></tr></thead>
-      <tbody id="msdComboRankingBody"><tr><td colspan="7" class="sig-empty">No combination discoveries yet.</td></tr></tbody>
+    <div class="gc-sub" style="margin-bottom:8px">2, 3, and 4-feature combinations whose combined (AND) condition beats the BEST of every individual member's own rate, ranked by <b>Evidence Score</b>. A combination only appears here if it genuinely outperforms its strongest single component, not merely co-occurs with it — and every combo tested in one experiment is corrected together via Benjamini-Hochberg FDR before any of them are gated on significance.</div>
+    <table class="sig-table"><thead><tr><th class="l">Combined Condition</th><th class="l">Size</th><th class="l">Samples</th><th class="l">Combo Rate</th><th class="l">Best Single Rate</th><th class="l">Synergy</th><th class="l">Maturity</th><th class="l">Experiments</th><th class="l">Evidence Score</th></tr></thead>
+      <tbody id="msdComboRankingBody"><tr><td colspan="9" class="sig-empty">No combination discoveries yet.</td></tr></tbody>
     </table>
   </div>
 
   <div class="grid-card" style="margin-top:16px">
     <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Market-State Ranking — Strongest Repeatable Regimes</h3>
-    <div class="gc-sub" style="margin-bottom:8px">Clustered regions of ADX/RSI/MACD/ATR/+DI/-DI space whose membership genuinely precedes a run, ranked by lift over the rest of the data. Each row's identity is a canonical qualitative fingerprint (which dimensions run meaningfully high or low), not an arbitrary cluster index — that's what lets the same real regime accumulate evidence across independently-clustered experiments.</div>
-    <table class="sig-table"><thead><tr><th class="l">Market State (feature signature)</th><th class="l">Samples</th><th class="l">Rate (state/rest)</th><th class="l">Lift</th><th class="l">Maturity</th><th class="l">Experiments</th></tr></thead>
-      <tbody id="msdStateRankingBody"><tr><td colspan="6" class="sig-empty">No market-state discoveries yet.</td></tr></tbody>
+    <div class="gc-sub" style="margin-bottom:8px">Clustered regions of ADX/RSI/MACD/ATR/+DI/-DI space whose membership genuinely precedes a run, ranked by <b>Evidence Score</b>. Each row's identity is a canonical qualitative fingerprint (which dimensions run meaningfully high or low), not an arbitrary cluster index — that's what lets the same real regime accumulate evidence across independently-clustered experiments. The Market State column is a heuristic, human-readable label layered on top of that fingerprint for interpretability — the fingerprint itself, not the label, is what the maturity engine tracks.</div>
+    <table class="sig-table"><thead><tr><th class="l">Market State</th><th class="l">Feature Signature</th><th class="l">Samples</th><th class="l">Rate (state/rest)</th><th class="l">Lift</th><th class="l">Maturity</th><th class="l">Experiments</th><th class="l">Evidence Score</th></tr></thead>
+      <tbody id="msdStateRankingBody"><tr><td colspan="8" class="sig-empty">No market-state discoveries yet.</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="grid-card" style="margin-top:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Regime Validation — Survives / Weakens / Disappears</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Every discovery's evidence, grouped by the DOMINANT market regime each supporting experiment was collected under (reusing the same clustering/labeling as Market-State discovery, applied once per experiment to characterize its overall condition) — never pooled into one global number. "Survives" means the effect holds at &ge;75% of its overall average with continued significance in that regime; "Weakens" means a real, same-direction effect remains but meaningfully smaller or less consistent; "Disappears" means no measurable effect, or never significant, in that regime.</div>
+    <table class="sig-table"><thead><tr><th class="l">Discovery</th><th class="l">Type</th><th class="l">Regime</th><th class="l">Evidence in Regime</th><th class="l">Mean Effect</th><th class="l">Overall Effect</th><th class="l">Status</th></tr></thead>
+      <tbody id="msdRegimeValidationBody"><tr><td colspan="7" class="sig-empty">No regime-tagged evidence yet.</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="grid-card" style="margin-top:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Cross-Market Transferability</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Every discovery's evidence, grouped by which market (symbol) each supporting experiment was run against — reusing the exact same Survives/Weakens/Disappears classification as Regime Validation above, just grouped by market instead of market condition. Under the project's current single-market research scope this table will read "Insufficient Data" throughout, by design — it activates automatically, with no further changes, the moment experiments are run against additional Volatility indices. Transferability Score (Survives=1.0, Weakens=0.5, Disappears=0.0, averaged across judged markets) now feeds directly into Evidence Score's market-consistency factor.</div>
+    <table class="sig-table"><thead><tr><th class="l">Discovery</th><th class="l">Type</th><th class="l">Market</th><th class="l">Evidence on Market</th><th class="l">Mean Effect</th><th class="l">Overall Effect</th><th class="l">Status</th></tr></thead>
+      <tbody id="msdMarketTransferabilityBody"><tr><td colspan="7" class="sig-empty">No cross-market evidence yet — single-market research in progress, as expected.</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="grid-card" style="margin-top:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Automatic Contradiction Detection</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Discoveries whose evidence REVERSES DIRECTION across distinct experiments — a qualitatively more severe failure than weakening (Regime Validation) or declining (Decay Engine), since it means the pooled claim may be actively wrong for part of the evidence. Contradicted discoveries are capped at Candidate maturity absolutely, regardless of experiment count. "Likely Cause" is a deterministic check — does grouping the conflicting evidence by regime or by market cleanly separate the two directions — never a speculative explanation.</div>
+    <table class="sig-table"><thead><tr><th class="l">Discovery</th><th class="l">Type</th><th class="l">Above-side Experiments</th><th class="l">Below-side Experiments</th><th class="l">Affected Markets</th><th class="l">Affected Regimes</th><th class="l">Likely Cause</th></tr></thead>
+      <tbody id="msdContradictionBody"><tr><td colspan="7" class="sig-empty">No contradictions detected.</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="grid-card" style="margin-top:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Research Reports — Automatic Notebook</h3>
+    <div class="gc-sub" style="margin-bottom:8px">One permanent, append-only report generated automatically after every completed research session — hypothesis, configuration, dataset, methods, every discovery touched with its evidence score/stability/regime/transferability/contradiction/decay status, maturity changes, conclusions, and future work. Every field is a direct read of what Phases 0-5 already computed — nothing here is a new statistic, only assembly. Click a row's Experiment ID to view the full report.</div>
+    <table class="sig-table"><thead><tr><th class="l">Experiment</th><th class="l">Date</th><th class="l">Discoveries (new/reinforced)</th><th class="l">Promoted</th><th class="l">Demoted</th><th class="l">Decaying</th><th class="l">Contradicted</th><th class="l">Conclusions</th></tr></thead>
+      <tbody id="msdResearchReportsBody"><tr><td colspan="8" class="sig-empty">No research reports yet — run an experiment and click "Train Models" to generate the first one.</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -3414,8 +3451,8 @@ function drawCandleChart(svgId, candles, formingCandle, opts={}){
   }
 
   // y-scale
-  const hi = Math.max(...all.map(c=>c.high));
-  const lo = Math.min(...all.map(c=>c.low));
+  const hi = msdSafeMax(all.map(c=>c.high));
+  const lo = msdSafeMin(all.map(c=>c.low));
   const pad = (hi-lo)*0.08 || 0.5;
   const yHi = hi+pad, yLo = lo-pad, yRng = yHi-yLo;
   const yp = v => padT + innerH*(1-(v-yLo)/yRng);
@@ -3429,7 +3466,7 @@ function drawCandleChart(svgId, candles, formingCandle, opts={}){
   const x0 = i => padL + i*(cw+gap) + gap/2;
 
   // vol scale (height = 30px max)
-  const maxTicks = Math.max(...shown.map(c=>c.ticks||1));
+  const maxTicks = msdSafeMax(shown.map(c=>c.ticks||1));
   const volH = 28;
   const vH = t => Math.max(2, (t/maxTicks)*volH);
 
@@ -3519,8 +3556,8 @@ function drawCandles(){
     return;
   }
   // y-scale across all shown candles
-  let hi = Math.max(...list.map(c => c.high));
-  let lo = Math.min(...list.map(c => c.low));
+  let hi = msdSafeMax(list.map(c => c.high));
+  let lo = msdSafeMin(list.map(c => c.low));
   if (hi === lo){ hi += 1; lo -= 1; }
   const padRange = (hi - lo) * 0.12;       // breathing room
   hi += padRange; lo -= padRange;
@@ -3586,8 +3623,8 @@ function drawLiveCandles(){
     return;
   }
   const priceBot = H - padB - volH;            // bottom of the price pane
-  let hi = Math.max(...list.map(c => c.high));
-  let lo = Math.min(...list.map(c => c.low));
+  let hi = msdSafeMax(list.map(c => c.high));
+  let lo = msdSafeMin(list.map(c => c.low));
   if (hi === lo){ hi += 1; lo -= 1; }
   const pd = (hi - lo) * 0.08; hi += pd; lo -= pd;
   const range = hi - lo;
@@ -3619,7 +3656,7 @@ function drawLiveCandles(){
       const span = Math.max(1, Math.min(bins-1,b1) - Math.max(0,b0) + 1);
       for (let b = Math.max(0,b0); b <= Math.min(bins-1,b1); b++) buckets[b] += w / span;
     });
-    const maxB = Math.max(...buckets, 1);
+    const maxB = msdSafeMax(buckets, 1);
     let pocIdx = 0; buckets.forEach((v,i)=>{ if (v > buckets[pocIdx]) pocIdx = i; });
     const maxW = (W - padL - padR) * 0.22;
     const bandH = (priceBot - padT) / bins;
@@ -3649,7 +3686,7 @@ function drawLiveCandles(){
 
   // tick-volume strip along the bottom
   if (wantVol){
-    const maxVol = Math.max(...list.map(c => c.ticks || 1), 1);
+    const maxVol = msdSafeMax(list.map(c => c.ticks || 1), 1);
     out += `<line x1="${padL}" y1="${(priceBot+2).toFixed(1)}" x2="${W-padR}" y2="${(priceBot+2).toFixed(1)}" stroke="#1a2130" stroke-width="1"/>`;
     out += `<text x="${W-padR+4}" y="${(H-padB-2).toFixed(1)}" fill="#475569" font-size="8" font-family="monospace">ticks</text>`;
     list.forEach((c, i) => {
@@ -3807,7 +3844,7 @@ function choppiness(closes, period=14){
   let sumTR = 0;
   for (let i = 1; i < slice.length; i++) sumTR += Math.abs(slice[i] - slice[i-1]);
   const win = slice.slice(1);
-  const hh = Math.max(...win), ll = Math.min(...win);
+  const hh = msdSafeMax(win), ll = msdSafeMin(win);
   const rng = hh - ll;
   if (rng === 0 || sumTR === 0) return 50;
   let ci = 100 * Math.log10(sumTR / rng) / Math.log10(period);
@@ -3850,7 +3887,7 @@ function stochastic(closes, kPeriod=14, dPeriod=3){
   for (let j = dPeriod - 1; j >= 0; j--){
     const offset = j;
     const window = closes.slice(-(kPeriod + offset), closes.length - offset || undefined);
-    const hi = Math.max(...window), lo = Math.min(...window);
+    const hi = msdSafeMax(window), lo = msdSafeMin(window);
     const last = closes[closes.length - 1 - offset];
     kArr.unshift((hi - lo) === 0 ? 50 : ((last - lo) / (hi - lo)) * 100);
   }
@@ -4823,7 +4860,7 @@ async function msdGetPipelineHealth(){
   const [eventDbSize, stateDbSize] = await Promise.all([msdGetEventCount(), msdGetMarketStateCount()]);
   const allWriteTimes = msdPipelineHealth.eventWriteTimes.concat(msdPipelineHealth.stateWriteTimes);
   const averageWriteTimeMs = allWriteTimes.length ? allWriteTimes.reduce((s, t) => s + t, 0) / allWriteTimes.length : null;
-  const maximumWriteTimeMs = allWriteTimes.length ? Math.max(...allWriteTimes) : null;
+  const maximumWriteTimeMs = allWriteTimes.length ? msdSafeMax(allWriteTimes) : null;
 
   return {
     ticksReceived: detectorCounters.ticksProcessed,
@@ -4958,7 +4995,7 @@ function msdHistogram(values, binCount){
   binCount = binCount || 10;
   const n = values.length;
   if (n === 0) return { bins: [], counts: [] };
-  const min = Math.min(...values), max = Math.max(...values);
+  const min = msdSafeMin(values), max = msdSafeMax(values);
   const bins = [];
   for (let i = 0; i <= binCount; i++) bins.push(min + (max - min) * (i / binCount));
   const counts = new Array(binCount).fill(0);
@@ -5077,8 +5114,8 @@ function msdMutualInformation(xs, ys, binCount){
   binCount = binCount || 8;
   const n = xs.length;
   if (n < 2) return null;
-  const xMin = Math.min(...xs), xMax = Math.max(...xs);
-  const yMin = Math.min(...ys), yMax = Math.max(...ys);
+  const xMin = msdSafeMin(xs), xMax = msdSafeMax(xs);
+  const yMin = msdSafeMin(ys), yMax = msdSafeMax(ys);
   function binOf(v, lo, hi){
     if (hi === lo) return 0;
     let idx = Math.floor(((v - lo) / (hi - lo)) * binCount);
@@ -5339,6 +5376,39 @@ function msdResetExperimentDatabase(){
 }
 
 /** mulberry32 — a small, fast, deterministic PRNG. Same seed, same sequence, every time, in every browser. Not cryptographic — doesn't need to be, only reproducible. */
+// ── Stack-safe max/min (Critical Fix — see Phase 0 audit) ─────────────
+// ROOT CAUSE of "Maximum call stack size exceeded" in the Experiment
+// Runner: `Math.max(...array)` / `Math.min(...array)` spread every array
+// element into a function call's argument list. V8 has a hard limit on
+// how many arguments a single call can carry (observed to throw exactly
+// this RangeError at ~65,000-150,000 elements, confirmed by direct
+// reproduction). Every dataset-scale array in this app — MarketStates
+// snapshots, feature-value columns pulled from an entire experiment,
+// training-set columns inside the gradient-boosted split search — grows
+// with collection time, and Volatility 100 (1s) in particular produces a
+// tick roughly every second: a multi-day collection run routinely
+// produces tens to hundreds of thousands of snapshots, which is exactly
+// the regime where these calls silently start failing. This was NOT a
+// recursion bug and had nothing to do with call depth in the normal
+// sense — it was a single non-recursive function call exceeding V8's
+// argument-count ceiling. The permanent fix: never spread a
+// dataset-scale array into a function call. These two helpers replace
+// EVERY `Math.max(...arr)` / `Math.min(...arr)` call in this file with
+// an O(n) loop of fixed, O(1) stack depth, regardless of array size —
+// eliminating the entire bug class, not just the first line that
+// happened to be hit. Extra plain scalar arguments (e.g. the historical
+// `Math.max(...arr, 1)` pattern used as a floor) are still supported.
+function msdSafeMax(arr, ...extra){
+  let m = extra.length ? Math.max(...extra) : -Infinity;
+  for (let i = 0; i < arr.length; i++) { const v = arr[i]; if (v > m) m = v; }
+  return m;
+}
+function msdSafeMin(arr, ...extra){
+  let m = extra.length ? Math.min(...extra) : Infinity;
+  for (let i = 0; i < arr.length; i++) { const v = arr[i]; if (v < m) m = v; }
+  return m;
+}
+
 function msdSeededRandom(seed){
   let state = seed >>> 0;
   return function(){
@@ -5366,19 +5436,30 @@ function msdSeededShuffle(arr, rng){
  * and filters. Given the same allStates and the same config, this always
  * returns byte-identical results.
  *
- * Research Configuration fields: leadTime (a specific tick value, or
- * 'all'), featureVersion (required — datasets are never built across
- * mismatched schema versions), samplingRatio (negatives sampled per
- * positive), randomSeed (integer), trainingSplit. Lookback Window is
- * deliberately NOT a config input here — it's derived by msdRunExperiment
- * from the actual built dataset (the widest Lead Time observed among its
- * positives), since a user-typed value could never be verified against
- * what the Labeler's own capture-time setting (msdLookbackWindow)
- * actually was when the referenced snapshots were captured.
- * (fraction, e.g. 0.7).
+ * Research Configuration fields: symbol (a specific market, or 'all' —
+ * see the Phase 0 audit: snapshots are now tagged by market at capture
+ * time, so this is the first point where "research on Volatility 100
+ * (1s) only" becomes an enforced, verifiable filter rather than
+ * something the researcher has to guarantee by hand), leadTime (a
+ * specific tick value, or 'all'), featureVersion (required — datasets
+ * are never built across mismatched schema versions), samplingRatio
+ * (negatives sampled per positive), randomSeed (integer), trainingSplit.
+ * Lookback Window is deliberately NOT a config input here — it's derived
+ * by msdRunExperiment from the actual built dataset (the widest Lead
+ * Time observed among its positives), since a user-typed value could
+ * never be verified against what the Labeler's own capture-time setting
+ * (msdLookbackWindow) actually was when the referenced snapshots were
+ * captured. (fraction, e.g. 0.7).
  */
 function msdBuildExperimentDataset(allStates, config){
   let filtered = allStates.filter(s => s.featureVersion === config.featureVersion);
+  if (config.symbol != null && config.symbol !== 'all') {
+    // Snapshots captured before this fix have no `symbol` field at all —
+    // they are correctly EXCLUDED by a specific-market filter (there is
+    // no way to retroactively know what market they came from), not
+    // silently included as if they matched.
+    filtered = filtered.filter(s => s.symbol === config.symbol);
+  }
   if (config.leadTime != null && config.leadTime !== 'all') {
     filtered = filtered.filter(s => s.outcome === 'negative' || s.leadTime === config.leadTime);
   }
@@ -5456,10 +5537,11 @@ async function msdRunExperiment(config){
   // is always an honest fact about this dataset; a typed one could
   // silently be fiction.
   const positiveLeadTimes = allSnapshots.filter(s => s.outcome === 'positive' && Number.isFinite(s.leadTime)).map(s => s.leadTime);
-  const derivedLookbackWindow = positiveLeadTimes.length ? Math.max(...positiveLeadTimes) : null;
+  const derivedLookbackWindow = positiveLeadTimes.length ? msdSafeMax(positiveLeadTimes) : null;
 
   const record = {
     experimentId,
+    symbol: config.symbol ?? 'all',
     lookbackWindow: derivedLookbackWindow,
     leadTime: config.leadTime ?? 'all',
     featureVersion: config.featureVersion,
@@ -5516,6 +5598,216 @@ function msdWilsonScoreInterval(successCount, totalCount, z){
   return { lower: Math.max(0, (center - margin) / denom), upper: Math.min(1, (center + margin) / denom) };
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// Statistical Rigor Extension (Phase 0 audit response)
+// ══════════════════════════════════════════════════════════════════════
+// The audit found that Mutual Information + Positive Rate alone are
+// insufficient to call something scientific evidence — neither carries a
+// p-value, a properly-scaled effect size, or protection against testing
+// many hypotheses at once. This section adds the standard battery
+// requested, each validated against known reference values (a textbook
+// 2x2 chi-square table, Fisher's own "Lady Tasting Tea" example, R's
+// fisher.test on a second table, hand-derived odds ratios, a classic
+// Benjamini-Hochberg worked example, and Beta-Binomial posterior
+// convergence) before being wired into the discovery pipeline. erf() is
+// reused from its existing definition elsewhere in this file, not
+// redefined — chi-square and the existing digit-tracker chi-square
+// share the one implementation.
+
+/** Chi-square test of independence for a 2x2 table: [[a,b],[c,d]] = [[inGroup&positive, inGroup&negative],[outGroup&positive, outGroup&negative]]. df=1, so its CDF has a closed form via erf. Returns null chi2/pValue (not a silently wrong number) if any expected cell is zero — use Fisher's exact test instead in that regime. */
+function msdChiSquareTest2x2(a, b, c, d, yatesCorrection){
+  const n = a + b + c + d;
+  if (n === 0) return { chi2: 0, df: 1, pValue: 1 };
+  const rowIn = a + b, rowOut = c + d, colPos = a + c, colNeg = b + d;
+  const expected = (row, col) => (row * col) / n;
+  const eA = expected(rowIn, colPos), eB = expected(rowIn, colNeg), eC = expected(rowOut, colPos), eD = expected(rowOut, colNeg);
+  if (eA === 0 || eB === 0 || eC === 0 || eD === 0) return { chi2: null, df: 1, pValue: null, note: 'zero expected cell — chi-square invalid, use Fisher exact instead' };
+  const correction = yatesCorrection ? 0.5 : 0;
+  const term = (o, e) => Math.pow(Math.max(0, Math.abs(o - e) - correction), 2) / e;
+  const chi2 = term(a, eA) + term(b, eB) + term(c, eC) + term(d, eD);
+  const pValue = 1 - erf(Math.sqrt(chi2 / 2));
+  return { chi2, df: 1, pValue: Math.max(0, Math.min(1, pValue)) };
+}
+
+/** Lanczos-approximation log-gamma — lets Fisher's exact test work with factorials of thousands of samples without overflowing (direct factorial computation breaks well before that). */
+function msdLogGamma(x){
+  const g = 7;
+  const c = [
+    0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+    771.32342877765313, -176.61502916214059, 12.507343278686905,
+    -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7,
+  ];
+  if (x < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * x)) - msdLogGamma(1 - x);
+  x -= 1;
+  let a = c[0];
+  const t = x + g + 0.5;
+  for (let i = 1; i < g + 2; i++) a += c[i] / (x + i);
+  return 0.5 * Math.log(2 * Math.PI) + (x + 0.5) * Math.log(t) - t + Math.log(a);
+}
+function msdLogChoose(n, k){
+  if (k < 0 || k > n) return -Infinity;
+  return msdLogGamma(n + 1) - msdLogGamma(k + 1) - msdLogGamma(n - k + 1);
+}
+/** Fisher's exact test (two-tailed) for a 2x2 table via exact hypergeometric enumeration — validated against Fisher's own "Lady Tasting Tea" table (p=0.4857) and an independently-computed second reference (p=0.023014). Correct at any sample size (uses log-space arithmetic throughout), unlike chi-square, which needs a large-sample approximation. */
+function msdFisherExactTest(a, b, c, d){
+  const rowIn = a + b, colPos = a + c, n = a + b + c + d, colNeg = b + d;
+  if (n === 0) return { pValue: 1 };
+  const aMin = Math.max(0, rowIn - colNeg), aMax = Math.min(rowIn, colPos);
+  const logProbs = [];
+  for (let ai = aMin; ai <= aMax; ai++) logProbs.push(msdLogChoose(colPos, ai) + msdLogChoose(n - colPos, rowIn - ai) - msdLogChoose(n, rowIn));
+  const maxLog = msdSafeMax(logProbs);
+  const probs = logProbs.map(lp => Math.exp(lp - maxLog));
+  const sumProbs = probs.reduce((s, p) => s + p, 0);
+  const normProbs = probs.map(p => p / sumProbs);
+  const observedProb = normProbs[a - aMin];
+  const eps = observedProb * 1e-7;
+  let pValue = 0;
+  normProbs.forEach(p => { if (p <= observedProb + eps) pValue += p; });
+  return { pValue: Math.max(0, Math.min(1, pValue)) };
+}
+
+/** Odds ratio with Haldane-Anscombe correction (adds 0.5 to every cell whenever any cell is zero, so the ratio and its CI stay finite) and a log-odds-scale confidence interval. */
+function msdOddsRatio(a, b, c, d, z){
+  z = z || 1.96;
+  const hasZero = a === 0 || b === 0 || c === 0 || d === 0;
+  const A = hasZero ? a + 0.5 : a, B = hasZero ? b + 0.5 : b, C = hasZero ? c + 0.5 : c, D = hasZero ? d + 0.5 : d;
+  const or_ = (A * D) / (B * C);
+  const seLogOR = Math.sqrt(1/A + 1/B + 1/C + 1/D);
+  const logOR = Math.log(or_);
+  return { oddsRatio: or_, lower: Math.exp(logOR - z * seLogOR), upper: Math.exp(logOR + z * seLogOR), haldaneCorrected: hasZero };
+}
+
+/** Likelihood ratio positive: LR+ = P(condition | positive outcome) / P(condition | negative outcome) — standard diagnostic-test framing, with the market condition playing the role of "the test." LR+ > 10 is conventionally "strong" evidence, 1 = no information. */
+function msdLikelihoodRatioPositive(a, b, c, d){
+  const totalPos = a + c, totalNeg = b + d;
+  if (totalPos === 0 || totalNeg === 0) return null;
+  const sensitivity = a / totalPos, falsePosRate = b / totalNeg;
+  if (falsePosRate === 0) return sensitivity > 0 ? Infinity : null;
+  return sensitivity / falsePosRate;
+}
+
+/** Cliff's delta (nonparametric effect size) via the Mann-Whitney U statistic, computed from ranks (O(n log n)), not naive O(n·m) pairwise comparison. delta=+1 means group A is always greater, 0 means the groups are indistinguishable, -1 means A is always less. Validated: fully separated groups give exactly ±1.0, and two draws from the same distribution give a value near 0. */
+function msdCliffsDelta(sampleA, sampleB){
+  const n = sampleA.length, m = sampleB.length;
+  if (n === 0 || m === 0) return null;
+  const tagged = sampleA.map(v => [v, 'A']).concat(sampleB.map(v => [v, 'B']));
+  tagged.sort((x, y) => x[0] - y[0]);
+  const ranks = new Array(tagged.length);
+  let i = 0;
+  while (i < tagged.length) {
+    let j = i;
+    while (j + 1 < tagged.length && tagged[j + 1][0] === tagged[i][0]) j++;
+    const avgRank = (i + 1 + j + 1) / 2;
+    for (let k = i; k <= j; k++) ranks[k] = avgRank;
+    i = j + 1;
+  }
+  let rankSumA = 0;
+  tagged.forEach((t, idx) => { if (t[1] === 'A') rankSumA += ranks[idx]; });
+  const U_A = rankSumA - (n * (n + 1)) / 2;
+  return (2 * U_A) / (n * m) - 1;
+}
+
+/** Benjamini-Hochberg False Discovery Rate correction (standard step-up procedure). Given many p-values from testing many features/pairs/clusters in one experiment, this is what keeps "significant at p<0.05" from becoming "false positive in 1 of every 20 features tested, guaranteed." Validated against the classic 5-p-value textbook example. */
+function msdBenjaminiHochberg(pValues, alpha){
+  alpha = alpha != null ? alpha : 0.05;
+  const m = pValues.length;
+  if (m === 0) return [];
+  const indexed = pValues.map((p, i) => ({ p, i })).sort((a, b) => a.p - b.p);
+  let prevAdj = 1;
+  const adjusted = new Array(m);
+  for (let rank = m; rank >= 1; rank--) {
+    const entry = indexed[rank - 1];
+    const raw = entry.p * m / rank;
+    const adj = Math.min(prevAdj, raw);
+    adjusted[entry.i] = Math.min(1, adj);
+    prevAdj = adj;
+  }
+  return adjusted.map((adjP, i) => ({ pValue: pValues[i], adjustedPValue: adjP, significant: adjP <= alpha }));
+}
+
+/** Beta-Binomial Bayesian posterior (conjugate prior, default uninformative Beta(1,1)=uniform). Returns the posterior mean and a normal-approximation credible interval on the Beta distribution's own variance — explicitly NOT exact inverse-CDF quantiles, which this app has no numerically-stable way to compute; documented as an approximation, not overstated as exact. Validated to match a hand-calculated posterior mean and to converge to the observed rate as sample size grows large. */
+function msdBayesianPosterior(successes, total, priorAlpha, priorBeta, z){
+  priorAlpha = priorAlpha != null ? priorAlpha : 1;
+  priorBeta = priorBeta != null ? priorBeta : 1;
+  z = z != null ? z : 1.96;
+  const postAlpha = priorAlpha + successes;
+  const postBeta = priorBeta + (total - successes);
+  const mean = postAlpha / (postAlpha + postBeta);
+  const variance = (postAlpha * postBeta) / (Math.pow(postAlpha + postBeta, 2) * (postAlpha + postBeta + 1));
+  const sd = Math.sqrt(variance);
+  return {
+    posteriorMean: mean, posteriorAlpha: postAlpha, posteriorBeta: postBeta,
+    credibleLower: Math.max(0, mean - z * sd), credibleUpper: Math.min(1, mean + z * sd),
+  };
+}
+
+/** Generic percentile bootstrap confidence interval for ANY statistic (not just a proportion) — pass a function computing the statistic from a resampled array. Deterministic: same seed always produces a byte-identical interval (validated directly). */
+function msdBootstrapCI(values, statFn, randomSeed, resamples, alpha){
+  resamples = resamples || 500;
+  alpha = alpha != null ? alpha : 0.05;
+  const n = values.length;
+  if (n < 3) return null;
+  const rng = msdSeededRandom(randomSeed || 1);
+  const stats = [];
+  for (let r = 0; r < resamples; r++) {
+    const sample = new Array(n);
+    for (let i = 0; i < n; i++) sample[i] = values[Math.floor(rng() * n)];
+    stats.push(statFn(sample));
+  }
+  stats.sort((a, b) => a - b);
+  const loIdx = Math.floor((alpha / 2) * resamples);
+  const hiIdx = Math.min(resamples - 1, Math.ceil((1 - alpha / 2) * resamples) - 1);
+  return { lower: stats[loIdx], upper: stats[hiIdx], resamples, pointEstimate: statFn(values) };
+}
+
+/**
+ * Unifies the full statistical battery into ONE call, given a 2x2 table
+ * of counts (a=inGroup&positive, b=inGroup&negative, c=outGroup&positive,
+ * d=outGroup&negative). This is what every Phase 3/4/5 analyzer now
+ * calls to build its statisticalEvidence, instead of reporting only a
+ * permutation p-value and a raw rate — satisfying the audit's
+ * requirement that every statistical result carry sample size, effect
+ * size, confidence interval, p-value, and support count together.
+ * Automatically prefers Fisher's exact test over chi-square whenever any
+ * expected cell would be small (<5), which is the standard rule for when
+ * the chi-square large-sample approximation stops being trustworthy.
+ */
+function msdComputeFullStatisticalEvidence(a, b, c, d){
+  const inTotal = a + b, outTotal = c + d, totalN = inTotal + outTotal;
+  const inRate = inTotal > 0 ? a / inTotal : null;
+  const outRate = outTotal > 0 ? c / outTotal : null;
+  const inCI = msdWilsonScoreInterval(a, inTotal);
+  const outCI = msdWilsonScoreInterval(c, outTotal);
+  const chi2 = msdChiSquareTest2x2(a, b, c, d);
+  const useExact = chi2.pValue == null || Math.min(a, b, c, d) < 5 || (inTotal * outTotal * (a+c) * (b+d)) / Math.pow(totalN, 3) < 5;
+  const exact = useExact ? msdFisherExactTest(a, b, c, d) : null;
+  const oddsRatio = msdOddsRatio(a, b, c, d);
+  const likelihoodRatioPositive = msdLikelihoodRatioPositive(a, b, c, d);
+  // Mutual information directly from the 2x2 counts — the same quantity
+  // msdFeatureOutcomeMI estimates via binning for continuous features,
+  // computed exactly here since the table is already discrete.
+  let mi = 0;
+  [[a, inTotal, totalN > 0 ? (a+c)/totalN : 0], [b, inTotal, totalN > 0 ? (b+d)/totalN : 0], [c, outTotal, totalN > 0 ? (a+c)/totalN : 0], [d, outTotal, totalN > 0 ? (b+d)/totalN : 0]].forEach(([count, groupTotal, py]) => {
+    const pxy = totalN > 0 ? count / totalN : 0;
+    const px = totalN > 0 ? groupTotal / totalN : 0;
+    if (pxy > 0 && px > 0 && py > 0) mi += pxy * Math.log2(pxy / (px * py));
+  });
+  return {
+    sampleCount: totalN,
+    inGroupCount: inTotal, outGroupCount: outTotal,
+    inGroupPositiveRate: inRate, outGroupPositiveRate: outRate,
+    inGroupCI: inCI, outGroupCI: outCI,
+    effectSize: (inRate != null && outRate != null) ? Math.abs(inRate - outRate) : null, // risk difference
+    chiSquare: chi2.pValue != null ? chi2 : null,
+    fisherExact: exact,
+    pValue: exact ? exact.pValue : chi2.pValue, // prefer the exact test whenever it was needed
+    testUsed: exact ? 'fisher_exact' : 'chi_square',
+    oddsRatio: oddsRatio.oddsRatio, oddsRatioCI: { lower: oddsRatio.lower, upper: oddsRatio.upper },
+    likelihoodRatioPositive,
+    mutualInformation: Math.max(0, mi),
+  };
+}
+
 /** Sample Count, Positive Rate, and its Wilson Confidence Interval for one set of snapshots. */
 function msdComputeSampleStatistics(snapshots){
   const positiveCount = snapshots.filter(s => s.outcome === 'positive').length;
@@ -5537,7 +5829,7 @@ function msdFeatureOutcomeMI(featureValues, outcomes, binCount){
   binCount = binCount || 8;
   const n = featureValues.length;
   if (n < 2 || outcomes.length !== n) return null;
-  const min = Math.min(...featureValues), max = Math.max(...featureValues);
+  const min = msdSafeMin(featureValues), max = msdSafeMax(featureValues);
   function binOf(v){
     if (max === min) return 0;
     let idx = Math.floor(((v - min) / (max - min)) * binCount);
@@ -5995,12 +6287,12 @@ function msdGenerateResearchSessionId(){
 // "enough repetition" is a genuine scientific judgment call, not a
 // constant to hardcode forever.
 let MSD_MATURITY_PROMOTION_RULES = {
-  candidate:  { minExperiments: 2 },
-  repeatable: { minExperiments: 4 },
-  verified:   { minExperiments: 8 },
+  candidate:  { minExperiments: 2, minStability: 0 },    // too little history to judge stability at all this early — gate is a no-op
+  repeatable: { minExperiments: 4, minStability: 0.4 },
+  verified:   { minExperiments: 8, minStability: 0.6 },
 };
 
-/** Updates the promotion thresholds. Refuses a non-ascending rule set — candidate must require fewer experiments than repeatable, which must require fewer than verified — since anything else would make the maturity ladder incoherent. */
+/** Updates the promotion thresholds. Refuses a non-ascending rule set — candidate must require fewer experiments than repeatable, which must require fewer than verified — since anything else would make the maturity ladder incoherent. Same non-decreasing requirement now applies to minStability (Phase 1): a discovery should never need LESS evidence consistency to reach a HIGHER maturity level. */
 function msdSetMaturityPromotionRules(rules){
   if (!rules || !rules.candidate || !rules.repeatable || !rules.verified) {
     return { ok: false, error: 'Rules must specify candidate, repeatable, and verified thresholds.' };
@@ -6009,7 +6301,17 @@ function msdSetMaturityPromotionRules(rules){
   if (!(Number.isInteger(c) && Number.isInteger(r) && Number.isInteger(v) && c >= 1 && c < r && r < v)) {
     return { ok: false, error: 'Promotion rules must be strictly ascending positive integers (candidate < repeatable < verified).' };
   }
-  MSD_MATURITY_PROMOTION_RULES = { candidate: { minExperiments: c }, repeatable: { minExperiments: r }, verified: { minExperiments: v } };
+  const sc = rules.candidate.minStability != null ? rules.candidate.minStability : 0;
+  const sr = rules.repeatable.minStability != null ? rules.repeatable.minStability : 0;
+  const sv = rules.verified.minStability != null ? rules.verified.minStability : 0;
+  if (!([sc, sr, sv].every(s => Number.isFinite(s) && s >= 0 && s <= 1) && sc <= sr && sr <= sv)) {
+    return { ok: false, error: 'Stability thresholds must each be between 0 and 1, and non-decreasing across candidate <= repeatable <= verified.' };
+  }
+  MSD_MATURITY_PROMOTION_RULES = {
+    candidate: { minExperiments: c, minStability: sc },
+    repeatable: { minExperiments: r, minStability: sr },
+    verified: { minExperiments: v, minStability: sv },
+  };
   return { ok: true };
 }
 function msdGetMaturityPromotionRules(){ return MSD_MATURITY_PROMOTION_RULES; }
@@ -6031,6 +6333,9 @@ async function msdRecordDiscoveryEvidence(evidence){
     experimentId: evidence.experimentId,
     leadTime: evidence.leadTime,
     featureVersion: evidence.featureVersion,
+    symbol: evidence.symbol,
+    regime: evidence.regime,
+    regimeFingerprint: evidence.regimeFingerprint,
     statisticalEvidence: evidence.statisticalEvidence,
     discoveredAt: Date.now(),
   };
@@ -6056,31 +6361,482 @@ function msdGroupDiscoveryEvidence(findings){
   return byKey;
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// Phase 1 — Evidence Stability Score
+// ══════════════════════════════════════════════════════════════════════
+// Answers a question the Maturity Engine could not: not "how many
+// experiments support this discovery" but "does the EVIDENCE ITSELF
+// agree across those experiments." A discovery could swing from an 80%
+// to a 20% positive rate and back, accumulate 8 supporting experiments
+// on raw count alone, and previously still reach "Verified" — that is
+// not what "verified" should mean. This section computes stability from
+// a discovery's own chronological evidence history and feeds it into
+// the two places the count-only version fell short: the Evidence
+// Score's stability factor (previously a neutral 0.5 fallback for 3 of 4
+// discovery types), and the Maturity Engine's promotion gate (previously
+// count-only).
+//
+// SCOPE DECISION, stated explicitly: "Evidence Ranking stability" could
+// mean full historical replay of this discovery's RANK POSITION among
+// every other discovery of its type at each past point in time — that
+// requires re-deriving the entire ranking system historically per
+// discovery, an O(discoveries x experiments^2) cost for a signal that
+// effect-size and confidence stability already substantially capture.
+// Not built this phase. Instead, "ranking stability" here is the
+// stability of a lightweight, NON-CIRCULAR proxy (effect size x
+// confidence) computed from this discovery's own history only —
+// deliberately not the full Evidence Score, since Evidence Score is
+// about to depend on this Stability Score, and using it here would be
+// circular.
+
+/** Per-type effect size, extracted from ONE evidence entry (not a summary) — the shared definition used by both the Evidence Score (current value) and the Stability Score (historical series), so "what counts as this discovery type's effect size" is defined in exactly one place. */
+function msdExtractEffectSizeFromEvidence(se, discoveryType){
+  if (!se) return null;
+  if (discoveryType === 'threshold') return se.effectSize;
+  if (discoveryType === 'combo') return se.synergy;
+  if (discoveryType === 'market_state') return se.lift;
+  if (discoveryType === 'single_feature') return se.mutualInformation != null ? Math.min(1, se.mutualInformation * 4) : null;
+  return null;
+}
+/** Per-type "in-group" positive rate — the discovery-specific subgroup rate, not the dataset baseline. single_feature has no such subgroup (its stored positiveRate is the dataset's overall baseline, not feature-specific), so it correctly returns null rather than a misleading number. */
+function msdExtractPositiveRateFromEvidence(se, discoveryType){
+  if (!se) return null;
+  if (discoveryType === 'threshold') return se.direction === 'above' ? se.abovePositiveRate : se.belowPositiveRate;
+  if (discoveryType === 'combo') return se.comboPositiveRate;
+  if (discoveryType === 'market_state') return se.statePositiveRate;
+  return null;
+}
+/** In-group confidence interval width — reuses fullStatistics.inGroupCI (Phase 0) for threshold/combo/market_state; single_feature falls back to its own baseline CI (documented as the baseline's width, not a subgroup's — the only CI that type ever computed). */
+function msdExtractCIWidthFromEvidence(se, discoveryType){
+  if (!se) return null;
+  if (se.fullStatistics && se.fullStatistics.inGroupCI && se.fullStatistics.inGroupCI.upper != null) {
+    return se.fullStatistics.inGroupCI.upper - se.fullStatistics.inGroupCI.lower;
+  }
+  if (discoveryType === 'single_feature' && se.confidenceIntervalUpper != null && se.confidenceIntervalLower != null) {
+    return se.confidenceIntervalUpper - se.confidenceIntervalLower;
+  }
+  return null;
+}
+/** Mutual information — reuses fullStatistics.mutualInformation (Phase 0, exact from the 2x2 table) for threshold/combo/market_state; single_feature reports its own binned continuous-feature MI directly. */
+function msdExtractMIFromEvidence(se, discoveryType){
+  if (!se) return null;
+  if (discoveryType === 'single_feature') return se.mutualInformation;
+  return se.fullStatistics ? se.fullStatistics.mutualInformation : null;
+}
+/** The best available p-value for one evidence entry — FDR-adjusted where computed (threshold/combo/market_state, Phase 0), else raw. single_feature never computed a formal p-value at all, and correctly returns null rather than a fabricated one. */
+function msdExtractPValueFromEvidence(se, discoveryType){
+  if (!se) return null;
+  if (discoveryType === 'single_feature') return null;
+  return se.fdrAdjustedPValue != null ? se.fdrAdjustedPValue : se.pValue;
+}
+
+/** Coefficient-of-variation-based stability for any numeric series: lower relative spread = higher stability. Bounded to (0,1] via 1/(1+CV) — CV=0 (perfectly consistent) gives 1.0, CV=1 (spread as large as the mean) gives 0.5. Returns null (not a guessed number) when fewer than 2 values exist or the mean is exactly zero (CV undefined). */
+function msdCVStability(series){
+  const valid = series.filter(v => v != null && Number.isFinite(v));
+  if (valid.length < 2) return null;
+  const mean = valid.reduce((a, b) => a + b, 0) / valid.length;
+  if (mean === 0) return null;
+  const variance = valid.reduce((a, b) => a + (b - mean) ** 2, 0) / (valid.length - 1);
+  const cv = Math.sqrt(variance) / Math.abs(mean);
+  return 1 / (1 + cv);
+}
+
+/** Agreement-based stability for a significance classification series: what fraction of entries agree with whichever classification (significant / not) is the majority. A discovery that flip-flops scores low; one that's consistently significant (or consistently not) scores high. Always >=0.5 by construction (majority is never a minority), so a fully-inconsistent 50/50 split is the floor, not 0 — flip-flopping is bad, but it is not the same failure as "no effect at all." */
+function msdSignificanceAgreementStability(pValueSeries, gate){
+  gate = gate != null ? gate : 0.05;
+  const valid = pValueSeries.filter(v => v != null && Number.isFinite(v));
+  if (valid.length < 2) return null;
+  const sigCount = valid.filter(p => p < gate).length;
+  const notSigCount = valid.length - sigCount;
+  return Math.max(sigCount, notSigCount) / valid.length;
+}
+
+/**
+ * Computes the Evidence Stability Score for one discovery from its own
+ * chronological evidence history (an array of statisticalEvidence
+ * objects, oldest first — the caller decides how much history to
+ * include, which is what lets msdComputePromotionHistory ask for a
+ * growing PREFIX at each replay step rather than always the full list).
+ * Combines available sub-scores as a plain ARITHMETIC mean (not
+ * Evidence Score's geometric mean) — deliberately, since a sub-metric
+ * being structurally inapplicable to a discovery type (e.g. no p-value
+ * for single_feature) is not the same as that sub-metric being WEAK, and
+ * a geometric mean would wrongly punish the former as if it were the latter.
+ */
+function msdComputeEvidenceStabilityScore(evidenceHistory, discoveryType){
+  if (!evidenceHistory || evidenceHistory.length < 2) {
+    return { score: null, subScores: {}, insufficientData: true };
+  }
+  const positiveRateSeries = evidenceHistory.map(se => msdExtractPositiveRateFromEvidence(se, discoveryType));
+  const ciWidthSeries = evidenceHistory.map(se => msdExtractCIWidthFromEvidence(se, discoveryType));
+  const effectSizeSeries = evidenceHistory.map(se => msdExtractEffectSizeFromEvidence(se, discoveryType));
+  const miSeries = evidenceHistory.map(se => msdExtractMIFromEvidence(se, discoveryType));
+  const pValueSeries = evidenceHistory.map(se => msdExtractPValueFromEvidence(se, discoveryType));
+  const rankingProxySeries = evidenceHistory.map(se => {
+    const eff = msdExtractEffectSizeFromEvidence(se, discoveryType);
+    const pv = msdExtractPValueFromEvidence(se, discoveryType);
+    if (eff == null) return null;
+    const confidence = pv != null ? Math.max(0.001, 1 - pv) : 0.5; // neutral confidence when no p-value exists for this type, matching Evidence Score's own convention
+    return Math.abs(eff) * confidence;
+  });
+
+  const subScores = {
+    positiveRate: msdCVStability(positiveRateSeries),
+    confidenceInterval: msdCVStability(ciWidthSeries),
+    effectSize: msdCVStability(effectSizeSeries),
+    mutualInformation: msdCVStability(miSeries),
+    statisticalSignificance: msdSignificanceAgreementStability(pValueSeries),
+    evidenceRanking: msdCVStability(rankingProxySeries),
+  };
+
+  const available = Object.values(subScores).filter(v => v != null);
+  if (!available.length) return { score: null, subScores, insufficientData: true };
+  const score = available.reduce((a, b) => a + b, 0) / available.length;
+  return { score, subScores, insufficientData: false, subScoresAvailable: available.length };
+}
+
 // ── Maturity Engine (generic — works on any discoveryKey's evidence list) ──
+
+// ══════════════════════════════════════════════════════════════════════
+// Phase 2 — Regime Validation: per-regime classification
+// ══════════════════════════════════════════════════════════════════════
+// Answers: for one discovery, grouped by SOME property each piece of
+// evidence was collected under (market regime for Phase 2, market/symbol
+// for Phase 4 — never pooled across groups), does the effect Survive,
+// Weaken, or Disappear. Reuses Phase 1's per-evidence accessors
+// (msdExtractEffectSizeFromEvidence, msdExtractPValueFromEvidence)
+// unchanged — no new statistical computation, only a new grouping and
+// classification layer on top of numbers already being computed.
+
+const MSD_REGIME_MIN_EVIDENCE = 2;         // fewer than this in a group and classification is honestly "Insufficient Data", not guessed
+const MSD_REGIME_SURVIVE_RATIO = 0.75;     // group effect must be at least this fraction of the discovery's OVERALL effect to count as "Survives"
+const MSD_REGIME_ZERO_EFFECT_FLOOR = 0.01; // effect sizes at or below this are treated as effectively zero ("Disappears"), not noise around a real number
+const MSD_REGIME_SIGNIFICANT_FRACTION_OK = 0.5; // at least half the group's evidence entries must have cleared significance (where a p-value exists) to count as "Survives"
+
+/** Classifies one group's status for one discovery, given its own effect/significance stats and the discovery's overall (all-group) effect as the baseline to compare against. Pure, deterministic, documented thresholds — same inputs always produce the same classification, whatever the grouping represents (regime, market, or any future one). */
+function msdClassifyRegimeStatus(groupEffect, overallEffect, groupSignificantFraction){
+  if (groupEffect == null) return 'Insufficient Data';
+  if (groupEffect <= MSD_REGIME_ZERO_EFFECT_FLOOR) return 'Disappears';
+  if (groupSignificantFraction != null && groupSignificantFraction === 0) return 'Disappears';
+  const ratio = overallEffect > 0 ? groupEffect / overallEffect : 0;
+  const significanceOk = groupSignificantFraction == null || groupSignificantFraction >= MSD_REGIME_SIGNIFICANT_FRACTION_OK;
+  if (ratio >= MSD_REGIME_SURVIVE_RATIO && significanceOk) return 'Survives';
+  return 'Weakens';
+}
+
+/**
+ * Groups one discovery's evidence by ANY caller-supplied key (a function
+ * from one finding to a group label) and classifies each group's status
+ * — never pooling across groups. `findings` are the raw finding objects
+ * (with .statisticalEvidence and whatever field groupKeyFn reads),
+ * already known to share one discoveryType. This is the single, shared
+ * implementation behind both Phase 2 (Regime Validation, grouping by
+ * .regime) and Phase 4 (Cross-Market Transferability, grouping by
+ * .symbol) — never duplicated between them.
+ */
+function msdComputeGroupedEffectBreakdown(findings, discoveryType, groupKeyFn){
+  const withKey = findings.filter(f => { const k = groupKeyFn(f); return k != null && k !== 'Undetermined'; });
+  if (!withKey.length) return { overallEffect: null, groups: {}, groupsWithData: 0 };
+
+  const allEffects = withKey.map(f => msdExtractEffectSizeFromEvidence(f.statisticalEvidence, discoveryType)).filter(v => v != null).map(Math.abs);
+  const overallEffect = allEffects.length ? allEffects.reduce((a, b) => a + b, 0) / allEffects.length : null;
+
+  const byGroup = {};
+  withKey.forEach(f => { const k = groupKeyFn(f); (byGroup[k] = byGroup[k] || []).push(f); });
+
+  const groups = {};
+  Object.keys(byGroup).forEach(groupLabel => {
+    const group = byGroup[groupLabel];
+    const effects = group.map(f => msdExtractEffectSizeFromEvidence(f.statisticalEvidence, discoveryType)).filter(v => v != null).map(Math.abs);
+    const pValues = group.map(f => msdExtractPValueFromEvidence(f.statisticalEvidence, discoveryType)).filter(v => v != null);
+    if (group.length < MSD_REGIME_MIN_EVIDENCE || !effects.length) {
+      groups[groupLabel] = { evidenceCount: group.length, meanEffect: null, significantFraction: null, status: 'Insufficient Data' };
+      return;
+    }
+    const meanEffect = effects.reduce((a, b) => a + b, 0) / effects.length;
+    const significantFraction = pValues.length ? pValues.filter(p => p < 0.05).length / pValues.length : null;
+    groups[groupLabel] = {
+      evidenceCount: group.length,
+      meanEffect,
+      significantFraction,
+      status: msdClassifyRegimeStatus(meanEffect, overallEffect, significantFraction),
+    };
+  });
+
+  return { overallEffect, groups, groupsWithData: Object.keys(groups).length };
+}
+
+/** Phase 2, unchanged behavior: groups by market regime. A thin wrapper over the generalized function above — same output shape as before (renamed groups->regimes for backward-compatible field names), verified by regression test against Phase 2's own existing test suite. */
+function msdComputeRegimeBreakdown(findings, discoveryType){
+  const result = msdComputeGroupedEffectBreakdown(findings, discoveryType, f => f.regime);
+  return { overallEffect: result.overallEffect, regimes: result.groups, regimesWithData: result.groupsWithData };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Phase 4 — Cross-Market Transferability
+// ══════════════════════════════════════════════════════════════════════
+// Answers: does this discovery's effect hold up on OTHER Volatility
+// indices, or is it specific to the one market it was found on. Reuses
+// msdComputeGroupedEffectBreakdown UNCHANGED (grouping by .symbol
+// instead of .regime is the only difference from Phase 2) — the
+// Survives/Weakens/Disappears classification is the exact same,
+// already-tested logic. Under the project's current single-market
+// research scope, distinctSymbols will almost always be 1, and this
+// will honestly read "Insufficient Data" — that's correct behavior, not
+// a gap, and it activates automatically with zero further code the
+// moment (if) evidence from additional markets exists.
+
+/** Groups by market/symbol, reusing the exact same breakdown logic as regime validation. */
+function msdComputeMarketBreakdown(findings, discoveryType){
+  const result = msdComputeGroupedEffectBreakdown(findings, discoveryType, f => f.symbol);
+  return { overallEffect: result.overallEffect, markets: result.groups, marketsWithData: result.groupsWithData };
+}
+
+const MSD_TRANSFERABILITY_STATUS_CREDIT = { Survives: 1.0, Weakens: 0.5, Disappears: 0.0 }; // 'Insufficient Data' markets are excluded from the average entirely, not counted as 0
+
+/**
+ * A single [0,1] composite: how consistently does this discovery's
+ * effect hold across every market with enough evidence to judge at all —
+ * a credit-weighted average (Survives=1.0, Weakens=0.5, Disappears=0.0),
+ * not a raw count of markets. Returns null (not a fabricated number)
+ * when fewer than 2 markets have enough data to compare — a single
+ * market says nothing about TRANSFER by definition, so this is the
+ * honest, structurally-correct output for the project's current
+ * single-market research scope.
+ */
+function msdComputeTransferabilityScore(marketBreakdown){
+  const judged = Object.values(marketBreakdown.markets).filter(m => m.status !== 'Insufficient Data');
+  if (judged.length < 2) return null;
+  const credits = judged.map(m => MSD_TRANSFERABILITY_STATUS_CREDIT[m.status]);
+  return { score: credits.reduce((a, b) => a + b, 0) / credits.length, marketsJudged: judged.length };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Phase 5 — Automatic Contradiction Detection
+// ══════════════════════════════════════════════════════════════════════
+// Answers a question none of Phases 1-4 can: does a discovery's evidence
+// literally REVERSE SIGN across experiments, not just weaken (Phase 2/3)
+// or vary in magnitude (Phase 1). This is a real, confirmed blind spot:
+// every effect-size extractor built so far takes Math.abs() before
+// computing stability/decay/regime/market statistics, so a discovery
+// that flips from +0.6 to -0.6 and back looks IDENTICAL to one that's
+// rock-solid at a constant +0.6 by every metric built through Phase 4 —
+// both show minimal coefficient-of-variation, "Stable." Confirmed
+// directly before writing this module: a synthetic +0.6/-0.6/+0.6/-0.6
+// series scores a perfect 1.0 on Phase 1's Evidence Stability Score.
+//
+// REUSE: "affected markets" and "affected regimes" reuse Phase 4's
+// msdComputeGroupedEffectBreakdown and Phase 2's regime tagging
+// unchanged — zero new grouping logic. The direction extractor reads
+// fields ALREADY STORED on every evidence entry (threshold's own
+// `direction`; the sign of in-group vs out-group rate for combo/
+// market_state, both already present) — no new statistics computed.
+
+/** Extracts which "side" this evidence entry's effect falls on — 'above' meaning the in-group/higher-feature-value side had the higher outcome rate, 'below' the opposite. Reuses fields every analyzer already stores; computes nothing new. single_feature has no directional split at all (it's not a comparison between two groups) and correctly returns null. */
+function msdExtractEffectDirectionFromEvidence(se, discoveryType){
+  if (!se) return null;
+  if (discoveryType === 'threshold') return se.direction || null;
+  if (discoveryType === 'combo') return se.comboPositiveRate != null && se.outsideRate != null ? (se.comboPositiveRate >= se.outsideRate ? 'above' : 'below') : null;
+  if (discoveryType === 'market_state') return se.statePositiveRate != null && se.outsideRate != null ? (se.statePositiveRate >= se.outsideRate ? 'above' : 'below') : null;
+  return null;
+}
+
+/** Does grouping findings by groupKeyFn cleanly separate the two conflicting directions — i.e. is every individual group internally direction-consistent (no single regime, or single market, itself contains both directions)? Deterministic, documented: this is the entire "likely cause" reasoning — not a speculative model, just "does this known grouping explain the split." */
+function msdGroupExplainsContradiction(directedFindings, groupKeyFn){
+  const byGroup = {};
+  directedFindings.forEach(f => {
+    const k = groupKeyFn(f);
+    if (k == null || k === 'Undetermined') return;
+    (byGroup[k] = byGroup[k] || new Set()).add(f.direction);
+  });
+  const groupLabels = Object.keys(byGroup);
+  if (groupLabels.length < 2) return false; // can't "explain" a split with only one group represented
+  return groupLabels.every(k => byGroup[k].size === 1);
+}
+
+/**
+ * Detects whether a discovery's evidence, across DISTINCT experiments
+ * (not just distinct evidence records — the requirement is explicitly
+ * "across experiments"), reports opposite effect directions. Returns
+ * the full explanation the phase requires: which experiments conflict,
+ * which markets and regimes are involved, and a deterministic,
+ * honestly-hedged "likely cause" — regime-dependent, market-dependent,
+ * or "no clear grouping identified" when neither explains it (never
+ * inventing a causal story the data doesn't support).
+ */
+function msdDetectContradiction(findings, discoveryType){
+  const directed = findings
+    .map(f => ({ experimentId: f.experimentId, direction: msdExtractEffectDirectionFromEvidence(f.statisticalEvidence, discoveryType), symbol: f.symbol, regime: f.regime, discoveredAt: f.discoveredAt }))
+    .filter(f => f.direction != null);
+  const allDirections = new Set(directed.map(f => f.direction));
+
+  if (allDirections.size < 2) return { contradicted: false };
+
+  // Only a genuine contradiction if the two directions come from DIFFERENT
+  // experiments — the spec asks specifically about evidence changing
+  // direction ACROSS experiments, not within the bookkeeping of one.
+  const experimentIdsByDirection = { above: new Set(), below: new Set() };
+  directed.forEach(f => { if (experimentIdsByDirection[f.direction]) experimentIdsByDirection[f.direction].add(f.experimentId); });
+  const aboveExperiments = Array.from(experimentIdsByDirection.above || []);
+  const belowExperiments = Array.from(experimentIdsByDirection.below || []);
+  if (!aboveExperiments.length || !belowExperiments.length) return { contradicted: false };
+
+  const conflictingExperiments = directed.map(f => ({ experimentId: f.experimentId, direction: f.direction, symbol: f.symbol, regime: f.regime, discoveredAt: f.discoveredAt }));
+  const affectedMarkets = Array.from(new Set(directed.map(f => f.symbol).filter(s => s != null)));
+  const affectedRegimes = Array.from(new Set(directed.map(f => f.regime).filter(r => r != null && r !== 'Undetermined')));
+
+  const regimeExplains = msdGroupExplainsContradiction(directed, f => f.regime);
+  const marketExplains = msdGroupExplainsContradiction(directed, f => f.symbol);
+  let likelyCause;
+  if (regimeExplains && marketExplains) likelyCause = 'Both regime and market cleanly separate the conflicting directions — likely regime-dependent and/or market-dependent; insufficient evidence yet to tell which is the true driver.';
+  else if (regimeExplains) likelyCause = 'Regime-dependent: every regime represented is internally direction-consistent — the effect appears to reverse specifically with market regime (see affected regimes).';
+  else if (marketExplains) likelyCause = 'Market-dependent: every market represented is internally direction-consistent — the effect appears to reverse specifically with which market was tested (see affected markets).';
+  else likelyCause = 'No clear regime or market grouping explains the contradiction — may indicate measurement noise, an unmodeled confounding variable, or a genuinely unstable/spurious relationship.';
+
+  return {
+    contradicted: true,
+    aboveExperimentCount: aboveExperiments.length, belowExperimentCount: belowExperiments.length,
+    conflictingExperiments, affectedMarkets, affectedRegimes,
+    regimeExplains, marketExplains, likelyCause,
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Phase 3 — Discovery Decay Engine
+// ══════════════════════════════════════════════════════════════════════
+// Answers a different question than Phase 1's Stability Score: not "how
+// much does the evidence vary" but "is there a genuine TREND over the
+// sequence of experiments." This is a real, distinct gap — Phase 1's
+// coefficient-of-variation is order-agnostic by construction (mean and
+// variance don't know or care which value came first), so it cannot
+// distinguish "declining in an orderly way" from "randomly fluctuating
+// around a fixed mean." A discovery can have low CV (Phase 1: stable)
+// while still being on a slow, steady decline (Phase 3: decaying).
+//
+// METHOD: the Mann-Kendall trend test — a standard, nonparametric test
+// for monotonic trend, chosen specifically because it doesn't assume
+// normally-distributed residuals or evenly-spaced samples, neither of
+// which holds for a sequence of independent experiments run whenever a
+// researcher happens to run them (unlike linear regression, which
+// assumes both). It's also the same computational family as Cliff's
+// Delta (Phase 0) — both are concordant-pair/rank statistics — so this
+// extends an idiom already established in the codebase rather than
+// introducing an unrelated one. Validated against hand-calculated
+// reference values before being wired in (a 5-point series with a known
+// S=-4, tau=-0.4, p=0.4624; monotonic sequences giving tau=+/-1).
+
+const MSD_DECAY_MIN_POINTS = 4;  // fewer effect-size data points than this and a trend test is not meaningful — classified "Uncertain," not guessed
+const MSD_DECAY_P_GATE = 0.05;
+
+/** Mann-Kendall trend test over an ordered numeric series (ties handled via the standard variance correction). Returns null if fewer than MSD_DECAY_MIN_POINTS values are available. */
+function msdMannKendallTrend(series){
+  const valid = series.filter(v => v != null && Number.isFinite(v));
+  const n = valid.length;
+  if (n < MSD_DECAY_MIN_POINTS) return null;
+  let S = 0;
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) S += Math.sign(valid[j] - valid[i]);
+  const counts = {};
+  valid.forEach(v => { counts[v] = (counts[v] || 0) + 1; });
+  let tieSum = 0;
+  Object.values(counts).forEach(t => { if (t > 1) tieSum += t * (t - 1) * (2 * t + 5); });
+  const varS = (n * (n - 1) * (2 * n + 5) - tieSum) / 18;
+  if (varS <= 0) return { S, tau: 0, Z: 0, pValue: 1, n }; // fully degenerate (e.g. every value identical) — no trend detectable, not a NaN risk
+  const Z = S > 0 ? (S - 1) / Math.sqrt(varS) : S < 0 ? (S + 1) / Math.sqrt(varS) : 0;
+  const pValue = 2 * (1 - 0.5 * (1 + erf(Math.abs(Z) / Math.SQRT2))); // two-tailed, reusing the app's existing erf()
+  const tau = S / (n * (n - 1) / 2);
+  return { S, tau, Z, pValue, n };
+}
+
+/** Classifies one discovery's decay status from its own chronological evidence (a prefix, when called incrementally from the promotion replay, or the full history for display). Reuses msdExtractEffectSizeFromEvidence (Phase 1) — no new per-type field logic. */
+function msdClassifyDecayStatus(evidenceHistory, discoveryType){
+  const effectSizeSeries = evidenceHistory.map(se => msdExtractEffectSizeFromEvidence(se, discoveryType));
+  const trend = msdMannKendallTrend(effectSizeSeries);
+  if (!trend) return { status: 'Uncertain', trend: null };
+  if (trend.pValue < MSD_DECAY_P_GATE) {
+    return { status: trend.tau < 0 ? 'Decaying' : 'Improving', trend };
+  }
+  return { status: 'Stable', trend };
+}
 
 /**
  * Replays one discoveryKey's evidence chronologically, tracking the
- * running set of DISTINCT experiments that have confirmed it, and
- * records a promotion event every time the computed level changes.
- * Repeated evidence from the SAME experiment never counts twice — this
- * is what makes "never promote based on a single experiment" hold even
- * if that one experiment's analyzer emits multiple evidence records.
+ * running set of DISTINCT experiments that have confirmed it AND (Phase
+ * 1) the running Evidence Stability Score computed from only the
+ * evidence seen so far, and records a promotion event every time the
+ * computed level changes. Repeated evidence from the SAME experiment
+ * never counts twice — this is what makes "never promote based on a
+ * single experiment" hold even if that one experiment's analyzer emits
+ * multiple evidence records.
+ *
+ * STABILITY GATE (Phase 1): a level's minExperiments threshold alone no
+ * longer suffices — the running stability score must also clear that
+ * level's minStability. Because this whole function is a REPLAY, not
+ * stored state, a discovery whose LATER evidence becomes inconsistent
+ * can legitimately compute back down to a lower maturity level the next
+ * time this runs — nothing is mutated or deleted (append-only is fully
+ * preserved), only the derived, current answer changes, which is
+ * correct: a discovery that has become unstable really should lose
+ * "Verified" status, per the project's own validation principles.
+ *
+ * DECAY GATE (Phase 3): a discovery currently classified "Decaying" (a
+ * significant negative Mann-Kendall trend in its own effect-size
+ * history) cannot be promoted to, or remain at, Repeatable/Verified —
+ * same reasoning and same append-only-preserving mechanism as the
+ * stability gate: this is a replay, so a discovery that starts decaying
+ * later can legitimately fall back to a lower level next time this runs.
+ * "Uncertain" (not enough points yet) never blocks, matching the
+ * stability gate's own precedent that insufficient data is not evidence
+ * of a problem.
+ *
+ * CONTRADICTION GATE (Phase 5): a discovery whose evidence has reversed
+ * DIRECTION across distinct experiments is capped at Candidate —
+ * ABSOLUTELY, not gradually like the stability/decay gates. Sign
+ * reversal is a qualitatively different, more fundamental problem than
+ * "somewhat noisy" or "somewhat declining": it means the pooled
+ * "this predicts positive" claim may be actively wrong for a real
+ * portion of the evidence, which is worse than merely weak evidence.
+ * "Do not average contradictory evidence" means never letting count
+ * alone paper over a sign flip — this gate is the maturity-side
+ * enforcement of that principle.
  */
 function msdComputePromotionHistory(evidenceList){
   const sorted = evidenceList.slice().sort((a, b) => a.discoveredAt - b.discoveredAt);
   const rules = MSD_MATURITY_PROMOTION_RULES;
+  const discoveryType = sorted.length ? sorted[0].discoveryType : null;
   const history = [];
   const seenExperiments = new Set();
+  const evidenceSoFar = [];
+  const findingsSoFar = [];
   let lastLevel = null;
   sorted.forEach(e => {
     seenExperiments.add(e.experimentId);
+    evidenceSoFar.push(e.statisticalEvidence);
+    findingsSoFar.push(e);
     const n = seenExperiments.size;
+    const stabilityResult = msdComputeEvidenceStabilityScore(evidenceSoFar, discoveryType);
+    const decayResult = msdClassifyDecayStatus(evidenceSoFar, discoveryType);
+    const contradictionResult = msdDetectContradiction(findingsSoFar, discoveryType);
+    // A stability score that cannot yet be computed (insufficient history)
+    // never BLOCKS promotion on its own — "not enough data to judge
+    // consistency" is not the same failure as "judged and found
+    // inconsistent." Only a COMPUTED, low stability score gates. Same
+    // principle for decay: "Uncertain" (not enough points) never blocks;
+    // only a computed "Decaying" classification does.
+    const stabilityOk = level => stabilityResult.score == null || stabilityResult.score >= rules[level].minStability;
+    const decayOk = decayResult.status !== 'Decaying';
+    const contradictionOk = !contradictionResult.contradicted;
+
     let level = 'observation';
-    if (n >= rules.verified.minExperiments) level = 'verified';
-    else if (n >= rules.repeatable.minExperiments) level = 'repeatable';
-    else if (n >= rules.candidate.minExperiments) level = 'candidate';
+    if (n >= rules.verified.minExperiments && stabilityOk('verified') && decayOk && contradictionOk) level = 'verified';
+    else if (n >= rules.repeatable.minExperiments && stabilityOk('repeatable') && decayOk && contradictionOk) level = 'repeatable';
+    else if (n >= rules.candidate.minExperiments && stabilityOk('candidate')) level = 'candidate'; // decay/contradiction gates apply from Repeatable up, not Candidate — a discovery must still be trackable as a Candidate even while contradicted, so the contradiction is visible rather than the discovery vanishing from the repository entirely
     if (level !== lastLevel) {
-      history.push({ level, timestamp: e.discoveredAt, supportingExperimentCount: n, triggeringExperimentId: e.experimentId });
+      history.push({
+        level, timestamp: e.discoveredAt, supportingExperimentCount: n, triggeringExperimentId: e.experimentId,
+        stabilityScore: stabilityResult.score, stabilitySubScores: stabilityResult.subScores,
+        decayStatus: decayResult.status, decayTrend: decayResult.trend,
+        contradicted: contradictionResult.contradicted,
+      });
       lastLevel = level;
     }
   });
@@ -6097,16 +6853,34 @@ function msdComputeMaturityLevel(evidenceList){
 function msdSummarizeDiscovery(discoveryKey, evidenceList){
   const sorted = evidenceList.slice().sort((a, b) => a.discoveredAt - b.discoveredAt);
   const promotionHistory = msdComputePromotionHistory(sorted);
+  const discoveryType = sorted[0].discoveryType;
+  const stabilityResult = msdComputeEvidenceStabilityScore(sorted.map(e => e.statisticalEvidence), discoveryType);
+  const regimeBreakdown = msdComputeRegimeBreakdown(sorted, discoveryType);
+  const decayResult = msdClassifyDecayStatus(sorted.map(e => e.statisticalEvidence), discoveryType);
+  const marketBreakdown = msdComputeMarketBreakdown(sorted, discoveryType);
+  const transferability = msdComputeTransferabilityScore(marketBreakdown);
+  const contradiction = msdDetectContradiction(sorted, discoveryType);
   return {
     discoveryKey,
-    discoveryType: sorted[0].discoveryType,
+    discoveryType,
     maturityLevel: promotionHistory.length ? promotionHistory[promotionHistory.length - 1].level : 'observation',
     supportingExperimentIds: Array.from(new Set(sorted.map(e => e.experimentId))),
+    distinctSymbols: Array.from(new Set(sorted.map(e => e.symbol).filter(s => s != null))),
+    distinctLeadTimes: Array.from(new Set(sorted.map(e => e.leadTime).filter(lt => lt != null))),
     evidenceCount: sorted.length,
     promotionHistory,
     firstSeenAt: sorted[0].discoveredAt,
     lastSeenAt: sorted[sorted.length - 1].discoveredAt,
     latestEvidence: sorted[sorted.length - 1].statisticalEvidence,
+    evidenceStabilityScore: stabilityResult.score,
+    evidenceStabilitySubScores: stabilityResult.subScores,
+    regimeBreakdown,
+    decayStatus: decayResult.status,
+    decayTrend: decayResult.trend,
+    contradiction,
+    marketBreakdown,
+    transferabilityScore: transferability ? transferability.score : null,
+    transferabilityMarketsJudged: transferability ? transferability.marketsJudged : 0,
   };
 }
 
@@ -6142,6 +6916,68 @@ function msdResetDiscoveryAnalyzers(){ msdRegisteredAnalyzers = []; }
  * — this is the "automatic execution" requirement, satisfied as genuine
  * plumbing regardless of how many analyzers are registered.
  */
+// ══════════════════════════════════════════════════════════════════════
+// Phase 2 — Regime Validation: dominant regime characterization
+// ══════════════════════════════════════════════════════════════════════
+// Answers: "under which market regime was THIS experiment's evidence
+// collected" — needed so evidence can be grouped by regime instead of
+// pooled into one global statistic.
+//
+// DESIGN CORRECTION, stated openly: the first version of this function
+// reused Phase 5's clustering machinery directly (self-relative z-scores
+// of the dominant cluster against the dataset's OWN mean). Direct
+// testing falsified that: a dataset that is genuinely, uniformly
+// trending throughout (e.g. ADX 40-80 everywhere) has almost no INTERNAL
+// spread for k-means to key on, so the self-relative z-score for ADX
+// comes out near zero — not because the market isn't trending, but
+// because there's no within-dataset contrast to detect — and the
+// fingerprint ends up describing whichever OTHER dimension happens to
+// have the largest incidental internal variance instead. Self-relative
+// z-scoring is the right tool for finding sub-states WITHIN one dataset
+// (Phase 5's actual job) and the wrong tool for characterizing ONE
+// dataset's overall, absolute condition (this function's job).
+//
+// The fix: classify the dataset's own OVERALL MEAN for each dimension
+// against FIXED, standard, documented technical-analysis conventions —
+// no clustering, no self-relative comparison. ADX>=25 "trending" is a
+// long-established convention (Wilder's own original threshold); RSI
+// 55/45 is a standard mild overbought/oversold split; MACD sign is
+// already scale-free; +DI vs -DI dominance is a direct, unit-free
+// comparison. ATR is deliberately EXCLUDED from this absolute
+// classifier — raw ATR has no universal cross-market threshold, and
+// forcing one would just reintroduce an arbitrary number dressed up as
+// a rule. msdLabelMarketState (Phase 5's rule engine) is reused
+// UNCHANGED — it only ever inspects the resulting fingerprint STRING
+// (e.g. "adx:high"), agnostic to how that string was constructed.
+
+const MSD_REGIME_ADX_HIGH = 25;   // Wilder's own standard "trending" threshold
+const MSD_REGIME_ADX_LOW = 20;
+const MSD_REGIME_RSI_HIGH = 55;
+const MSD_REGIME_RSI_LOW = 45;
+const MSD_REGIME_DI_GAP = 5;      // +DI/-DI must differ by at least this much to call one dominant
+
+function msdComputeDominantRegimeLabel(dataset){
+  const allSnapshots = dataset.trainSet.concat(dataset.valSet, dataset.testSet);
+  const validRows = allSnapshots.filter(s => MSD_CLUSTER_FEATURE_KEYS.every(k => s[k] != null && Number.isFinite(s[k])));
+  if (validRows.length < MSD_REGIME_MIN_EVIDENCE * 10) {
+    return { label: 'Undetermined', fingerprint: '', reason: 'insufficient complete rows to characterize a regime' };
+  }
+  const mean = key => validRows.reduce((s, r) => s + r[key], 0) / validRows.length;
+  const meanAdx = mean('adx'), meanRsi = mean('rsi'), meanMacd = mean('macd'), meanPdi = mean('pdi'), meanNdi = mean('ndi');
+
+  const parts = [];
+  if (meanAdx >= MSD_REGIME_ADX_HIGH) parts.push('adx:high');
+  else if (meanAdx < MSD_REGIME_ADX_LOW) parts.push('adx:low');
+  if (meanRsi >= MSD_REGIME_RSI_HIGH) parts.push('rsi:high');
+  else if (meanRsi <= MSD_REGIME_RSI_LOW) parts.push('rsi:low');
+  if (meanMacd > 0) parts.push('macd:high'); else if (meanMacd < 0) parts.push('macd:low');
+  if (meanPdi - meanNdi > MSD_REGIME_DI_GAP) parts.push('pdi:high');
+  else if (meanNdi - meanPdi > MSD_REGIME_DI_GAP) parts.push('ndi:high');
+
+  const fingerprint = parts.join('|');
+  return { label: msdLabelMarketState(fingerprint), fingerprint, meanAdx, meanRsi, meanMacd, meanPdi, meanNdi };
+}
+
 /**
  * SIGNATURE REFACTOR (Phase 3): added `dataset` as a 4th parameter,
  * passed through to every analyzer as a 5th argument. Additive, not
@@ -6151,14 +6987,163 @@ function msdResetDiscoveryAnalyzers(){ msdRegisteredAnalyzers = []; }
  * split point requires the actual per-snapshot feature values and
  * outcomes, which discoveryResult.featureReports (aggregate stats only)
  * doesn't carry.
+ *
+ * SIGNATURE REFACTOR (Phase 2, Regime Validation): added `regimeInfo` as
+ * a 6th argument to every analyzer, computed ONCE here (not re-derived
+ * per analyzer) from the SAME `dataset` already being passed through —
+ * no external call site needed to change, since this is computed
+ * internally from a parameter already received.
  */
+// ══════════════════════════════════════════════════════════════════════
+// Phase 6 — Automatic Research Notebook
+// ══════════════════════════════════════════════════════════════════════
+// Not a new statistical capability — a TRACEABILITY one. Confirmed gap
+// before writing this: msdRunStatisticalDiscovery's and
+// msdRunResearchSession's outputs previously lived only in a transient
+// JS variable (window._msdLastExperiment) — nothing about what one
+// specific experiment concluded was ever PERSISTED as a readable record,
+// only as raw evidence a researcher would have to reconstruct by hand.
+//
+// DISCIPLINE: every field below is a direct read from something Phases
+// 0-5 already computed (msdGetDiscoverySummaries, msdComputeEvidenceScore,
+// promotionHistory, regimeBreakdown, transferabilityScore, contradiction,
+// decayStatus) — nothing here is a new statistic. The only genuinely new
+// logic is the ASSEMBLY: which discoveries this specific experiment
+// touched, and each one's maturity immediately before vs after.
+//
+// STORAGE: reuses the exact same locked, append-only KnowledgeBase and
+// msdWriteFinding path already used for 'research_discovery' and
+// 'market_state_discovery' findings — a third `type` value in the SAME
+// store, not a new one, per the store's own existing "not a new physical
+// store" precedent.
+
+const MSD_RESEARCH_HYPOTHESIS = "Market states preceding the start of a five-consecutive-tick directional run exhibit statistically identifiable technical-indicator characteristics — individual features, thresholds, feature combinations, and clustered regimes — that differ from baseline with a probability significantly greater than random, and that this relationship replicates across independent experiments, market regimes, and (where tested) additional markets.";
+
+const MSD_STATISTICAL_METHODS_SUMMARY = [
+  'Wilson score confidence intervals for all binomial proportions (appropriate near 0/1 and at small samples)',
+  'Permutation tests with Benjamini-Hochberg False Discovery Rate correction, applied across every feature/combination/cluster tested within one experiment before any significance gate',
+  'Chi-square test of independence, automatically replaced by Fisher\'s exact test whenever any expected cell count is small',
+  'Odds ratio (Haldane-Anscombe corrected) and likelihood ratio positive',
+  'Mutual information, both as a binned continuous-feature estimate and computed exactly from 2x2 contingency tables',
+  'Mann-Kendall nonparametric trend test for discovery decay/improvement over the sequence of experiments',
+  'k-means clustering (fixed, documented feature set) for market-state and regime characterization, with canonical z-scored fingerprints so the same real regime is recognized across independently-run clusterings',
+];
+
+const MSD_MATURITY_RANK = { observation: 0, candidate: 1, repeatable: 2, verified: 3 };
+
+/**
+ * Assembles and permanently records the Research Report for one
+ * completed experiment's research session. Pure assembly — see module
+ * docblock above. Called automatically at the same point the research
+ * session itself already runs.
+ */
+async function msdGenerateResearchReport(experimentRecord, discoveryResult, dataset, researchSessionResult){
+  const touchedKeys = Array.from(new Set(researchSessionResult.results.filter(r => r.finding).map(r => r.finding.discoveryKey)));
+  const allSummaries = await msdGetDiscoverySummaries();
+  const touchedSummaries = allSummaries.filter(s => touchedKeys.includes(s.discoveryKey));
+
+  const datasetSummary = {
+    trainCount: dataset.trainSet.length, valCount: dataset.valSet.length, testCount: dataset.testSet.length,
+    totalCount: discoveryResult.sampleStats.totalCount,
+    positiveRate: discoveryResult.sampleStats.positiveRate,
+    positiveRateCI: discoveryResult.sampleStats.confidenceInterval,
+  };
+
+  const discoveries = touchedSummaries.map(s => {
+    // Maturity BEFORE this experiment: the last promotion-history entry
+    // NOT triggered by this experimentId — a direct read of already-
+    // computed history, not a re-derivation.
+    const priorEntries = s.promotionHistory.filter(h => h.triggeringExperimentId !== experimentRecord.experimentId);
+    const maturityBefore = priorEntries.length ? priorEntries[priorEntries.length - 1].level : 'observation';
+    const isNewThisExperiment = s.supportingExperimentIds.length === 1 && s.supportingExperimentIds[0] === experimentRecord.experimentId;
+    return {
+      discoveryKey: s.discoveryKey, discoveryType: s.discoveryType,
+      isNewThisExperiment,
+      maturityBefore, maturityAfter: s.maturityLevel, maturityChanged: maturityBefore !== s.maturityLevel,
+      evidenceScore: msdComputeEvidenceScore(s).score,
+      evidenceStabilityScore: s.evidenceStabilityScore,
+      decayStatus: s.decayStatus,
+      contradicted: s.contradiction ? s.contradiction.contradicted : false,
+      contradictionCause: (s.contradiction && s.contradiction.contradicted) ? s.contradiction.likelyCause : null,
+      transferabilityScore: s.transferabilityScore,
+      regimesWithData: s.regimeBreakdown ? s.regimeBreakdown.regimesWithData : 0,
+      latestEvidence: s.latestEvidence,
+    };
+  });
+
+  const newCount = discoveries.filter(d => d.isNewThisExperiment).length;
+  const reinforcedCount = discoveries.length - newCount;
+  const promotedCount = discoveries.filter(d => d.maturityChanged && MSD_MATURITY_RANK[d.maturityAfter] > MSD_MATURITY_RANK[d.maturityBefore]).length;
+  const demotedCount = discoveries.filter(d => d.maturityChanged && MSD_MATURITY_RANK[d.maturityAfter] < MSD_MATURITY_RANK[d.maturityBefore]).length;
+  const decayingCount = discoveries.filter(d => d.decayStatus === 'Decaying').length;
+  const uncertainCount = discoveries.filter(d => d.decayStatus === 'Uncertain').length;
+  const contradictedCount = discoveries.filter(d => d.contradicted).length;
+  const transferabilityAvailableCount = discoveries.filter(d => d.transferabilityScore != null).length;
+
+  const testsUsed = discoveries.map(d => d.latestEvidence && d.latestEvidence.fullStatistics ? d.latestEvidence.fullStatistics.testUsed : null).filter(Boolean);
+  const statisticalTestsApplied = {
+    chiSquareCount: testsUsed.filter(t => t === 'chi_square').length,
+    fisherExactCount: testsUsed.filter(t => t === 'fisher_exact').length,
+    fdrCorrectionApplied: discoveries.some(d => d.latestEvidence && d.latestEvidence.fdrAdjustedPValue != null),
+  };
+
+  const conclusions = [
+    `This experiment (${experimentRecord.experimentId}) recorded evidence for ${discoveries.length} discovery key(s): ${newCount} newly observed, ${reinforcedCount} reinforced from prior experiments.`,
+    promotedCount ? `${promotedCount} discovery(ies) advanced in maturity as a result of this experiment.` : 'No discoveries advanced in maturity this experiment.',
+    demotedCount ? `${demotedCount} discovery(ies) fell back in maturity — new evidence introduced instability, decay, or contradiction that the Maturity Engine correctly penalized.` : null,
+    contradictedCount ? `${contradictedCount} discovery(ies) now show cross-experiment direction contradictions and are capped at Candidate maturity pending investigation.` : null,
+  ].filter(Boolean).join(' ');
+
+  const futureWork = [
+    decayingCount ? `${decayingCount} discovery(ies) are currently classified Decaying — prioritize additional experiments to confirm whether the effect has genuinely weakened or this reflects a temporary regime shift.` : null,
+    contradictedCount ? `${contradictedCount} discovery(ies) show unresolved contradictions — review the Automatic Contradiction Detection table's Likely Cause column before relying on these.` : null,
+    uncertainCount ? `${uncertainCount} discovery(ies) do not yet have enough evidence points (fewer than ${MSD_DECAY_MIN_POINTS}) to assess a decay trend — continue accumulating experiments.` : null,
+    transferabilityAvailableCount === 0
+      ? 'No discoveries yet have Transferability Score data (requires evidence from at least 2 distinct markets) — the project\'s current single-market research scope leaves this untested; running experiments against additional Volatility indices would activate this analysis immediately, with no further code changes.'
+      : `${transferabilityAvailableCount} discovery(ies) now have cross-market Transferability data — review the Cross-Market Transferability table.`,
+  ].filter(Boolean).join(' ');
+
+  const report = {
+    findingId: msdGenerateFindingId(),
+    type: 'research_report',
+    experimentId: experimentRecord.experimentId,
+    researchSessionId: researchSessionResult.researchSessionId,
+    generatedAt: Date.now(),
+    hypothesis: MSD_RESEARCH_HYPOTHESIS,
+    experimentConfiguration: {
+      symbol: experimentRecord.symbol, leadTime: experimentRecord.leadTime, featureVersion: experimentRecord.featureVersion,
+      randomSeed: experimentRecord.randomSeed, lookbackWindow: experimentRecord.lookbackWindow,
+    },
+    datasetSummary,
+    statisticalMethods: MSD_STATISTICAL_METHODS_SUMMARY,
+    statisticalTestsApplied,
+    regimeAnalysis: {
+      dominantRegime: researchSessionResult.regimeInfo ? researchSessionResult.regimeInfo.label : 'Undetermined',
+      regimeFingerprint: researchSessionResult.regimeInfo ? researchSessionResult.regimeInfo.fingerprint : '',
+    },
+    discoveries,
+    summary: { touchedCount: discoveries.length, newCount, reinforcedCount, promotedCount, demotedCount, decayingCount, uncertainCount, contradictedCount, transferabilityAvailableCount },
+    conclusions,
+    futureWork,
+  };
+  const writeResult = await msdWriteFinding(report);
+  return { report, writeResult };
+}
+
+/** Every research_report finding ever recorded, newest first — read-only, derived from the shared KnowledgeBase getAll, same pattern as msdGetAllDiscoveryEvidence. */
+async function msdGetAllResearchReports(){
+  const allFindings = await msdGetAllFindings();
+  return allFindings.filter(f => f.type === 'research_report').sort((a, b) => b.generatedAt - a.generatedAt);
+}
+
 async function msdRunResearchSession(experimentRecord, discoveryResult, trainResult, dataset){
   const researchSessionId = msdGenerateResearchSessionId();
+  const regimeInfo = dataset ? msdComputeDominantRegimeLabel(dataset) : null;
   const results = [];
   for (const analyzer of msdRegisteredAnalyzers) {
     let evidenceList;
     try {
-      evidenceList = analyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset) || [];
+      evidenceList = analyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset, regimeInfo) || [];
     } catch (e) {
       results.push({ error: 'Analyzer threw: ' + e.message });
       continue;
@@ -6168,7 +7153,7 @@ async function msdRunResearchSession(experimentRecord, discoveryResult, trainRes
       results.push(recorded);
     }
   }
-  return { researchSessionId, analyzerCount: msdRegisteredAnalyzers.length, recordedCount: results.filter(r => r.writeResult).length, results };
+  return { researchSessionId, analyzerCount: msdRegisteredAnalyzers.length, recordedCount: results.filter(r => r.writeResult).length, results, regimeInfo };
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -6187,12 +7172,12 @@ async function msdRunResearchSession(experimentRecord, discoveryResult, trainRes
 
 const MSD_SINGLE_FEATURE_MI_THRESHOLD = 0.05; // stated, configurable — matches the existing notable-MI bar used elsewhere, for consistency
 
-function msdSingleFeatureAnalyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, _dataset){
+function msdSingleFeatureAnalyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, _dataset, regimeInfo){
   // _dataset intentionally unused — Phase 2 only needs the aggregate
   // featureReports the Statistical Discovery Engine already computed.
-  // Accepting (and ignoring) the 5th argument keeps this analyzer
-  // compatible with the Phase 3 signature refactor above without any
-  // change to its own logic.
+  // Accepting (and ignoring) the 5th/6th arguments keeps this analyzer
+  // compatible with later signature refactors without any change to its
+  // own logic.
   if (!discoveryResult || !discoveryResult.featureReports) return [];
   // An underpowered experiment shouldn't seed the repository with noise —
   // reuses the existing, already-tested readyForTraining gate rather than
@@ -6209,6 +7194,9 @@ function msdSingleFeatureAnalyzer(experimentRecord, discoveryResult, trainResult
       experimentId: experimentRecord.experimentId,
       leadTime: experimentRecord.leadTime,
       featureVersion: experimentRecord.featureVersion,
+      symbol: experimentRecord.symbol,
+      regime: regimeInfo ? regimeInfo.label : null,
+      regimeFingerprint: regimeInfo ? regimeInfo.fingerprint : null,
       statisticalEvidence: {
         sampleCount: discoveryResult.sampleStats.totalCount,
         positiveRate: discoveryResult.sampleStats.positiveRate,
@@ -6326,6 +7314,7 @@ function msdFindOptimalThreshold(values, outcomes, minSide, randomSeed){
     threshold: best.threshold, gain: best.gain,
     direction: aboveRate > belowRate ? 'above' : 'below',
     belowCount: below.length, aboveCount: above.length,
+    belowPositiveCount: belowPos, abovePositiveCount: abovePos,
     belowPositiveRate: belowRate, abovePositiveRate: aboveRate,
     belowCI, aboveCI,
     effectSize: Math.abs(aboveRate - belowRate),
@@ -6360,29 +7349,58 @@ function msdThresholdStability(values, outcomes, threshold, direction, randomSee
 }
 
 /** Phase 3 analyzer: for every feature that already cleared Phase 2's notability bar, searches for its best threshold on THIS experiment's actual dataset, emitting evidence only when the permutation test finds it significant. Gated by the same readyForTraining check Phase 2 uses. */
-function msdThresholdAnalyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset){
+function msdThresholdAnalyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset, regimeInfo){
   if (!discoveryResult || !discoveryResult.featureReports || !dataset) return [];
   if (!discoveryResult.readyForTraining) return [];
 
   const allSnapshots = dataset.trainSet.concat(dataset.valSet, dataset.testSet);
   const outcomes = allSnapshots.map(s => s.outcome === 'positive' ? 1 : 0);
 
-  const evidence = [];
+  // Pass 1: find a candidate threshold for every notable feature, but do
+  // NOT gate on significance yet — every feature tested this experiment
+  // needs to go into ONE multiple-hypothesis correction together first.
+  // Gating each feature independently at p<0.05 (the pre-audit behavior)
+  // guarantees a false discovery roughly 1 time in 20 once enough
+  // features are tested per experiment; Benjamini-Hochberg controls the
+  // FALSE DISCOVERY RATE across the whole batch instead.
+  const candidates = [];
   discoveryResult.featureReports.forEach(report => {
     if (report.mutualInformation == null || report.mutualInformation < MSD_THRESHOLD_GATE_MI) return;
     const values = allSnapshots.map(s => s[report.feature]);
     const result = msdFindOptimalThreshold(values, outcomes, undefined, experimentRecord.randomSeed || 1);
-    if (!result || !result.significant) return;
+    if (!result) return;
+    candidates.push({ feature: report.feature, values, result });
+  });
+  if (!candidates.length) return [];
 
+  const corrected = msdBenjaminiHochberg(candidates.map(c => c.result.pValue), MSD_THRESHOLD_P_GATE);
+
+  const evidence = [];
+  candidates.forEach((cand, i) => {
+    if (!corrected[i].significant) return;
+    const { feature, values, result } = cand;
     const stability = msdThresholdStability(values, outcomes, result.threshold, result.direction, experimentRecord.randomSeed || 1);
 
+    // Exact 2x2 table: "in-group" = whichever side (above/below) has the
+    // higher positive rate, matching result.direction — this is what
+    // feeds the full statistical battery (chi-square/Fisher, odds ratio,
+    // likelihood ratio), not just the permutation p-value alone.
+    const inPos = result.direction === 'above' ? result.abovePositiveCount : result.belowPositiveCount;
+    const inTotal = result.direction === 'above' ? result.aboveCount : result.belowCount;
+    const outPos = result.direction === 'above' ? result.belowPositiveCount : result.abovePositiveCount;
+    const outTotal = result.direction === 'above' ? result.belowCount : result.aboveCount;
+    const fullStats = msdComputeFullStatisticalEvidence(inPos, inTotal - inPos, outPos, outTotal - outPos);
+
     evidence.push({
-      discoveryKey: 'threshold:' + report.feature,
+      discoveryKey: 'threshold:' + feature,
       discoveryType: 'threshold',
       researchSessionId,
       experimentId: experimentRecord.experimentId,
       leadTime: experimentRecord.leadTime,
       featureVersion: experimentRecord.featureVersion,
+      symbol: experimentRecord.symbol,
+      regime: regimeInfo ? regimeInfo.label : null,
+      regimeFingerprint: regimeInfo ? regimeInfo.fingerprint : null,
       statisticalEvidence: {
         threshold: result.threshold,
         direction: result.direction, // 'above' or 'below' — which side has the higher positive rate
@@ -6393,8 +7411,11 @@ function msdThresholdAnalyzer(experimentRecord, discoveryResult, trainResult, re
         aboveCIlower: result.aboveCI.lower, aboveCIupper: result.aboveCI.upper,
         effectSize: result.effectSize,
         pValue: result.pValue,
+        fdrAdjustedPValue: corrected[i].adjustedPValue,
+        featuresTestedThisExperiment: candidates.length,
         stability,
         sampleCount: discoveryResult.sampleStats.totalCount,
+        fullStatistics: fullStats,
       },
     });
   });
@@ -6411,6 +7432,91 @@ function msdRankDiscoverySummaries(summaries, discoveryType, scoreFn){
     .map(s => ({ ...s, score: scoreFn(s.latestEvidence) }))
     .filter(s => s.score != null)
     .sort((a, b) => b.score - a.score);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Evidence Score — replaces "rank by positive rate" (Phase 0 audit finding)
+// ══════════════════════════════════════════════════════════════════════
+// A single composite ranking number combining every factor the spec
+// requires, so no ranking anywhere in this app reduces to "highest
+// positive rate wins" again. Every factor is normalized to [0,1] first
+// (documented per-factor below), then combined as a WEIGHTED GEOMETRIC
+// MEAN, deliberately not a weighted sum — a geometric mean forces every
+// factor to be reasonably good for the total to be high; a discovery
+// with a huge effect size but only 1 supporting experiment cannot buy
+// its way to a high score on that one factor alone the way a sum would
+// let it. This is a documented, fully deterministic formula: identical
+// inputs always produce an identical score, and every intermediate
+// factor is exposed alongside the final number, not hidden.
+
+const MSD_EVIDENCE_SCORE_WEIGHTS = {
+  effectSize: 0.25, confidence: 0.20, repeatability: 0.20, stability: 0.10,
+  sampleSize: 0.10, marketConsistency: 0.075, leadTimeConsistency: 0.075,
+};
+
+/** Log-scaled normalization to [0,1] with a stated cap — e.g. 20 supporting experiments is treated as "as good as it needs to be" for the repeatability factor, not requiring unbounded growth to reach a high score. */
+function msdNormalizeLogCapped(value, cap){
+  if (value == null || value <= 0) return 0;
+  return Math.min(1, Math.log(1 + value) / Math.log(1 + cap));
+}
+
+/** Extracts the discovery-type-specific effect size to feed the Evidence Score — delegates to msdExtractEffectSizeFromEvidence (the one shared definition, also used by the Stability Score's historical series) so "what counts as this type's effect size" is never defined twice. */
+function msdExtractEffectSizeForScoring(summary){
+  return msdExtractEffectSizeFromEvidence(summary.latestEvidence, summary.discoveryType);
+}
+
+/**
+ * Computes the Evidence Score for one discovery summary (from
+ * msdGetDiscoverySummaries). Returns both the final score and every
+ * individual factor that went into it, so a researcher can see WHY a
+ * discovery ranks where it does, not just the number.
+ */
+function msdComputeEvidenceScore(summary){
+  const e = summary.latestEvidence || {};
+  const rawEffect = msdExtractEffectSizeForScoring(summary);
+  const effectSize = rawEffect != null ? Math.max(0, Math.min(1, Math.abs(rawEffect))) : 0;
+  const pv = e.fdrAdjustedPValue != null ? e.fdrAdjustedPValue : e.pValue;
+  const confidence = pv != null ? Math.max(0, 1 - pv) : 0.5;
+  const repeatability = msdNormalizeLogCapped(summary.supportingExperimentIds.length, 20);
+  // Phase 1: the generic, cross-experiment Evidence Stability Score
+  // replaces the old per-type ad-hoc fallback (which was only ever
+  // computed for threshold discoveries; combo/market_state always used
+  // a neutral 0.5). summary.evidenceStabilityScore is null when there
+  // isn't yet enough history to judge — neutral 0.5 in that specific
+  // case only, not as a silent default for types that don't report one.
+  const stability = summary.evidenceStabilityScore != null ? Math.max(0, Math.min(1, summary.evidenceStabilityScore)) : 0.5;
+  const sampleSize = msdNormalizeLogCapped(e.sampleCount, 100000);
+  // Phase 4: the real, effect-agreement-based Transferability Score
+  // replaces the old count-only proxy (which scored a discovery seen on
+  // 3 markets decently regardless of whether the effect actually held up
+  // in 1 of them or all 3). Falls back to the count-based proxy only
+  // when transferability genuinely isn't computable yet (fewer than 2
+  // markets with enough evidence to compare — the project's current,
+  // expected single-market research state) — never fabricating a number
+  // for data that doesn't exist, matching every other factor's own
+  // insufficient-data convention above.
+  const marketConsistency = summary.transferabilityScore != null
+    ? summary.transferabilityScore
+    : msdNormalizeLogCapped((summary.distinctSymbols || []).length, 10);
+  const leadTimeConsistency = msdNormalizeLogCapped((summary.distinctLeadTimes || []).length, 20);
+
+  const factors = { effectSize, confidence, repeatability, stability, sampleSize, marketConsistency, leadTimeConsistency };
+  const w = MSD_EVIDENCE_SCORE_WEIGHTS;
+  let logSum = 0, totalWeight = 0;
+  Object.keys(factors).forEach(k => {
+    const v = Math.max(0.001, factors[k]); // floor so one zero factor drives the score toward zero (as intended) without producing NaN via log(0)
+    logSum += w[k] * Math.log(v);
+    totalWeight += w[k];
+  });
+  return { score: Math.exp(logSum / totalWeight), factors };
+}
+
+/** Ranks ALL discoveries of a given type by Evidence Score (not by any single raw metric) — the primary, spec-mandated ranking function. msdRankDiscoverySummaries above remains available for single-factor sorts (e.g. "sort by raw effect size only") where that's specifically wanted. */
+function msdRankByEvidenceScore(summaries, discoveryType){
+  return summaries
+    .filter(s => s.discoveryType === discoveryType && s.latestEvidence)
+    .map(s => { const { score, factors } = msdComputeEvidenceScore(s); return { ...s, evidenceScore: score, evidenceFactors: factors }; })
+    .sort((a, b) => b.evidenceScore - a.evidenceScore);
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -6478,10 +7584,12 @@ function msdEvaluateCombo(membership, outcomes, minSide, randomSeed){
   const pValue = (1 + countGE) / (1 + MSD_COMBO_PERMUTATIONS);
 
   const comboPos = inIdx.filter(i => outcomes[i] === 1).length;
+  const outsidePos = outIdx.filter(i => outcomes[i] === 1).length;
   const comboCI = msdWilsonScoreInterval(comboPos, inIdx.length);
 
   return {
     comboCount: inIdx.length, outsideCount: outIdx.length,
+    comboPositiveCount: comboPos, outsidePositiveCount: outsidePos,
     comboPositiveRate: comboRate, outsideRate,
     comboCI,
     pValue, significant: pValue < MSD_COMBO_P_GATE,
@@ -6489,7 +7597,22 @@ function msdEvaluateCombo(membership, outcomes, minSide, randomSeed){
 }
 
 /** Phase 4 analyzer: re-derives each notable feature's own threshold on THIS experiment's dataset (Phase 3, unmodified), tries every pair among the top MSD_COMBO_MAX_FEATURES, and emits evidence only for pairs whose combo beats both single features with a permutation-significant gap. */
-function msdFeatureCombinationAnalyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset){
+/** All k-element subsets of arr, as index-arrays — used to generate 2/3/4-feature combinations from the candidate pool without hand-writing nested loops per size. */
+function msdCombinationsOfSize(n, k){
+  const results = [];
+  const combo = [];
+  function recurse(start){
+    if (combo.length === k) { results.push(combo.slice()); return; }
+    for (let i = start; i < n; i++) { combo.push(i); recurse(i + 1); combo.pop(); }
+  }
+  recurse(0);
+  return results;
+}
+
+const MSD_COMBO_MAX_SIZE = 4;              // supports 2, 3, and 4-feature combinations
+const MSD_COMBO_CANDIDATE_CAP = 6;         // candidates considered for 3/4-way combos — bounded separately from the 8 used for pairs alone, since C(8,4)=70 vs C(6,4)=15 keeps runtime and the FDR batch size sane
+
+function msdFeatureCombinationAnalyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset, regimeInfo){
   if (!discoveryResult || !discoveryResult.featureReports || !dataset) return [];
   if (!discoveryResult.readyForTraining) return [];
 
@@ -6505,46 +7628,72 @@ function msdFeatureCombinationAnalyzer(experimentRecord, discoveryResult, trainR
     if (!result || !result.significant) return;
     candidates.push({ feature: report.feature, values, threshold: result.threshold, direction: result.direction, ownRate: result.direction === 'above' ? result.abovePositiveRate : result.belowPositiveRate });
   });
-
   candidates.sort((a, b) => b.ownRate - a.ownRate);
-  const top = candidates.slice(0, MSD_COMBO_MAX_FEATURES);
-  if (top.length < 2) return [];
+  if (candidates.length < 2) return [];
+
+  const pairPool = candidates.slice(0, MSD_COMBO_MAX_FEATURES);       // up to 8, pairs only — matches the original pairwise cap
+  const higherOrderPool = candidates.slice(0, MSD_COMBO_CANDIDATE_CAP); // up to 6, for triples/quads too — bounds combinatorial growth
+
+  // Build every candidate combo of size 2, 3, and 4 first, WITHOUT
+  // gating on significance yet — same reasoning as the threshold
+  // analyzer: many combos get tested per experiment, so they all need to
+  // go through ONE Benjamini-Hochberg correction together, not each be
+  // judged against a raw p<0.05 independently.
+  const comboCandidates = [];
+  for (let size = 2; size <= MSD_COMBO_MAX_SIZE; size++) {
+    const pool = size === 2 ? pairPool : higherOrderPool;
+    if (pool.length < size) continue;
+    msdCombinationsOfSize(pool.length, size).forEach(idxSet => {
+      const members = idxSet.map(i => pool[i]);
+      const membership = allSnapshots.map((_, k) => members.every(m => msdMeetsThreshold(m.values[k], m.threshold, m.direction)) ? 1 : 0);
+      const comboSeed = seed + idxSet.reduce((s, v, pos) => s + v * 97 * (pos + 1), 0); // deterministic per exact member set
+      const result = msdEvaluateCombo(membership, outcomes, MSD_COMBO_MIN_SIDE, comboSeed);
+      if (!result) return;
+      const bestSingleRate = msdSafeMax(members.map(m => m.ownRate));
+      const synergy = result.comboPositiveRate - bestSingleRate;
+      if (synergy <= 0) return; // must beat the BEST of every individual member, not just co-occur — generalizes cleanly to any combo size
+      comboCandidates.push({ members, result, synergy, size });
+    });
+  }
+  if (!comboCandidates.length) return [];
+
+  const corrected = msdBenjaminiHochberg(comboCandidates.map(c => c.result.pValue), MSD_COMBO_P_GATE);
 
   const evidence = [];
-  for (let i = 0; i < top.length; i++) {
-    for (let j = i + 1; j < top.length; j++) {
-      const a = top[i], b = top[j];
-      const membership = allSnapshots.map((_, k) =>
-        msdMeetsThreshold(a.values[k], a.threshold, a.direction) && msdMeetsThreshold(b.values[k], b.threshold, b.direction) ? 1 : 0
-      );
-      const comboSeed = seed + i * 97 + j; // deterministic per pair, reproducible from experimentRecord.randomSeed
-      const result = msdEvaluateCombo(membership, outcomes, MSD_COMBO_MIN_SIDE, comboSeed);
-      if (!result || !result.significant) continue;
+  comboCandidates.forEach((cand, i) => {
+    if (!corrected[i].significant) return;
+    const { members, result, synergy, size } = cand;
+    const key = members.map(m => m.feature).sort().join('+');
+    const fullStats = msdComputeFullStatisticalEvidence(
+      result.comboPositiveCount, result.comboCount - result.comboPositiveCount,
+      result.outsidePositiveCount, result.outsideCount - result.outsidePositiveCount
+    );
 
-      const synergy = result.comboPositiveRate - Math.max(a.ownRate, b.ownRate);
-      if (synergy <= 0) continue; // must beat the BETTER of the two single features, not just co-occur
-
-      const key = [a.feature, b.feature].sort().join('+'); // order-independent
-      evidence.push({
-        discoveryKey: 'combo:' + key,
-        discoveryType: 'combo',
-        researchSessionId,
-        experimentId: experimentRecord.experimentId,
-        leadTime: experimentRecord.leadTime,
-        featureVersion: experimentRecord.featureVersion,
-        statisticalEvidence: {
-          featureA: a.feature, thresholdA: a.threshold, directionA: a.direction, rateAAlone: a.ownRate,
-          featureB: b.feature, thresholdB: b.threshold, directionB: b.direction, rateBAlone: b.ownRate,
-          comboCount: result.comboCount, outsideCount: result.outsideCount,
-          comboPositiveRate: result.comboPositiveRate, outsideRate: result.outsideRate,
-          comboCIlower: result.comboCI.lower, comboCIupper: result.comboCI.upper,
-          synergy,
-          pValue: result.pValue,
-          sampleCount: discoveryResult.sampleStats.totalCount,
-        },
-      });
-    }
-  }
+    evidence.push({
+      discoveryKey: 'combo:' + key,
+      discoveryType: 'combo',
+      researchSessionId,
+      experimentId: experimentRecord.experimentId,
+      leadTime: experimentRecord.leadTime,
+      featureVersion: experimentRecord.featureVersion,
+      symbol: experimentRecord.symbol,
+      regime: regimeInfo ? regimeInfo.label : null,
+      regimeFingerprint: regimeInfo ? regimeInfo.fingerprint : null,
+      statisticalEvidence: {
+        comboSize: size,
+        conditions: members.map(m => ({ feature: m.feature, threshold: m.threshold, direction: m.direction, rateAlone: m.ownRate })),
+        comboCount: result.comboCount, outsideCount: result.outsideCount,
+        comboPositiveRate: result.comboPositiveRate, outsideRate: result.outsideRate,
+        comboCIlower: result.comboCI.lower, comboCIupper: result.comboCI.upper,
+        synergy,
+        pValue: result.pValue,
+        fdrAdjustedPValue: corrected[i].adjustedPValue,
+        combosTestedThisExperiment: comboCandidates.length,
+        sampleCount: discoveryResult.sampleStats.totalCount,
+        fullStatistics: fullStats,
+      },
+    });
+  });
   return evidence;
 }
 
@@ -6622,7 +7771,50 @@ function msdCanonicalizeClusterFingerprint(clusterRawMeans, overallMeans, overal
 }
 
 /** Phase 5 analyzer: clusters this experiment's dataset (existing k-means, unmodified), tests each cluster's membership via msdEvaluateCombo (Phase 4, reused as-is), and records evidence under a canonical regime fingerprint. */
-function msdMarketStateAnalyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset){
+/**
+ * Parses a canonical fingerprint string ("adx:high|rsi:low|...") into a
+ * plain {feature: 'high'|'low'} map — the ONLY input the label rules
+ * below are allowed to see, so a label can never depend on anything the
+ * fingerprint itself doesn't already canonically encode.
+ */
+function msdParseFingerprint(fingerprint){
+  const map = {};
+  (fingerprint || '').split('|').filter(Boolean).forEach(part => {
+    const [k, v] = part.split(':');
+    map[k] = v;
+  });
+  return map;
+}
+
+/**
+ * Heuristic, human-readable label layer on top of the canonical
+ * fingerprint — per the audit: "avoid anonymous cluster IDs becoming the
+ * final knowledge representation." This is deliberately NOT the
+ * scientific identity of a discovery (the fingerprint/discoveryKey
+ * remains that, unchanged) — it exists purely so a researcher reading
+ * the Market-State Ranking table sees "Strong Trend" instead of
+ * "adx:high|pdi:high", without two different label outcomes ever being
+ * able to merge or split what the fingerprint says is the same or a
+ * different discovery. Rules are evaluated top-to-bottom, first match
+ * wins; documented here exactly as implemented, not left implicit.
+ */
+const MSD_STATE_LABEL_RULES = [
+  { label: 'Strong Trend',        test: m => m.adx === 'high' && (m.pdi === 'high' || m.ndi === 'high') },
+  { label: 'Momentum Burst',      test: m => m.macd === 'high' && m.atr === 'high' },
+  { label: 'Momentum Exhaustion', test: m => m.rsi === 'high' && m.macd === 'low' },
+  { label: 'Pullback',            test: m => m.rsi === 'low' && m.pdi === 'high' },
+  { label: 'Expansion',           test: m => m.atr === 'high' },
+  { label: 'Compression',         test: m => m.atr === 'low' },
+  { label: 'Weak Trend',          test: m => m.adx === 'high' },
+  { label: 'Range',               test: m => Object.keys(m).length === 0 },
+];
+function msdLabelMarketState(fingerprint){
+  const m = msdParseFingerprint(fingerprint);
+  for (const rule of MSD_STATE_LABEL_RULES) if (rule.test(m)) return rule.label;
+  return 'Transition';
+}
+
+function msdMarketStateAnalyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset, regimeInfo){
   if (!discoveryResult || !dataset) return [];
   if (!discoveryResult.readyForTraining) return [];
 
@@ -6639,13 +7831,10 @@ function msdMarketStateAnalyzer(experimentRecord, discoveryResult, trainResult, 
   const { assignments } = msdKMeans(standardized, MSD_STATE_K, seed);
   if (!assignments.length) return [];
 
-  // Best evidence per fingerprint WITHIN this experiment — if two
-  // clusters happen to land on the same qualitative fingerprint in one
-  // run, keep only the stronger one rather than emitting duplicate
-  // evidence (the maturity engine tolerates duplicates safely anyway,
-  // since it counts distinct experimentIds, but this keeps the record clean).
-  const bestByFingerprint = {};
-
+  // Pass 1: evaluate every cluster, but don't gate on significance yet —
+  // all k clusters tested this experiment go through ONE Benjamini-
+  // Hochberg correction together first, same reasoning as Phase 3/4.
+  const clusterCandidates = [];
   for (let c = 0; c < MSD_STATE_K; c++) {
     const memberIdx = [];
     assignments.forEach((a, i) => { if (a === c) memberIdx.push(i); });
@@ -6653,40 +7842,66 @@ function msdMarketStateAnalyzer(experimentRecord, discoveryResult, trainResult, 
 
     const membership = validRows.map((_, i) => assignments[i] === c ? 1 : 0);
     const result = msdEvaluateCombo(membership, outcomesAll, MSD_STATE_MIN_SIZE, seed + c * 131);
-    if (!result || !result.significant) continue;
-
+    if (!result) continue;
     const lift = result.comboPositiveRate - result.outsideRate;
-    if (lift <= 0) continue; // only "precedes a run MORE than the rest of the data", not less
+    if (lift <= 0) continue;
 
     const clusterRawMeans = MSD_CLUSTER_FEATURE_KEYS.map((_, di) => {
       let sum = 0; memberIdx.forEach(i => sum += matrix[i][di]);
       return sum / memberIdx.length;
     });
     const fingerprint = msdCanonicalizeClusterFingerprint(clusterRawMeans, overallMeans, overallStds, MSD_CLUSTER_FEATURE_KEYS, eligible);
-    if (!fingerprint) continue; // no dimension meaningfully differentiates this cluster — not a describable "state"
-
-    const entry = { fingerprint, lift, result, clusterRawMeans };
-    if (!bestByFingerprint[fingerprint] || lift > bestByFingerprint[fingerprint].lift) bestByFingerprint[fingerprint] = entry;
+    if (!fingerprint) continue;
+    clusterCandidates.push({ fingerprint, lift, result, clusterRawMeans });
   }
+  if (!clusterCandidates.length) return [];
 
-  return Object.values(bestByFingerprint).map(e => ({
-    discoveryKey: 'market_state:' + e.fingerprint,
-    discoveryType: 'market_state',
-    researchSessionId,
-    experimentId: experimentRecord.experimentId,
-    leadTime: experimentRecord.leadTime,
-    featureVersion: experimentRecord.featureVersion,
-    statisticalEvidence: {
-      fingerprint: e.fingerprint,
-      featureMeans: Object.fromEntries(MSD_CLUSTER_FEATURE_KEYS.map((k, i) => [k, e.clusterRawMeans[i]])),
-      stateCount: e.result.comboCount,
-      statePositiveRate: e.result.comboPositiveRate,
-      outsideRate: e.result.outsideRate,
-      lift: e.lift,
-      pValue: e.result.pValue,
-      sampleCount: discoveryResult.sampleStats ? discoveryResult.sampleStats.totalCount : validRows.length,
-    },
-  }));
+  const corrected = msdBenjaminiHochberg(clusterCandidates.map(c => c.result.pValue), MSD_COMBO_P_GATE);
+
+  // Best evidence per fingerprint WITHIN this experiment — if two
+  // clusters happen to land on the same qualitative fingerprint in one
+  // run, keep only the stronger one rather than emitting duplicate
+  // evidence (the maturity engine tolerates duplicates safely anyway,
+  // since it counts distinct experimentIds, but this keeps the record clean).
+  const bestByFingerprint = {};
+  clusterCandidates.forEach((entry, i) => {
+    if (!corrected[i].significant) return;
+    if (!bestByFingerprint[entry.fingerprint] || entry.lift > bestByFingerprint[entry.fingerprint].lift) {
+      bestByFingerprint[entry.fingerprint] = Object.assign({}, entry, { fdrAdjustedPValue: corrected[i].adjustedPValue, clustersTestedThisExperiment: clusterCandidates.length });
+    }
+  });
+
+  return Object.values(bestByFingerprint).map(e => {
+    const fullStats = msdComputeFullStatisticalEvidence(
+      e.result.comboPositiveCount, e.result.comboCount - e.result.comboPositiveCount,
+      e.result.outsidePositiveCount, e.result.outsideCount - e.result.outsidePositiveCount
+    );
+    return {
+      discoveryKey: 'market_state:' + e.fingerprint,
+      discoveryType: 'market_state',
+      researchSessionId,
+      experimentId: experimentRecord.experimentId,
+      leadTime: experimentRecord.leadTime,
+      featureVersion: experimentRecord.featureVersion,
+      symbol: experimentRecord.symbol,
+      regime: regimeInfo ? regimeInfo.label : null,
+      regimeFingerprint: regimeInfo ? regimeInfo.fingerprint : null,
+      statisticalEvidence: {
+        fingerprint: e.fingerprint,
+        label: msdLabelMarketState(e.fingerprint), // heuristic, human-readable — the fingerprint above remains the canonical identity
+        featureMeans: Object.fromEntries(MSD_CLUSTER_FEATURE_KEYS.map((k, i) => [k, e.clusterRawMeans[i]])),
+        stateCount: e.result.comboCount,
+        statePositiveRate: e.result.comboPositiveRate,
+        outsideRate: e.result.outsideRate,
+        lift: e.lift,
+        pValue: e.result.pValue,
+        fdrAdjustedPValue: e.fdrAdjustedPValue,
+        clustersTestedThisExperiment: e.clustersTestedThisExperiment,
+        sampleCount: discoveryResult.sampleStats ? discoveryResult.sampleStats.totalCount : validRows.length,
+        fullStatistics: fullStats,
+      },
+    };
+  });
 }
 
 msdRegisterDiscoveryAnalyzer(msdMarketStateAnalyzer);
@@ -6797,6 +8012,7 @@ async function msdRecordModelPerformance(experimentRecord, trainResult){
       modelName: m.name,
       leadTime: experimentRecord.leadTime,
       featureVersion: experimentRecord.featureVersion,
+      symbol: experimentRecord.symbol,
       hyperparameters: m.hyperparametersUsed,
       threshold: trainResult.threshold,
       valAuc: m.valMetrics.auc, valF1: m.valMetrics.f1, valAccuracy: m.valMetrics.acc,
@@ -6948,10 +8164,10 @@ function msdValidateDataset(dataset, config){
   allSnapshots.forEach(s => { if (seen.has(s.snapshotId)) duplicateCount++; else seen.add(s.snapshotId); });
   checks.push({ name: 'No Duplicated Snapshots', value: duplicateCount, ok: duplicateCount === 0 });
 
-  const maxTrainTs = dataset.trainSet.length ? Math.max(...dataset.trainSet.map(s => s.timestamp)) : -Infinity;
-  const minValTs   = dataset.valSet.length   ? Math.min(...dataset.valSet.map(s => s.timestamp))   : Infinity;
-  const maxValTs   = dataset.valSet.length   ? Math.max(...dataset.valSet.map(s => s.timestamp))   : -Infinity;
-  const minTestTs  = dataset.testSet.length  ? Math.min(...dataset.testSet.map(s => s.timestamp))  : Infinity;
+  const maxTrainTs = dataset.trainSet.length ? msdSafeMax(dataset.trainSet.map(s => s.timestamp)) : -Infinity;
+  const minValTs   = dataset.valSet.length   ? msdSafeMin(dataset.valSet.map(s => s.timestamp))   : Infinity;
+  const maxValTs   = dataset.valSet.length   ? msdSafeMax(dataset.valSet.map(s => s.timestamp))   : -Infinity;
+  const minTestTs  = dataset.testSet.length  ? msdSafeMin(dataset.testSet.map(s => s.timestamp))  : Infinity;
   const noLeakage = maxTrainTs <= minValTs && maxValTs <= minTestTs;
   checks.push({ name: 'No Data Leakage (chronological order across splits)', value: { maxTrainTs, minValTs, maxValTs, minTestTs }, ok: noLeakage });
 
@@ -7007,7 +8223,7 @@ function msdExtendDiscoveryWithFeatureDiagnostics(discovery, allSnapshots){
     const stats = msdBasicStats(values);
     report.variance = stats.std != null ? stats.std * stats.std : null;
     const related = correlationMatrix.filter(r => r.featureA === key || r.featureB === key);
-    report.maxAbsCorrelation = related.length ? Math.max(...related.map(r => Math.abs(r.pearson ?? 0))) : null;
+    report.maxAbsCorrelation = related.length ? msdSafeMax(related.map(r => Math.abs(r.pearson ?? 0))) : null;
   });
   return discovery;
 }
@@ -7052,7 +8268,7 @@ async function msdAuditNegativeSampling(){
   });
 
   const negEpochs = negatives.map(n => n.epoch);
-  const epochSpread = negEpochs.length ? Math.max(...negEpochs) - Math.min(...negEpochs) : 0;
+  const epochSpread = negEpochs.length ? msdSafeMax(negEpochs) - msdSafeMin(negEpochs) : 0;
 
   return {
     totalPositives: positives.length,
@@ -7299,7 +8515,7 @@ async function msdEventsRefresh(){
   body.innerHTML = allEvents.map(ev => {
     const snaps = allStates.filter(s => s.eventId === ev.eventId);
     const leadTimes = snaps.map(s => s.leadTime).filter(lt => lt != null);
-    const ltRange = leadTimes.length ? `${Math.min(...leadTimes)}–${Math.max(...leadTimes)}` : '—';
+    const ltRange = leadTimes.length ? `${msdSafeMin(leadTimes)}–${msdSafeMax(leadTimes)}` : '—';
     const runStart = new Date(ev.runStartEpoch * 1000 || ev.runStartEpoch).toLocaleString();
     return `<tr style="cursor:pointer" onclick="msdShowEventSnapshots('${ev.eventId}')">
       <td class="l">${ev.eventId}</td><td>${ev.actualRunLength ?? '—'}</td><td>${ltRange}</td><td>${snaps.length}</td><td class="l">${runStart}</td>
@@ -7389,7 +8605,7 @@ function msdShowHistogram(feature){
   if (title) title.textContent = feature;
   const { bins, counts } = report.histogram;
   if (!counts.length) { body.innerHTML = '<tr><td colspan="2" class="sig-empty">No data.</td></tr>'; return; }
-  const maxCount = Math.max(...counts) || 1;
+  const maxCount = msdSafeMax(counts) || 1;
   body.innerHTML = counts.map((count, i) => {
     const barWidth = Math.round((count / maxCount) * 100);
     return `<tr><td class="l">${bins[i].toFixed(2)} – ${bins[i+1].toFixed(2)}</td><td><div style="display:flex;align-items:center;gap:6px"><div style="background:var(--accent,#56b6ff);height:10px;width:${barWidth}%;min-width:2px"></div><span>${count}</span></div></td></tr>`;
@@ -7507,10 +8723,24 @@ async function msdSearchRun(){
 }
 
 /** Reads the Research Configuration form, runs the experiment, shows the result, and refreshes history. */
+/** Populates the Experiment Runner's market selector from the app's existing MARKETS constant, defaulting to whichever market is currently selected live — filled lazily on focus so it always reflects MARKETS even if this page loads before that constant's script block runs. */
+function msdPopulateExpSymbolSelect(){
+  const sel = $("msdExpSymbol");
+  if (!sel || sel.dataset.populated) return;
+  const opts = ['<option value="all">All markets (not recommended — mixes markets)</option>'];
+  Object.entries(MARKETS).forEach(([code, name]) => {
+    opts.push(`<option value="${code}"${code === SYMBOL ? ' selected' : ''}>${name}</option>`);
+  });
+  sel.innerHTML = opts.join('');
+  sel.dataset.populated = '1';
+}
+
 async function msdRunExperimentUi(){
   const statusEl = $("msdExperimentStatus");
   const getVal = id => { const e = $(id); return e ? e.value : ''; };
+  msdPopulateExpSymbolSelect();
 
+  const symbol = getVal('msdExpSymbol') || SYMBOL;
   const featureVersion = getVal('msdExpFeatureVersion').trim() || 'v1';
   const leadTimeRaw = getVal('msdExpLeadTime').trim();
   const leadTime = leadTimeRaw.toLowerCase() === 'all' || leadTimeRaw === '' ? 'all' : parseInt(leadTimeRaw, 10);
@@ -7535,7 +8765,7 @@ async function msdRunExperimentUi(){
   if (statusEl) statusEl.textContent = 'Running…';
   let result;
   try {
-    result = await msdRunExperiment({ featureVersion, leadTime, samplingRatio, randomSeed, trainingSplit, validationSplit });
+    result = await msdRunExperiment({ symbol, featureVersion, leadTime, samplingRatio, randomSeed, trainingSplit, validationSplit });
   } catch (e) {
     if (statusEl) statusEl.textContent = 'Error: ' + e.message;
     return;
@@ -7574,7 +8804,7 @@ async function msdRunExperimentUi(){
   // Stored for the Research Validation Suite page — reproducibility
   // stress-testing and the random-chance benchmark both need the exact
   // config and dataset this experiment was actually run with.
-  window._msdLastExperiment = { config: { featureVersion, leadTime, samplingRatio, randomSeed, trainingSplit, validationSplit }, result, discovery };
+  window._msdLastExperiment = { config: { symbol, featureVersion, leadTime, samplingRatio, randomSeed, trainingSplit, validationSplit }, result, discovery };
 
   // A fresh experiment invalidates any previously-trained model results for the OLD dataset — hide until retrained.
   const mlCard = $("msdMlCard");
@@ -7620,7 +8850,8 @@ async function msdTrainModelUi(){
   // Session and records zero discoveries — genuine, honest plumbing, not
   // yet science.
   const researchSession = await msdRunResearchSession(last.result.record, last.discovery, trainResult, last.result.dataset);
-  if (statusEl) statusEl.textContent += ' — Research session ' + researchSession.researchSessionId + ' (' + researchSession.recordedCount + ' discovery record(s)).';
+  const reportResult = await msdGenerateResearchReport(last.result.record, last.discovery, last.result.dataset, researchSession);
+  if (statusEl) statusEl.textContent += ' — Research session ' + researchSession.researchSessionId + ' (' + researchSession.recordedCount + ' discovery record(s)) — Research Report ' + (reportResult.writeResult.ok ? 'recorded.' : 'FAILED to record: ' + reportResult.writeResult.error);
 }
 
 /** Reads the Lead Time list from the form, runs the automated sweep, records results, and renders the comparison table. */
@@ -7794,9 +9025,9 @@ async function msdKnowledgeRefresh(){
             const label = f.discoveryType === 'threshold'
               ? `${f.discoveryKey.replace('threshold:','')} ${se.direction==='above'?'≥':'<'} ${se.threshold!=null?se.threshold.toFixed(3):'?'}`
               : f.discoveryType === 'combo'
-              ? `${se.featureA}(${se.directionA==='above'?'≥':'<'}${se.thresholdA!=null?se.thresholdA.toFixed(2):'?'}) AND ${se.featureB}(${se.directionB==='above'?'≥':'<'}${se.thresholdB!=null?se.thresholdB.toFixed(2):'?'})`
+              ? (se.conditions || []).map(c => `${c.feature}(${c.direction==='above'?'≥':'<'}${c.threshold!=null?c.threshold.toFixed(2):'?'})`).join(' AND ')
               : f.discoveryType === 'market_state'
-              ? f.discoveryKey.replace('market_state:','').replace(/\|/g, ' ')
+              ? `${se.label ? se.label + ' — ' : ''}${f.discoveryKey.replace('market_state:','').replace(/\|/g, ' ')}`
               : f.discoveryKey.replace('single_feature:','');
             const metric = f.discoveryType === 'threshold'
               ? `Δrate ${se.effectSize!=null?(se.effectSize*100).toFixed(1)+'%':'—'} (p=${fmt(se.pValue)})`
@@ -7971,6 +9202,9 @@ async function msdWorkbenchRefresh(){
   setVal('msdMaturityCandidate', rules.candidate.minExperiments);
   setVal('msdMaturityRepeatable', rules.repeatable.minExperiments);
   setVal('msdMaturityVerified', rules.verified.minExperiments);
+  setVal('msdStabilityCandidate', rules.candidate.minStability);
+  setVal('msdStabilityRepeatable', rules.repeatable.minStability);
+  setVal('msdStabilityVerified', rules.verified.minStability);
 
   let summaries;
   try { summaries = await msdGetDiscoverySummaries(); }
@@ -7980,27 +9214,37 @@ async function msdWorkbenchRefresh(){
   const body = $("msdDiscoveryRepoBody");
   if (body) {
     if (!summaries.length) {
-      body.innerHTML = '<tr><td colspan="6" class="sig-empty">No discoveries yet — waiting for the first completed experiment with enough samples to clear the readyForTraining gate.</td></tr>';
+      body.innerHTML = '<tr><td colspan="8" class="sig-empty">No discoveries yet — waiting for the first completed experiment with enough samples to clear the readyForTraining gate.</td></tr>';
     } else {
       const maturityClass = { observation: '', candidate: '', repeatable: 'cell-pos', verified: 'cell-pos' };
-      body.innerHTML = summaries.sort((a, b) => b.evidenceCount - a.evidenceCount).map(s => `<tr>
+      const decayClass = { Stable: '', Improving: 'cell-pos', Decaying: 'cell-neg', Uncertain: 'cell-mut' };
+      body.innerHTML = summaries.sort((a, b) => b.evidenceCount - a.evidenceCount).map(s => {
+        const sub = s.evidenceStabilitySubScores || {};
+        const subTitle = Object.entries(sub).filter(([,v]) => v != null).map(([k,v]) => `${k}: ${(v*100).toFixed(0)}%`).join(' · ') || 'insufficient history yet';
+        const stabilityText = s.evidenceStabilityScore != null ? (s.evidenceStabilityScore*100).toFixed(0) + '%' : '—';
+        const decayTitle = s.decayTrend ? `tau=${s.decayTrend.tau.toFixed(2)} · p=${s.decayTrend.pValue.toFixed(3)} · n=${s.decayTrend.n} points` : 'fewer than 4 effect-size data points — trend not yet testable';
+        return `<tr>
         <td class="l">${s.discoveryKey}</td>
         <td class="l">${s.discoveryType}</td>
         <td class="l ${maturityClass[s.maturityLevel] || ''}">${s.maturityLevel}</td>
         <td>${s.supportingExperimentIds.length}</td>
         <td>${s.evidenceCount}</td>
+        <td title="${subTitle}">${stabilityText}</td>
+        <td class="l ${decayClass[s.decayStatus]||''}" title="${decayTitle}">${s.decayStatus}</td>
         <td class="l">${new Date(s.firstSeenAt).toLocaleDateString()}</td>
-      </tr>`).join('');
+      </tr>`;
+      }).join('');
     }
   }
 
-  const thresholdRanking = msdRankDiscoverySummaries(summaries, 'threshold', e => e.effectSize);
+  const thresholdRanking = msdRankByEvidenceScore(summaries, 'threshold');
   const thBody = $("msdThresholdRankingBody");
   if (thBody) {
     thBody.innerHTML = thresholdRanking.length
       ? thresholdRanking.map(s => {
           const e = s.latestEvidence;
           const maturityClass = { observation: '', candidate: '', repeatable: 'cell-pos', verified: 'cell-pos' };
+          const factorTitle = Object.entries(s.evidenceFactors).map(([k,v]) => `${k}: ${(v*100).toFixed(0)}%`).join(' · ');
           return `<tr>
             <td class="l">${s.discoveryKey.replace('threshold:','')}</td>
             <td class="l">${e.direction==='above'?'≥':'<'} ${e.threshold.toFixed(4)}</td>
@@ -8010,49 +9254,190 @@ async function msdWorkbenchRefresh(){
             <td>${e.stability!=null?(e.stability*100).toFixed(0)+'%':'—'}</td>
             <td class="l ${maturityClass[s.maturityLevel]||''}">${s.maturityLevel}</td>
             <td>${s.supportingExperimentIds.length}</td>
+            <td style="font-weight:700;color:var(--accent)" title="${factorTitle}">${(s.evidenceScore*100).toFixed(1)}</td>
           </tr>`;
         }).join('')
-      : '<tr><td colspan="8" class="sig-empty">No threshold discoveries yet.</td></tr>';
+      : '<tr><td colspan="9" class="sig-empty">No threshold discoveries yet.</td></tr>';
   }
 
-  const comboRanking = msdRankDiscoverySummaries(summaries, 'combo', e => e.synergy);
+  const comboRanking = msdRankByEvidenceScore(summaries, 'combo');
   const comboBody = $("msdComboRankingBody");
   if (comboBody) {
     comboBody.innerHTML = comboRanking.length
       ? comboRanking.map(s => {
           const e = s.latestEvidence;
           const maturityClass = { observation: '', candidate: '', repeatable: 'cell-pos', verified: 'cell-pos' };
+          const conditionsHtml = (e.conditions || []).map(c => `${c.feature} ${c.direction==='above'?'≥':'<'} ${c.threshold.toFixed(3)}`).join('<br>AND ');
+          const bestSingleRate = e.conditions && e.conditions.length ? msdSafeMax(e.conditions.map(c => c.rateAlone)) : null;
+          const factorTitle = Object.entries(s.evidenceFactors).map(([k,v]) => `${k}: ${(v*100).toFixed(0)}%`).join(' · ');
           return `<tr>
-            <td class="l">${e.featureA} ${e.directionA==='above'?'≥':'<'} ${e.thresholdA.toFixed(3)}<br>AND ${e.featureB} ${e.directionB==='above'?'≥':'<'} ${e.thresholdB.toFixed(3)}</td>
+            <td class="l">${conditionsHtml}</td>
+            <td>${e.comboSize ?? (e.conditions ? e.conditions.length : 2)}-way</td>
             <td>${e.comboCount ?? '—'}</td>
             <td>${(e.comboPositiveRate*100).toFixed(1)}%</td>
-            <td>${(e.rateAAlone*100).toFixed(1)}% / ${(e.rateBAlone*100).toFixed(1)}%</td>
+            <td>${bestSingleRate!=null ? (bestSingleRate*100).toFixed(1)+'%' : '—'}</td>
             <td>+${(e.synergy*100).toFixed(1)}%</td>
             <td class="l ${maturityClass[s.maturityLevel]||''}">${s.maturityLevel}</td>
             <td>${s.supportingExperimentIds.length}</td>
+            <td style="font-weight:700;color:var(--accent)" title="${factorTitle}">${(s.evidenceScore*100).toFixed(1)}</td>
           </tr>`;
         }).join('')
-      : '<tr><td colspan="7" class="sig-empty">No combination discoveries yet.</td></tr>';
+      : '<tr><td colspan="9" class="sig-empty">No combination discoveries yet.</td></tr>';
   }
 
-  const stateRanking = msdRankDiscoverySummaries(summaries, 'market_state', e => e.lift);
+  const stateRanking = msdRankByEvidenceScore(summaries, 'market_state');
   const stateBody = $("msdStateRankingBody");
   if (stateBody) {
     stateBody.innerHTML = stateRanking.length
       ? stateRanking.map(s => {
           const e = s.latestEvidence;
           const maturityClass = { observation: '', candidate: '', repeatable: 'cell-pos', verified: 'cell-pos' };
+          const factorTitle = Object.entries(s.evidenceFactors).map(([k,v]) => `${k}: ${(v*100).toFixed(0)}%`).join(' · ');
           return `<tr>
-            <td class="l">${s.discoveryKey.replace('market_state:','').replace(/\|/g, '<br>')}</td>
+            <td class="l" style="font-weight:700;color:var(--accent)">${e.label || 'Transition'}</td>
+            <td class="l" style="font-size:10px;color:var(--muted)">${s.discoveryKey.replace('market_state:','').replace(/\|/g, '<br>')}</td>
             <td>${e.stateCount ?? '—'}</td>
             <td>${(e.statePositiveRate*100).toFixed(1)}% / ${(e.outsideRate*100).toFixed(1)}%</td>
             <td>+${(e.lift*100).toFixed(1)}%</td>
             <td class="l ${maturityClass[s.maturityLevel]||''}">${s.maturityLevel}</td>
             <td>${s.supportingExperimentIds.length}</td>
+            <td style="font-weight:700;color:var(--accent)" title="${factorTitle}">${(s.evidenceScore*100).toFixed(1)}</td>
           </tr>`;
         }).join('')
-      : '<tr><td colspan="6" class="sig-empty">No market-state discoveries yet.</td></tr>';
+      : '<tr><td colspan="8" class="sig-empty">No market-state discoveries yet.</td></tr>';
   }
+
+  const regimeBody = $("msdRegimeValidationBody");
+  if (regimeBody) {
+    const rows = [];
+    const statusClass = { Survives: 'cell-pos', Weakens: 'cell-warn', Disappears: 'cell-neg', 'Insufficient Data': 'cell-mut' };
+    summaries.forEach(s => {
+      const rb = s.regimeBreakdown;
+      if (!rb || !rb.regimesWithData) return;
+      const label = msdDiscoveryDisplayLabel(s);
+      Object.entries(rb.regimes).forEach(([regimeName, r]) => {
+        rows.push({
+          label, discoveryType: s.discoveryType, regimeName,
+          evidenceCount: r.evidenceCount,
+          meanEffect: r.meanEffect, overallEffect: rb.overallEffect, status: r.status,
+        });
+      });
+    });
+    regimeBody.innerHTML = rows.length
+      ? rows.sort((a, b) => (a.status === 'Survives' ? -1 : 1) - (b.status === 'Survives' ? -1 : 1)).map(r => `<tr>
+          <td class="l">${r.label}</td>
+          <td class="l">${r.discoveryType}</td>
+          <td class="l">${r.regimeName}</td>
+          <td>${r.evidenceCount}</td>
+          <td>${r.meanEffect != null ? (r.meanEffect*100).toFixed(1)+'%' : '—'}</td>
+          <td>${r.overallEffect != null ? (r.overallEffect*100).toFixed(1)+'%' : '—'}</td>
+          <td class="l ${statusClass[r.status]||''}" style="font-weight:700">${r.status}</td>
+        </tr>`).join('')
+      : '<tr><td colspan="7" class="sig-empty">No regime-tagged evidence yet — run more experiments across varying market conditions.</td></tr>';
+  }
+
+  const marketBody = $("msdMarketTransferabilityBody");
+  if (marketBody) {
+    const rows = [];
+    const statusClass = { Survives: 'cell-pos', Weakens: 'cell-warn', Disappears: 'cell-neg', 'Insufficient Data': 'cell-mut' };
+    summaries.forEach(s => {
+      const mb = s.marketBreakdown;
+      if (!mb || !mb.marketsWithData) return;
+      const label = msdDiscoveryDisplayLabel(s);
+      Object.entries(mb.markets).forEach(([marketName, m]) => {
+        rows.push({
+          label, discoveryType: s.discoveryType, marketName,
+          evidenceCount: m.evidenceCount,
+          meanEffect: m.meanEffect, overallEffect: mb.overallEffect, status: m.status,
+        });
+      });
+    });
+    marketBody.innerHTML = rows.length
+      ? rows.sort((a, b) => (a.status === 'Survives' ? -1 : 1) - (b.status === 'Survives' ? -1 : 1)).map(r => `<tr>
+          <td class="l">${r.label}</td>
+          <td class="l">${r.discoveryType}</td>
+          <td class="l">${MARKETS[r.marketName] || r.marketName}</td>
+          <td>${r.evidenceCount}</td>
+          <td>${r.meanEffect != null ? (r.meanEffect*100).toFixed(1)+'%' : '—'}</td>
+          <td>${r.overallEffect != null ? (r.overallEffect*100).toFixed(1)+'%' : '—'}</td>
+          <td class="l ${statusClass[r.status]||''}" style="font-weight:700">${r.status}</td>
+        </tr>`).join('')
+      : '<tr><td colspan="7" class="sig-empty">No cross-market evidence yet — single-market research in progress, as expected.</td></tr>';
+  }
+
+  const contradictionBody = $("msdContradictionBody");
+  if (contradictionBody) {
+    const contradicted = summaries.filter(s => s.contradiction && s.contradiction.contradicted);
+    contradictionBody.innerHTML = contradicted.length
+      ? contradicted.map(s => {
+          const c = s.contradiction;
+          const label = msdDiscoveryDisplayLabel(s);
+          const aboveList = c.conflictingExperiments.filter(e => e.direction === 'above').map(e => e.experimentId).join(', ');
+          const belowList = c.conflictingExperiments.filter(e => e.direction === 'below').map(e => e.experimentId).join(', ');
+          return `<tr>
+            <td class="l" style="font-weight:700;color:var(--down)">${label}</td>
+            <td class="l">${s.discoveryType}</td>
+            <td class="l" style="font-size:10px">${aboveList || '—'}</td>
+            <td class="l" style="font-size:10px">${belowList || '—'}</td>
+            <td class="l">${c.affectedMarkets.map(m => MARKETS[m]||m).join(', ') || '—'}</td>
+            <td class="l">${c.affectedRegimes.join(', ') || '—'}</td>
+            <td class="l" style="font-size:11px">${c.likelyCause}</td>
+          </tr>`;
+        }).join('')
+      : '<tr><td colspan="7" class="sig-empty">No contradictions detected.</td></tr>';
+  }
+
+  const reportsBody = $("msdResearchReportsBody");
+  if (reportsBody) {
+    const reports = await msdGetAllResearchReports();
+    window._msdResearchReportsCache = reports; // small in-memory index for the row-click viewer, avoids embedding large JSON blobs as HTML attributes
+    reportsBody.innerHTML = reports.length
+      ? reports.map((r, idx) => {
+          const sum = r.summary || {};
+          return `<tr style="cursor:pointer" onclick="msdViewResearchReport(${idx})" title="Click to view the full report">
+            <td class="l">${r.experimentId}</td>
+            <td class="l">${new Date(r.generatedAt).toLocaleString()}</td>
+            <td>${sum.newCount ?? 0} / ${sum.reinforcedCount ?? 0}</td>
+            <td class="${sum.promotedCount ? 'cell-pos' : ''}">${sum.promotedCount ?? 0}</td>
+            <td class="${sum.demotedCount ? 'cell-neg' : ''}">${sum.demotedCount ?? 0}</td>
+            <td class="${sum.decayingCount ? 'cell-warn' : ''}">${sum.decayingCount ?? 0}</td>
+            <td class="${sum.contradictedCount ? 'cell-neg' : ''}">${sum.contradictedCount ?? 0}</td>
+            <td class="l" style="font-size:11px;max-width:320px">${r.conclusions}</td>
+          </tr>`;
+        }).join('')
+      : '<tr><td colspan="8" class="sig-empty">No research reports yet — run an experiment and click "Train Models" to generate the first one.</td></tr>';
+  }
+}
+
+/** Displays one full Research Report from the in-memory index populated by the last Workbench refresh. Plain-text presentation of a permanent, already-stored record — this function only reads and formats it. */
+function msdViewResearchReport(idx){
+  const r = (window._msdResearchReportsCache || [])[idx];
+  if (!r) return;
+  const lines = [
+    `RESEARCH REPORT — ${r.experimentId}`,
+    `Generated: ${new Date(r.generatedAt).toLocaleString()}`,
+    ``,
+    `HYPOTHESIS`, r.hypothesis, ``,
+    `EXPERIMENT CONFIGURATION`, JSON.stringify(r.experimentConfiguration, null, 2), ``,
+    `DATASET SUMMARY`, JSON.stringify(r.datasetSummary, null, 2), ``,
+    `STATISTICAL METHODS`, r.statisticalMethods.map(m => '- ' + m).join('\n'), ``,
+    `STATISTICAL TESTS APPLIED`, JSON.stringify(r.statisticalTestsApplied, null, 2), ``,
+    `REGIME ANALYSIS`, JSON.stringify(r.regimeAnalysis, null, 2), ``,
+    `DISCOVERIES TOUCHED (${r.discoveries.length})`,
+    r.discoveries.map(d => `- ${d.discoveryKey} [${d.discoveryType}] maturity ${d.maturityBefore}->${d.maturityAfter}${d.maturityChanged?' (CHANGED)':''}, evidenceScore=${d.evidenceScore.toFixed(3)}, stability=${d.evidenceStabilityScore!=null?d.evidenceStabilityScore.toFixed(2):'n/a'}, decay=${d.decayStatus}, contradicted=${d.contradicted}${d.contradicted?' ('+d.contradictionCause+')':''}, transferability=${d.transferabilityScore!=null?d.transferabilityScore.toFixed(2):'n/a'}`).join('\n'), ``,
+    `SUMMARY`, JSON.stringify(r.summary, null, 2), ``,
+    `CONCLUSIONS`, r.conclusions, ``,
+    `FUTURE WORK`, r.futureWork,
+  ];
+  alert(lines.join('\n'));
+}
+
+/** Shared display label for a discovery summary row — used identically across the Regime Validation and Market Transferability tables (and available for any future grouped-breakdown view) so the label logic is defined once. */
+function msdDiscoveryDisplayLabel(s){
+  if (s.discoveryType === 'threshold') return s.discoveryKey.replace('threshold:', '');
+  if (s.discoveryType === 'combo') return s.discoveryKey.replace('combo:', '').replace(/\+/g, ' + ');
+  if (s.discoveryType === 'market_state') return (s.latestEvidence && s.latestEvidence.label) ? s.latestEvidence.label : s.discoveryKey.replace('market_state:', '');
+  return s.discoveryKey.replace('single_feature:', '');
 }
 
 /** Reads the Research Configuration form and applies new maturity promotion rules, with validation feedback. */
@@ -8061,7 +9446,14 @@ function msdSaveMaturityRulesUi(){
   const c = parseInt(($("msdMaturityCandidate") || {}).value, 10);
   const r = parseInt(($("msdMaturityRepeatable") || {}).value, 10);
   const v = parseInt(($("msdMaturityVerified") || {}).value, 10);
-  const result = msdSetMaturityPromotionRules({ candidate: { minExperiments: c }, repeatable: { minExperiments: r }, verified: { minExperiments: v } });
+  const sc = parseFloat(($("msdStabilityCandidate") || {}).value);
+  const sr = parseFloat(($("msdStabilityRepeatable") || {}).value);
+  const sv = parseFloat(($("msdStabilityVerified") || {}).value);
+  const result = msdSetMaturityPromotionRules({
+    candidate: { minExperiments: c, minStability: sc },
+    repeatable: { minExperiments: r, minStability: sr },
+    verified: { minExperiments: v, minStability: sv },
+  });
   if (statusEl) statusEl.textContent = result.ok ? '✅ Saved.' : '⛔ ' + result.error;
 }
 
@@ -8069,6 +9461,7 @@ function msdSaveMaturityRulesUi(){
 function makeSnap(epoch, price){
   return {
     epoch, price,
+    symbol: SYMBOL, // CRITICAL FIX (Phase 0 audit): previously untagged — every snapshot must record which market it came from, or a dataset can silently mix markets with no way to detect it after the fact. This is what makes "research on Volatility 100 (1s) only" an enforceable, verifiable constraint rather than something the researcher has to manually guarantee by never touching the market selector.
     macd:   indSnapshot.macd,    signal: indSnapshot.macdSig, hist: indSnapshot.macdHist,
     chop:   indSnapshot.chop,    cci:    indSnapshot.cci,
     bbPctB: indSnapshot.bbPctB,  bbUpper:indSnapshot.bbUpper,
@@ -8279,7 +9672,7 @@ function updateIndicators(){
     const bars = $("macdBars");
     if (bars){
       const hs = m.histSeries.slice(-40);
-      const maxAbs = Math.max(...hs.map(Math.abs), 1e-9);
+      const maxAbs = msdSafeMax(hs.map(Math.abs), 1e-9);
       bars.innerHTML = hs.map(h => {
         const ht = Math.max(1, Math.abs(h)/maxAbs*32);
         const col = h >= 0 ? "var(--up)" : "var(--down)";
@@ -8337,7 +9730,7 @@ function drawChart(){
   if (ticks.length < 2){ svg.innerHTML = ""; return; }
 
   const prices = ticks.map(t => t.price);
-  let min = Math.min(...prices), max = Math.max(...prices);
+  let min = msdSafeMin(prices), max = msdSafeMax(prices);
 
   // Rolling Bollinger Bands (period 20) for the overlay, if enabled
   const bbOn = $("bbToggle") && $("bbToggle").checked;
@@ -8995,7 +10388,7 @@ function clusterLevels(points, range, tol = 0.012){
 // Support & resistance relative to the latest close
 function computeSR(arr){
   if (arr.length < 8) return { support: [], resistance: [] };
-  const range = Math.max(...arr.map(c => c.high)) - Math.min(...arr.map(c => c.low)) || 1;
+  const range = msdSafeMax(arr.map(c => c.high)) - msdSafeMin(arr.map(c => c.low)) || 1;
   const { highs, lows } = findSwings(arr, 2);
   const last = arr[arr.length - 1].close;
   const resAll = clusterLevels(highs, range).filter(l => l.price >= last);
@@ -9093,7 +10486,7 @@ function rfaZoneProximity(candles, currentCandle){
   if (!candles || candles.length < 8) return { inZone: false };
   const { support, resistance } = computeSR(candles);
   const { demand, supply } = computeZones(candles);
-  const range = Math.max(...candles.map(c => c.high)) - Math.min(...candles.map(c => c.low)) || 1;
+  const range = msdSafeMax(candles.map(c => c.high)) - msdSafeMin(candles.map(c => c.low)) || 1;
   const tol = range * RFA_ZONE_TOLERANCE_FRAC;
 
   // Support/demand are checked against the candle's LOW, and
@@ -9677,7 +11070,7 @@ function computeOrderBlocks(arr){
 // clusters of swing pivots at nearly the same price, where stops rest.
 function computeLiquidity(arr){
   if (arr.length < 8) return { buy: [], sell: [] };
-  const range = Math.max(...arr.map(c => c.high)) - Math.min(...arr.map(c => c.low)) || 1;
+  const range = msdSafeMax(arr.map(c => c.high)) - msdSafeMin(arr.map(c => c.low)) || 1;
   const { highs, lows } = findSwings(arr, 2);
   // only levels touched by 2+ pivots count as liquidity
   const buy = clusterLevels(highs, range, 0.008).filter(l => l.touches >= 2).slice(0, 3);
@@ -9723,8 +11116,8 @@ function computeStructure(arr){
 // selling), below = discount (favour buying).
 function computeEquilibrium(arr){
   if (arr.length < 5) return null;
-  const hi = Math.max(...arr.map(c => c.high));
-  const lo = Math.min(...arr.map(c => c.low));
+  const hi = msdSafeMax(arr.map(c => c.high));
+  const lo = msdSafeMin(arr.map(c => c.low));
   const eq = (hi + lo) / 2;
   const last = arr[arr.length - 1].close;
   return { hi, lo, eq, zone: last > eq ? "PREMIUM" : "DISCOUNT", last };
@@ -9825,8 +11218,8 @@ function computeAMD(arr){
 // the Point of Control (POC) — the price the market spent most time around.
 function computeVolumeProfile(arr, bins = 24){
   if (arr.length < 5) return null;
-  const hi = Math.max(...arr.map(c => c.high));
-  const lo = Math.min(...arr.map(c => c.low));
+  const hi = msdSafeMax(arr.map(c => c.high));
+  const lo = msdSafeMin(arr.map(c => c.low));
   const range = hi - lo || 1;
   const buckets = new Array(bins).fill(0);
   arr.forEach(c => {
@@ -9834,7 +11227,7 @@ function computeVolumeProfile(arr, bins = 24){
     const b1 = Math.floor(((c.high - lo) / range) * (bins - 1));
     for (let b = Math.max(0, b0); b <= Math.min(bins - 1, b1); b++) buckets[b]++;
   });
-  const max = Math.max(...buckets, 1);
+  const max = msdSafeMax(buckets, 1);
   let pocIdx = 0; buckets.forEach((v, i) => { if (v > buckets[pocIdx]) pocIdx = i; });
   const pocPrice = lo + (pocIdx + 0.5) / bins * range;
   return { hi, lo, range, buckets, max, bins, pocPrice };
@@ -10067,8 +11460,8 @@ function predScoreWick(maxPts){
   const upperWick = ci => ci.high-Math.max(ci.open,ci.close);
   const lowerWick = ci => Math.min(ci.open,ci.close)-ci.low;
   const uWicks=c.slice(-3).map(upperWick), lWicks=c.slice(-3).map(lowerWick);
-  const uMax=Math.max(...uWicks), uMin=Math.min(...uWicks);
-  const lMax=Math.max(...lWicks), lMin=Math.min(...lWicks);
+  const uMax=msdSafeMax(uWicks), uMin=msdSafeMin(uWicks);
+  const lMax=msdSafeMax(lWicks), lMin=msdSafeMin(lWicks);
   const uCluster=(uMax-uMin)<tol && uWicks.every(w=>w>atr*0.05);
   const lCluster=(lMax-lMin)<tol && lWicks.every(w=>w>atr*0.05);
   const avgBody=c.slice(-3).map(ci=>Math.abs(ci.close-ci.open)).reduce((a,b)=>a+b,0)/3;
@@ -10096,8 +11489,8 @@ function predScoreLiquidity(maxPts){
   const recent=arr1.slice(-3), lastC=recent[recent.length-1];
   if (!lastC) return 0;
   // Bull sweep: swept below prevLow and reversed
-  const bullSweepLow  = Math.min(...recent.map(c=>c.low));
-  const bearSweepHigh = Math.max(...recent.map(c=>c.high));
+  const bullSweepLow  = msdSafeMin(recent.map(c=>c.low));
+  const bearSweepHigh = msdSafeMax(recent.map(c=>c.high));
   const bullSweep = bullSweepLow < prevLow && lastC.close > prevLow;
   const bearSweep = bearSweepHigh > prevHigh && lastC.close < prevHigh;
   if (bullSweep||bearSweep){
@@ -10499,7 +11892,7 @@ function predRender(){
   }
   const actualsArr=(predCandles(60)||[]).slice(-5);
   const allC=[...predicted];
-  let hi=Math.max(...allC.map(c=>c.high)), lo=Math.min(...allC.map(c=>c.low));
+  let hi=msdSafeMax(allC.map(c=>c.high)), lo=msdSafeMin(allC.map(c=>c.low));
   if (actualsArr.length){hi=Math.max(hi,...actualsArr.map(c=>c.high));lo=Math.min(lo,...actualsArr.map(c=>c.low));}
   if (hi===lo){hi+=1;lo-=1;}
   const padY=(hi-lo)*0.1; hi+=padY; lo-=padY;
@@ -10584,8 +11977,8 @@ function drawTfCandles(g){
   const view = tfGetView(g, arr.length);
   const count = view.count, start = view.start;
   const vis = arr.slice(start, start + count);
-  let hi = Math.max(...vis.map(c => c.high));
-  let lo = Math.min(...vis.map(c => c.low));
+  let hi = msdSafeMax(vis.map(c => c.high));
+  let lo = msdSafeMin(vis.map(c => c.low));
   if (hi === lo){ hi += 1; lo -= 1; }
   const basePad = (hi - lo) * 0.08; hi += basePad; lo -= basePad;
   // vertical zoom around midpoint, then vertical pan
@@ -11190,7 +12583,7 @@ function drawEngLine(){
   const data = engTicks.slice(-Math.min(engTicks.length, 180));
   if (data.length < 2){ svg.innerHTML = `<text x="${W/2}" y="${H/2}" fill="#475569" font-size="13" text-anchor="middle" font-family="monospace">collecting ticks…</text>`; return; }
   const prices = data.map(t=>t.price);
-  let min=Math.min(...prices), max=Math.max(...prices); if(min===max){min-=1;max+=1;}
+  let min=msdSafeMin(prices), max=msdSafeMax(prices); if(min===max){min-=1;max+=1;}
   const rng=max-min, stepX=(W-padX*2)/(data.length-1);
   const x=i=>padX+i*stepX, y=p=>padY+(H-padY*2)*(1-(p-min)/rng);
   // flag points inside a run of RUN_LENGTH
@@ -11223,11 +12616,11 @@ function drawEngTickCandles(){
   for(let i=0;i<engTicks.length;i+=K){
     const slice=engTicks.slice(i,i+K); if(slice.length<2&&candles.length) break;
     const ps=slice.map(t=>t.price);
-    candles.push({ o:ps[0], h:Math.max(...ps), l:Math.min(...ps), c:ps[ps.length-1], n:slice.length });
+    candles.push({ o:ps[0], h:msdSafeMax(ps), l:msdSafeMin(ps), c:ps[ps.length-1], n:slice.length });
   }
   const vis=candles.slice(-Math.min(candles.length,60));
   if(vis.length<2){ svg.innerHTML=`<text x="${W/2}" y="${H/2}" fill="#475569" font-size="13" text-anchor="middle" font-family="monospace">building tick candles…</text>`; return; }
-  let hi=Math.max(...vis.map(c=>c.h)), lo=Math.min(...vis.map(c=>c.l)); if(hi===lo){hi+=1;lo-=1;}
+  let hi=msdSafeMax(vis.map(c=>c.h)), lo=msdSafeMin(vis.map(c=>c.l)); if(hi===lo){hi+=1;lo-=1;}
   const pd=(hi-lo)*0.08; hi+=pd; lo-=pd; const rng=hi-lo;
   const y=p=>padT+(H-padT-padB)*(1-(p-lo)/rng);
   const slot=(W-padL-padR)/vis.length, bw=Math.max(1.5,Math.min(slot*0.66,16));
@@ -12655,7 +14048,7 @@ const _FEAT_DEFS = (function(){
   // ═════════════════════════════════════════════════════════════════════
   add('Chop mean B',    'Chop','B',s=>mn(bCols.map(i=>g(s[i],'chop'))));
   add('Chop delta B',   'Chop','B',s=>sl(g(s[B3],'chop'),g(s[B1],'chop')));
-  add('Chop range B',   'Chop','B',s=>{ const v=bCols.map(i=>g(s[i],'chop')).filter(x=>x!=null); return v.length?Math.max(...v)-Math.min(...v):null; });
+  add('Chop range B',   'Chop','B',s=>{ const v=bCols.map(i=>g(s[i],'chop')).filter(x=>x!=null); return v.length?msdSafeMax(v)-msdSafeMin(v):null; });
   add('Chop accel B',   'Chop','B',s=>ac(g(s[B3],'chop'),g(s[B2],'chop'),g(s[B1],'chop')));
   // Chop falling = trending emerging (key pre-run signal)
   add('Chop falling B', 'Chop','B',s=>{ const d=sl(g(s[B3],'chop'),g(s[B1],'chop')); return d!=null?+(d<0):null; });
@@ -12667,7 +14060,7 @@ const _FEAT_DEFS = (function(){
   add('CCI mean B',     'CCI','B',s=>mn(bCols.map(i=>g(s[i],'cci'))));
   add('CCI delta B',    'CCI','B',s=>sl(g(s[B3],'cci'),g(s[B1],'cci')));
   add('CCI accel B',    'CCI','B',s=>ac(g(s[B3],'cci'),g(s[B2],'cci'),g(s[B1],'cci')));
-  add('CCI abs max B',  'CCI','B',s=>{ const v=bCols.map(i=>g(s[i],'cci')).filter(x=>x!=null); return v.length?Math.max(...v.map(Math.abs)):null; });
+  add('CCI abs max B',  'CCI','B',s=>{ const v=bCols.map(i=>g(s[i],'cci')).filter(x=>x!=null); return v.length?msdSafeMax(v.map(Math.abs)):null; });
   add('CCI monotone B', 'CCI','B',s=>{
     const v=bCols.map(i=>g(s[i],'cci')).filter(x=>x!=null);
     if(v.length<2) return null;
@@ -12732,7 +14125,7 @@ const _FEAT_DEFS = (function(){
   add('PriceVel B3→B1','Price','B',s=>sl(g(s[B3],'price'),g(s[B1],'price')));
   add('PriceVel B2→B1','Price','B',s=>sl(g(s[B2],'price'),g(s[B1],'price')));
   add('Price accel B',  'Price','B',s=>ac(g(s[B3],'price'),g(s[B2],'price'),g(s[B1],'price')));
-  add('Price range B',  'Price','B',s=>{ const v=bCols.map(i=>g(s[i],'price')).filter(x=>x!=null); return v.length?Math.max(...v)-Math.min(...v):null; });
+  add('Price range B',  'Price','B',s=>{ const v=bCols.map(i=>g(s[i],'price')).filter(x=>x!=null); return v.length?msdSafeMax(v)-msdSafeMin(v):null; });
   // ATR
   add('ATR B1',         'Price','B',s=>g(s[B1],'atr'));
   add('ATR B2',         'Price','B',s=>g(s[B2],'atr'));
@@ -13039,7 +14432,7 @@ function featMutualInfo(colVals, labels){
   if (valid.length < 3) return 0;
   const vals = valid.map(([v])=>v);
   const lbs  = valid.map(([,l])=>l);
-  const vmin=Math.min(...vals),vmax=Math.max(...vals);
+  const vmin=msdSafeMin(vals),vmax=msdSafeMax(vals);
   const rng=vmax-vmin;
   if (rng===0) return 0;
   const BINS=8;
@@ -13186,7 +14579,7 @@ function featCompute(){
       const barsEl=$("featDeviationBars");
       if(barsEl){
         const withDelta=rankings.filter(r=>r.delta!=null).sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta)).slice(0,20);
-        const maxD=Math.max(...withDelta.map(r=>Math.abs(r.delta)))||1;
+        const maxD=msdSafeMax(withDelta.map(r=>Math.abs(r.delta)))||1;
         barsEl.innerHTML=withDelta.map(r=>{
           const pct=(Math.abs(r.delta)/maxD*100).toFixed(1);
           const col=r.delta>0?'var(--up)':'var(--down)';
@@ -13481,7 +14874,7 @@ function drawAnSpark(data, cols){
   const pts = data.prices;  // 3 prices: B-3, B-2, B-1
   const valid = pts.map((p,i)=>({p,i})).filter(o=>o.p!=null);
   if (!valid.length){ svg.innerHTML=''; return; }
-  let hi = Math.max(...valid.map(o=>o.p)), lo = Math.min(...valid.map(o=>o.p));
+  let hi = msdSafeMax(valid.map(o=>o.p)), lo = msdSafeMin(valid.map(o=>o.p));
   if (hi===lo){ hi+=1; lo-=1; }
   const pad=(hi-lo)*0.15; hi+=pad; lo-=pad; const range=hi-lo;
   const n = cols.length;  // 3
@@ -13572,7 +14965,7 @@ function renderTrackerPage(){
   // frequency bar chart
   const bars = $("trackerFreqBars");
   if (bars){
-    const maxCount = Math.max(...counts, 1);
+    const maxCount = msdSafeMax(counts, 1);
     bars.innerHTML = counts.map((c,d) => {
       const pct = (c/maxCount*100).toFixed(1);
       const freqPct = (c/n*100).toFixed(1);
@@ -13815,7 +15208,7 @@ function digMarkovRow(prevDigit){
 // Weights: frequency deviation 40%, gap score 30%, transition 30%
 function digPredictions(freqs, gaps, markov){
   const W_FREQ = 0.40, W_GAP = 0.30, W_TRANS = 0.30;
-  const maxGap = Math.max(...gaps, 1);
+  const maxGap = msdSafeMax(gaps, 1);
   const raw = new Array(10);
   for (let d = 0; d < 10; d++){
     // Frequency deviation: digits below 10% get a positive boost
@@ -13937,9 +15330,9 @@ function digRender(){
     pvalEl.style.color = chiResult.pval < 0.05 ? "var(--up)" : "var(--muted)";
   }
   gridSet("digEntropy", ent.toFixed(3));
-  const topDigit = preds.indexOf(Math.max(...preds));
+  const topDigit = preds.indexOf(msdSafeMax(preds));
   gridSet("digTop", String(topDigit));
-  const maxGap = Math.max(...gaps);
+  const maxGap = msdSafeMax(gaps);
   const maxGapDigit = gaps.indexOf(maxGap);
   gridSet("digMaxGap", `${maxGap} (digit ${maxGapDigit})`);
 
@@ -14199,13 +15592,13 @@ function digCheckAuto(){
   if (ct === "DIGITODD"){ digPlaceTrade("B", "auto"); digAutoLastAt = tickIdx; digAutoCount++; gridSet("digAutoStatus",`Fired ODD · auto-trades: ${digAutoCount}`); return; }
 
   if (mode === "gap"){
-    pickDigit = gaps.indexOf(Math.max(...gaps));
+    pickDigit = gaps.indexOf(msdSafeMax(gaps));
   } else if (mode === "cold"){
     let minFreq = Infinity, minD = 0;
     freqs.forEach(f => { if (f.freq < minFreq){ minFreq = f.freq; minD = f.digit; } });
     pickDigit = minD;
   } else {
-    pickDigit = preds.indexOf(Math.max(...preds));
+    pickDigit = preds.indexOf(msdSafeMax(preds));
   }
 
   if (preds[pickDigit] < threshold) return;
@@ -14303,7 +15696,7 @@ function chartHline(y,W,color,dash){return`<line x1="0" y1="${y.toFixed(1)}" x2=
 function chartScale(vals,H,pad){
   const c=vals.filter(v=>v!=null&&isFinite(v));
   if(!c.length)return{min:0,max:1,toY:()=>H/2};
-  let mn=Math.min(...c), mx=Math.max(...c);
+  let mn=msdSafeMin(c), mx=msdSafeMax(c);
   const mg=(mx-mn)*(pad||0.1);
   mn-=mg;mx+=mg;if(mn===mx){mn-=1;mx+=1;}
   return{min:mn,max:mx,toY:v=>H-((v-mn)/(mx-mn))*H};
@@ -14479,7 +15872,7 @@ function _pbSplit(X, y, g, h, lambda=1, gamma=0, nBins=32){
     const vals=X.map(r=>r[fi]);
     const finite=vals.filter(v=>v!=null&&isFinite(v));
     if(finite.length<4) continue;
-    const mn=Math.min(...finite),mx=Math.max(...finite);
+    const mn=msdSafeMin(finite),mx=msdSafeMax(finite);
     if(mn===mx) continue;
     const step=(mx-mn)/nBins;
     for(let b=1;b<nBins;b++){
@@ -14542,7 +15935,7 @@ function _pbFeatImp(trees, nFeat){
     walk(node.left); walk(node.right);
   }
   trees.forEach(t=>walk(t));
-  const mx=Math.max(...imp)||1;
+  const mx=msdSafeMax(imp)||1;
   return Array.from(imp).map(v=>v/mx);
 }
 
@@ -16408,7 +17801,7 @@ function adxRenderLive(){
     const el=$(containerId); if(!el) return;
     const vals=_adxHist.slice(-5).map(h=>h[key]).filter(v=>v!=null);
     if(!vals.length){ el.innerHTML=''; return; }
-    const mx=Math.max(...vals)||1;
+    const mx=msdSafeMax(vals)||1;
     el.innerHTML=vals.map((v,i)=>{
       const isLast=i===vals.length-1;
       const rising=i>0&&v>vals[i-1];
@@ -17250,7 +18643,7 @@ try {
     const tks = typeof ticks!=='undefined'?ticks:[];
     if(tks.length<5) return;
     const prices = tks.slice(-20).map(t=>t.price);
-    const hi=Math.max(...prices), lo=Math.min(...prices);
+    const hi=msdSafeMax(prices), lo=msdSafeMin(prices);
     const dec=typeof decimals!=='undefined'?decimals:2;
     const rng=hi-lo;
     const stake=mfxGetStake();
@@ -17780,7 +19173,7 @@ try {
       const tks=typeof ticks!=='undefined'?ticks:[];
       if(tks.length>=5){
         const prices=tks.slice(-20).map(t=>t.price);
-        const hi=Math.max(...prices),lo=Math.min(...prices),rng=hi-lo;
+        const hi=msdSafeMax(prices),lo=msdSafeMin(prices),rng=hi-lo;
         const dec=(typeof decimals!=='undefined'?decimals:2);
         proposal.high_barrier=(hi+rng*0.5).toFixed(dec);
         proposal.low_barrier=(lo-rng*0.5).toFixed(dec);
