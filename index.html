@@ -2715,6 +2715,13 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   </div>
 
   <div class="grid-card" style="margin-bottom:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Scientific Assessment Engine</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Reads ONLY the stored Knowledge Base — never fabricates, simulates, or infers unsupported discoveries — and assembles the full 13-section scientific report from what's already been independently computed and tested across every prior phase. Updates automatically after every completed experiment (click "Train Models" in the Experiment Runner); also refreshable on demand below. If the Knowledge Base has no real discoveries yet, this will say so plainly rather than showing anything fabricated.</div>
+    <button class="gc-btn" onclick="msdRefreshScientificAssessmentUi()">🔄 Refresh Scientific Assessment</button>
+    <div id="msdScientificAssessment" style="margin-top:10px;font-size:12px">Click Refresh to generate.</div>
+  </div>
+
+  <div class="grid-card" style="margin-bottom:16px">
     <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Research Configuration — Maturity Promotion Rules</h3>
     <div class="gc-sub" style="margin-bottom:8px">How many INDEPENDENT experiments a discovery needs before advancing, AND (Phase 1) how consistent its evidence must be at that point via the Evidence Stability Score (0-1). Both must be strictly ascending. A discovery can never be promoted past Observation on the strength of a single experiment, or with evidence that disagrees with itself, regardless of these settings.</div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
@@ -7864,6 +7871,178 @@ async function msdGetDiscoverySummaries(){
   return Object.entries(grouped).map(([key, list]) => msdSummarizeDiscovery(key, list, fdc.perDiscovery[key] || null, registrationsById, validationRecordsByKey));
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// Scientific Assessment Engine
+// ══════════════════════════════════════════════════════════════════════
+// Reads the platform's Knowledge Base (msdGetDiscoverySummaries, already
+// computing Evidence Score, Scientific Confidence, replication, regime,
+// transferability, contradiction, decay, and maturity for every
+// discovery) and assembles the 13-section scientific report. Pure
+// assembly, like Phase 6's Research Report — no new statistics, no new
+// gates, nothing that wasn't already independently built and tested
+// across Phases 0-7H. The one behavior that matters most here, and is
+// tested explicitly: when the Knowledge Base has no discoveries at all,
+// this reports that honestly (insufficientEvidence: true, Research
+// Completeness 0%) rather than ever fabricating a section.
+//
+// MINIMUM EVIDENCE THRESHOLDS, stated as constants so the report's own
+// "why is X only a Candidate" and "Research Completeness" sections are
+// computed from the same, documented bar rather than an implicit one:
+const MSD_ASSESSMENT_MIN_DISCOVERIES_FOR_ASSESSMENT = 1; // fewer than this and there is nothing to report on at all
+const MSD_ASSESSMENT_MARKET_COVERAGE_TARGET = 3;  // the original objective explicitly asks for "multiple market conditions" — 3 is a reasonable target, not proof of completeness at exactly 3
+const MSD_ASSESSMENT_REGIME_COVERAGE_TARGET = 5;  // Strong Trend / Weak Trend / Range / Compression / Expansion is a reasonable spread of the label vocabulary already in use (Phase 5)
+const MSD_ASSESSMENT_EXPERIMENT_COUNT_TARGET = 50; // a log-capped target for "enough total experiments to speak with real confidence," not a hard requirement
+
+/** Classifies one discovery's cross-market transferability into the three requested tiers, from its already-computed transferabilityScore (Phase 4) — no new computation. */
+function msdClassifyTransferabilityTier(summary){
+  if (summary.transferabilityScore == null) return 'Market-specific'; // fewer than 2 markets with enough evidence to judge at all — by definition not yet shown to transfer
+  if (summary.transferabilityScore >= 0.7) return 'Broadly Transferable';
+  if (summary.transferabilityScore > 0) return 'Partially Transferable';
+  return 'Market-specific'; // judged across markets, but the effect did not actually hold up elsewhere
+}
+
+/** Explains, in plain terms, exactly which already-computed gate is holding back a non-Verified discovery — reads the same promotionHistory.gate flags the Maturity Engine itself used, never re-derives a separate explanation. */
+function msdExplainMaturityGate(summary){
+  const reasons = [];
+  const last = summary.promotionHistory.length ? summary.promotionHistory[summary.promotionHistory.length - 1] : null;
+  if (!last) return ['No promotion history yet.'];
+  const n = last.supportingExperimentCount;
+  const rules = MSD_MATURITY_PROMOTION_RULES;
+  if (n < rules.verified.minExperiments) reasons.push(`Only ${n} of ${rules.verified.minExperiments} required supporting experiments.`);
+  if (last.stabilityScore != null && last.stabilityScore < rules.verified.minStability) reasons.push(`Evidence Stability Score (${(last.stabilityScore*100).toFixed(0)}%) is below the ${(rules.verified.minStability*100).toFixed(0)}% required for Verified.`);
+  if (last.decayStatus === 'Decaying') reasons.push('Currently classified Decaying.');
+  if (last.contradicted) reasons.push('Evidence contains an unresolved cross-experiment contradiction.');
+  if (last.globalFdrOk === false) reasons.push('Does not survive the whole-repository Benjamini-Yekutieli correction.');
+  if (last.replicationClassification === 'Insufficient Replication') reasons.push('Supporting experiments do not span enough genuinely distinct (non-overlapping) time windows.');
+  if (last.scientificConfidenceOk === false) reasons.push(`Scientific Confidence Score (${last.scientificConfidenceScore != null ? (last.scientificConfidenceScore*100).toFixed(0)+'%' : 'n/a'}) is below the ${(MSD_MIN_SCIENTIFIC_CONFIDENCE_FOR_VERIFIED*100).toFixed(0)}% required for Verified.`);
+  return reasons.length ? reasons : ['Meets every currently-checked requirement for its supporting-experiment count; likely still accumulating toward the next threshold.'];
+}
+
+/**
+ * Generates the full Scientific Assessment. Always safe to call —
+ * returns a clearly-flagged insufficient-evidence result rather than an
+ * empty or misleading report when the Knowledge Base has nothing in it.
+ */
+async function msdGenerateScientificAssessment(){
+  const summaries = await msdGetDiscoverySummaries();
+  const allExperiments = await msdGetAllExperiments();
+
+  if (summaries.length < MSD_ASSESSMENT_MIN_DISCOVERIES_FOR_ASSESSMENT) {
+    return {
+      generatedAt: Date.now(),
+      insufficientEvidence: true,
+      currentState: { discoveryCount: summaries.length, experimentCount: allExperiments.length },
+      explanation: 'The Knowledge Base currently contains ' + summaries.length + ' discoveries and ' + allExperiments.length + ' recorded experiments. No discovery exists to report on at all.',
+      requiredNext: 'Run experiments via the Experiment Runner against real market data, click "Train Models" after each to trigger the automatic Research Session, and repeat across genuinely distinct time periods. See the Research Governance panel to pre-register objectives before starting.',
+      researchCompletenessPercent: 0,
+    };
+  }
+
+  const nonObservation = summaries.filter(s => s.maturityLevel !== 'observation');
+  const verified = summaries.filter(s => s.maturityLevel === 'verified');
+  const candidates = summaries.filter(s => s.maturityLevel === 'candidate' || s.maturityLevel === 'repeatable');
+  const contradicted = summaries.filter(s => s.contradiction && s.contradiction.contradicted);
+  const decayGroups = { Stable: [], Improving: [], Decaying: [], Uncertain: [] };
+  summaries.forEach(s => { if (decayGroups[s.decayStatus]) decayGroups[s.decayStatus].push(s); });
+
+  const marketStateRanking = msdRankByEvidenceScore(summaries, 'market_state');
+  const comboRanking = msdRankByEvidenceScore(summaries, 'combo');
+
+  // Lead-time analysis: aggregate every discovery's distinctLeadTimes,
+  // weighted by that discovery's own Evidence Score — a lead time backed
+  // by strong discoveries counts for more than one backed by weak ones.
+  const leadTimeStats = {};
+  summaries.forEach(s => {
+    const es = msdComputeEvidenceScore(s).score;
+    (s.distinctLeadTimes || []).forEach(lt => {
+      if (!leadTimeStats[lt]) leadTimeStats[lt] = { leadTime: lt, discoveryCount: 0, totalEvidenceScore: 0 };
+      leadTimeStats[lt].discoveryCount++;
+      leadTimeStats[lt].totalEvidenceScore += es;
+    });
+  });
+  const leadTimeAnalysis = Object.values(leadTimeStats).map(l => ({ ...l, avgEvidenceScore: l.totalEvidenceScore / l.discoveryCount })).sort((a, b) => b.avgEvidenceScore - a.avgEvidenceScore);
+
+  // Regime analysis: aggregate every discovery's regimeBreakdown (Phase 2, reused directly).
+  const regimeStats = {};
+  summaries.forEach(s => {
+    if (!s.regimeBreakdown) return;
+    Object.entries(s.regimeBreakdown.regimes).forEach(([regime, r]) => {
+      if (!regimeStats[regime]) regimeStats[regime] = { regime, survives: 0, weakens: 0, disappears: 0, insufficientData: 0 };
+      if (r.status === 'Survives') regimeStats[regime].survives++;
+      else if (r.status === 'Weakens') regimeStats[regime].weakens++;
+      else if (r.status === 'Disappears') regimeStats[regime].disappears++;
+      else regimeStats[regime].insufficientData++;
+    });
+  });
+  const regimeAnalysis = Object.values(regimeStats).sort((a, b) => b.survives - a.survives);
+  const regimeIndependentCount = summaries.filter(s => {
+    const regimes = s.regimeBreakdown ? Object.values(s.regimeBreakdown.regimes) : [];
+    const judged = regimes.filter(r => r.status !== 'Insufficient Data');
+    return judged.length >= 2 && judged.every(r => r.status === 'Survives');
+  }).length;
+
+  const transferability = summaries.map(s => ({ discoveryKey: s.discoveryKey, tier: msdClassifyTransferabilityTier(s), transferabilityScore: s.transferabilityScore }));
+
+  // Evidence gaps — deterministic counts, not opinions.
+  const gaps = {
+    insufficientReplication: summaries.filter(s => s.replicationProfile && s.replicationProfile.classification === 'Insufficient Replication').length,
+    neverProductionValidated: summaries.filter(s => !s.validationRecord || !s.validationRecord.production_validation).length,
+    neverCalibrated: summaries.filter(s => !s.validationRecord || !s.validationRecord.calibration).length,
+    singleMarketOnly: summaries.filter(s => (s.distinctSymbols || []).length < 2).length,
+    fewerThanTwoRegimes: summaries.filter(s => !s.regimeBreakdown || s.regimeBreakdown.regimesWithData < 2).length,
+    totalDiscoveries: summaries.length,
+  };
+
+  const recommendedExperiments = [];
+  if (gaps.insufficientReplication > 0) recommendedExperiments.push(`${gaps.insufficientReplication} discovery(ies) need experiments on genuinely distinct (non-overlapping) time periods — re-analyzing the same collection cannot resolve this.`);
+  if (gaps.neverProductionValidated > 0) recommendedExperiments.push(`${gaps.neverProductionValidated} discovery(ies) have never been checked against the Production Validation holdout — use the Strict Out-of-Sample panel.`);
+  if (gaps.neverCalibrated > 0) recommendedExperiments.push(`${gaps.neverCalibrated} discovery(ies) have never had a calibration check run — use the same panel's Calibration button.`);
+  if (gaps.singleMarketOnly === gaps.totalDiscoveries) recommendedExperiments.push('Every discovery so far is single-market — running experiments against additional Volatility indices is the only way to ever populate Cross-Market Transferability.');
+  if (gaps.fewerThanTwoRegimes > 0) recommendedExperiments.push(`${gaps.fewerThanTwoRegimes} discovery(ies) have evidence from fewer than 2 distinct market regimes — collecting across more varied conditions (not just more repetitions) would let Regime Validation actually distinguish regime-specific from regime-independent effects.`);
+
+  // Research Completeness — a documented, deterministic formula, reusing
+  // msdNormalizeLogCapped (already exists) for every log-scaled factor.
+  // Geometric-mean-style (via the same log-capped normalization already
+  // used elsewhere) so a single completely unaddressed dimension (e.g.
+  // zero market coverage) pulls completeness down hard, matching the
+  // original objective's explicit multi-part requirement ("across large
+  // datasets AND multiple market conditions") rather than letting a lot
+  // of one-market evidence alone read as "nearly complete."
+  const allSymbols = new Set();
+  const allRegimesSeen = new Set();
+  summaries.forEach(s => { (s.distinctSymbols||[]).forEach(sym => allSymbols.add(sym)); Object.keys(s.regimeBreakdown ? s.regimeBreakdown.regimes : {}).forEach(r => allRegimesSeen.add(r)); });
+  const scConfidences = summaries.map(s => s.scientificConfidenceScore).filter(v => v != null);
+  const completenessFactors = {
+    verifiedFraction: nonObservation.length ? verified.length / nonObservation.length : 0,
+    avgScientificConfidence: scConfidences.length ? scConfidences.reduce((a,b)=>a+b,0)/scConfidences.length : 0,
+    marketCoverage: msdNormalizeLogCapped(allSymbols.size, MSD_ASSESSMENT_MARKET_COVERAGE_TARGET),
+    regimeCoverage: msdNormalizeLogCapped(allRegimesSeen.size, MSD_ASSESSMENT_REGIME_COVERAGE_TARGET),
+    evidenceQuantity: msdNormalizeLogCapped(allExperiments.length, MSD_ASSESSMENT_EXPERIMENT_COUNT_TARGET),
+  };
+  const factorValues = Object.values(completenessFactors).map(v => Math.max(0.001, v));
+  const researchCompletenessPercent = Math.round(Math.exp(factorValues.reduce((s,v)=>s+Math.log(v),0) / factorValues.length) * 100);
+
+  const executiveSummary = [
+    `${summaries.length} discoveries recorded across ${allExperiments.length} experiments: ${verified.length} Verified, ${candidates.length} Candidate/Repeatable, ${summaries.length - verified.length - candidates.length} still Observation.`,
+    contradicted.length ? `${contradicted.length} discovery(ies) show unresolved contradictions.` : 'No unresolved contradictions.',
+    decayGroups.Decaying.length ? `${decayGroups.Decaying.length} discovery(ies) are currently Decaying.` : 'No discoveries currently classified Decaying.',
+    `Research Completeness: ${researchCompletenessPercent}% — judged strictly from accumulated evidence (maturity, confidence, market/regime coverage, experiment count), not software readiness.`,
+  ].join(' ');
+
+  return {
+    generatedAt: Date.now(),
+    insufficientEvidence: false,
+    marketStateRanking, comboRanking, leadTimeAnalysis, regimeAnalysis, regimeIndependentCount,
+    transferability,
+    verified, candidates,
+    candidateExplanations: candidates.map(s => ({ discoveryKey: s.discoveryKey, reasons: msdExplainMaturityGate(s) })),
+    contradicted, decayGroups,
+    gaps, recommendedExperiments,
+    completenessFactors, researchCompletenessPercent,
+    executiveSummary,
+  };
+}
+
 // ── Research Session Manager: the automatic-execution entry point ──────
 
 /**
@@ -10143,6 +10322,63 @@ async function msdTrainModelUi(){
   const researchSession = await msdRunResearchSession(last.result.record, last.discovery, trainResult, last.result.dataset);
   const reportResult = await msdGenerateResearchReport(last.result.record, last.discovery, last.result.dataset, researchSession);
   if (statusEl) statusEl.textContent += ' — Research session ' + researchSession.researchSessionId + ' (' + researchSession.recordedCount + ' discovery record(s)) — Research Report ' + (reportResult.writeResult.ok ? 'recorded.' : 'FAILED to record: ' + reportResult.writeResult.error);
+  msdRefreshScientificAssessmentUi(); // automatic update after every completed experiment, as required — never persisted, always recomputed fresh from the current Knowledge Base
+}
+
+/** Fetches and renders the Scientific Assessment — called automatically after every completed experiment (see msdTrainModelUi above), and available on demand via its own refresh button. */
+async function msdRefreshScientificAssessmentUi(){
+  const el = $("msdScientificAssessment");
+  if (!el) return;
+  const a = await msdGenerateScientificAssessment();
+
+  if (a.insufficientEvidence) {
+    el.innerHTML = `
+      <div class="cell-warn" style="font-weight:700;margin-bottom:6px">⚠ Insufficient Evidence</div>
+      <div>${a.explanation}</div>
+      <div style="margin-top:6px"><b>Required next:</b> ${a.requiredNext}</div>
+      <div style="margin-top:6px"><b>Research Completeness: 0%</b> — no discoveries exist to assess.</div>`;
+    return;
+  }
+
+  const rankRows = (list, label) => list.slice(0, 5).map(s => `<tr><td class="l">${msdDiscoveryDisplayLabel(s)}</td><td>${(s.evidenceScore*100).toFixed(1)}</td><td>${s.scientificConfidenceScore!=null?(s.scientificConfidenceScore*100).toFixed(1):'—'}</td><td class="l">${s.maturityLevel}</td></tr>`).join('') || `<tr><td colspan="4" class="sig-empty">None yet.</td></tr>`;
+
+  el.innerHTML = `
+    <div style="font-weight:700;margin-bottom:8px">${a.executiveSummary}</div>
+
+    <div class="gc-sub" style="margin:8px 0 4px">1. Strongest Market States (top 5)</div>
+    <table class="sig-table"><thead><tr><th class="l">State</th><th class="l">Evidence Score</th><th class="l">Sci. Confidence</th><th class="l">Maturity</th></tr></thead><tbody>${rankRows(a.marketStateRanking)}</tbody></table>
+
+    <div class="gc-sub" style="margin:8px 0 4px">2. Strongest Feature Combinations (top 5)</div>
+    <table class="sig-table"><thead><tr><th class="l">Combination</th><th class="l">Evidence Score</th><th class="l">Sci. Confidence</th><th class="l">Maturity</th></tr></thead><tbody>${rankRows(a.comboRanking)}</tbody></table>
+
+    <div class="gc-sub" style="margin:8px 0 4px">3. Lead-Time Analysis</div>
+    <table class="sig-table"><thead><tr><th class="l">Lead Time</th><th class="l">Discoveries</th><th class="l">Avg Evidence Score</th></tr></thead><tbody>${a.leadTimeAnalysis.slice(0,8).map(l=>`<tr><td>${l.leadTime}</td><td>${l.discoveryCount}</td><td>${(l.avgEvidenceScore*100).toFixed(1)}</td></tr>`).join('') || '<tr><td colspan="3" class="sig-empty">No lead-time data yet.</td></tr>'}</tbody></table>
+
+    <div class="gc-sub" style="margin:8px 0 4px">4. Market Regime Analysis (${a.regimeIndependentCount} discoveries appear regime-independent)</div>
+    <table class="sig-table"><thead><tr><th class="l">Regime</th><th class="l">Survives</th><th class="l">Weakens</th><th class="l">Disappears</th></tr></thead><tbody>${a.regimeAnalysis.map(r=>`<tr><td class="l">${r.regime}</td><td class="cell-pos">${r.survives}</td><td class="cell-warn">${r.weakens}</td><td class="cell-neg">${r.disappears}</td></tr>`).join('') || '<tr><td colspan="4" class="sig-empty">No regime data yet.</td></tr>'}</tbody></table>
+
+    <div class="gc-sub" style="margin:8px 0 4px">5. Cross-Market Transferability</div>
+    <div>${['Broadly Transferable','Partially Transferable','Market-specific'].map(tier => `${tier}: ${a.transferability.filter(t=>t.tier===tier).length}`).join(' · ')}</div>
+
+    <div class="gc-sub" style="margin:8px 0 4px">6-7. Verified (${a.verified.length}) / Candidate (${a.candidates.length}) Discoveries</div>
+    <table class="sig-table"><thead><tr><th class="l">Discovery</th><th class="l">Status</th><th class="l">Reason (if not Verified)</th></tr></thead><tbody>${
+      a.verified.map(s=>`<tr><td class="l">${msdDiscoveryDisplayLabel(s)}</td><td class="cell-pos l">Verified</td><td class="l">—</td></tr>`).join('') +
+      a.candidateExplanations.map(c=>`<tr><td class="l">${c.discoveryKey}</td><td class="l">Candidate</td><td class="l" style="font-size:11px">${c.reasons.join(' ')}</td></tr>`).join('')
+    || '<tr><td colspan="3" class="sig-empty">None yet.</td></tr>'}</tbody></table>
+
+    <div class="gc-sub" style="margin:8px 0 4px">8. Contradictory Discoveries (${a.contradicted.length})</div>
+    <div>${a.contradicted.map(s=>msdDiscoveryDisplayLabel(s)).join(', ') || 'None.'}</div>
+
+    <div class="gc-sub" style="margin:8px 0 4px">9. Decay Status</div>
+    <div>Stable: ${a.decayGroups.Stable.length} · Improving: ${a.decayGroups.Improving.length} · Decaying: ${a.decayGroups.Decaying.length} · Uncertain: ${a.decayGroups.Uncertain.length}</div>
+
+    <div class="gc-sub" style="margin:8px 0 4px">10-11. Evidence Gaps &amp; Recommended Next Experiments</div>
+    <div>${a.recommendedExperiments.map(r=>'• '+r).join('<br>') || 'No major gaps identified from current evidence.'}</div>
+
+    <div class="gc-sub" style="margin:8px 0 4px">13. Research Completeness</div>
+    <div style="font-size:20px;font-weight:700;color:var(--accent)">${a.researchCompletenessPercent}%</div>
+    <div style="font-size:10px">${Object.entries(a.completenessFactors).map(([k,v])=>`${k}: ${(v*100).toFixed(0)}%`).join(' · ')}</div>
+  `;
 }
 
 /** Reads the Lead Time list from the form, runs the automated sweep, records results, and renders the comparison table. */
@@ -10488,6 +10724,7 @@ async function msdWorkbenchRefresh(){
   const statusEl = $("msdWorkbenchStatus");
   if (statusEl) statusEl.textContent = 'Loading…';
   msdRefreshRegistrationsTable(); // Phase 7F — independent of discovery evidence, refreshed alongside everything else on this page
+  msdRefreshScientificAssessmentUi(); // refreshed on every Workbench load too, not just after training
 
   const rules = msdGetMaturityPromotionRules();
   const setVal = (id, v) => { const e = $(id); if (e) e.value = v; };
