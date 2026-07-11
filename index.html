@@ -2542,7 +2542,8 @@ table.an-table tbody tr:last-child td{border-bottom:none}
         <input type="number" id="msdExpTrainingSplit" value="0.7" min="0.1" max="0.9" step="0.05" style="width:100%"></div>
       <div><label for="msdExpValidationSplit">Validation Split of remainder (Test gets the rest)</label>
         <input type="number" id="msdExpValidationSplit" value="0.5" min="0.1" max="0.9" step="0.05" style="width:100%"></div>
-      <div></div>
+      <div><label for="msdExpRegistrationId">Registration ID (optional — see Governance panel below)</label>
+        <input type="text" id="msdExpRegistrationId" placeholder="leave blank = Exploratory" style="width:100%"></div>
       <div></div>
     </div>
     <button class="gc-btn" onclick="msdRunExperimentUi()">🧪 Run Experiment</button>
@@ -2728,11 +2729,32 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <span id="msdMaturityRulesStatus" class="gc-sub" style="margin-top:6px;display:block"></span>
   </div>
 
+  <div class="grid-card" style="margin-bottom:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">False Discovery Control (Phase 7A) — Whole-Repository Correction</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Per-experiment Benjamini-Hochberg correction (Phase 0) already runs before any evidence is recorded at all. This is a SEPARATE, stricter correction applied across every discovery's latest p-value together, recomputed fresh on every load — Benjamini-Yekutieli, since it stays valid even though many discoveries here share overlapping underlying market data (BH's own guarantee assumes independence this platform's discoveries don't have). "Verified" maturity requires surviving this whole-repository correction, not just the local one.</div>
+    <div id="msdFdcSummary" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;font-size:12px"></div>
+  </div>
+
+  <div class="grid-card" style="margin-bottom:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Strict Out-of-Sample Validation &amp; Calibration (Phase 7C/7D)</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Three tiers, kept genuinely separate: <b>Discovery</b> (train+validation — where thresholds are found and tuned), <b>Validation</b> (the test split — confirms it wasn't overfit to Discovery), and <b>Production Validation</b> (the most recent 15% of ALL data for a market+feature version, permanently reserved and excluded from every experiment's pool before Discovery ever begins — not just a relabeled slice of the same data). A purge gap (Phase 7C) now also separates every split boundary by each snapshot's own recorded lookback window. Calibration (Phase 7D) asks a different question than significance: not "is this effect real" but "does the SPECIFIC claimed rate hold up" — evaluated exclusively on the Production Validation holdout. Enter a threshold condition (feature, threshold, direction — copy one from the Threshold Ranking table above) to test it against genuinely unseen data.</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px">
+      <div><label for="msdOosFeature">Feature</label><input type="text" id="msdOosFeature" placeholder="adx" style="width:100%"></div>
+      <div><label for="msdOosThreshold">Threshold</label><input type="number" id="msdOosThreshold" step="0.01" style="width:100%"></div>
+      <div><label for="msdOosDirection">Direction</label><select id="msdOosDirection" style="width:100%"><option value="above">above (≥)</option><option value="below">below (&lt;)</option></select></div>
+      <div><label for="msdOosMode">Walk-Forward Mode</label><select id="msdOosMode" style="width:100%"><option value="rolling">Rolling (fixed window)</option><option value="expanding">Expanding (walk-forward)</option></select></div>
+    </div>
+    <button class="gc-btn" onclick="msdRunWalkForwardUi()">▶️ Run Walk-Forward Validation</button>
+    <button class="gc-btn" onclick="msdRunProductionValidationUi()">🔒 Run Production Validation</button>
+    <button class="gc-btn" onclick="msdRunCalibrationUi()">📏 Check Calibration</button>
+    <div id="msdOosResults" style="margin-top:10px;font-size:12px"></div>
+  </div>
+
   <div class="grid-card">
     <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Discovery Repository</h3>
-    <div class="gc-sub" style="margin-bottom:8px">Every discovery ever recorded, derived fresh from its complete evidence history on every load. Stability (Phase 1) measures whether the evidence agrees across experiments; Decay (Phase 3) measures whether it's trending — a discovery can be perfectly stable (low variance) while still decaying (a steady, orderly decline), since these are different statistical questions. Hover a value for its detail breakdown.</div>
-    <table class="sig-table"><thead><tr><th class="l">Discovery Key</th><th class="l">Type</th><th class="l">Maturity</th><th class="l">Supporting Experiments</th><th class="l">Evidence Count</th><th class="l">Stability</th><th class="l">Decay</th><th class="l">First Seen</th></tr></thead>
-      <tbody id="msdDiscoveryRepoBody"><tr><td colspan="8" class="sig-empty">No discoveries yet — waiting for the first completed experiment with enough samples to clear the readyForTraining gate.</td></tr></tbody>
+    <div class="gc-sub" style="margin-bottom:8px">Every discovery ever recorded, derived fresh from its complete evidence history on every load. Stability (Phase 1) measures whether the evidence agrees across experiments; Decay (Phase 3) measures whether it's trending — a discovery can be perfectly stable (low variance) while still decaying (a steady, orderly decline), since these are different statistical questions. Significance (Phase 7A) distinguishes Nominal (raw p&lt;0.05), FDR-adjusted (survives correction), and Verified (survives correction AND has actually reached Verified maturity). Replication (Phase 7B) counts genuinely non-overlapping dataset time windows, not raw experiment count — re-analyzing the same period repeatedly cannot inflate this. Prospective (Phase 7C) means at least one supporting experiment's underlying market data didn't exist yet when this discovery was first proposed — the strongest evidence against curve-fitting. <b>Evidence Score</b> (Phase 0) measures statistical strength alone; <b>Scientific Confidence</b> (Phase 7H) is a separate, complementary measure integrating False Discovery correction, Replication, Stability, Regime Validation, Transferability, Out-of-Sample Validation, Calibration, Contradiction, and Decay — a huge-effect, single-experiment finding can score high on one and low on the other. Hover a value for its detail breakdown.</div>
+    <table class="sig-table"><thead><tr><th class="l">Discovery Key</th><th class="l">Type</th><th class="l">Maturity</th><th class="l">Supporting Experiments</th><th class="l">Evidence Count</th><th class="l">Stability</th><th class="l">Decay</th><th class="l">Significance</th><th class="l">Replication</th><th class="l">Prospective</th><th class="l">Governance</th><th class="l">Evidence Score</th><th class="l">Scientific Confidence</th><th class="l">First Seen</th></tr></thead>
+      <tbody id="msdDiscoveryRepoBody"><tr><td colspan="14" class="sig-empty">No discoveries yet — waiting for the first completed experiment with enough samples to clear the readyForTraining gate.</td></tr></tbody>
     </table>
   </div>
 
@@ -2790,6 +2812,45 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <table class="sig-table"><thead><tr><th class="l">Experiment</th><th class="l">Date</th><th class="l">Discoveries (new/reinforced)</th><th class="l">Promoted</th><th class="l">Demoted</th><th class="l">Decaying</th><th class="l">Contradicted</th><th class="l">Conclusions</th></tr></thead>
       <tbody id="msdResearchReportsBody"><tr><td colspan="8" class="sig-empty">No research reports yet — run an experiment and click "Train Models" to generate the first one.</td></tr></tbody>
     </table>
+  </div>
+
+  <div class="grid-card" style="margin-top:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Data Provenance &amp; Lineage (Phase 7E)</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Every discovery's full chain: Discovery ID, Evidence IDs, each supporting Experiment's Dataset ID (reusing the existing datasetFingerprint), exact frozen raw snapshot IDs, Feature/Label/Statistical-Engine/Code versions, and the linked Research Report. "Verify Integrity" checks that every referenced raw snapshot still actually exists in MarketStates — operationalizing "every conclusion must remain reproducible from raw evidence" as a real, checkable test, not an aspiration. One honest, stated gap: raw tick data itself is never persisted (only derived, labeled snapshots are) — see the code's own comments for why.</div>
+    <div style="display:grid;grid-template-columns:3fr auto auto;gap:10px;margin-bottom:10px">
+      <div><label for="msdProvenanceKey">Discovery Key</label><input type="text" id="msdProvenanceKey" placeholder="threshold:adx" style="width:100%"></div>
+      <div style="align-self:end"><button class="gc-btn" onclick="msdShowProvenanceUi()">🔗 Trace Provenance</button></div>
+      <div style="align-self:end"><button class="gc-btn" onclick="msdVerifyProvenanceUi()">✅ Verify Integrity</button></div>
+    </div>
+    <div id="msdProvenanceResults" style="font-size:12px"></div>
+  </div>
+
+  <div class="grid-card" style="margin-top:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Research Governance &amp; Experiment Registry (Phase 7F)</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Write down what you're testing BEFORE running the experiment — this is what makes the distinction between a confirmed hypothesis and a coincidental finding checkable rather than a matter of memory. Registering produces an ID: paste it into the Experiment Runner's Registration ID field before running. Leaving that field blank is honest too — the experiment is then structurally, automatically marked Exploratory, never silently treated as confirmatory.</div>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:10px">
+      <div><label for="msdRegObjectives">Objectives</label><textarea id="msdRegObjectives" rows="2" style="width:100%" placeholder="What is this experiment for?"></textarea></div>
+      <div><label for="msdRegHypotheses">Hypotheses (free text)</label><textarea id="msdRegHypotheses" rows="2" style="width:100%" placeholder="What do you expect to find, and why?"></textarea></div>
+      <div><label for="msdRegHypothesisFeatures">Hypothesis Features (comma-separated — e.g. adx,rsi)</label><input type="text" id="msdRegHypothesisFeatures" style="width:100%" placeholder="adx,rsi"></div>
+      <div><label for="msdRegStoppingCount">Stopping Rule — max experiments under this registration</label><input type="number" id="msdRegStoppingCount" style="width:100%" placeholder="e.g. 8" min="1" step="1"></div>
+      <div><label for="msdRegInclusion">Inclusion Criteria</label><input type="text" id="msdRegInclusion" style="width:100%"></div>
+      <div><label for="msdRegExclusion">Exclusion Criteria</label><input type="text" id="msdRegExclusion" style="width:100%"></div>
+      <div><label for="msdRegTests">Planned Statistical Tests</label><input type="text" id="msdRegTests" style="width:100%" placeholder="e.g. permutation test + BH correction"></div>
+      <div><label for="msdRegNotes">Researcher Notes</label><input type="text" id="msdRegNotes" style="width:100%"></div>
+    </div>
+    <button class="gc-btn" onclick="msdRegisterExperimentUi()">📝 Register (immutable, before running)</button>
+    <button class="gc-btn" onclick="msdCheckStoppingRuleUi()">🛑 Check Stopping Rule Compliance</button>
+    <div id="msdRegistrationResults" style="margin-top:10px;font-size:12px"></div>
+    <table class="sig-table" style="margin-top:10px"><thead><tr><th class="l">Registration ID</th><th class="l">Registered</th><th class="l">Objectives</th><th class="l">Hypothesis Features</th><th class="l">Stopping Rule</th></tr></thead>
+      <tbody id="msdRegistrationsBody"><tr><td colspan="5" class="sig-empty">No registrations yet.</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="grid-card" style="margin-top:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Data Quality Validation (Phase 7G)</h3>
+    <div class="gc-sub" style="margin-bottom:8px">A mandatory quality gate now runs automatically inside the Experiment Runner, before any Experiment record is ever written — a dataset with a CRITICAL failure (duplicate ticks, clock discontinuities, likely mid-session interruptions, corrupted feature values, incomplete labels, data leakage) is refused, not just warned about. Gaps longer than an hour are treated as normal session boundaries (a warning, not a block) — see the code's own comments for why a large gap can't be distinguished from a dropped connection with certainty. Use this panel to check the raw MarketStates collection on its own, independent of running an experiment.</div>
+    <button class="gc-btn" onclick="msdCheckRawDataQualityUi()">🔍 Check Raw Data Quality</button>
+    <div id="msdDataQualityResults" style="margin-top:10px;font-size:12px"></div>
   </div>
 </div>
 
@@ -4320,6 +4381,15 @@ function msdResetEventDatabase(){
 // NOT write to MarketStates directly.
 
 let msdLookbackWindow = 20;     // configurable — ticks to look back before Run Start
+
+// Phase 7E (Data Provenance & Lineage): a version identifier for the
+// LABELING ruleset — distinct from featureVersion, which only versions
+// how indicator features are computed. This covers what counts as a
+// "run" at all (5 consecutive same-direction ticks) and the lookback
+// window logic above. Bump this if that logic itself ever changes, so
+// discoveries can distinguish "the market changed" from "the definition
+// of a positive label changed."
+const MSD_LABEL_VERSION = 'label-v1-5tick-run';
 let msdClassBalanceRatio = 1;   // configurable — negative snapshots per positive snapshot
 let msdSnapshotSeq = 0;         // per-session ordinal for Snapshot IDs, same pattern as Event IDs
 let msdPositiveWindows = [];    // [{startEpoch, endEpoch}] — every positive event's window, for negative-sampling exclusion
@@ -4346,6 +4416,7 @@ function msdBuildLabeledSnapshot(raw, meta){
     featureVersion: meta.featureVersion,
     featureFingerprint: msdComputeFeatureFingerprint(raw),
     lookbackWindow: meta.lookbackWindow, // the ACTUAL window used to capture this snapshot — previously never recorded, making it impossible to later filter or verify by it
+    labelVersion: MSD_LABEL_VERSION, // Phase 7E — which labeling ruleset produced this outcome, distinct from featureVersion
     timestamp: Date.now(),
   });
 }
@@ -5451,15 +5522,85 @@ function msdSeededShuffle(arr, rng){
  * (msdLookbackWindow) actually was when the referenced snapshots were
  * captured. (fraction, e.g. 0.7).
  */
+/**
+ * Phase 7C — purge gap at each split boundary, closing a real leakage
+ * source the pre-existing "No Data Leakage" check couldn't see: that
+ * check only verifies snapshot TIMESTAMPS don't overlap across splits.
+ * It says nothing about LABELS. A snapshot's outcome here depends on
+ * whether a 5-tick run starts within `lookbackWindow` ticks of it
+ * (confirmed directly in the labeler) — a training-set snapshot near the
+ * train/validation boundary can have a label that depends on knowing
+ * whether a run occurred just past that boundary, chronologically
+ * inside validation. This is the standard "purged cross-validation"
+ * problem (López de Prado), previously unguarded here.
+ *
+ * Drops the trailing `purgeSeconds` of train (nearest the train/val
+ * boundary) and the trailing `purgeSeconds` of validation (nearest the
+ * val/test boundary) — exactly where a label could have looked across
+ * the line. purgeSeconds is measured in SECONDS using each snapshot's
+ * own recorded lookbackWindow (the maximum present, for safety), taking
+ * advantage of a fact specific to this project's actual market, not an
+ * approximation: Volatility 100 (1s) ticks exactly once per second by
+ * definition, so lookbackWindow ticks IS lookbackWindow seconds exactly.
+ */
+function msdApplyPurgeGap(trainSet, valSet, testSet){
+  const allWithLookback = trainSet.concat(valSet, testSet).map(s => s.lookbackWindow).filter(v => v != null && Number.isFinite(v));
+  const purgeSeconds = allWithLookback.length ? msdSafeMax(allWithLookback) : 20; // falls back to the labeler's own documented default if no snapshot recorded one (pre-Phase-0-fix data)
+
+  const trainBoundaryEpoch = valSet.length ? valSet[0].epoch : (testSet.length ? testSet[0].epoch : Infinity);
+  const purgedTrain = trainSet.filter(s => s.epoch == null || trainBoundaryEpoch - s.epoch >= purgeSeconds);
+  const valBoundaryEpoch = testSet.length ? testSet[0].epoch : Infinity;
+  const purgedVal = valSet.filter(s => s.epoch == null || valBoundaryEpoch - s.epoch >= purgeSeconds);
+
+  return {
+    trainSet: purgedTrain, valSet: purgedVal, testSet,
+    purgeSeconds,
+    purgedTrainCount: trainSet.length - purgedTrain.length,
+    purgedValCount: valSet.length - purgedVal.length,
+  };
+}
+
+const MSD_PRODUCTION_HOLDOUT_FRACTION = 0.15; // the most recent 15% of ALL data for a symbol+featureVersion, permanently reserved, never touched during Discovery or Validation
+
+/**
+ * Phase 7C — three-tier separation. Discovery (train+val) and Validation
+ * (test) both draw from the SAME pool msdBuildExperimentDataset has
+ * always used — a chronological split of it, but still one pool a
+ * researcher could iterate against across many experiments. Production
+ * Validation is different in kind, not just in name: the most RECENT
+ * fraction of ALL known data for a symbol+featureVersion, sliced off
+ * BEFORE any experiment ever sees the rest, and never included in
+ * msdBuildExperimentDataset's own pool at all. This is what makes "data
+ * genuinely never touched during discovery" a real, enforced property
+ * rather than a naming convention.
+ */
+function msdPartitionProductionHoldout(allStates, featureVersion, symbol){
+  let filtered = allStates.filter(s => s.featureVersion === featureVersion);
+  if (symbol != null && symbol !== 'all') filtered = filtered.filter(s => s.symbol === symbol);
+  // Prefer real-world `epoch` (market time) when present — falls back to
+  // `timestamp` (the field the rest of this pipeline already relies on
+  // for chronological ordering, e.g. the train/val/test split above)
+  // when it isn't. A snapshot missing `epoch` should degrade to a less
+  // precise recency ordering, not silently vanish from the entire
+  // discovery-eligible pool — the earlier version of this function did
+  // exactly that, caught directly by a regression in Phase 0's own test
+  // suite once this function started gating msdBuildExperimentDataset.
+  const orderable = filtered.filter(s => (s.epoch != null && Number.isFinite(s.epoch)) || (s.timestamp != null && Number.isFinite(s.timestamp)));
+  const orderKey = s => s.epoch != null && Number.isFinite(s.epoch) ? s.epoch : s.timestamp;
+  const sorted = orderable.slice().sort((a, b) => orderKey(a) - orderKey(b));
+  const holdoutCount = Math.floor(sorted.length * MSD_PRODUCTION_HOLDOUT_FRACTION);
+  return {
+    discoveryEligible: sorted.slice(0, sorted.length - holdoutCount),
+    productionHoldout: sorted.slice(sorted.length - holdoutCount),
+  };
+}
+
 function msdBuildExperimentDataset(allStates, config){
-  let filtered = allStates.filter(s => s.featureVersion === config.featureVersion);
-  if (config.symbol != null && config.symbol !== 'all') {
-    // Snapshots captured before this fix have no `symbol` field at all —
-    // they are correctly EXCLUDED by a specific-market filter (there is
-    // no way to retroactively know what market they came from), not
-    // silently included as if they matched.
-    filtered = filtered.filter(s => s.symbol === config.symbol);
-  }
+  // Phase 7C: exclude the Production Validation holdout BEFORE any other
+  // filtering — this is what makes it a genuinely separate tier, not
+  // just a relabeled slice of the same pool every experiment draws from.
+  const { discoveryEligible } = msdPartitionProductionHoldout(allStates, config.featureVersion, config.symbol);
+  let filtered = discoveryEligible;
   if (config.leadTime != null && config.leadTime !== 'all') {
     filtered = filtered.filter(s => s.outcome === 'negative' || s.leadTime === config.leadTime);
   }
@@ -5491,9 +5632,16 @@ function msdBuildExperimentDataset(allStates, config){
   const valSet = remaining.slice(0, valCount);
   const testSet = remaining.slice(valCount);
 
+  // Phase 7C: purge gap — see msdApplyPurgeGap's own docblock for why
+  // timestamp non-overlap alone (the pre-existing check) isn't sufficient.
+  const purged = msdApplyPurgeGap(trainSet, valSet, testSet);
+
   return {
-    trainSet, valSet, testSet,
-    meta: { positiveCount: shuffledPositives.length, negativeSampledCount: sampledNegatives.length, negativeAvailableCount: shuffledNegatives.length, validationSplit },
+    trainSet: purged.trainSet, valSet: purged.valSet, testSet: purged.testSet,
+    meta: {
+      positiveCount: shuffledPositives.length, negativeSampledCount: sampledNegatives.length, negativeAvailableCount: shuffledNegatives.length, validationSplit,
+      purgeSeconds: purged.purgeSeconds, purgedTrainCount: purged.purgedTrainCount, purgedValCount: purged.purgedValCount,
+    },
   };
 }
 
@@ -5511,10 +5659,163 @@ function msdBuildFeatureAnalysisDataset(){ throw new Error('Feature-Analysis Dat
  * temporary by design, rebuildable on demand from the same config against
  * the same (or a later, larger) database state.
  */
+// ══════════════════════════════════════════════════════════════════════
+// Phase 7F — Research Governance & Experiment Registry
+// ══════════════════════════════════════════════════════════════════════
+// A different class of problem from every prior phase: process
+// integrity, not statistics. FDR correction, replication, out-of-sample
+// validation, calibration, and provenance all assume the research
+// process itself was honest — none of them can detect a researcher
+// deciding AFTER seeing results what they were "really" testing
+// (HARKing), re-running until something clears significance
+// (p-hacking), or only reporting the wins (selective reporting).
+//
+// MECHANISM: a registration is an IMMUTABLE finding (same append-only
+// KnowledgeBase, same msdWriteFinding path, a fourth `type` value) —
+// written and timestamped BEFORE the experiment it describes ever runs.
+// Because the store rejects duplicate/retroactive writes, a registration
+// can never be edited afterward to conveniently match whatever came out
+// significant. An experiment run WITHOUT a registrationId is
+// structurally, automatically marked Exploratory — never silently
+// treated as confirmatory.
+//
+// HONEST LIMIT, stated plainly: no software mechanism can fully PREVENT
+// a determined bad-faith actor from writing a vague or after-the-fact
+// registration. What this provides is visibility and a checkable
+// record — exactly what real pre-registration (OSF, AsPredicted,
+// clinicaltrials.gov) has always actually offered, not an unbreakable
+// guarantee.
+
+/**
+ * Writes an immutable experiment registration BEFORE any experiment
+ * runs. `hypothesisFeatures` is the key anti-HARKing mechanism: the
+ * specific features/conditions this registration commits to
+ * investigating, checked later against whatever evidence actually gets
+ * produced (see msdClassifyDiscoveryGovernance).
+ */
+async function msdRegisterExperiment(registration){
+  const registrationId = 'reg_' + msdSessionId + '_' + msdRandomSuffix();
+  const finding = {
+    findingId: msdGenerateFindingId(),
+    type: 'experiment_registration',
+    registrationId,
+    registeredAt: Date.now(),
+    objectives: registration.objectives || '',
+    hypotheses: registration.hypotheses || '',
+    hypothesisFeatures: Array.isArray(registration.hypothesisFeatures) ? registration.hypothesisFeatures : [],
+    outcomeDefinition: registration.outcomeDefinition || MSD_RESEARCH_HYPOTHESIS,
+    featureVersion: registration.featureVersion || null,
+    inclusionCriteria: registration.inclusionCriteria || '',
+    exclusionCriteria: registration.exclusionCriteria || '',
+    plannedStatisticalTests: registration.plannedStatisticalTests || '',
+    significanceThreshold: registration.significanceThreshold != null ? registration.significanceThreshold : 0.05,
+    stoppingRule: registration.stoppingRule || { type: 'fixed_experiment_count', value: null },
+    researcherNotes: registration.researcherNotes || '',
+  };
+  const writeResult = await msdWriteFinding(finding);
+  return { registrationId, finding, writeResult };
+}
+
+/** Every registration ever recorded, newest first — read-only, same pattern as msdGetAllResearchReports. */
+async function msdGetAllRegistrations(){
+  const allFindings = await msdGetAllFindings();
+  return allFindings.filter(f => f.type === 'experiment_registration').sort((a, b) => b.registeredAt - a.registeredAt);
+}
+
+/** Looks up one registration by ID, or null if it doesn't exist (a fabricated/typo'd registrationId must never be silently treated as valid). */
+async function msdGetRegistration(registrationId){
+  if (!registrationId) return null;
+  const all = await msdGetAllRegistrations();
+  return all.find(r => r.registrationId === registrationId) || null;
+}
+
+/**
+ * Checks whether a registration's stated stopping rule has been
+ * violated — real, checkable enforcement of "reduce p-hacking," not
+ * just a recorded intention. A fixed_experiment_count rule is violated
+ * if MORE experiments than stated have been run referencing this
+ * registration; a null/unset stopping rule cannot be violated (honestly
+ * unknown, not assumed compliant).
+ */
+async function msdCheckStoppingRuleCompliance(registrationId){
+  const registration = await msdGetRegistration(registrationId);
+  if (!registration) return { error: 'registration not found' };
+  const rule = registration.stoppingRule;
+  if (!rule || rule.value == null) return { checkable: false, reason: 'no stopping rule value was stated at registration time' };
+
+  const allExperiments = await msdGetAllExperiments();
+  const referencingExperiments = allExperiments.filter(e => e.registrationId === registrationId);
+
+  if (rule.type === 'fixed_experiment_count') {
+    const violated = referencingExperiments.length > rule.value;
+    return { checkable: true, ruleType: rule.type, statedLimit: rule.value, actualCount: referencingExperiments.length, violated };
+  }
+  return { checkable: false, reason: 'unrecognized stopping rule type: ' + rule.type };
+}
+
+/**
+ * Classifies one discovery's governance status from its supporting
+ * evidence's registrationIds. "Pre-registered, Confirmed" requires BOTH
+ * that the evidence came from a registered experiment AND that the
+ * discovery's own underlying feature was explicitly named in that
+ * registration's hypothesisFeatures — a real membership test, not just
+ * "was there any registration at all." "Post-hoc" is exactly the
+ * HARKing-detection case: a registered experiment produced this
+ * evidence, but this specific discovery was never among what was
+ * declared in advance. "Exploratory" is evidence from experiments run
+ * with no registration referenced at all.
+ *
+ * Synchronous — takes a PRE-FETCHED registrationsById lookup rather than
+ * querying IndexedDB itself, so msdSummarizeDiscovery (called many times
+ * per msdGetDiscoverySummaries) doesn't need to become async and refetch
+ * registrations on every single discovery. Same fetch-once pattern
+ * already established for Phase 7A's global False Discovery Control.
+ */
+function msdClassifyDiscoveryGovernance(findings, discoveryKey, registrationsById){
+  const registrationIds = Array.from(new Set(findings.map(f => f.registrationId).filter(id => id != null)));
+  if (!registrationIds.length) return { status: 'Exploratory', registrationIds: [] };
+
+  const validRegistrations = registrationIds.map(id => registrationsById[id]).filter(r => r != null);
+  if (!validRegistrations.length) return { status: 'Exploratory', registrationIds }; // referenced a registrationId that doesn't actually exist — cannot be trusted as pre-registered
+
+  // Extract the feature this discoveryKey concerns (works for all 4
+  // types: 'threshold:adx' -> 'adx'; 'combo:adx+rsi' -> ['adx','rsi'];
+  // 'market_state:...' has no single feature, checked via fingerprint
+  // substring instead; 'single_feature:adx' -> 'adx').
+  const keyFeatures = discoveryKey.startsWith('combo:')
+    ? discoveryKey.replace('combo:', '').split('+')
+    : [discoveryKey.replace(/^(threshold|single_feature|market_state):/, '')];
+
+  const wasHypothesized = validRegistrations.some(reg =>
+    keyFeatures.some(kf => reg.hypothesisFeatures.some(hf => discoveryKey.includes('market_state:') ? kf.includes(hf) : hf === kf))
+  );
+
+  return { status: wasHypothesized ? 'Pre-registered, Confirmed' : 'Post-hoc (registered experiment, unregistered finding)', registrationIds };
+}
+
 async function msdRunExperiment(config){
+  // Phase 7F: if a registrationId is claimed, it must actually exist —
+  // never silently accept a fabricated or typo'd one as if it were a
+  // real pre-registration. A genuinely nonexistent registrationId means
+  // this experiment cannot be treated as pre-registered at all.
+  if (config.registrationId) {
+    const registration = await msdGetRegistration(config.registrationId);
+    if (!registration) return { error: 'registrationId "' + config.registrationId + '" does not reference any actual registration — cannot proceed as if pre-registered' };
+  }
+
   const allStates = await msdGetAllMarketStates();
   const dataset = msdBuildExperimentDataset(allStates, config);
   const experimentId = msdGenerateExperimentId();
+
+  // Phase 7G: mandatory quality gate — "block analysis when critical
+  // failures are detected" is enforced exactly here, before an
+  // Experiment record is ever written. A dataset that fails this cannot
+  // become part of the permanent record at all, not just a warning
+  // someone might ignore.
+  const qualityReport = msdGenerateDataQualityReport(allStates, dataset, config);
+  if (qualityReport.hasCriticalFailure) {
+    return { error: 'Data Quality gate failed — critical issue(s): ' + qualityReport.criticalFailures.map(f => f.name).join(', '), qualityReport };
+  }
 
   const allSnapshots = dataset.trainSet.concat(dataset.valSet, dataset.testSet);
   const datasetFingerprint = msdComputeDatasetFingerprint(dataset);
@@ -5539,6 +5840,17 @@ async function msdRunExperiment(config){
   const positiveLeadTimes = allSnapshots.filter(s => s.outcome === 'positive' && Number.isFinite(s.leadTime)).map(s => s.leadTime);
   const derivedLookbackWindow = positiveLeadTimes.length ? msdSafeMax(positiveLeadTimes) : null;
 
+  // Phase 7B (Independent Replication): the dataset's own epoch range —
+  // NOT when this experiment was RUN (Date.now() above), but the market
+  // time span its underlying snapshots actually came from. This is what
+  // lets replication be judged against genuinely different data, not
+  // just a different random seed re-run on the same period. Uses the
+  // stack-safe helpers from the Phase 0 fix — raw Math.min/max spread on
+  // a dataset-scale array is exactly the bug those exist to prevent.
+  const epochs = allSnapshots.map(s => s.epoch).filter(e => e != null && Number.isFinite(e));
+  const datasetEpochMin = epochs.length ? msdSafeMin(epochs) : null;
+  const datasetEpochMax = epochs.length ? msdSafeMax(epochs) : null;
+
   const record = {
     experimentId,
     symbol: config.symbol ?? 'all',
@@ -5550,6 +5862,8 @@ async function msdRunExperiment(config){
     trainingSplit: config.trainingSplit,
     validationSplit: dataset.meta.validationSplit,
     date: Date.now(),
+    datasetEpochMin, datasetEpochMax,
+    registrationId: config.registrationId || null, // Phase 7F — null means structurally Exploratory, never silently treated as confirmatory
     trainCount: dataset.trainSet.length,
     valCount: dataset.valSet.length,
     testCount: dataset.testSet.length,
@@ -5564,6 +5878,260 @@ async function msdRunExperiment(config){
   };
   const writeResult = await msdWriteExperiment(record);
   return { experimentId, dataset, record, writeResult };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Phase 7C — Rolling / Walk-Forward Validation and Production Validation
+// ══════════════════════════════════════════════════════════════════════
+// One parameterized function handles both "rolling" (fixed-size sliding
+// window) and "walk-forward" (expanding window) validation — genuinely
+// the same mechanism with one parameter different, not two systems.
+// Reuses msdMeetsThreshold and msdComputeFullStatisticalEvidence
+// (existing, unmodified) for every window's test — no new statistics.
+// Scoped to threshold discoveries specifically (feature + threshold +
+// direction is the cleanest condition to re-test against a new window);
+// stated as a deliberate scope cut, not a silent gap.
+
+const MSD_WALKFORWARD_WINDOW_COUNT = 5;
+const MSD_WALKFORWARD_MIN_TOTAL = 100; // below this, windows would be too small to say anything
+
+/**
+ * Slices chronologically-sorted snapshots into MSD_WALKFORWARD_WINDOW_COUNT
+ * windows and tests, in EACH one independently, whether the given
+ * feature/threshold/direction condition still shows a significant effect.
+ * mode='rolling': fixed-size, non-overlapping windows across the whole
+ * span. mode='expanding' (walk-forward): each window includes everything
+ * from the start up to that point, the classic walk-forward shape.
+ */
+function msdRunWalkForwardValidation(sortedSnapshots, feature, threshold, direction, mode, windowCount){
+  mode = mode === 'expanding' ? 'expanding' : 'rolling';
+  windowCount = windowCount || MSD_WALKFORWARD_WINDOW_COUNT;
+  const n = sortedSnapshots.length;
+  if (n < MSD_WALKFORWARD_MIN_TOTAL) return { mode, windowCount, windows: [], error: 'insufficient data (' + n + ' rows) for ' + windowCount + ' meaningful windows' };
+
+  const baseSize = Math.floor(n / windowCount);
+  const windows = [];
+  for (let w = 0; w < windowCount; w++) {
+    const windowSnapshots = mode === 'expanding'
+      ? sortedSnapshots.slice(0, baseSize * (w + 1))
+      : sortedSnapshots.slice(baseSize * w, baseSize * (w + 1));
+    let inPos = 0, inTotal = 0, outPos = 0, outTotal = 0;
+    windowSnapshots.forEach(s => {
+      const meets = msdMeetsThreshold(s[feature], threshold, direction);
+      const isPos = s.outcome === 'positive';
+      if (meets) { inTotal++; if (isPos) inPos++; } else { outTotal++; if (isPos) outPos++; }
+    });
+    const stats = (inTotal > 0 && outTotal > 0) ? msdComputeFullStatisticalEvidence(inPos, inTotal - inPos, outPos, outTotal - outPos) : null;
+    windows.push({
+      windowIndex: w, sampleCount: windowSnapshots.length,
+      epochStart: windowSnapshots.length ? windowSnapshots[0].epoch : null,
+      epochEnd: windowSnapshots.length ? windowSnapshots[windowSnapshots.length - 1].epoch : null,
+      effectSize: stats ? stats.effectSize : null,
+      pValue: stats ? stats.pValue : null,
+      significant: !!(stats && stats.pValue != null && stats.pValue < 0.05),
+    });
+  }
+  const validWindows = windows.filter(w => w.pValue != null);
+  const significantWindows = validWindows.filter(w => w.significant).length;
+  return {
+    mode, windowCount, windows,
+    significantWindows, validWindowCount: validWindows.length,
+    consistencyRate: validWindows.length ? significantWindows / validWindows.length : null,
+  };
+}
+
+/**
+ * Tests one threshold discovery's condition against the Production
+ * Validation holdout — data that was NEVER included in ANY experiment's
+ * discovery-eligible pool (see msdPartitionProductionHoldout). This is
+ * the strongest confirmation this platform can offer: not just a
+ * held-out fraction of one experiment's data, but a partition sliced off
+ * before discovery ever began.
+ */
+async function msdRunProductionValidation(feature, threshold, direction, featureVersion, symbol){
+  const allStates = await msdGetAllMarketStates();
+  const { productionHoldout } = msdPartitionProductionHoldout(allStates, featureVersion, symbol);
+  if (!productionHoldout.length) return { error: 'no production holdout data available yet', sampleCount: 0 };
+
+  let inPos = 0, inTotal = 0, outPos = 0, outTotal = 0;
+  productionHoldout.forEach(s => {
+    const meets = msdMeetsThreshold(s[feature], threshold, direction);
+    const isPos = s.outcome === 'positive';
+    if (meets) { inTotal++; if (isPos) inPos++; } else { outTotal++; if (isPos) outPos++; }
+  });
+  if (inTotal === 0 || outTotal === 0) return { error: 'condition does not split the production holdout into two non-empty groups', sampleCount: productionHoldout.length };
+
+  const stats = msdComputeFullStatisticalEvidence(inPos, inTotal - inPos, outPos, outTotal - outPos);
+  return {
+    sampleCount: productionHoldout.length, inGroupCount: inTotal, outGroupCount: outTotal,
+    effectSize: stats.effectSize, pValue: stats.pValue,
+    passed: stats.pValue != null && stats.pValue < 0.05 && stats.effectSize > 0,
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Phase 7D — Probability Calibration
+// ══════════════════════════════════════════════════════════════════════
+// A genuinely different question from everything built through 7C: not
+// "is this effect statistically real" (significance, effect size) but
+// "when a discovery STATES a probability — e.g. 'ADX>=25 predicts 75%
+// positive' — does that specific number hold up, or is the effect real
+// while the stated magnitude is untrustworthy." Evaluated exclusively on
+// the Production Validation holdout (Phase 7C) — calibration checked
+// against training data is trivially good by construction and proves
+// nothing.
+//
+// A rule-based discovery here isn't a continuous-score model — it's a
+// two-value step function (the claimed in-group rate for rows meeting
+// the condition, the claimed out-group rate for rows that don't). That
+// makes for a coarse (2-3 point) calibration curve rather than a smooth
+// one, which is correct and expected, not a limitation to hide: the
+// same underlying machinery (curve/ECE/MCE/Brier/log loss/isotonic fit)
+// is written generically enough to also apply to a continuous-score
+// predictor (e.g. this app's existing gradient-boosted models) if ever
+// wired in — not rebuilt for that case later.
+//
+// REUSE, disclosed: Brier score already exists inline inside pbMetrics
+// (this app's model-evaluation function). msdComputeBrierScore below
+// uses the IDENTICAL formula, deliberately NOT extracted into a shared
+// helper — pbMetrics bundles several other model-specific metrics
+// (accuracy, AUC, profit factor) that don't apply to a rule-based
+// discovery's two-value predictions, and refactoring a large, stable,
+// actively-used function to share one line of arithmetic carries more
+// risk than the minor, disclosed duplication it would save.
+
+/** Brier score: mean squared error between predicted probability and actual outcome. 0 = perfect, 0.25 = what a constant "always predict 0.5" gets, 1 = maximally wrong and confident. Same formula as pbMetrics's inline calculation — see module docblock for why this isn't a shared extraction. */
+function msdComputeBrierScore(predictedProbs, actualOutcomes){
+  if (!predictedProbs.length) return null;
+  return predictedProbs.reduce((sum, p, i) => sum + (p - actualOutcomes[i]) ** 2, 0) / predictedProbs.length;
+}
+
+/** Log loss (cross-entropy): the standard companion metric to Brier score, penalizing confident wrong predictions more heavily. Clipped away from exactly 0/1 to avoid -Infinity. Validated: a constant 0.5 prediction gives exactly ln(2) = 0.6931, the known reference value. */
+function msdComputeLogLoss(predictedProbs, actualOutcomes){
+  if (!predictedProbs.length) return null;
+  const eps = 1e-15;
+  let sum = 0;
+  predictedProbs.forEach((p, i) => {
+    const clipped = Math.min(1 - eps, Math.max(eps, p));
+    sum += actualOutcomes[i] * Math.log(clipped) + (1 - actualOutcomes[i]) * Math.log(1 - clipped);
+  });
+  return -sum / predictedProbs.length;
+}
+
+/**
+ * Bins predictions by predicted probability and computes, per bin, the
+ * mean predicted probability vs the mean actual outcome — the data
+ * behind both a reliability diagram (plotted directly) and ECE/MCE
+ * (computed from it below). A rule-based discovery's 2-3 distinct
+ * predicted values naturally collapse into 2-3 populated bins, which is
+ * correct, not degenerate.
+ */
+function msdComputeCalibrationCurve(predictedProbs, actualOutcomes, binCount){
+  binCount = binCount || 10;
+  const bins = Array.from({ length: binCount }, () => ({ predictedSum: 0, actualSum: 0, count: 0 }));
+  predictedProbs.forEach((p, i) => {
+    const binIdx = Math.min(binCount - 1, Math.floor(p * binCount));
+    bins[binIdx].predictedSum += p;
+    bins[binIdx].actualSum += actualOutcomes[i];
+    bins[binIdx].count++;
+  });
+  return bins.map((b, i) => ({
+    binLower: i / binCount, binUpper: (i + 1) / binCount,
+    meanPredicted: b.count ? b.predictedSum / b.count : null,
+    meanActual: b.count ? b.actualSum / b.count : null,
+    count: b.count,
+  })).filter(b => b.count > 0);
+}
+
+/** Expected Calibration Error: the count-weighted average absolute gap between predicted and actual across populated bins — the single-number summary of a reliability diagram. */
+function msdComputeECE(curve){
+  const total = curve.reduce((s, b) => s + b.count, 0);
+  if (!total) return null;
+  return curve.reduce((s, b) => s + b.count * Math.abs(b.meanPredicted - b.meanActual), 0) / total;
+}
+
+/** Maximum Calibration Error: the single WORST bin's gap — ECE can look fine while one bin is badly miscalibrated; MCE catches that. */
+function msdComputeMCE(curve){
+  if (!curve.length) return null;
+  return msdSafeMax(curve.map(b => Math.abs(b.meanPredicted - b.meanActual)));
+}
+
+/**
+ * Isotonic regression via the Pool Adjacent Violators Algorithm (PAVA) —
+ * fits a monotonic (non-decreasing) step function mapping predicted
+ * probability to a corrected, better-calibrated probability. Chosen
+ * over Platt Scaling deliberately: Platt Scaling assumes a specific
+ * sigmoid-shaped miscalibration, which isn't established here; isotonic
+ * regression only assumes monotonicity (higher predicted should still
+ * mean higher actual, even if the exact numbers are off) — a much
+ * milder, more defensible assumption for rule-based discoveries with
+ * only 2-3 distinct predicted values, where fitting a full logistic
+ * curve would be overkill and fragile. Validated against the classic
+ * PAVA textbook example: [1,2,0,4,3] correctly pools into
+ * [1,1,1,3.5,3.5].
+ */
+function msdFitIsotonicRegression(predictedProbs, actualOutcomes){
+  const paired = predictedProbs.map((p, i) => ({ p, y: actualOutcomes[i] })).sort((a, b) => a.p - b.p);
+  let levels = paired.map(pt => ({ pMin: pt.p, pMax: pt.p, sum: pt.y, count: 1, val: pt.y }));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let i = 0; i < levels.length - 1; i++) {
+      if (levels[i].val > levels[i + 1].val + 1e-12) {
+        const merged = {
+          pMin: levels[i].pMin, pMax: levels[i + 1].pMax,
+          sum: levels[i].sum + levels[i + 1].sum, count: levels[i].count + levels[i + 1].count,
+        };
+        merged.val = merged.sum / merged.count;
+        levels.splice(i, 2, merged);
+        changed = true;
+        break;
+      }
+    }
+  }
+  // Returns a step function: apply(x) finds the level whose [pMin,pMax] contains x (or nearest) and returns its calibrated value.
+  return {
+    levels,
+    apply(x){
+      if (!levels.length) return x;
+      let best = levels[0];
+      for (const lvl of levels) { if (x >= lvl.pMin) best = lvl; else break; }
+      return best.val;
+    },
+  };
+}
+
+/**
+ * Evaluates ONE threshold discovery's calibration on the Production
+ * Validation holdout: for every holdout row, "predicted probability" is
+ * the discovery's OWN claimed rate (in-group rate if the row meets the
+ * condition, out-group rate otherwise) — never re-derived from the
+ * holdout itself, which would make calibration trivially perfect by
+ * construction. Actual outcome is the row's real, held-out label.
+ */
+async function msdEvaluateDiscoveryCalibration(feature, threshold, direction, claimedInRate, claimedOutRate, featureVersion, symbol){
+  const allStates = await msdGetAllMarketStates();
+  const { productionHoldout } = msdPartitionProductionHoldout(allStates, featureVersion, symbol);
+  if (!productionHoldout.length) return { error: 'no production holdout data available yet' };
+
+  const predictedProbs = [], actualOutcomes = [];
+  productionHoldout.forEach(s => {
+    const meets = msdMeetsThreshold(s[feature], threshold, direction);
+    predictedProbs.push(meets ? claimedInRate : claimedOutRate);
+    actualOutcomes.push(s.outcome === 'positive' ? 1 : 0);
+  });
+
+  const curve = msdComputeCalibrationCurve(predictedProbs, actualOutcomes, 10);
+  const isotonic = msdFitIsotonicRegression(predictedProbs, actualOutcomes);
+  return {
+    sampleCount: productionHoldout.length,
+    brierScore: msdComputeBrierScore(predictedProbs, actualOutcomes),
+    logLoss: msdComputeLogLoss(predictedProbs, actualOutcomes),
+    ece: msdComputeECE(curve),
+    mce: msdComputeMCE(curve),
+    calibrationCurve: curve,
+    isotonicCorrection: curve.map(b => ({ claimed: b.meanPredicted, corrected: isotonic.apply(b.meanPredicted) })),
+  };
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -5718,6 +6286,38 @@ function msdBenjaminiHochberg(pValues, alpha){
   for (let rank = m; rank >= 1; rank--) {
     const entry = indexed[rank - 1];
     const raw = entry.p * m / rank;
+    const adj = Math.min(prevAdj, raw);
+    adjusted[entry.i] = Math.min(1, adj);
+    prevAdj = adj;
+  }
+  return adjusted.map((adjP, i) => ({ pValue: pValues[i], adjustedPValue: adjP, significant: adjP <= alpha }));
+}
+
+/**
+ * Benjamini-Yekutieli False Discovery Rate correction (Phase 7A). Same
+ * step-up structure as Benjamini-Hochberg, but scaled by the harmonic
+ * sum C(m) = sum(1/i, i=1..m) — the correction BH's own guarantee
+ * doesn't cover: BH assumes independence or positive dependence between
+ * tests, which does NOT hold across this platform's discoveries (many
+ * share underlying market data and overlapping snapshots). BY is valid
+ * under ANY dependency structure, at the cost of being more
+ * conservative. Validated: for the classic 5-p-value example, every
+ * BY-adjusted value is >= the corresponding BH-adjusted value (BY's
+ * defining property, since C(m)>=1 always), and the two agree exactly
+ * at m=1 (C(1)=1).
+ */
+function msdBenjaminiYekutieli(pValues, alpha){
+  alpha = alpha != null ? alpha : 0.05;
+  const m = pValues.length;
+  if (m === 0) return [];
+  let harmonicSum = 0;
+  for (let k = 1; k <= m; k++) harmonicSum += 1 / k;
+  const indexed = pValues.map((p, i) => ({ p, i })).sort((a, b) => a.p - b.p);
+  let prevAdj = 1;
+  const adjusted = new Array(m);
+  for (let rank = m; rank >= 1; rank--) {
+    const entry = indexed[rank - 1];
+    const raw = entry.p * m * harmonicSum / rank;
     const adj = Math.min(prevAdj, raw);
     adjusted[entry.i] = Math.min(1, adj);
     prevAdj = adj;
@@ -6336,6 +6936,11 @@ async function msdRecordDiscoveryEvidence(evidence){
     symbol: evidence.symbol,
     regime: evidence.regime,
     regimeFingerprint: evidence.regimeFingerprint,
+    datasetEpochMin: evidence.datasetEpochMin,
+    datasetEpochMax: evidence.datasetEpochMax,
+    statisticalEngineVersion: evidence.statisticalEngineVersion,
+    codeVersion: evidence.codeVersion,
+    registrationId: evidence.registrationId,
     statisticalEvidence: evidence.statisticalEvidence,
     discoveredAt: Date.now(),
   };
@@ -6758,6 +7363,280 @@ function msdClassifyDecayStatus(evidenceHistory, discoveryType){
   return { status: 'Stable', trend };
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// Phase 7A — False Discovery Control (global, cross-discovery)
+// ══════════════════════════════════════════════════════════════════════
+// Answers a different question than the per-experiment BH correction
+// Phase 0 already applies: not "were the features/combos/clusters tested
+// THIS experiment corrected against each other" (already true, always
+// has been) but "does this discovery survive correction against EVERY
+// discovery the platform has EVER found." As the Discovery Repository
+// grows across many experiments over the life of the project, the bar
+// for the strongest claim ("Verified") should get more conservative,
+// not stay fixed to whatever one experiment's local family looked like.
+//
+// REUSE: msdBenjaminiHochberg (Phase 0) and msdBenjaminiYekutieli (just
+// above) are called AS-IS — this is orchestration, not a third
+// correction implementation. msdExtractPValueFromEvidence (Phase 1)
+// supplies each discovery's representative p-value with zero new
+// extraction logic.
+//
+// SCOPE, stated explicitly: the global family is evaluated against the
+// CURRENT set of all discoveries, not historically reconstructed at
+// every past replay point — doing the latter would require snapshotting
+// the whole repository's composition at every historical instant, a
+// materially larger feature not justified here. "q-value" here means
+// the BH-adjusted p-value (a standard, widely-used convention), not
+// Storey's full pi0-estimation procedure — a deliberate, stated
+// simplification, not an unstated one.
+
+const MSD_FDC_ALPHA = 0.05;
+
+/**
+ * Computes the global multiple-testing correction ONCE across every
+ * discovery's latest representative p-value. Returns a per-discoveryKey
+ * lookup plus family-level statistics (total tests, Bonferroni
+ * family-wise threshold, and the expected number of false discoveries
+ * among those currently called BH-significant — a direct, standard
+ * consequence of the FDR guarantee: E[false discoveries] <= q * R for R
+ * discoveries called significant at FDR level q).
+ */
+function msdComputeFalseDiscoveryControl(preliminarySummaries){
+  const withPValue = preliminarySummaries
+    .map(s => ({ discoveryKey: s.discoveryKey, discoveryType: s.discoveryType, pValue: msdExtractPValueFromEvidence(s.latestEvidence, s.discoveryType) }))
+    .filter(s => s.pValue != null);
+
+  const m = withPValue.length;
+  const perDiscovery = {};
+  if (m === 0) return { perDiscovery, family: { totalTests: 0 } };
+
+  const pValues = withPValue.map(s => s.pValue);
+  const bh = msdBenjaminiHochberg(pValues, MSD_FDC_ALPHA);
+  const by = msdBenjaminiYekutieli(pValues, MSD_FDC_ALPHA);
+
+  withPValue.forEach((s, i) => {
+    const nominallySignificant = s.pValue < MSD_FDC_ALPHA;
+    const fdrSignificant = bh[i].significant;
+    const byFdrSignificant = by[i].significant;
+    perDiscovery[s.discoveryKey] = {
+      pValue: s.pValue,
+      qValueBH: bh[i].adjustedPValue,
+      qValueBY: by[i].adjustedPValue,
+      nominallySignificant, fdrSignificant, byFdrSignificant,
+      // The single "does this pass the platform's appropriate global
+      // correction" flag the Maturity Engine gates on for Verified —
+      // BY, the stricter/more broadly-valid test, since it doesn't
+      // assume independence this platform's discoveries don't have.
+      globallySignificant: byFdrSignificant,
+      significanceClassification: !nominallySignificant ? 'Not Significant'
+        : !fdrSignificant ? 'Nominal Significance'
+        : !byFdrSignificant ? 'FDR-adjusted Significance (BH only — does not survive BY)'
+        : 'FDR-adjusted Significance', // "Verified Significance" is assigned later, only once maturity actually reaches Verified — see msdSummarizeDiscovery
+    };
+  });
+
+  const fdrSignificantCount = Object.values(perDiscovery).filter(d => d.fdrSignificant).length;
+  const bonferroniAlpha = MSD_FDC_ALPHA / m;
+  const fwerEstimate = 1 - Math.pow(1 - MSD_FDC_ALPHA, m); // probability of >=1 false positive across the family if EVERY test were judged at the raw alpha with no correction at all — the risk multiple-testing correction exists to control
+  const expectedFalseDiscoveries = MSD_FDC_ALPHA * fdrSignificantCount; // standard FDR guarantee: E[false discoveries] <= q * R
+
+  return {
+    perDiscovery,
+    family: { totalTests: m, alpha: MSD_FDC_ALPHA, bonferroniAlpha, fwerEstimate, fdrSignificantCount, expectedFalseDiscoveries },
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Phase 7H — Scientific Confidence Framework
+// ══════════════════════════════════════════════════════════════════════
+// Two complementary measures, deliberately never merged into one:
+// Evidence Score (Phase 0) measures the STATISTICAL STRENGTH of a
+// finding — effect size, significance, sample size. Scientific
+// Confidence Score measures confidence that a finding represents a
+// genuine, reproducible, generalizable market phenomenon — a huge-
+// effect-size, highly-significant finding from ONE unreplicated
+// experiment can have a high Evidence Score and a LOW Scientific
+// Confidence Score simultaneously; that gap is the entire point.
+//
+// GAP CLOSED: Production Validation (7C) and Calibration (7D) previously
+// only ran on-demand via a UI button and were never persisted or
+// attached to a discovery — Scientific Confidence Score can't
+// meaningfully incorporate results that vanish the moment the button is
+// clicked. `validation_record` is a new finding type in the SAME
+// append-only KnowledgeBase (same pattern as every other capability
+// added since Phase 6), so a validation run becomes a permanent,
+// dated record, not ephemeral UI output.
+//
+// FACTORS NOT YET ASSESSED ARE EXCLUDED, NOT PENALIZED: the composite is
+// a plain arithmetic mean over whatever's actually been tested — a
+// discovery that has never had a Production Validation or Calibration
+// check run yet is missing those factors from the average entirely, not
+// scored as if it failed them. Contradiction (Phase 5) is the one
+// deliberate exception: it's an ABSOLUTE OVERRIDE on the whole score,
+// not one factor among equals, matching the Maturity Engine's own
+// treatment of contradiction as categorically worse than merely weak
+// evidence.
+
+const MSD_SCIENTIFIC_CONFIDENCE_CONTRADICTION_CEILING = 0.15;
+const MSD_MIN_SCIENTIFIC_CONFIDENCE_FOR_VERIFIED = 0.5;
+
+/** Persists a Production Validation or Calibration result permanently, linked to the discoveryKey it was run against — reuses the exact same append-only msdWriteFinding path as every other finding type. */
+async function msdPersistValidationRecord(discoveryKey, kind, data){
+  const finding = {
+    findingId: msdGenerateFindingId(),
+    type: 'validation_record',
+    discoveryKey,
+    kind, // 'production_validation' | 'calibration'
+    recordedAt: Date.now(),
+    data,
+  };
+  return await msdWriteFinding(finding);
+}
+
+/** Every discoveryKey's LATEST validation record of each kind — read-only, same fetch-once pattern already established for False Discovery Control and Registrations. */
+async function msdGetLatestValidationRecords(){
+  const allFindings = await msdGetAllFindings();
+  const records = allFindings.filter(f => f.type === 'validation_record').sort((a, b) => b.recordedAt - a.recordedAt);
+  const latestByKey = {};
+  records.forEach(r => {
+    if (!latestByKey[r.discoveryKey]) latestByKey[r.discoveryKey] = {};
+    if (!latestByKey[r.discoveryKey][r.kind]) latestByKey[r.discoveryKey][r.kind] = r.data; // first hit per kind, since sorted newest-first
+  });
+  return latestByKey;
+}
+
+/**
+ * Computes the Scientific Confidence Score from every input already
+ * independently established by Phases 0-7G, plus any persisted
+ * validation record. Deliberately computed from RAW fdcInfo fields (not
+ * the maturity-dependent significanceClassification string) so this can
+ * be evaluated BEFORE maturity is known, and then used to GATE maturity
+ * without circularity.
+ */
+function msdComputeScientificConfidenceScore(inputs){
+  const { fdcInfo, replicationProfile, evidenceStabilityScore, regimeBreakdown, transferabilityScore, decayStatus, contradicted, validationRecord } = inputs;
+  const factors = {};
+
+  if (fdcInfo) {
+    factors.falseDiscoveryControl = fdcInfo.globallySignificant ? 1.0 : fdcInfo.fdrSignificant ? 0.6 : fdcInfo.nominallySignificant ? 0.3 : 0;
+  }
+  if (replicationProfile) {
+    factors.independentReplication = replicationProfile.classification === 'Externally Replicated' ? 1.0
+      : replicationProfile.classification === 'Internally Replicated' ? 0.5 : 0;
+  }
+  if (evidenceStabilityScore != null) factors.evidenceStability = Math.max(0, Math.min(1, evidenceStabilityScore));
+  if (regimeBreakdown && regimeBreakdown.regimesWithData > 0) {
+    const judged = Object.values(regimeBreakdown.regimes).filter(r => r.status !== 'Insufficient Data');
+    if (judged.length) factors.regimeValidation = judged.filter(r => r.status === 'Survives').length / judged.length;
+  }
+  if (transferabilityScore != null) factors.marketTransferability = Math.max(0, Math.min(1, transferabilityScore));
+  if (validationRecord && validationRecord.production_validation && validationRecord.production_validation.passed != null) {
+    factors.outOfSampleValidation = validationRecord.production_validation.passed ? 1.0 : 0.0;
+  }
+  if (validationRecord && validationRecord.calibration && validationRecord.calibration.ece != null) {
+    factors.probabilityCalibration = Math.max(0, 1 - validationRecord.calibration.ece * 2); // ECE=0 -> 1.0; ECE>=0.5 -> 0
+  }
+  const decayCredit = { Improving: 1.0, Stable: 0.8, Uncertain: 0.5, Decaying: 0.1 };
+  if (decayStatus && decayCredit[decayStatus] != null) factors.decayAnalysis = decayCredit[decayStatus];
+
+  const availableKeys = Object.keys(factors);
+  if (!availableKeys.length) return { score: null, factors, contradicted: !!contradicted };
+  let score = availableKeys.reduce((s, k) => s + factors[k], 0) / availableKeys.length;
+
+  // Contradiction Detection (Phase 5) — absolute override, see module docblock.
+  if (contradicted) score = Math.min(score, MSD_SCIENTIFIC_CONFIDENCE_CONTRADICTION_CEILING);
+
+  return { score, factors, contradicted: !!contradicted, factorsAssessed: availableKeys.length };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Phase 7B — Independent Replication
+// ══════════════════════════════════════════════════════════════════════
+// Answers: are a discovery's supporting experiments genuinely
+// INDEPENDENT evidence, or repeated analysis of similar/overlapping
+// data wearing different experimentIds. "Supporting experiment count"
+// alone cannot tell the difference — two experiments run back-to-back on
+// the same collection period, different random seeds, currently count
+// as "2 experiments" even though they may be looking at nearly the same
+// ticks. This closes that gap using the dataset epoch range Phase 7B
+// just added to the Experiment record (see msdRunExperiment).
+//
+// REUSE: markets (symbol) and regimes are already tracked (Phase 0,
+// Phase 2) — zero new logic there, just a distinct-count. Feature
+// version was already stored per evidence, just never counted distinctly
+// before. The genuinely new piece is time-window overlap detection.
+
+const MSD_REPLICATION_MIN_WINDOWS = 2; // fewer than this many non-overlapping time windows and even many raw experimentIds don't count as real replication
+
+/** Merges a list of {min,max} epoch intervals into the minimal number of non-overlapping windows — the standard sorted-interval-merge algorithm, O(n log n). Two experiments whose windows merge into ONE analyzed overlapping underlying market data and are not independent replications of each other, however many raw experimentIds are involved. */
+function msdMergeTimeWindows(intervals){
+  const valid = intervals.filter(iv => iv.min != null && iv.max != null && Number.isFinite(iv.min) && Number.isFinite(iv.max));
+  if (!valid.length) return [];
+  const sorted = valid.slice().sort((a, b) => a.min - b.min);
+  const merged = [Object.assign({}, sorted[0])];
+  for (let i = 1; i < sorted.length; i++) {
+    const last = merged[merged.length - 1];
+    if (sorted[i].min <= last.max) last.max = Math.max(last.max, sorted[i].max); // overlaps or touches — merge
+    else merged.push(Object.assign({}, sorted[i]));
+  }
+  return merged;
+}
+
+/**
+ * Classifies one discovery's replication profile from its supporting
+ * experiments (one representative record per distinct experimentId —
+ * evidence entries from the same experiment share the same context, so
+ * only counted once). "Insufficient Replication" if fewer than
+ * MSD_REPLICATION_MIN_WINDOWS genuinely non-overlapping time windows
+ * exist — the direct enforcement of "prevent repeated analysis of
+ * similar datasets from inflating evidence." "Externally Replicated"
+ * requires BOTH enough time windows AND at least one other axis (market,
+ * regime, or feature version) to actually vary — replication that still
+ * holds when something meaningful about the conditions changes, not just
+ * repeated confirmation under identical circumstances.
+ */
+function msdComputeReplicationProfile(findings, discoveryType){
+  const byExperiment = {};
+  findings.forEach(f => {
+    if (!byExperiment[f.experimentId]) {
+      byExperiment[f.experimentId] = { experimentId: f.experimentId, symbol: f.symbol, regime: f.regime, featureVersion: f.featureVersion, epochMin: f.datasetEpochMin, epochMax: f.datasetEpochMax };
+    }
+  });
+  const experiments = Object.values(byExperiment);
+  const windows = msdMergeTimeWindows(experiments.map(e => ({ min: e.epochMin, max: e.epochMax })));
+  const distinctTimeWindows = windows.length;
+  const distinctMarkets = new Set(experiments.map(e => e.symbol).filter(s => s != null)).size;
+  const distinctRegimes = new Set(experiments.map(e => e.regime).filter(r => r != null && r !== 'Undetermined')).size;
+  const distinctFeatureVersions = new Set(experiments.map(e => e.featureVersion).filter(v => v != null)).size;
+
+  let classification;
+  if (distinctTimeWindows < MSD_REPLICATION_MIN_WINDOWS) classification = 'Insufficient Replication';
+  else if (distinctMarkets >= 2 || distinctRegimes >= 2 || distinctFeatureVersions >= 2) classification = 'Externally Replicated';
+  else classification = 'Internally Replicated';
+
+  return { experimentCount: experiments.length, distinctTimeWindows, distinctMarkets, distinctRegimes, distinctFeatureVersions, classification };
+}
+
+/**
+ * Phase 7C — prospective validation: does at least one supporting
+ * experiment's underlying MARKET DATA (datasetEpochMin, Phase 7B) begin
+ * AFTER this discovery was first proposed (firstSeenAt)? If so, that
+ * evidence could not possibly have been curve-fit to — the data it's
+ * drawn from didn't exist in the real world yet when the claim was
+ * first made. The strongest form of validation this platform can offer,
+ * computed entirely from data Phase 7B already tracks — zero new
+ * tracking, only a new comparison. firstSeenAt is milliseconds
+ * (Date.now()); datasetEpochMin is Unix seconds (tick data) — converted
+ * once here, not silently mismatched.
+ */
+function msdComputeProspectiveValidation(findings, firstSeenAt){
+  const firstSeenSeconds = firstSeenAt / 1000;
+  const prospectiveExperiments = Array.from(new Set(
+    findings.filter(f => f.datasetEpochMin != null && f.datasetEpochMin > firstSeenSeconds).map(f => f.experimentId)
+  ));
+  return { prospectivelyValidated: prospectiveExperiments.length > 0, prospectiveExperimentIds: prospectiveExperiments };
+}
+
 /**
  * Replays one discoveryKey's evidence chronologically, tracking the
  * running set of DISTINCT experiments that have confirmed it AND (Phase
@@ -6798,8 +7677,27 @@ function msdClassifyDecayStatus(evidenceHistory, discoveryType){
  * "Do not average contradictory evidence" means never letting count
  * alone paper over a sign flip — this gate is the maturity-side
  * enforcement of that principle.
+ *
+ * GLOBAL FALSE DISCOVERY GATE (Phase 7A): Verified additionally requires
+ * surviving the CURRENT global Benjamini-Yekutieli correction across
+ * every discovery the platform has ever found, not just the local,
+ * per-experiment correction each analyzer already applies before
+ * recording any evidence at all. "No discovery may become Verified
+ * without surviving appropriate multiple-testing correction" — this is
+ * the appropriate one for the platform's strongest claim. Missing
+ * correction info (e.g. this discovery type has no p-value at all, like
+ * single_feature) never blocks, matching every other gate's own
+ * insufficient-data precedent.
+ *
+ * REPLICATION GATE (Phase 7B): Repeatable/Verified additionally require
+ * at least MSD_REPLICATION_MIN_WINDOWS genuinely non-overlapping dataset
+ * time windows among supporting experiments — not just that many
+ * distinct experimentIds. Re-running the same underlying collection
+ * period repeatedly, however many times, cannot manufacture this on its
+ * own; "prevent repeated analysis of similar datasets from inflating
+ * evidence" is enforced exactly here.
  */
-function msdComputePromotionHistory(evidenceList){
+function msdComputePromotionHistory(evidenceList, fdcInfo, scientificConfidenceScore){
   const sorted = evidenceList.slice().sort((a, b) => a.discoveredAt - b.discoveredAt);
   const rules = MSD_MATURITY_PROMOTION_RULES;
   const discoveryType = sorted.length ? sorted[0].discoveryType : null;
@@ -6816,6 +7714,7 @@ function msdComputePromotionHistory(evidenceList){
     const stabilityResult = msdComputeEvidenceStabilityScore(evidenceSoFar, discoveryType);
     const decayResult = msdClassifyDecayStatus(evidenceSoFar, discoveryType);
     const contradictionResult = msdDetectContradiction(findingsSoFar, discoveryType);
+    const replicationResult = msdComputeReplicationProfile(findingsSoFar, discoveryType);
     // A stability score that cannot yet be computed (insufficient history)
     // never BLOCKS promotion on its own — "not enough data to judge
     // consistency" is not the same failure as "judged and found
@@ -6825,17 +7724,35 @@ function msdComputePromotionHistory(evidenceList){
     const stabilityOk = level => stabilityResult.score == null || stabilityResult.score >= rules[level].minStability;
     const decayOk = decayResult.status !== 'Decaying';
     const contradictionOk = !contradictionResult.contradicted;
+    // Phase 7A: missing correction info (no computable p-value for this
+    // discovery type) never blocks, matching every other gate's own
+    // insufficient-data precedent — only a COMPUTED, non-significant
+    // result gates.
+    const globalFdrOk = fdcInfo == null || fdcInfo.globallySignificant === true;
+    const replicationOk = replicationResult.classification !== 'Insufficient Replication';
+    // Phase 7H: "achieving the required Scientific Confidence Score" is
+    // one of the explicit Verified Discovery Criteria — applied the same
+    // way as the global FDR gate (current value, not historically
+    // replayed per evidence point, since several of its own inputs, like
+    // Production Validation, aren't naturally decomposable per-experiment
+    // either). A score that cannot yet be computed at all (zero factors
+    // assessed) never blocks, matching every other gate's insufficient-
+    // data precedent.
+    const scientificConfidenceOk = scientificConfidenceScore == null || scientificConfidenceScore >= MSD_MIN_SCIENTIFIC_CONFIDENCE_FOR_VERIFIED;
 
     let level = 'observation';
-    if (n >= rules.verified.minExperiments && stabilityOk('verified') && decayOk && contradictionOk) level = 'verified';
-    else if (n >= rules.repeatable.minExperiments && stabilityOk('repeatable') && decayOk && contradictionOk) level = 'repeatable';
-    else if (n >= rules.candidate.minExperiments && stabilityOk('candidate')) level = 'candidate'; // decay/contradiction gates apply from Repeatable up, not Candidate — a discovery must still be trackable as a Candidate even while contradicted, so the contradiction is visible rather than the discovery vanishing from the repository entirely
+    if (n >= rules.verified.minExperiments && stabilityOk('verified') && decayOk && contradictionOk && globalFdrOk && replicationOk && scientificConfidenceOk) level = 'verified';
+    else if (n >= rules.repeatable.minExperiments && stabilityOk('repeatable') && decayOk && contradictionOk && replicationOk) level = 'repeatable';
+    else if (n >= rules.candidate.minExperiments && stabilityOk('candidate')) level = 'candidate'; // decay/contradiction/replication gates apply from Repeatable up, global-FDR and Scientific Confidence only at Verified — never at Candidate, so a discovery stays trackable and visible in the repository rather than vanishing
     if (level !== lastLevel) {
       history.push({
         level, timestamp: e.discoveredAt, supportingExperimentCount: n, triggeringExperimentId: e.experimentId,
         stabilityScore: stabilityResult.score, stabilitySubScores: stabilityResult.subScores,
         decayStatus: decayResult.status, decayTrend: decayResult.trend,
         contradicted: contradictionResult.contradicted,
+        globalFdrOk,
+        replicationClassification: replicationResult.classification,
+        scientificConfidenceOk, scientificConfidenceScore,
       });
       lastLevel = level;
     }
@@ -6843,27 +7760,56 @@ function msdComputePromotionHistory(evidenceList){
   return history;
 }
 
-/** The CURRENT maturity level for one discoveryKey — always the last entry of its derived promotion history, computed from the exact same logic, so the two can never disagree. */
+/** The CURRENT maturity level for one discoveryKey — always the last entry of its derived promotion history, computed from the exact same logic, so the two can never disagree. NOTE (Phase 7A): called without fdcInfo, so this does NOT apply the global false-discovery gate (which requires the cross-discovery family only msdGetDiscoverySummaries computes) — a discovery could show "verified" here but not in msdSummarizeDiscovery's own output. Currently unused elsewhere in the app; msdGetDiscoverySummaries remains the authoritative source for maturity level. */
 function msdComputeMaturityLevel(evidenceList){
   const history = msdComputePromotionHistory(evidenceList);
   return history.length ? history[history.length - 1].level : 'observation';
 }
 
 /** Full, derived summary for one discoveryKey — the Discovery Repository's primary read interface. */
-function msdSummarizeDiscovery(discoveryKey, evidenceList){
+function msdSummarizeDiscovery(discoveryKey, evidenceList, fdcInfo, registrationsById, validationRecordsByKey){
   const sorted = evidenceList.slice().sort((a, b) => a.discoveredAt - b.discoveredAt);
-  const promotionHistory = msdComputePromotionHistory(sorted);
   const discoveryType = sorted[0].discoveryType;
+  // Phase 7H: every one of these is computed BEFORE promotionHistory —
+  // deliberately reordered from the pre-7H version — because Scientific
+  // Confidence Score needs them, and Scientific Confidence Score itself
+  // needs to be available BEFORE promotionHistory runs so it can gate
+  // Verified. None of these factors depend on maturityLevel, so this
+  // reordering introduces no circularity.
   const stabilityResult = msdComputeEvidenceStabilityScore(sorted.map(e => e.statisticalEvidence), discoveryType);
   const regimeBreakdown = msdComputeRegimeBreakdown(sorted, discoveryType);
   const decayResult = msdClassifyDecayStatus(sorted.map(e => e.statisticalEvidence), discoveryType);
   const marketBreakdown = msdComputeMarketBreakdown(sorted, discoveryType);
   const transferability = msdComputeTransferabilityScore(marketBreakdown);
   const contradiction = msdDetectContradiction(sorted, discoveryType);
+  const replicationProfile = msdComputeReplicationProfile(sorted, discoveryType);
+  const prospectiveValidation = msdComputeProspectiveValidation(sorted, sorted[0].discoveredAt);
+  const governance = msdClassifyDiscoveryGovernance(sorted, discoveryKey, registrationsById || {});
+
+  const validationRecord = (validationRecordsByKey || {})[discoveryKey] || null;
+  const scientificConfidence = msdComputeScientificConfidenceScore({
+    fdcInfo, replicationProfile, evidenceStabilityScore: stabilityResult.score, regimeBreakdown,
+    transferabilityScore: transferability ? transferability.score : null,
+    decayStatus: decayResult.status, contradicted: contradiction.contradicted, validationRecord,
+  });
+
+  const promotionHistory = msdComputePromotionHistory(sorted, fdcInfo, scientificConfidence.score);
+  const maturityLevel = promotionHistory.length ? promotionHistory[promotionHistory.length - 1].level : 'observation';
+  // Phase 7A: "Verified Significance" is the platform's strongest label —
+  // reserved for discoveries that have ACTUALLY reached Verified maturity
+  // (which already required surviving the global FDR gate above), not
+  // just discoveries whose p-value happens to clear the bar in isolation.
+  // Distinguishes exactly the three levels requested: Nominal (raw
+  // p<0.05, uncorrected), FDR-adjusted (survives correction but not yet
+  // Verified maturity), Verified (survives correction AND has actually
+  // met every other maturity requirement).
+  const significanceClassification = !fdcInfo ? 'Insufficient Data'
+    : maturityLevel === 'verified' ? 'Verified Significance'
+    : fdcInfo.significanceClassification;
   return {
     discoveryKey,
     discoveryType,
-    maturityLevel: promotionHistory.length ? promotionHistory[promotionHistory.length - 1].level : 'observation',
+    maturityLevel,
     supportingExperimentIds: Array.from(new Set(sorted.map(e => e.experimentId))),
     distinctSymbols: Array.from(new Set(sorted.map(e => e.symbol).filter(s => s != null))),
     distinctLeadTimes: Array.from(new Set(sorted.map(e => e.leadTime).filter(lt => lt != null))),
@@ -6881,14 +7827,41 @@ function msdSummarizeDiscovery(discoveryKey, evidenceList){
     marketBreakdown,
     transferabilityScore: transferability ? transferability.score : null,
     transferabilityMarketsJudged: transferability ? transferability.marketsJudged : 0,
+    falseDiscoveryControl: fdcInfo,
+    significanceClassification,
+    replicationProfile,
+    prospectiveValidation,
+    governance,
+    validationRecord,
+    scientificConfidenceScore: scientificConfidence.score,
+    scientificConfidenceFactors: scientificConfidence.factors,
   };
 }
 
-/** Every discovery currently known, summarized — the Discovery Repository's "browse everything" entry point. */
+/**
+ * Every discovery currently known, summarized — the Discovery
+ * Repository's "browse everything" entry point. Phase 7A restructures
+ * this into two passes: build preliminary summaries first (to get each
+ * discovery's latest representative p-value), compute the GLOBAL
+ * multiple-testing correction once across all of them, then rebuild the
+ * summaries with that correction available so the Maturity Engine's new
+ * global-FDR gate can apply. This doubles msdSummarizeDiscovery's own
+ * work per call — an honest, bounded cost (discovery counts are nowhere
+ * near tick-data scale) traded for a materially more rigorous,
+ * whole-repository-aware significance gate. Phase 7F: registrations are
+ * fetched ONCE here too (same fetch-once pattern) and passed down as a
+ * plain lookup, keeping msdSummarizeDiscovery itself synchronous.
+ */
 async function msdGetDiscoverySummaries(){
   const evidence = await msdGetAllDiscoveryEvidence();
   const grouped = msdGroupDiscoveryEvidence(evidence);
-  return Object.entries(grouped).map(([key, list]) => msdSummarizeDiscovery(key, list));
+  const allRegistrations = await msdGetAllRegistrations();
+  const registrationsById = {};
+  allRegistrations.forEach(r => { registrationsById[r.registrationId] = r; });
+  const validationRecordsByKey = await msdGetLatestValidationRecords(); // Phase 7H — fetched once, same fetch-once pattern as registrations and FDC
+  const preliminary = Object.entries(grouped).map(([key, list]) => msdSummarizeDiscovery(key, list, null, registrationsById, validationRecordsByKey));
+  const fdc = msdComputeFalseDiscoveryControl(preliminary);
+  return Object.entries(grouped).map(([key, list]) => msdSummarizeDiscovery(key, list, fdc.perDiscovery[key] || null, registrationsById, validationRecordsByKey));
 }
 
 // ── Research Session Manager: the automatic-execution entry point ──────
@@ -7136,6 +8109,142 @@ async function msdGetAllResearchReports(){
   return allFindings.filter(f => f.type === 'research_report').sort((a, b) => b.generatedAt - a.generatedAt);
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// Phase 7E — Data Provenance & Lineage
+// ══════════════════════════════════════════════════════════════════════
+// Most of what this phase requires already exists in substance, built
+// incrementally across Phases 0-7D: experimentId, symbol, regime,
+// featureVersion, dataset epoch range, and the frozen exact
+// trainSnapshotIds/valSnapshotIds/testSnapshotIds are all already
+// recorded. datasetFingerprint (already computed at experiment-build
+// time, used for the existing reproducibility stress test) IS this
+// platform's Dataset ID — reused directly, not reinvented. Evidence ID
+// (findingId) and Discovery ID (discoveryKey) already exist too. This
+// phase fills the genuine remaining gaps and assembles everything into
+// one walkable chain, rather than requiring manual cross-referencing of
+// four separate stores by hand.
+//
+// TWO GAPS FILLED: Label Version (distinct from Feature Version — covers
+// the labeling ruleset itself: what counts as a "run," the lookback
+// window logic) and Statistical Engine Version (which phase's
+// statistical methodology produced this evidence — meaningful since the
+// methods themselves have materially changed release over release, most
+// recently through Phase 7D).
+//
+// ONE GAP STATED HONESTLY, NOT PAPERED OVER: "Raw Tick Data." Confirmed
+// directly before writing this: `indHistory` is a bounded, in-memory
+// rolling buffer (see its own definition above) that is NEVER persisted
+// — only derived, labeled MarketState snapshots are permanent. There is
+// no raw-tick store to link to. The honest link this platform CAN offer
+// is each snapshot's own recorded `epoch` (exact tick time) and `price`
+// — sufficient to cross-reference against Deriv's own historical tick
+// API if ever needed, but not a stored raw-tick record within this app.
+//
+// "GIT COMMIT HASH": this is a single static HTML file with no git
+// repository tracked inside this deployment — a literal commit hash
+// isn't available. MSD_CODE_VERSION is the honest substitute: a
+// manually-maintained version identifier for this file's own code,
+// serving the same purpose (which exact version of the analysis logic
+// produced this evidence) without pretending a VCS hash exists where
+// none does.
+
+const MSD_STATISTICAL_ENGINE_VERSION = 'msd-engine-7d'; // bump this whenever a phase materially changes HOW evidence is computed, not just what UI shows it
+const MSD_CODE_VERSION = 'mambafx-2026.07-phase7e';       // honest substitute for a git commit hash — see module docblock above
+
+/**
+ * Assembles the full provenance chain for one discovery: every
+ * supporting experiment's dataset identity (datasetFingerprint, reused
+ * as Dataset ID), exact frozen snapshot membership, feature/label/engine
+ * versions, and the linked Research Report (Phase 6) for that
+ * experiment's research session — pure assembly of already-stored data,
+ * no new computation, mirroring exactly how Phase 6's report itself was
+ * built.
+ */
+async function msdGetDiscoveryProvenance(discoveryKey){
+  const allFindings = await msdGetAllDiscoveryEvidence();
+  const ownFindings = allFindings.filter(f => f.discoveryKey === discoveryKey).sort((a, b) => a.discoveredAt - b.discoveredAt);
+  if (!ownFindings.length) return { error: 'no evidence found for this discoveryKey' };
+
+  const allExperiments = await msdGetAllExperiments();
+  const allReports = await msdGetAllResearchReports();
+  const allStates = await msdGetAllMarketStates();
+  const experimentsById = {};
+  allExperiments.forEach(e => { experimentsById[e.experimentId] = e; });
+  const reportsBySession = {};
+  allReports.forEach(r => { reportsBySession[r.researchSessionId] = r; });
+  const labelVersionBySnapshotId = {};
+  allStates.forEach(s => { if (s.labelVersion) labelVersionBySnapshotId[s.snapshotId] = s.labelVersion; });
+
+  const experimentChain = [];
+  const seenExperiments = new Set();
+  ownFindings.forEach(f => {
+    if (seenExperiments.has(f.experimentId)) return;
+    seenExperiments.add(f.experimentId);
+    const exp = experimentsById[f.experimentId];
+    const report = reportsBySession[f.researchSessionId];
+    // labelVersion is stamped per-SNAPSHOT (msdBuildLabeledSnapshot), not
+    // on the Experiment record — read from an actual representative
+    // snapshot rather than assumed. Honestly null for snapshots captured
+    // before this phase added the field, not backfilled with a guess.
+    const firstTrainId = exp && exp.trainSnapshotIds && exp.trainSnapshotIds.length ? exp.trainSnapshotIds[0] : null;
+    const labelVersion = firstTrainId ? (labelVersionBySnapshotId[firstTrainId] || null) : null;
+    experimentChain.push({
+      experimentId: f.experimentId,
+      evidenceId: f.findingId,
+      datasetId: exp ? exp.datasetFingerprint : null, // reused, not reinvented — see module docblock
+      featureVersion: f.featureVersion,
+      labelVersion,
+      statisticalEngineVersion: f.statisticalEngineVersion || null, // only present on evidence recorded after this phase — honestly null for earlier evidence, not backfilled with a guess
+      codeVersion: f.codeVersion || null,
+      trainSnapshotIds: exp ? exp.trainSnapshotIds : null,
+      valSnapshotIds: exp ? exp.valSnapshotIds : null,
+      testSnapshotIds: exp ? exp.testSnapshotIds : null,
+      researchReportId: report ? report.findingId : null,
+      experimentRecordFound: !!exp,
+      researchReportFound: !!report,
+    });
+  });
+
+  return {
+    discoveryId: discoveryKey,
+    discoveryType: ownFindings[0].discoveryType,
+    evidenceIds: ownFindings.map(f => f.findingId),
+    experimentChain,
+  };
+}
+
+/**
+ * Operationalizes "every conclusion must remain reproducible from raw
+ * evidence" as an ACTUAL, checkable claim rather than an aspiration: for
+ * every experiment supporting this discovery, confirms its frozen
+ * trainSnapshotIds/valSnapshotIds/testSnapshotIds STILL EXIST in the
+ * permanent MarketStates store. A missing snapshot would mean the raw
+ * evidence behind a conclusion has been lost — this is how that would
+ * actually be detected, not assumed impossible.
+ */
+async function msdVerifyProvenanceIntegrity(discoveryKey){
+  const provenance = await msdGetDiscoveryProvenance(discoveryKey);
+  if (provenance.error) return provenance;
+
+  const allStates = await msdGetAllMarketStates();
+  const existingIds = new Set(allStates.map(s => s.snapshotId));
+
+  const results = provenance.experimentChain.map(exp => {
+    if (!exp.experimentRecordFound) return { experimentId: exp.experimentId, ok: false, reason: 'Experiment record not found — cannot verify raw evidence at all' };
+    const allIds = (exp.trainSnapshotIds || []).concat(exp.valSnapshotIds || [], exp.testSnapshotIds || []);
+    const missing = allIds.filter(id => !existingIds.has(id));
+    return {
+      experimentId: exp.experimentId,
+      ok: missing.length === 0,
+      totalSnapshots: allIds.length,
+      missingCount: missing.length,
+      reason: missing.length ? `${missing.length} of ${allIds.length} raw snapshots are no longer present in MarketStates` : null,
+    };
+  });
+
+  return { discoveryId: discoveryKey, allReproducible: results.every(r => r.ok), experiments: results };
+}
+
 async function msdRunResearchSession(experimentRecord, discoveryResult, trainResult, dataset){
   const researchSessionId = msdGenerateResearchSessionId();
   const regimeInfo = dataset ? msdComputeDominantRegimeLabel(dataset) : null;
@@ -7197,6 +8306,11 @@ function msdSingleFeatureAnalyzer(experimentRecord, discoveryResult, trainResult
       symbol: experimentRecord.symbol,
       regime: regimeInfo ? regimeInfo.label : null,
       regimeFingerprint: regimeInfo ? regimeInfo.fingerprint : null,
+      datasetEpochMin: experimentRecord.datasetEpochMin,
+      datasetEpochMax: experimentRecord.datasetEpochMax,
+      statisticalEngineVersion: MSD_STATISTICAL_ENGINE_VERSION,
+      codeVersion: MSD_CODE_VERSION,
+      registrationId: experimentRecord.registrationId,
       statisticalEvidence: {
         sampleCount: discoveryResult.sampleStats.totalCount,
         positiveRate: discoveryResult.sampleStats.positiveRate,
@@ -7401,6 +8515,11 @@ function msdThresholdAnalyzer(experimentRecord, discoveryResult, trainResult, re
       symbol: experimentRecord.symbol,
       regime: regimeInfo ? regimeInfo.label : null,
       regimeFingerprint: regimeInfo ? regimeInfo.fingerprint : null,
+      datasetEpochMin: experimentRecord.datasetEpochMin,
+      datasetEpochMax: experimentRecord.datasetEpochMax,
+      statisticalEngineVersion: MSD_STATISTICAL_ENGINE_VERSION,
+      codeVersion: MSD_CODE_VERSION,
+      registrationId: experimentRecord.registrationId,
       statisticalEvidence: {
         threshold: result.threshold,
         direction: result.direction, // 'above' or 'below' — which side has the higher positive rate
@@ -7679,6 +8798,11 @@ function msdFeatureCombinationAnalyzer(experimentRecord, discoveryResult, trainR
       symbol: experimentRecord.symbol,
       regime: regimeInfo ? regimeInfo.label : null,
       regimeFingerprint: regimeInfo ? regimeInfo.fingerprint : null,
+      datasetEpochMin: experimentRecord.datasetEpochMin,
+      datasetEpochMax: experimentRecord.datasetEpochMax,
+      statisticalEngineVersion: MSD_STATISTICAL_ENGINE_VERSION,
+      codeVersion: MSD_CODE_VERSION,
+      registrationId: experimentRecord.registrationId,
       statisticalEvidence: {
         comboSize: size,
         conditions: members.map(m => ({ feature: m.feature, threshold: m.threshold, direction: m.direction, rateAlone: m.ownRate })),
@@ -7886,6 +9010,11 @@ function msdMarketStateAnalyzer(experimentRecord, discoveryResult, trainResult, 
       symbol: experimentRecord.symbol,
       regime: regimeInfo ? regimeInfo.label : null,
       regimeFingerprint: regimeInfo ? regimeInfo.fingerprint : null,
+      datasetEpochMin: experimentRecord.datasetEpochMin,
+      datasetEpochMax: experimentRecord.datasetEpochMax,
+      statisticalEngineVersion: MSD_STATISTICAL_ENGINE_VERSION,
+      codeVersion: MSD_CODE_VERSION,
+      registrationId: experimentRecord.registrationId,
       statisticalEvidence: {
         fingerprint: e.fingerprint,
         label: msdLabelMarketState(e.fingerprint), // heuristic, human-readable — the fingerprint above remains the canonical identity
@@ -8133,51 +9262,208 @@ function msdComputeLeadTimeDiscoveryRanking(findings){
  * timestamp than an earlier split, which would let future information
  * reach training).
  */
+// ══════════════════════════════════════════════════════════════════════
+// Phase 7G — Data Quality Validation
+// ══════════════════════════════════════════════════════════════════════
+// The integrity of the raw data itself, checked BEFORE any statistics
+// are computed — every downstream mechanism built through Phase 7F
+// (FDR correction, replication, calibration, provenance, governance)
+// assumes the input data is trustworthy; none of them can detect if it
+// isn't. msdValidateDataset (extended just above) already checks one
+// EXPERIMENT's built dataset; this checks the RAW, permanent MarketStates
+// collection itself — missing ticks, duplicates, clock discontinuities —
+// properties of the collection process, not of any one experiment's split.
+
+const MSD_EXPECTED_TICK_INTERVAL_SECONDS = 1; // Volatility 100 (1s) ticks exactly once per second by definition — not an approximation, see Phase 7C's purge-gap module for the same fact used the same way
+const MSD_GAP_WARNING_MULTIPLE = 5;      // a gap more than 5x the expected interval is worth flagging as a warning
+const MSD_GAP_CRITICAL_MULTIPLE = 60;    // a gap more than 60x (a full minute of silence) suggests a connection dropped mid-session
+const MSD_GAP_SESSION_BOUNDARY_SECONDS = 3600; // a gap beyond ONE HOUR is presumed to be a normal session boundary (the researcher simply wasn't collecting), not corruption — see docblock
+
+/**
+ * Validates the RAW, permanent MarketStates collection for one market —
+ * independent of any single experiment's dataset. Missing ticks/sampling
+ * gaps and clock discontinuities are distinguished explicitly: a gap
+ * (time moved forward faster than expected) suggests an interruption; a
+ * discontinuity (time moved BACKWARD) is a more serious, distinct
+ * anomaly — conflating the two would hide which failure mode occurred.
+ *
+ * GAP SEVERITY, a real design decision worth stating plainly: a large
+ * epoch gap is genuinely ambiguous on its own — it looks identical
+ * whether the live connection silently dropped mid-session (a real data
+ * quality problem, since ticks were expected continuously and some were
+ * silently lost) or the researcher simply wasn't running the collector
+ * at all between sessions (normal, expected, not corruption). This was
+ * caught directly: an earlier version treated ANY gap over 60 seconds as
+ * CRITICAL, which correctly flagged real interruptions but ALSO flagged
+ * the large, deliberate gaps between this app's own genuinely-separate
+ * test sessions as false failures. The fix: only gaps between 60 seconds
+ * and MSD_GAP_SESSION_BOUNDARY_SECONDS (1 hour) are treated as CRITICAL
+ * likely mid-session interruptions; gaps larger than that are logged as
+ * a WARNING (still visible, never hidden) and presumed to be an ordinary
+ * session boundary. This is a real, imperfect heuristic — the platform
+ * has no way to know if the researcher intended a longer break — stated
+ * honestly rather than pretending certainty that doesn't exist.
+ */
+function msdValidateRawDataQuality(allStates, symbol){
+  const filtered = symbol && symbol !== 'all' ? allStates.filter(s => s.symbol === symbol) : allStates;
+  const checks = [];
+  const push = (name, value, ok, critical, expected) => checks.push({ name, value, ok, critical: !!critical, expected });
+
+  const withEpoch = filtered.filter(s => s.epoch != null && Number.isFinite(s.epoch));
+  push('Snapshots With a Valid Epoch', withEpoch.length, withEpoch.length > 0, true, filtered.length);
+
+  const sorted = withEpoch.slice().sort((a, b) => a.epoch - b.epoch);
+
+  // Duplicate ticks: same symbol, same epoch, recorded more than once —
+  // distinct from msdValidateDataset's "duplicate snapshotId" check,
+  // which catches the SAME snapshot record appearing twice; this catches
+  // TWO DIFFERENT snapshot records both claiming the same tick.
+  const epochCounts = {};
+  sorted.forEach(s => { epochCounts[s.epoch] = (epochCounts[s.epoch] || 0) + 1; });
+  const duplicateTickCount = Object.values(epochCounts).filter(c => c > 1).length;
+  push('No Duplicate Ticks (same epoch recorded twice)', duplicateTickCount, duplicateTickCount === 0, true);
+
+  // Clock discontinuities: epoch moving BACKWARD when sorted by the very
+  // field we just sorted by shouldn't be possible unless multiple equal
+  // epochs exist — checked directly against timestamp (capture order)
+  // instead, which SHOULD move forward independently of epoch.
+  let clockDiscontinuities = 0;
+  for (let i = 1; i < sorted.length; i++) { if (sorted[i].timestamp < sorted[i - 1].timestamp) clockDiscontinuities++; }
+  push('No Clock Discontinuities (capture order matches epoch order)', clockDiscontinuities, clockDiscontinuities === 0, true);
+
+  // Missing ticks / sampling gaps / likely mid-session interruptions —
+  // see the module docblock above for why gaps beyond a plausible
+  // session length are downgraded to a warning instead of critical.
+  let warningGaps = 0, criticalGaps = 0, sessionBoundaryGaps = 0, maxGapSeconds = 0;
+  for (let i = 1; i < sorted.length; i++) {
+    const gap = sorted[i].epoch - sorted[i - 1].epoch;
+    if (gap > maxGapSeconds) maxGapSeconds = gap;
+    if (gap > MSD_GAP_SESSION_BOUNDARY_SECONDS) sessionBoundaryGaps++;
+    else if (gap > MSD_EXPECTED_TICK_INTERVAL_SECONDS * MSD_GAP_CRITICAL_MULTIPLE) criticalGaps++;
+    else if (gap > MSD_EXPECTED_TICK_INTERVAL_SECONDS * MSD_GAP_WARNING_MULTIPLE) warningGaps++;
+  }
+  push('No Large Sampling Gaps (>5x expected interval)', warningGaps, warningGaps === 0, false);
+  push('No Likely Mid-Session Interruptions (60s-1hr gap)', criticalGaps, criticalGaps === 0, true, { maxGapSeconds });
+  push('Session Boundaries Noted (>1hr gap — presumed normal, not corruption)', sessionBoundaryGaps, true, false);
+
+  const criticalFailures = checks.filter(c => c.critical && !c.ok);
+  return { symbol: symbol || 'all', totalSnapshots: filtered.length, checks, allOk: checks.every(c => c.ok), criticalFailures, hasCriticalFailure: criticalFailures.length > 0 };
+}
+
 function msdValidateDataset(dataset, config){
   const allSnapshots = dataset.trainSet.concat(dataset.valSet, dataset.testSet);
   const checks = [];
+  // Phase 7G: every check now carries a `critical` flag — a WARNING can
+  // be surfaced without stopping anyone, a CRITICAL failure is what
+  // "block analysis when critical failures are detected" actually gates
+  // on (see msdRunExperiment's mandatory quality gate below).
+  const push = (name, value, ok, critical, expected) => checks.push({ name, value, ok, critical: !!critical, expected });
 
   const totalObservations = allSnapshots.length;
-  checks.push({ name: 'Total Observations', value: totalObservations, ok: totalObservations > 0 });
+  push('Total Observations', totalObservations, totalObservations > 0, true);
 
   const positiveCount = allSnapshots.filter(s => s.outcome === 'positive').length;
   const negativeCount = allSnapshots.filter(s => s.outcome === 'negative').length;
-  checks.push({ name: 'Positive Samples', value: positiveCount, ok: positiveCount > 0 });
-  checks.push({ name: 'Negative Samples', value: negativeCount, ok: negativeCount > 0 });
+  push('Positive Samples', positiveCount, positiveCount > 0, true);
+  push('Negative Samples', negativeCount, negativeCount > 0, true);
 
   const ratio = positiveCount > 0 ? negativeCount / positiveCount : null;
   const expectedRatio = config.samplingRatio;
-  // Tolerant, not exact — the actual ratio depends on how many negatives
-  // were AVAILABLE to sample, which can fall short of the target.
   const ratioOk = ratio != null && expectedRatio != null && Math.abs(ratio - expectedRatio) <= expectedRatio * 0.5 + 0.5;
-  checks.push({ name: 'Positive:Negative Ratio', value: ratio, expected: expectedRatio, ok: ratioOk });
+  push('Positive:Negative Ratio', ratio, ratioOk, false, expectedRatio);
 
   const leadTimeDist = msdBucketBy(allSnapshots.filter(s => s.outcome === 'positive'), s => s.leadTime);
-  checks.push({ name: 'Lead Time Distribution', value: leadTimeDist, ok: Object.keys(leadTimeDist).length > 0 });
+  push('Lead Time Distribution', leadTimeDist, Object.keys(leadTimeDist).length > 0, false);
 
   const versions = new Set(allSnapshots.map(s => s.featureVersion));
   const versionOk = versions.size <= 1 && (versions.size === 0 || versions.has(config.featureVersion));
-  checks.push({ name: 'Feature Version Consistency', value: Array.from(versions), ok: versionOk });
+  push('Feature Version Consistency', Array.from(versions), versionOk, true);
 
   const seen = new Set();
   let duplicateCount = 0;
   allSnapshots.forEach(s => { if (seen.has(s.snapshotId)) duplicateCount++; else seen.add(s.snapshotId); });
-  checks.push({ name: 'No Duplicated Snapshots', value: duplicateCount, ok: duplicateCount === 0 });
+  push('No Duplicated Snapshots', duplicateCount, duplicateCount === 0, true);
 
   const maxTrainTs = dataset.trainSet.length ? msdSafeMax(dataset.trainSet.map(s => s.timestamp)) : -Infinity;
   const minValTs   = dataset.valSet.length   ? msdSafeMin(dataset.valSet.map(s => s.timestamp))   : Infinity;
   const maxValTs   = dataset.valSet.length   ? msdSafeMax(dataset.valSet.map(s => s.timestamp))   : -Infinity;
   const minTestTs  = dataset.testSet.length  ? msdSafeMin(dataset.testSet.map(s => s.timestamp))  : Infinity;
   const noLeakage = maxTrainTs <= minValTs && maxValTs <= minTestTs;
-  checks.push({ name: 'No Data Leakage (chronological order across splits)', value: { maxTrainTs, minValTs, maxValTs, minTestTs }, ok: noLeakage });
+  push('No Data Leakage (chronological order across splits)', { maxTrainTs, minValTs, maxValTs, minTestTs }, noLeakage, true);
 
-  checks.push({
-    name: 'Train/Val/Test Split',
-    value: totalObservations > 0 ? { train: dataset.trainSet.length / totalObservations, val: dataset.valSet.length / totalObservations, test: dataset.testSet.length / totalObservations } : null,
-    ok: dataset.trainSet.length > 0,
+  // Phase 7C: this is a SEPARATE check from the timestamp-ordering one
+  // above — ordering alone doesn't catch LABEL leakage (a snapshot's
+  // outcome can depend on up to lookbackWindow ticks of future data; see
+  // msdApplyPurgeGap). Verifies an actual epoch gap of at least the
+  // relevant lookbackWindow exists at each boundary, not just that
+  // ordering happens to hold.
+  const trainMaxEpoch = dataset.trainSet.length ? msdSafeMax(dataset.trainSet.map(s => s.epoch).filter(e => e != null)) : null;
+  const valMinEpoch = dataset.valSet.length ? msdSafeMin(dataset.valSet.map(s => s.epoch).filter(e => e != null)) : null;
+  const valMaxEpoch = dataset.valSet.length ? msdSafeMax(dataset.valSet.map(s => s.epoch).filter(e => e != null)) : null;
+  const testMinEpoch = dataset.testSet.length ? msdSafeMin(dataset.testSet.map(s => s.epoch).filter(e => e != null)) : null;
+  const relevantLookback = allSnapshots.map(s => s.lookbackWindow).filter(v => v != null && Number.isFinite(v));
+  const requiredGap = relevantLookback.length ? msdSafeMax(relevantLookback) : 20;
+  const trainValGap = (trainMaxEpoch != null && valMinEpoch != null) ? valMinEpoch - trainMaxEpoch : null;
+  const valTestGap = (valMaxEpoch != null && testMinEpoch != null) ? testMinEpoch - valMaxEpoch : null;
+  const purgeGapOk = (trainValGap == null || trainValGap >= requiredGap) && (valTestGap == null || valTestGap >= requiredGap);
+  push('Purge Gap at Split Boundaries (label-window leakage)', { trainValGap, valTestGap, requiredGap }, purgeGapOk, true);
+
+  push('Train/Val/Test Split',
+    totalObservations > 0 ? { train: dataset.trainSet.length / totalObservations, val: dataset.valSet.length / totalObservations, test: dataset.testSet.length / totalObservations } : null,
+    dataset.trainSet.length > 0, false);
+
+  // Phase 7G: corrupted feature vectors — every known indicator field
+  // must be finite (catches NaN/Infinity from a computation bug or a
+  // genuinely bad tick), plus range checks for the conventionally
+  // 0-100-bounded oscillators specifically (RSI, ADX, stochastic, +DI/-DI,
+  // Choppiness Index) — a value like RSI=340 is not a valid indicator
+  // reading under any circumstance, corrupted or not.
+  const boundedFields = ['rsi', 'adx', 'stochK', 'stochD', 'pdi', 'ndi', 'chop'];
+  let nonFiniteCount = 0, outOfRangeCount = 0;
+  allSnapshots.forEach(s => {
+    MSD_KNOWN_FEATURE_KEYS.forEach(k => {
+      const v = s[k];
+      if (v != null && !Number.isFinite(v)) nonFiniteCount++;
+    });
+    boundedFields.forEach(k => {
+      const v = s[k];
+      if (v != null && Number.isFinite(v) && (v < 0 || v > 100)) outOfRangeCount++;
+    });
   });
+  push('No Corrupted Feature Values (NaN/Infinity)', nonFiniteCount, nonFiniteCount === 0, true);
+  push('Bounded Indicators Within Valid Range (0-100)', outOfRangeCount, outOfRangeCount === 0, true);
 
-  return { checks, allOk: checks.every(c => c.ok) };
+  // Phase 7G: incomplete labels — a positive snapshot without a finite
+  // leadTime, or a negative snapshot that somehow carries one, means the
+  // labeling process itself broke down for that row, independent of
+  // whether the underlying features are fine.
+  const incompleteLabels = allSnapshots.filter(s =>
+    (s.outcome === 'positive' && !Number.isFinite(s.leadTime)) ||
+    (s.outcome === 'negative' && s.leadTime != null)
+  ).length;
+  push('No Incomplete Labels', incompleteLabels, incompleteLabels === 0, true);
+
+  const criticalFailures = checks.filter(c => c.critical && !c.ok);
+  return { checks, allOk: checks.every(c => c.ok), criticalFailures, hasCriticalFailure: criticalFailures.length > 0 };
+}
+
+/**
+ * Assembles ONE Data Quality Report combining the raw-collection-level
+ * checks (msdValidateRawDataQuality) and the built-dataset-level checks
+ * (msdValidateDataset) — pure assembly of the two, not a third
+ * validation implementation. This is what msdRunExperiment's mandatory
+ * quality gate (below) actually consults.
+ */
+function msdGenerateDataQualityReport(allStates, dataset, config){
+  const rawQuality = msdValidateRawDataQuality(allStates, config.symbol);
+  const datasetQuality = msdValidateDataset(dataset, config);
+  const criticalFailures = rawQuality.criticalFailures.concat(datasetQuality.criticalFailures);
+  return {
+    generatedAt: Date.now(),
+    rawQuality, datasetQuality,
+    hasCriticalFailure: criticalFailures.length > 0,
+    criticalFailures,
+  };
 }
 
 /**
@@ -8748,6 +10034,7 @@ async function msdRunExperimentUi(){
   const randomSeed = parseInt(getVal('msdExpRandomSeed'), 10) || 0;
   const trainingSplit = parseFloat(getVal('msdExpTrainingSplit')) || 0.7;
   const validationSplit = parseFloat(getVal('msdExpValidationSplit')) || 0.5;
+  const registrationId = getVal('msdExpRegistrationId').trim() || null;
 
   if (leadTime !== 'all' && !Number.isFinite(leadTime)) {
     if (statusEl) statusEl.textContent = 'Lead Time must be "all" or a whole number.';
@@ -8765,9 +10052,13 @@ async function msdRunExperimentUi(){
   if (statusEl) statusEl.textContent = 'Running…';
   let result;
   try {
-    result = await msdRunExperiment({ symbol, featureVersion, leadTime, samplingRatio, randomSeed, trainingSplit, validationSplit });
+    result = await msdRunExperiment({ symbol, featureVersion, leadTime, samplingRatio, randomSeed, trainingSplit, validationSplit, registrationId });
   } catch (e) {
     if (statusEl) statusEl.textContent = 'Error: ' + e.message;
+    return;
+  }
+  if (result.error) {
+    if (statusEl) statusEl.textContent = '⛔ ' + result.error;
     return;
   }
 
@@ -9196,6 +10487,7 @@ async function msdRunRandomChanceBenchmark(){
 async function msdWorkbenchRefresh(){
   const statusEl = $("msdWorkbenchStatus");
   if (statusEl) statusEl.textContent = 'Loading…';
+  msdRefreshRegistrationsTable(); // Phase 7F — independent of discovery evidence, refreshed alongside everything else on this page
 
   const rules = msdGetMaturityPromotionRules();
   const setVal = (id, v) => { const e = $(id); if (e) e.value = v; };
@@ -9214,15 +10506,36 @@ async function msdWorkbenchRefresh(){
   const body = $("msdDiscoveryRepoBody");
   if (body) {
     if (!summaries.length) {
-      body.innerHTML = '<tr><td colspan="8" class="sig-empty">No discoveries yet — waiting for the first completed experiment with enough samples to clear the readyForTraining gate.</td></tr>';
+      body.innerHTML = '<tr><td colspan="14" class="sig-empty">No discoveries yet — waiting for the first completed experiment with enough samples to clear the readyForTraining gate.</td></tr>';
     } else {
       const maturityClass = { observation: '', candidate: '', repeatable: 'cell-pos', verified: 'cell-pos' };
       const decayClass = { Stable: '', Improving: 'cell-pos', Decaying: 'cell-neg', Uncertain: 'cell-mut' };
+      const sigClass = { 'Verified Significance': 'cell-pos', 'FDR-adjusted Significance': '', 'Nominal Significance': 'cell-warn', 'Not Significant': 'cell-mut', 'Insufficient Data': 'cell-mut' };
+      const repClass = { 'Externally Replicated': 'cell-pos', 'Internally Replicated': '', 'Insufficient Replication': 'cell-mut' };
+      const govClass = { 'Pre-registered, Confirmed': 'cell-pos', 'Post-hoc (registered experiment, unregistered finding)': 'cell-warn', 'Exploratory': 'cell-mut' };
       body.innerHTML = summaries.sort((a, b) => b.evidenceCount - a.evidenceCount).map(s => {
         const sub = s.evidenceStabilitySubScores || {};
         const subTitle = Object.entries(sub).filter(([,v]) => v != null).map(([k,v]) => `${k}: ${(v*100).toFixed(0)}%`).join(' · ') || 'insufficient history yet';
         const stabilityText = s.evidenceStabilityScore != null ? (s.evidenceStabilityScore*100).toFixed(0) + '%' : '—';
         const decayTitle = s.decayTrend ? `tau=${s.decayTrend.tau.toFixed(2)} · p=${s.decayTrend.pValue.toFixed(3)} · n=${s.decayTrend.n} points` : 'fewer than 4 effect-size data points — trend not yet testable';
+        const fdc = s.falseDiscoveryControl;
+        const sigTitle = fdc ? `raw p=${fdc.pValue.toFixed(4)} · q(BH)=${fdc.qValueBH.toFixed(4)} · q(BY)=${fdc.qValueBY.toFixed(4)}` : 'no p-value computed for this discovery type';
+        const rp = s.replicationProfile;
+        const repTitle = rp ? `${rp.distinctTimeWindows} time window(s) · ${rp.distinctMarkets} market(s) · ${rp.distinctRegimes} regime(s) · ${rp.distinctFeatureVersions} feature version(s)` : '';
+        const pv = s.prospectiveValidation;
+        const prospectiveText = pv && pv.prospectivelyValidated ? '✓ Yes' : '—';
+        const prospectiveTitle = pv && pv.prospectivelyValidated ? `${pv.prospectiveExperimentIds.length} experiment(s) used data collected after this discovery was first proposed` : 'no supporting experiment used data collected after this discovery was first proposed';
+        const gov = s.governance || { status: 'Exploratory', registrationIds: [] };
+        const govTitle = gov.registrationIds.length ? gov.registrationIds.join(', ') : 'no registration referenced by any supporting experiment';
+        // Evidence Score (Phase 0, reused as-is) and Scientific Confidence
+        // Score (Phase 7H) shown side by side, deliberately — two
+        // complementary measures, never merged into one.
+        const evidenceScoreResult = msdComputeEvidenceScore(s);
+        const evidenceScoreText = (evidenceScoreResult.score * 100).toFixed(1);
+        const scTitle = s.scientificConfidenceFactors && Object.keys(s.scientificConfidenceFactors).length
+          ? Object.entries(s.scientificConfidenceFactors).map(([k,v]) => `${k}: ${(v*100).toFixed(0)}%`).join(' · ') + (s.contradiction.contradicted ? ' · CAPPED (contradicted)' : '')
+          : 'no factors assessed yet';
+        const scText = s.scientificConfidenceScore != null ? (s.scientificConfidenceScore*100).toFixed(1) : '—';
         return `<tr>
         <td class="l">${s.discoveryKey}</td>
         <td class="l">${s.discoveryType}</td>
@@ -9231,6 +10544,12 @@ async function msdWorkbenchRefresh(){
         <td>${s.evidenceCount}</td>
         <td title="${subTitle}">${stabilityText}</td>
         <td class="l ${decayClass[s.decayStatus]||''}" title="${decayTitle}">${s.decayStatus}</td>
+        <td class="l ${sigClass[s.significanceClassification]||''}" title="${sigTitle}" style="font-size:11px">${s.significanceClassification}</td>
+        <td class="l ${repClass[rp.classification]||''}" title="${repTitle}" style="font-size:11px">${rp.classification}</td>
+        <td class="l ${pv && pv.prospectivelyValidated ? 'cell-pos' : ''}" title="${prospectiveTitle}">${prospectiveText}</td>
+        <td class="l ${govClass[gov.status]||''}" title="${govTitle}" style="font-size:10px">${gov.status}</td>
+        <td style="font-weight:700">${evidenceScoreText}</td>
+        <td style="font-weight:700;color:var(--accent)" title="${scTitle}">${scText}</td>
         <td class="l">${new Date(s.firstSeenAt).toLocaleDateString()}</td>
       </tr>`;
       }).join('');
@@ -9305,6 +10624,20 @@ async function msdWorkbenchRefresh(){
           </tr>`;
         }).join('')
       : '<tr><td colspan="8" class="sig-empty">No market-state discoveries yet.</td></tr>';
+  }
+
+  const fdcSummaryEl = $("msdFdcSummary");
+  if (fdcSummaryEl) {
+    const fdc = msdComputeFalseDiscoveryControl(summaries); // same function already used inside msdGetDiscoverySummaries — reused here purely to extract the family-level stats for display
+    const f = fdc.family;
+    fdcSummaryEl.innerHTML = f.totalTests
+      ? `
+        <div><div class="gc-sub">Total Tests (m)</div><div style="font-size:18px;font-weight:700">${f.totalTests}</div></div>
+        <div><div class="gc-sub">Bonferroni α (family-wise)</div><div style="font-size:18px;font-weight:700">${f.bonferroniAlpha.toExponential(2)}</div></div>
+        <div><div class="gc-sub">FWER estimate (uncorrected)</div><div style="font-size:18px;font-weight:700">${(f.fwerEstimate*100).toFixed(1)}%</div></div>
+        <div><div class="gc-sub">Expected False Discoveries</div><div style="font-size:18px;font-weight:700">${f.expectedFalseDiscoveries.toFixed(2)} of ${f.fdrSignificantCount}</div></div>
+      `
+      : `<div class="sig-empty" style="grid-column:1/-1">No discoveries with a computable p-value yet.</div>`;
   }
 
   const regimeBody = $("msdRegimeValidationBody");
@@ -9456,6 +10789,226 @@ function msdSaveMaturityRulesUi(){
   });
   if (statusEl) statusEl.textContent = result.ok ? '✅ Saved.' : '⛔ ' + result.error;
 }
+
+/** Reads the Strict Out-of-Sample Validation form and runs rolling/walk-forward validation for one threshold condition against the CURRENT symbol/featureVersion's discovery-eligible pool (the same pool msdBuildExperimentDataset draws from — NOT the Production Validation holdout, which has its own separate button). */
+async function msdRunWalkForwardUi(){
+  const resultsEl = $("msdOosResults");
+  const feature = ($("msdOosFeature") || {}).value.trim();
+  const threshold = parseFloat(($("msdOosThreshold") || {}).value);
+  const direction = ($("msdOosDirection") || {}).value;
+  const mode = ($("msdOosMode") || {}).value;
+  if (!feature || !Number.isFinite(threshold)) { if (resultsEl) resultsEl.innerHTML = '<span class="cell-neg">Enter a feature name and a numeric threshold.</span>'; return; }
+  if (resultsEl) resultsEl.textContent = 'Running…';
+
+  const allStates = await msdGetAllMarketStates();
+  const featureVersion = ($("msdExpFeatureVersion") || {}).value || 'v1';
+  const symbol = ($("msdExpSymbol") || {}).value || SYMBOL;
+  const { discoveryEligible } = msdPartitionProductionHoldout(allStates, featureVersion, symbol);
+  const sorted = discoveryEligible.filter(s => s.epoch != null).slice().sort((a, b) => a.epoch - b.epoch);
+  const result = msdRunWalkForwardValidation(sorted, feature, threshold, direction, mode);
+
+  if (!resultsEl) return;
+  if (result.error) { resultsEl.innerHTML = `<span class="cell-warn">${result.error}</span>`; return; }
+  resultsEl.innerHTML = `
+    <div style="margin-bottom:6px"><b>${result.mode === 'expanding' ? 'Walk-Forward (expanding)' : 'Rolling'}</b> — significant in ${result.significantWindows}/${result.validWindowCount} windows (consistency rate ${result.consistencyRate!=null?(result.consistencyRate*100).toFixed(0)+'%':'n/a'})</div>
+    <table class="sig-table"><thead><tr><th class="l">Window</th><th class="l">Samples</th><th class="l">Effect Size</th><th class="l">p-value</th><th class="l">Significant</th></tr></thead>
+    <tbody>${result.windows.map(w => `<tr>
+      <td>${w.windowIndex+1}</td><td>${w.sampleCount}</td>
+      <td>${w.effectSize!=null?(w.effectSize*100).toFixed(1)+'%':'—'}</td>
+      <td>${w.pValue!=null?w.pValue.toFixed(4):'—'}</td>
+      <td class="l ${w.significant?'cell-pos':'cell-mut'}">${w.significant?'Yes':'No'}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+/** Reads the Strict Out-of-Sample Validation form and tests one threshold condition against the Production Validation holdout — data never included in any experiment's discovery-eligible pool. */
+async function msdRunProductionValidationUi(){
+  const resultsEl = $("msdOosResults");
+  const feature = ($("msdOosFeature") || {}).value.trim();
+  const threshold = parseFloat(($("msdOosThreshold") || {}).value);
+  const direction = ($("msdOosDirection") || {}).value;
+  if (!feature || !Number.isFinite(threshold)) { if (resultsEl) resultsEl.innerHTML = '<span class="cell-neg">Enter a feature name and a numeric threshold.</span>'; return; }
+  if (resultsEl) resultsEl.textContent = 'Running…';
+
+  const featureVersion = ($("msdExpFeatureVersion") || {}).value || 'v1';
+  const symbol = ($("msdExpSymbol") || {}).value || SYMBOL;
+  const result = await msdRunProductionValidation(feature, threshold, direction, featureVersion, symbol);
+
+  if (!resultsEl) return;
+  if (result.error) { resultsEl.innerHTML = `<span class="cell-warn">${result.error}</span>`; return; }
+  // Phase 7H: persist so Scientific Confidence Score can incorporate this
+  // result — otherwise it would vanish the moment the UI is closed.
+  await msdPersistValidationRecord('threshold:' + feature, 'production_validation', result);
+  resultsEl.innerHTML = `
+    <div><b>Production Validation</b> — ${result.sampleCount} samples never used in any experiment (${result.inGroupCount} meeting condition, ${result.outGroupCount} not)</div>
+    <div>Effect size: ${(result.effectSize*100).toFixed(1)}% · p-value: ${result.pValue.toFixed(4)}</div>
+    <div class="${result.passed?'cell-pos':'cell-neg'}" style="font-weight:700">${result.passed ? '✓ PASSED — holds on completely unseen data' : '✗ FAILED — does not replicate on completely unseen data'}</div>
+    <div class="gc-sub" style="margin-top:4px">Recorded — this discovery's Scientific Confidence Score will reflect it on next refresh.</div>`;
+}
+
+/** Reads the Strict Out-of-Sample Validation form and checks calibration: derives the condition's CURRENTLY claimed in/out rates fresh from the discovery-eligible pool (never manually typed — that would risk stating a number the data doesn't currently actually claim), then tests those specific claimed rates against the Production Validation holdout. */
+async function msdRunCalibrationUi(){
+  const resultsEl = $("msdOosResults");
+  const feature = ($("msdOosFeature") || {}).value.trim();
+  const threshold = parseFloat(($("msdOosThreshold") || {}).value);
+  const direction = ($("msdOosDirection") || {}).value;
+  if (!feature || !Number.isFinite(threshold)) { if (resultsEl) resultsEl.innerHTML = '<span class="cell-neg">Enter a feature name and a numeric threshold.</span>'; return; }
+  if (resultsEl) resultsEl.textContent = 'Running…';
+
+  const featureVersion = ($("msdExpFeatureVersion") || {}).value || 'v1';
+  const symbol = ($("msdExpSymbol") || {}).value || SYMBOL;
+  const allStates = await msdGetAllMarketStates();
+  const { discoveryEligible } = msdPartitionProductionHoldout(allStates, featureVersion, symbol);
+
+  let inPos = 0, inTotal = 0, outPos = 0, outTotal = 0;
+  discoveryEligible.forEach(s => {
+    const meets = msdMeetsThreshold(s[feature], threshold, direction);
+    const isPos = s.outcome === 'positive';
+    if (meets) { inTotal++; if (isPos) inPos++; } else { outTotal++; if (isPos) outPos++; }
+  });
+  if (!resultsEl) return;
+  if (inTotal === 0 || outTotal === 0) { resultsEl.innerHTML = '<span class="cell-warn">Condition does not split the discovery-eligible pool into two non-empty groups.</span>'; return; }
+  const claimedInRate = inPos / inTotal, claimedOutRate = outPos / outTotal;
+
+  const result = await msdEvaluateDiscoveryCalibration(feature, threshold, direction, claimedInRate, claimedOutRate, featureVersion, symbol);
+  if (result.error) { resultsEl.innerHTML = `<span class="cell-warn">${result.error}</span>`; return; }
+  // Phase 7H: persist so Scientific Confidence Score can incorporate this
+  // result — otherwise it would vanish the moment the UI is closed.
+  await msdPersistValidationRecord('threshold:' + feature, 'calibration', result);
+  resultsEl.innerHTML = `
+    <div style="margin-bottom:6px"><b>Calibration</b> — claimed ${(claimedInRate*100).toFixed(1)}% (in-group) / ${(claimedOutRate*100).toFixed(1)}% (out-group), tested against ${result.sampleCount} production-holdout samples</div>
+    <div>Brier Score: ${result.brierScore!=null?result.brierScore.toFixed(4):'—'} · Log Loss: ${result.logLoss!=null?result.logLoss.toFixed(4):'—'} · ECE: ${result.ece!=null?result.ece.toFixed(4):'—'} · MCE: ${result.mce!=null?result.mce.toFixed(4):'—'}</div>
+    <table class="sig-table" style="margin-top:6px"><thead><tr><th class="l">Claimed Probability</th><th class="l">Actual Frequency (holdout)</th><th class="l">Samples</th><th class="l">Isotonic-Corrected</th></tr></thead>
+    <tbody>${result.calibrationCurve.map((b,i) => `<tr>
+      <td>${(b.meanPredicted*100).toFixed(1)}%</td>
+      <td>${(b.meanActual*100).toFixed(1)}%</td>
+      <td>${b.count}</td>
+      <td>${(result.isotonicCorrection[i].corrected*100).toFixed(1)}%</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+/** Reads the discoveryKey input and renders its full provenance chain. */
+async function msdShowProvenanceUi(){
+  const resultsEl = $("msdProvenanceResults");
+  const key = ($("msdProvenanceKey") || {}).value.trim();
+  if (!key) { if (resultsEl) resultsEl.innerHTML = '<span class="cell-neg">Enter a discovery key (e.g. threshold:adx).</span>'; return; }
+  if (resultsEl) resultsEl.textContent = 'Tracing…';
+
+  const provenance = await msdGetDiscoveryProvenance(key);
+  if (!resultsEl) return;
+  if (provenance.error) { resultsEl.innerHTML = `<span class="cell-warn">${provenance.error}</span>`; return; }
+
+  resultsEl.innerHTML = `
+    <div style="margin-bottom:6px"><b>Discovery ID:</b> ${provenance.discoveryId} (${provenance.discoveryType})</div>
+    <div style="margin-bottom:6px"><b>Evidence IDs (${provenance.evidenceIds.length}):</b> <span style="font-size:10px">${provenance.evidenceIds.join(', ')}</span></div>
+    <table class="sig-table"><thead><tr><th class="l">Experiment ID</th><th class="l">Dataset ID</th><th class="l">Feature/Label/Engine/Code Versions</th><th class="l">Raw Snapshots (train/val/test)</th><th class="l">Research Report</th></tr></thead>
+    <tbody>${provenance.experimentChain.map(e => `<tr>
+      <td class="l" style="font-size:10px">${e.experimentId}</td>
+      <td class="l" style="font-size:10px">${e.datasetId ? e.datasetId.slice(0,16)+'…' : (e.experimentRecordFound ? '—' : '<span class=\"cell-neg\">Experiment record not found</span>')}</td>
+      <td class="l" style="font-size:10px">${e.featureVersion||'—'} / ${e.labelVersion||'—'} / ${e.statisticalEngineVersion||'—'} / ${e.codeVersion||'—'}</td>
+      <td>${e.trainSnapshotIds?e.trainSnapshotIds.length:0} / ${e.valSnapshotIds?e.valSnapshotIds.length:0} / ${e.testSnapshotIds?e.testSnapshotIds.length:0}</td>
+      <td class="l ${e.researchReportFound?'cell-pos':'cell-mut'}" style="font-size:10px">${e.researchReportFound ? e.researchReportId.slice(0,12)+'…' : 'none linked'}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+/** Reads the discoveryKey input and verifies every referenced raw snapshot still exists in MarketStates. */
+async function msdVerifyProvenanceUi(){
+  const resultsEl = $("msdProvenanceResults");
+  const key = ($("msdProvenanceKey") || {}).value.trim();
+  if (!key) { if (resultsEl) resultsEl.innerHTML = '<span class="cell-neg">Enter a discovery key (e.g. threshold:adx).</span>'; return; }
+  if (resultsEl) resultsEl.textContent = 'Verifying…';
+
+  const result = await msdVerifyProvenanceIntegrity(key);
+  if (!resultsEl) return;
+  if (result.error) { resultsEl.innerHTML = `<span class="cell-warn">${result.error}</span>`; return; }
+
+  resultsEl.innerHTML = `
+    <div class="${result.allReproducible?'cell-pos':'cell-neg'}" style="font-weight:700;margin-bottom:6px">${result.allReproducible ? '✓ Every supporting experiment\'s raw evidence is fully intact' : '✗ Some raw evidence is missing — this discovery is not fully reproducible from raw evidence right now'}</div>
+    <table class="sig-table"><thead><tr><th class="l">Experiment ID</th><th class="l">Total Raw Snapshots</th><th class="l">Missing</th><th class="l">Status</th></tr></thead>
+    <tbody>${result.experiments.map(e => `<tr>
+      <td class="l" style="font-size:10px">${e.experimentId}</td>
+      <td>${e.totalSnapshots ?? '—'}</td>
+      <td class="${e.missingCount?'cell-neg':''}">${e.missingCount ?? '—'}</td>
+      <td class="l ${e.ok?'cell-pos':'cell-neg'}">${e.ok ? 'Intact' : (e.reason||'Failed')}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+/** Reads the registration form and writes an immutable registration BEFORE any experiment runs — the core mechanism this phase exists to provide. */
+async function msdRegisterExperimentUi(){
+  const resultsEl = $("msdRegistrationResults");
+  const objectives = ($("msdRegObjectives") || {}).value.trim();
+  const hypotheses = ($("msdRegHypotheses") || {}).value.trim();
+  const hypothesisFeatures = ($("msdRegHypothesisFeatures") || {}).value.split(',').map(s => s.trim()).filter(Boolean);
+  const stoppingCount = parseInt(($("msdRegStoppingCount") || {}).value, 10);
+  const inclusionCriteria = ($("msdRegInclusion") || {}).value.trim();
+  const exclusionCriteria = ($("msdRegExclusion") || {}).value.trim();
+  const plannedStatisticalTests = ($("msdRegTests") || {}).value.trim();
+  const researcherNotes = ($("msdRegNotes") || {}).value.trim();
+  const featureVersion = ($("msdExpFeatureVersion") || {}).value || 'v1';
+
+  if (!objectives || !hypothesisFeatures.length) {
+    if (resultsEl) resultsEl.innerHTML = '<span class="cell-neg">Objectives and at least one Hypothesis Feature are required — a registration with no stated hypothesis cannot support the Pre-registered/Post-hoc distinction later.</span>';
+    return;
+  }
+
+  const result = await msdRegisterExperiment({
+    objectives, hypotheses, hypothesisFeatures, featureVersion,
+    inclusionCriteria, exclusionCriteria, plannedStatisticalTests, researcherNotes,
+    stoppingRule: { type: 'fixed_experiment_count', value: Number.isFinite(stoppingCount) ? stoppingCount : null },
+  });
+  if (!resultsEl) return;
+  if (!result.writeResult.ok) { resultsEl.innerHTML = `<span class="cell-neg">Failed to register: ${result.writeResult.error}</span>`; return; }
+  resultsEl.innerHTML = `<span class="cell-pos" style="font-weight:700">✓ Registered: ${result.registrationId}</span> — paste this into the Experiment Runner's Registration ID field before running.`;
+  msdRefreshRegistrationsTable();
+}
+
+/** Renders the registrations table — separate from the main Workbench refresh since registration doesn'''t depend on discovery evidence. */
+async function msdRefreshRegistrationsTable(){
+  const body = $("msdRegistrationsBody");
+  if (!body) return;
+  const regs = await msdGetAllRegistrations();
+  body.innerHTML = regs.length
+    ? regs.map(r => `<tr>
+        <td class="l" style="font-size:10px">${r.registrationId}</td>
+        <td class="l">${new Date(r.registeredAt).toLocaleString()}</td>
+        <td class="l" style="font-size:11px">${r.objectives}</td>
+        <td class="l">${r.hypothesisFeatures.join(', ')}</td>
+        <td class="l">${r.stoppingRule && r.stoppingRule.value != null ? 'max ' + r.stoppingRule.value + ' experiments' : 'not stated'}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="5" class="sig-empty">No registrations yet.</td></tr>';
+}
+
+/** Checks whether a registration'''s stated stopping rule has been exceeded — reads the registrationId currently in the Experiment Runner form. */
+async function msdCheckStoppingRuleUi(){
+  const resultsEl = $("msdRegistrationResults");
+  const registrationId = ($("msdExpRegistrationId") || {}).value.trim();
+  if (!registrationId) { if (resultsEl) resultsEl.innerHTML = '<span class="cell-neg">Enter a Registration ID in the Experiment Runner form above first.</span>'; return; }
+
+  const result = await msdCheckStoppingRuleCompliance(registrationId);
+  if (!resultsEl) return;
+  if (result.error) { resultsEl.innerHTML = `<span class="cell-warn">${result.error}</span>`; return; }
+  if (!result.checkable) { resultsEl.innerHTML = `<span class="cell-mut">${result.reason}</span>`; return; }
+  resultsEl.innerHTML = `<span class="${result.violated?'cell-neg':'cell-pos'}" style="font-weight:700">${result.violated ? '✗ STOPPING RULE VIOLATED' : '✓ Within stated limit'}</span> — ${result.actualCount} of ${result.statedLimit} stated experiments run under this registration.`;
+}
+
+/** Runs msdValidateRawDataQuality against the CURRENT market selector's collection and renders the results, with critical failures visually distinguished from warnings. */
+async function msdCheckRawDataQualityUi(){
+  const resultsEl = $("msdDataQualityResults");
+  if (resultsEl) resultsEl.textContent = 'Checking…';
+  const symbol = ($("msdExpSymbol") || {}).value || SYMBOL;
+  const allStates = await msdGetAllMarketStates();
+  const result = msdValidateRawDataQuality(allStates, symbol);
+  if (!resultsEl) return;
+  resultsEl.innerHTML = `
+    <div class="${result.hasCriticalFailure?'cell-neg':'cell-pos'}" style="font-weight:700;margin-bottom:6px">${result.hasCriticalFailure ? '✗ CRITICAL FAILURE(S) — this data would BLOCK the mandatory quality gate' : '✓ No critical failures'}</div>
+    <table class="sig-table"><thead><tr><th class="l">Check</th><th class="l">Severity</th><th class="l">Value</th><th class="l">Status</th></tr></thead>
+    <tbody>${result.checks.map(c => `<tr>
+      <td class="l">${c.name}</td>
+      <td class="l ${c.critical?'cell-neg':'cell-mut'}">${c.critical ? 'CRITICAL' : 'Warning'}</td>
+      <td class="l" style="font-size:10px">${typeof c.value === 'object' ? JSON.stringify(c.value) : c.value}</td>
+      <td class="l ${c.ok?'cell-pos':(c.critical?'cell-neg':'cell-warn')}">${c.ok ? 'Pass' : 'Fail'}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
 
 // Build a compact full-indicator snapshot for one tick.
 function makeSnap(epoch, price){
