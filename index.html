@@ -9899,12 +9899,22 @@ function msdValidateDataset(dataset, config){
   allSnapshots.forEach(s => { if (seen.has(s.snapshotId)) duplicateCount++; else seen.add(s.snapshotId); });
   push('No Duplicated Snapshots', duplicateCount, duplicateCount === 0, true);
 
-  const maxTrainTs = dataset.trainSet.length ? msdSafeMax(dataset.trainSet.map(s => s.timestamp)) : -Infinity;
-  const minValTs   = dataset.valSet.length   ? msdSafeMin(dataset.valSet.map(s => s.timestamp))   : Infinity;
-  const maxValTs   = dataset.valSet.length   ? msdSafeMax(dataset.valSet.map(s => s.timestamp))   : -Infinity;
-  const minTestTs  = dataset.testSet.length  ? msdSafeMin(dataset.testSet.map(s => s.timestamp))  : Infinity;
-  const noLeakage = maxTrainTs <= minValTs && maxValTs <= minTestTs;
-  push('No Data Leakage (chronological order across splits)', { maxTrainTs, minValTs, maxValTs, minTestTs }, noLeakage, true);
+  // FIX: this check previously compared TIMESTAMP (capture order) while
+  // msdBuildExperimentDataset splits and orders train/val/test by EPOCH
+  // (market time) — a leftover inconsistency from the epoch-based
+  // construction redesign that never updated this one check to match.
+  // Confirmed by direct reproduction: a dataset with correct EPOCH
+  // ordering (no real leakage) was still failing this check whenever a
+  // real clock discontinuity caused timestamp order to diverge from
+  // epoch order near a split boundary — exactly the reconnect scenario
+  // the whole redesign exists to accommodate. Now compares the same
+  // field the split itself is defined by.
+  const maxTrainEpoch = dataset.trainSet.length ? msdSafeMax(dataset.trainSet.map(s => s.epoch)) : -Infinity;
+  const minValEpoch   = dataset.valSet.length   ? msdSafeMin(dataset.valSet.map(s => s.epoch))   : Infinity;
+  const maxValEpoch   = dataset.valSet.length   ? msdSafeMax(dataset.valSet.map(s => s.epoch))   : -Infinity;
+  const minTestEpoch  = dataset.testSet.length  ? msdSafeMin(dataset.testSet.map(s => s.epoch))  : Infinity;
+  const noLeakage = maxTrainEpoch <= minValEpoch && maxValEpoch <= minTestEpoch;
+  push('No Data Leakage (chronological order across splits)', { maxTrainEpoch, minValEpoch, maxValEpoch, minTestEpoch }, noLeakage, true);
 
   // Phase 7C: this is a SEPARATE check from the timestamp-ordering one
   // above — ordering alone doesn't catch LABEL leakage (a snapshot's
