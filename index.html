@@ -2544,7 +2544,10 @@ table.an-table tbody tr:last-child td{border-bottom:none}
         <input type="number" id="msdExpValidationSplit" value="0.5" min="0.1" max="0.9" step="0.05" style="width:100%"></div>
       <div><label for="msdExpRegistrationId">Registration ID (optional — see Governance panel below)</label>
         <input type="text" id="msdExpRegistrationId" placeholder="leave blank = Exploratory" style="width:100%"></div>
-      <div></div>
+      <div><label for="msdExpMinSegmentSize">Min Segment Size (optional — default 100)</label>
+        <input type="number" id="msdExpMinSegmentSize" placeholder="100" min="1" step="1" style="width:100%"></div>
+      <div><label for="msdExpCorruptionThreshold">Corruption Fatal Threshold, 0-1 (optional — default 0.10)</label>
+        <input type="number" id="msdExpCorruptionThreshold" placeholder="0.10" min="0.01" max="1" step="0.01" style="width:100%"></div>
     </div>
     <button class="gc-btn" onclick="msdRunExperimentUi()">🧪 Run Experiment</button>
     <span id="msdExperimentStatus" class="gc-sub" style="margin-left:10px"></span>
@@ -5823,7 +5826,12 @@ function msdBuildExperimentDataset(allStates, config){
   })();
   const { segments: purgedSegments, purgedCount: segmentBoundaryPurgeCount } = msdPurgeSegmentBoundaries(segments, boundaries, purgeSecondsForSegments);
 
-  const viableSegments = purgedSegments.filter(seg => seg.length >= MSD_MIN_SEGMENT_SIZE);
+  // Genuinely configurable, not just documented as such: an experiment
+  // can override this via config.minSegmentSize; otherwise falls back to
+  // the platform default (MSD_MIN_SEGMENT_SIZE), preserving existing
+  // behavior for every caller that doesn't specify one.
+  const minSegmentSize = config.minSegmentSize != null ? config.minSegmentSize : MSD_MIN_SEGMENT_SIZE;
+  const viableSegments = purgedSegments.filter(seg => seg.length >= minSegmentSize);
   const segmentsDiscarded = purgedSegments.length - viableSegments.length;
 
   const pooled = [].concat(...viableSegments); // still epoch-ordered — each segment internally is, and they're concatenated in original order
@@ -5867,6 +5875,14 @@ function msdBuildExperimentDataset(allStates, config){
     finalTrainSize: purged.trainSet.length,
     finalValSize: purged.valSet.length,
     finalTestSize: purged.testSet.length,
+    // Requirement: every threshold actually applied, recorded alongside
+    // the outcome it produced — a Data Quality Summary that reports
+    // counts without the config that produced them isn't fully
+    // traceable. corruptionRateFatalThreshold is added by
+    // msdRunExperiment (it isn't known at this point in the pipeline).
+    minSegmentSize,
+    interruptionThresholdSeconds: interruptionThreshold,
+    purgeSecondsApplied: purgeSecondsForSegments,
   };
 
   return {
@@ -6068,6 +6084,12 @@ async function msdRunExperiment(config){
     dataset.meta.recoveryReport.finalTrainSize = dataset.trainSet.length;
     dataset.meta.recoveryReport.finalValSize = dataset.valSet.length;
     dataset.meta.recoveryReport.finalTestSize = dataset.testSet.length;
+    // The actual threshold used, read back from the check that applied
+    // it — traceable to what config produced this outcome, not just the
+    // outcome itself.
+    const corruptionCheck = qualityReport.datasetQuality.checks.find(c => c.name.includes('Corruption Rate'));
+    dataset.meta.recoveryReport.corruptionRateFatalThreshold = corruptionCheck && corruptionCheck.expected ? corruptionCheck.expected.threshold : MSD_CORRUPTION_RATE_FATAL_THRESHOLD;
+    dataset.meta.recoveryReport.corruptionRateObserved = corruptionCheck ? corruptionCheck.value : null;
   }
 
   const allSnapshots = dataset.trainSet.concat(dataset.valSet, dataset.testSet);
@@ -9925,11 +9947,16 @@ function msdValidateDataset(dataset, config){
     if (rowBad) corruptedRowCount++;
   });
   const corruptionRate = totalObservations > 0 ? corruptedRowCount / totalObservations : 0;
-  const corruptionFatal = corruptionRate > MSD_CORRUPTION_RATE_FATAL_THRESHOLD;
+  // Genuinely configurable, not just documented as such: an experiment
+  // can override this via config.corruptionRateFatalThreshold; otherwise
+  // falls back to the platform default, preserving existing behavior for
+  // every caller that doesn't specify one.
+  const corruptionRateFatalThreshold = config.corruptionRateFatalThreshold != null ? config.corruptionRateFatalThreshold : MSD_CORRUPTION_RATE_FATAL_THRESHOLD;
+  const corruptionFatal = corruptionRate > corruptionRateFatalThreshold;
   push('No Corrupted Feature Values (NaN/Infinity)', nonFiniteCount, nonFiniteCount === 0, false);
   push('Bounded Indicators Within Valid Range (0-100)', outOfRangeCount, outOfRangeCount === 0, false);
   push('No Incomplete Labels', incompleteLabelCount, incompleteLabelCount === 0, false);
-  push('Corruption Rate Within Tolerance (row-level exclusion below this, fatal above)', corruptionRate, !corruptionFatal, true, { corruptedRowCount, totalObservations, threshold: MSD_CORRUPTION_RATE_FATAL_THRESHOLD });
+  push('Corruption Rate Within Tolerance (row-level exclusion below this, fatal above)', corruptionRate, !corruptionFatal, true, { corruptedRowCount, totalObservations, threshold: corruptionRateFatalThreshold });
 
   const criticalFailures = checks.filter(c => c.critical && !c.ok);
   return { checks, allOk: checks.every(c => c.ok), criticalFailures, hasCriticalFailure: criticalFailures.length > 0 };
@@ -10523,6 +10550,10 @@ async function msdRunExperimentUi(){
   const trainingSplit = parseFloat(getVal('msdExpTrainingSplit')) || 0.7;
   const validationSplit = parseFloat(getVal('msdExpValidationSplit')) || 0.5;
   const registrationId = getVal('msdExpRegistrationId').trim() || null;
+  const minSegmentSizeRaw = parseFloat(getVal('msdExpMinSegmentSize'));
+  const minSegmentSize = Number.isFinite(minSegmentSizeRaw) ? minSegmentSizeRaw : null;
+  const corruptionThresholdRaw = parseFloat(getVal('msdExpCorruptionThreshold'));
+  const corruptionRateFatalThreshold = Number.isFinite(corruptionThresholdRaw) ? corruptionThresholdRaw : null;
 
   if (leadTime !== 'all' && !Number.isFinite(leadTime)) {
     if (statusEl) statusEl.textContent = 'Lead Time must be "all" or a whole number.';
@@ -10540,7 +10571,7 @@ async function msdRunExperimentUi(){
   if (statusEl) statusEl.textContent = 'Running…';
   let result;
   try {
-    result = await msdRunExperiment({ symbol, featureVersion, leadTime, samplingRatio, randomSeed, trainingSplit, validationSplit, registrationId });
+    result = await msdRunExperiment({ symbol, featureVersion, leadTime, samplingRatio, randomSeed, trainingSplit, validationSplit, registrationId, minSegmentSize, corruptionRateFatalThreshold });
   } catch (e) {
     if (statusEl) statusEl.textContent = 'Error: ' + e.message;
     return;
@@ -10571,7 +10602,8 @@ async function msdRunExperimentUi(){
     recoveryEl.innerHTML = r ? `
       Raw ticks: ${r.totalRawTicks} · Duplicates removed: ${r.duplicateTicksRemoved} · Conflicting duplicates removed: ${r.conflictingDuplicatesRemoved} · Corrupted rows removed: ${r.corruptedRowsRemoved}<br>
       Segments detected: ${r.segmentsDetected} · Retained: <span class="cell-pos">${r.segmentsRetained}</span> · Discarded (too small): <span class="${r.segmentsDiscarded?'cell-warn':''}">${r.segmentsDiscarded}</span><br>
-      Purge-gap removals — at segment boundaries: ${r.segmentBoundaryPurgeCount} · at train/val/test split boundaries: ${r.trainValPurgeCount}
+      Purge-gap removals — at segment boundaries: ${r.segmentBoundaryPurgeCount} · at train/val/test split boundaries: ${r.trainValPurgeCount}<br>
+      <span class="gc-sub">Thresholds actually applied — min segment size: ${r.minSegmentSize} · interruption threshold: ${r.interruptionThresholdSeconds}s · purge window: ${r.purgeSecondsApplied}s · corruption fatal threshold: ${r.corruptionRateFatalThreshold!=null?(r.corruptionRateFatalThreshold*100).toFixed(0)+'%':'—'} (observed: ${r.corruptionRateObserved!=null?(r.corruptionRateObserved*100).toFixed(2)+'%':'—'})</span>
     ` : '<span class="sig-empty">No recovery report available.</span>';
   }
 
