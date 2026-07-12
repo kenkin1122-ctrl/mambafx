@@ -2559,6 +2559,8 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       <div class="em-card"><div class="em-lab">Positives Used</div><div id="msdExpPositiveCount" class="em-val up">—</div></div>
       <div class="em-card"><div class="em-lab">Negatives Sampled</div><div id="msdExpNegativeCount" class="em-val down">—</div></div>
     </div>
+    <div class="gc-sub" style="margin:10px 0 4px">Data Recovery Report — what was automatically detected and handled, permanently recorded on this experiment</div>
+    <div id="msdExpRecoveryReport" style="font-size:11px"></div>
   </div>
 
   <div class="grid-card" id="msdDiscoveryCard" style="margin-bottom:16px;display:none">
@@ -2854,8 +2856,8 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   </div>
 
   <div class="grid-card" style="margin-top:16px">
-    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Data Quality Validation (Phase 7G)</h3>
-    <div class="gc-sub" style="margin-bottom:8px">A mandatory quality gate now runs automatically inside the Experiment Runner, before any Experiment record is ever written — a dataset with a CRITICAL failure (duplicate ticks, clock discontinuities, likely mid-session interruptions, corrupted feature values, incomplete labels, data leakage) is refused, not just warned about. Gaps longer than an hour are treated as normal session boundaries (a warning, not a block) — see the code's own comments for why a large gap can't be distinguished from a dropped connection with certainty. Use this panel to check the raw MarketStates collection on its own, independent of running an experiment.</div>
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Data Quality Gate (Redesigned)</h3>
+    <div class="gc-sub" style="margin-bottom:8px"><b>Fatal</b> (blocks the experiment entirely): mixed feature versions, zero positive or negative samples, or a corruption RATE above 10% of rows — a systemic problem, not incidental noise. <b>Recoverable</b> (detected, automatically handled, never blocks): duplicate ticks (deduplicated), conflicting duplicate ticks (excluded), clock discontinuities and mid-session interruptions (the dataset is automatically segmented at every real gap, purged around each boundary using the same purge-gap logic as the train/val/test splits, and built from the union of valid segments — real internet outages and reconnects are expected, not evidence of a broken experiment), and small numbers of corrupted rows (excluded individually). Every experiment's Data Recovery Report — ticks removed, segments detected/retained/discarded, purge-gap counts — is permanently recorded on the Experiment record. Use this panel to check the raw MarketStates collection on its own, independent of running an experiment.</div>
     <button class="gc-btn" onclick="msdCheckRawDataQualityUi()">🔍 Check Raw Data Quality</button>
     <div id="msdDataQualityResults" style="margin-top:10px;font-size:12px"></div>
   </div>
@@ -4086,6 +4088,34 @@ const MSD_FEATURE_SCHEMA_VERSION = 'v1';
 // leadTime, etc.) — those vary per-snapshot by design and would make a
 // schema fingerprint meaningless if included.
 const MSD_KNOWN_FEATURE_KEYS = ['epoch','price','macd','signal','hist','chop','cci','bbPctB','bbUpper','bbMid','bbLower','pdi','ndi','adx','rsi','atr','ema5','ema10','ema20','stochK','stochD','roc'];
+
+const MSD_BOUNDED_INDICATOR_FIELDS = ['rsi', 'adx', 'stochK', 'stochD', 'pdi', 'ndi', 'chop']; // conventionally 0-100 oscillators — a value outside this range is not a valid reading under any circumstance
+
+/**
+ * Data Quality Gate redesign: a single, shared predicate for "is this
+ * ROW corrupted" — reused by both msdValidateDataset (to compute the
+ * corruption RATE, which decides fatal-vs-recoverable) and
+ * msdBuildExperimentDataset (to actually exclude the bad rows once the
+ * rate has been judged non-fatal). Previously this logic was duplicated
+ * inline inside the validator only, with no corresponding exclusion
+ * step anywhere — a corrupted row would be reported but never actually
+ * removed from any dataset. Checks: any known feature field that's
+ * non-finite (NaN/Infinity), any bounded oscillator outside its valid
+ * 0-100 range, or a label that's internally inconsistent (a positive
+ * snapshot missing leadTime, or a negative one carrying one).
+ */
+function msdIsRowCorrupted(s){
+  for (const k of MSD_KNOWN_FEATURE_KEYS) {
+    const v = s[k];
+    if (v != null && !Number.isFinite(v)) return true;
+  }
+  for (const k of MSD_BOUNDED_INDICATOR_FIELDS) {
+    const v = s[k];
+    if (v != null && Number.isFinite(v) && (v < 0 || v > 100)) return true;
+  }
+  if ((s.outcome === 'positive' && !Number.isFinite(s.leadTime)) || (s.outcome === 'negative' && s.leadTime != null)) return true;
+  return false;
+}
 
 /**
  * Deterministic, dependency-free string hash (FNV-1a). Doesn't need
@@ -5550,13 +5580,29 @@ function msdSeededShuffle(arr, rng){
  * approximation: Volatility 100 (1s) ticks exactly once per second by
  * definition, so lookbackWindow ticks IS lookbackWindow seconds exactly.
  */
+/**
+ * BUG FIX (forensic investigation, confirmed by direct code trace): the
+ * previous version used valSet[0].epoch / testSet[0].epoch as the
+ * boundary reference — correct ONLY if the first element of a
+ * TIMESTAMP-sorted slice is also the minimum-EPOCH element. That
+ * assumption silently breaks whenever timestamp order and epoch order
+ * diverge near a boundary, which is exactly what a clock discontinuity
+ * from a real websocket reconnect produces — confirmed as the actual
+ * root cause of a real Purge Gap validation failure. Fixed by computing
+ * the true minimum epoch of each partition directly via msdSafeMin,
+ * matching what msdValidateDataset's own purge-gap CHECK already did
+ * correctly (that check was catching a real bug in this BUILDER
+ * function, not producing a false positive).
+ */
 function msdApplyPurgeGap(trainSet, valSet, testSet){
   const allWithLookback = trainSet.concat(valSet, testSet).map(s => s.lookbackWindow).filter(v => v != null && Number.isFinite(v));
   const purgeSeconds = allWithLookback.length ? msdSafeMax(allWithLookback) : 20; // falls back to the labeler's own documented default if no snapshot recorded one (pre-Phase-0-fix data)
 
-  const trainBoundaryEpoch = valSet.length ? valSet[0].epoch : (testSet.length ? testSet[0].epoch : Infinity);
+  const valEpochs = valSet.map(s => s.epoch).filter(e => e != null);
+  const testEpochs = testSet.map(s => s.epoch).filter(e => e != null);
+  const trainBoundaryEpoch = valEpochs.length ? msdSafeMin(valEpochs) : (testEpochs.length ? msdSafeMin(testEpochs) : Infinity);
   const purgedTrain = trainSet.filter(s => s.epoch == null || trainBoundaryEpoch - s.epoch >= purgeSeconds);
-  const valBoundaryEpoch = testSet.length ? testSet[0].epoch : Infinity;
+  const valBoundaryEpoch = testEpochs.length ? msdSafeMin(testEpochs) : Infinity;
   const purgedVal = valSet.filter(s => s.epoch == null || valBoundaryEpoch - s.epoch >= purgeSeconds);
 
   return {
@@ -5565,6 +5611,132 @@ function msdApplyPurgeGap(trainSet, valSet, testSet){
     purgedTrainCount: trainSet.length - purgedTrain.length,
     purgedValCount: valSet.length - purgedVal.length,
   };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Data Quality Gate Redesign — Recoverable Collection Events
+// ══════════════════════════════════════════════════════════════════════
+// Distinguishes FATAL data problems (mixed feature versions, zero-class,
+// corruption RATE above a configurable threshold — must block the
+// experiment entirely) from RECOVERABLE collection events (duplicate
+// ticks, clock discontinuities, mid-session interruptions, a small
+// number of corrupted rows — real, expected consequences of live
+// collection over the internet that should be isolated and excluded,
+// not treated as a reason to discard an entire session's data).
+
+const MSD_MIN_SEGMENT_SIZE = 100; // configurable — a continuous segment shorter than this contributes too little to be worth keeping, discarded rather than treated as an error
+const MSD_CORRUPTION_RATE_FATAL_THRESHOLD = 0.10; // configurable — above this fraction of rows corrupted, something is systemically wrong (not incidental noise) and the experiment should be blocked entirely rather than self-healed
+
+// Seconds per tick, per market — the basis for the ADAPTIVE interruption
+// threshold (requirement 5). Defaults to the existing MSD_EXPECTED_TICK_INTERVAL_SECONDS
+// and MSD_GAP_CRITICAL_MULTIPLE (both already defined, reused here rather
+// than duplicated) for any market not listed, so the fixed 60-second
+// behavior is UNCHANGED for Volatility 100 (1s), the platform's current
+// scope — this is additive and future-proofing, not a behavior change
+// for what's actually in use today.
+const MSD_MARKET_TICK_INTERVAL_SECONDS = { '1HZ100V': 1 };
+
+/** Adaptive interruption threshold (requirement 5): market-aware, not a hardcoded constant. Identical value to the original fixed rule for Volatility 100 (1s) — no silent behavior change for the platform's current scope. Reuses MSD_EXPECTED_TICK_INTERVAL_SECONDS and MSD_GAP_CRITICAL_MULTIPLE (defined further below, in the data-quality module) rather than duplicating them — safe because both are only referenced here at CALL time, once the whole script has already loaded, not at this function's own definition time. */
+function msdGetInterruptionThreshold(symbol){
+  const tickInterval = (symbol != null && MSD_MARKET_TICK_INTERVAL_SECONDS[symbol] != null) ? MSD_MARKET_TICK_INTERVAL_SECONDS[symbol] : MSD_EXPECTED_TICK_INTERVAL_SECONDS;
+  return tickInterval * MSD_GAP_CRITICAL_MULTIPLE;
+}
+
+/**
+ * Deduplicates ticks by epoch. Identical duplicates (same epoch, every
+ * other field equal) are collapsed to one record, deterministically —
+ * this is not a loss of information, since the copies are identical.
+ * CONFLICTING duplicates (same epoch, different field values) cannot be
+ * resolved automatically — there's no principled way to pick a "correct"
+ * one — so both/all copies are excluded entirely. snapshotId and
+ * timestamp are excluded from the equality comparison since those are
+ * expected to differ between a duplicate pair even when every
+ * market-relevant field is identical (e.g. a reconnect re-processing the
+ * same tick gets a new capture timestamp and snapshotId either way).
+ */
+function msdDeduplicateTicks(snapshots){
+  const byEpoch = {};
+  const noEpoch = [];
+  snapshots.forEach(s => {
+    if (s.epoch == null) { noEpoch.push(s); return; }
+    if (!byEpoch[s.epoch]) byEpoch[s.epoch] = [];
+    byEpoch[s.epoch].push(s);
+  });
+  const canonicalize = s => { const { snapshotId, timestamp, ...rest } = s; return JSON.stringify(rest); };
+  const deduped = [];
+  let identicalRemoved = 0, conflictingRemoved = 0;
+  Object.values(byEpoch).forEach(group => {
+    if (group.length === 1) { deduped.push(group[0]); return; }
+    const canonical = canonicalize(group[0]);
+    const allIdentical = group.every(g => canonicalize(g) === canonical);
+    if (allIdentical) {
+      deduped.push(group[0]);
+      identicalRemoved += group.length - 1;
+    } else {
+      conflictingRemoved += group.length; // exclude every copy — no principled way to pick a "correct" one
+    }
+  });
+  return { deduped: deduped.concat(noEpoch), identicalRemoved, conflictingRemoved };
+}
+
+/**
+ * Segments an EPOCH-sorted sequence into continuous sessions, splitting
+ * wherever the gap between consecutive ticks exceeds the (adaptive)
+ * interruption threshold. Returns segments in original order plus the
+ * boundary info (the gap-adjacent epochs) needed to purge around each
+ * one afterward.
+ */
+function msdSegmentContinuousSessions(sortedByEpoch, interruptionThresholdSeconds){
+  if (!sortedByEpoch.length) return { segments: [], boundaries: [] };
+  const segments = [];
+  const boundaries = [];
+  let current = [sortedByEpoch[0]];
+  for (let i = 1; i < sortedByEpoch.length; i++) {
+    const gap = sortedByEpoch[i].epoch - sortedByEpoch[i - 1].epoch;
+    if (gap > interruptionThresholdSeconds) {
+      segments.push(current);
+      boundaries.push({ afterEpoch: sortedByEpoch[i - 1].epoch, beforeEpoch: sortedByEpoch[i].epoch, gapSeconds: gap });
+      current = [sortedByEpoch[i]];
+    } else {
+      current.push(sortedByEpoch[i]);
+    }
+  }
+  segments.push(current);
+  return { segments, boundaries };
+}
+
+/**
+ * Purges a band around EVERY inter-segment boundary — both the tail of
+ * the segment before it and the head of the segment after it. This is
+ * what makes "no label may span a session interruption" true in
+ * general, not just at the three train/val/test split points: the live
+ * capture buffer naturally can't include ticks it never received during
+ * a real gap, but a label computed shortly after reconnection could
+ * still reach back across the gap into stale pre-interruption buffer
+ * contents if the buffer wasn't cleared across the drop — this closes
+ * exactly that residual risk, reusing the same purge-gap CONCEPT already
+ * applied at split boundaries (see msdApplyPurgeGap), generalized to
+ * every discontinuity in the retained timeline, not just three points.
+ */
+function msdPurgeSegmentBoundaries(segments, boundaries, purgeSeconds){
+  let purgedCount = 0;
+  const purgedSegments = segments.map((seg, i) => {
+    let result = seg;
+    if (i > 0) {
+      const boundaryEpoch = boundaries[i - 1].beforeEpoch;
+      const before = result.length;
+      result = result.filter(s => s.epoch - boundaryEpoch >= purgeSeconds);
+      purgedCount += before - result.length;
+    }
+    if (i < segments.length - 1) {
+      const boundaryEpoch = boundaries[i].afterEpoch;
+      const before = result.length;
+      result = result.filter(s => boundaryEpoch - s.epoch >= purgeSeconds);
+      purgedCount += before - result.length;
+    }
+    return result;
+  });
+  return { segments: purgedSegments, purgedCount };
 }
 
 const MSD_PRODUCTION_HOLDOUT_FRACTION = 0.15; // the most recent 15% of ALL data for a symbol+featureVersion, permanently reserved, never touched during Discovery or Validation
@@ -5602,6 +5774,27 @@ function msdPartitionProductionHoldout(allStates, featureVersion, symbol){
   };
 }
 
+/**
+ * REDESIGNED per the Data Quality Gate redesign. New pipeline:
+ *   Production holdout exclusion (unchanged, Phase 7C)
+ *   -> leadTime filter (unchanged)
+ *   -> Deduplicate (NEW — identical ticks collapsed, conflicting ticks excluded)
+ *   -> Sort by EPOCH, not timestamp (timestamp remains an audit-only field from here on)
+ *   -> Segment continuous sessions at the adaptive interruption threshold (NEW)
+ *   -> Purge a band around every segment boundary (NEW — closes the
+ *      residual "label reaches across a gap via a stale live buffer" risk)
+ *   -> Discard segments below the minimum viable size (NEW)
+ *   -> Existing positive/negative separation, seeded shuffle, and
+ *      ratio-based negative sampling (unchanged logic, now operating on
+ *      the gap-excised, deduplicated pool)
+ *   -> Existing chronological train/val/test split, now by epoch
+ *   -> Existing purge gap at the two split boundaries (msdApplyPurgeGap, bug fixed above)
+ *
+ * A full Data Recovery Report (requirement 7) is assembled as an
+ * integral part of this function, since every number in it is a direct
+ * byproduct of a step already happening here — nothing is recomputed
+ * separately.
+ */
 function msdBuildExperimentDataset(allStates, config){
   // Phase 7C: exclude the Production Validation holdout BEFORE any other
   // filtering — this is what makes it a genuinely separate tier, not
@@ -5611,9 +5804,32 @@ function msdBuildExperimentDataset(allStates, config){
   if (config.leadTime != null && config.leadTime !== 'all') {
     filtered = filtered.filter(s => s.outcome === 'negative' || s.leadTime === config.leadTime);
   }
+  const totalRawTicks = filtered.length;
 
-  const positives = filtered.filter(s => s.outcome === 'positive');
-  const negatives = filtered.filter(s => s.outcome === 'negative');
+  const dedupResult = msdDeduplicateTicks(filtered);
+  filtered = dedupResult.deduped;
+
+  // Sort by EPOCH (market time) for all chronological work from here on —
+  // requirement 3: timestamp is preserved on every row for auditing, but
+  // is never again used to decide ordering, splitting, or purging.
+  const sortedByEpoch = filtered.filter(s => s.epoch != null).slice().sort((a, b) => a.epoch - b.epoch);
+
+  const interruptionThreshold = msdGetInterruptionThreshold(config.symbol);
+  const { segments, boundaries } = msdSegmentContinuousSessions(sortedByEpoch, interruptionThreshold);
+
+  const purgeSecondsForSegments = (() => {
+    const lookbacks = sortedByEpoch.map(s => s.lookbackWindow).filter(v => v != null && Number.isFinite(v));
+    return lookbacks.length ? msdSafeMax(lookbacks) : 20;
+  })();
+  const { segments: purgedSegments, purgedCount: segmentBoundaryPurgeCount } = msdPurgeSegmentBoundaries(segments, boundaries, purgeSecondsForSegments);
+
+  const viableSegments = purgedSegments.filter(seg => seg.length >= MSD_MIN_SEGMENT_SIZE);
+  const segmentsDiscarded = purgedSegments.length - viableSegments.length;
+
+  const pooled = [].concat(...viableSegments); // still epoch-ordered — each segment internally is, and they're concatenated in original order
+
+  const positives = pooled.filter(s => s.outcome === 'positive');
+  const negatives = pooled.filter(s => s.outcome === 'negative');
 
   const rng = msdSeededRandom(config.randomSeed);
   const shuffledPositives = msdSeededShuffle(positives, rng);
@@ -5622,32 +5838,43 @@ function msdBuildExperimentDataset(allStates, config){
   const targetNegativeCount = Math.round(shuffledPositives.length * config.samplingRatio);
   const sampledNegatives = shuffledNegatives.slice(0, targetNegativeCount);
 
-  // Chronological split — deliberately NOT touched by the seeded shuffle
-  // above, which only decided WHICH negatives get sampled, not the
-  // eventual train/val/test assignment.
-  const combined = shuffledPositives.concat(sampledNegatives).slice().sort((a, b) => a.timestamp - b.timestamp);
+  // Chronological split by EPOCH — deliberately NOT touched by the seeded
+  // shuffle above, which only decided WHICH negatives get sampled, not
+  // the eventual train/val/test assignment.
+  const combined = shuffledPositives.concat(sampledNegatives).slice().sort((a, b) => a.epoch - b.epoch);
   const trainCount = Math.floor(combined.length * config.trainingSplit);
   const trainSet = combined.slice(0, trainCount);
   const remaining = combined.slice(trainCount);
-  // Validation/Test split of the remainder — independently configurable
-  // via config.validationSplit (fraction of the remainder going to
-  // validation; test gets the rest). Defaults to exactly 0.5, preserving
-  // the original fixed 50/50 behavior for any caller that doesn't specify
-  // it — this is additive, not a breaking change.
   const validationSplit = config.validationSplit != null ? config.validationSplit : 0.5;
   const valCount = Math.floor(remaining.length * validationSplit);
   const valSet = remaining.slice(0, valCount);
   const testSet = remaining.slice(valCount);
 
-  // Phase 7C: purge gap — see msdApplyPurgeGap's own docblock for why
-  // timestamp non-overlap alone (the pre-existing check) isn't sufficient.
   const purged = msdApplyPurgeGap(trainSet, valSet, testSet);
+
+  // Requirement 7 — Data Recovery Report: every field here is a direct
+  // byproduct of a step already performed above, not recomputed.
+  const recoveryReport = {
+    totalRawTicks,
+    duplicateTicksRemoved: dedupResult.identicalRemoved,
+    conflictingDuplicatesRemoved: dedupResult.conflictingRemoved,
+    corruptedRowsRemoved: 0, // populated by msdRunExperiment's quality gate step, which has the RATE context this function doesn't — see its own docblock
+    segmentsDetected: purgedSegments.length,
+    segmentsRetained: viableSegments.length,
+    segmentsDiscarded,
+    segmentBoundaryPurgeCount,
+    trainValPurgeCount: purged.purgedTrainCount + purged.purgedValCount,
+    finalTrainSize: purged.trainSet.length,
+    finalValSize: purged.valSet.length,
+    finalTestSize: purged.testSet.length,
+  };
 
   return {
     trainSet: purged.trainSet, valSet: purged.valSet, testSet: purged.testSet,
     meta: {
       positiveCount: shuffledPositives.length, negativeSampledCount: sampledNegatives.length, negativeAvailableCount: shuffledNegatives.length, validationSplit,
       purgeSeconds: purged.purgeSeconds, purgedTrainCount: purged.purgedTrainCount, purgedValCount: purged.purgedValCount,
+      recoveryReport,
     },
   };
 }
@@ -5814,14 +6041,33 @@ async function msdRunExperiment(config){
   const dataset = msdBuildExperimentDataset(allStates, config);
   const experimentId = msdGenerateExperimentId();
 
-  // Phase 7G: mandatory quality gate — "block analysis when critical
-  // failures are detected" is enforced exactly here, before an
-  // Experiment record is ever written. A dataset that fails this cannot
-  // become part of the permanent record at all, not just a warning
-  // someone might ignore.
+  // Phase 7G / Data Quality Gate Redesign: mandatory quality gate — only
+  // GENUINELY fatal issues (mixed feature versions, zero-class, or a
+  // corruption RATE above threshold) block here now. Duplicate ticks,
+  // clock discontinuities, and mid-session interruptions are recoverable
+  // and were already handled automatically inside msdBuildExperimentDataset
+  // (dedup + segmentation + purge) — they no longer reach this gate as
+  // critical failures at all.
   const qualityReport = msdGenerateDataQualityReport(allStates, dataset, config);
   if (qualityReport.hasCriticalFailure) {
     return { error: 'Data Quality gate failed — critical issue(s): ' + qualityReport.criticalFailures.map(f => f.name).join(', '), qualityReport };
+  }
+
+  // Recoverable row-level exclusion: the fatal-rate check just confirmed
+  // corruption is BELOW threshold, so exclude the specific bad rows
+  // (using the same msdIsRowCorrupted predicate the rate check itself
+  // used, so detection and exclusion always agree) rather than either
+  // blocking on them or silently training on them.
+  const preExclusionCounts = { train: dataset.trainSet.length, val: dataset.valSet.length, test: dataset.testSet.length };
+  dataset.trainSet = dataset.trainSet.filter(s => !msdIsRowCorrupted(s));
+  dataset.valSet = dataset.valSet.filter(s => !msdIsRowCorrupted(s));
+  dataset.testSet = dataset.testSet.filter(s => !msdIsRowCorrupted(s));
+  const corruptedRowsRemoved = (preExclusionCounts.train - dataset.trainSet.length) + (preExclusionCounts.val - dataset.valSet.length) + (preExclusionCounts.test - dataset.testSet.length);
+  if (dataset.meta && dataset.meta.recoveryReport) {
+    dataset.meta.recoveryReport.corruptedRowsRemoved = corruptedRowsRemoved;
+    dataset.meta.recoveryReport.finalTrainSize = dataset.trainSet.length;
+    dataset.meta.recoveryReport.finalValSize = dataset.valSet.length;
+    dataset.meta.recoveryReport.finalTestSize = dataset.testSet.length;
   }
 
   const allSnapshots = dataset.trainSet.concat(dataset.valSet, dataset.testSet);
@@ -5882,6 +6128,13 @@ async function msdRunExperiment(config){
     testSnapshotIds: dataset.testSet.map(s => s.snapshotId),
     datasetFingerprint,
     featureFingerprint,
+    // Requirement 7 — Data Recovery Report, permanent provenance: every
+    // future audit of this experiment can see not just which snapshots
+    // were used, but exactly what was excluded and why (duplicates,
+    // conflicting ticks, corrupted rows, discarded segments, purge-gap
+    // removals) — extending Phase 7E's provenance chain, not sitting
+    // outside it.
+    dataRecoveryReport: dataset.meta.recoveryReport || null,
   };
   const writeResult = await msdWriteExperiment(record);
   return { experimentId, dataset, record, writeResult };
@@ -9546,36 +9799,44 @@ function msdValidateRawDataQuality(allStates, symbol){
 
   const sorted = withEpoch.slice().sort((a, b) => a.epoch - b.epoch);
 
-  // Duplicate ticks: same symbol, same epoch, recorded more than once —
-  // distinct from msdValidateDataset's "duplicate snapshotId" check,
-  // which catches the SAME snapshot record appearing twice; this catches
-  // TWO DIFFERENT snapshot records both claiming the same tick.
+  // REDESIGN: duplicate ticks are RECOVERABLE, not fatal — real
+  // websocket reconnects legitimately re-process the last few ticks
+  // they have any uncertainty about, and msdBuildExperimentDataset now
+  // deduplicates automatically (msdDeduplicateTicks) before any dataset
+  // is built. This check remains informational: it still reports the
+  // count so a researcher can see it happened, but no longer blocks.
   const epochCounts = {};
   sorted.forEach(s => { epochCounts[s.epoch] = (epochCounts[s.epoch] || 0) + 1; });
   const duplicateTickCount = Object.values(epochCounts).filter(c => c > 1).length;
-  push('No Duplicate Ticks (same epoch recorded twice)', duplicateTickCount, duplicateTickCount === 0, true);
+  push('Duplicate Ticks Detected (same epoch recorded twice — auto-deduplicated)', duplicateTickCount, duplicateTickCount === 0, false);
 
-  // Clock discontinuities: epoch moving BACKWARD when sorted by the very
-  // field we just sorted by shouldn't be possible unless multiple equal
-  // epochs exist — checked directly against timestamp (capture order)
-  // instead, which SHOULD move forward independently of epoch.
+  // REDESIGN: clock discontinuities are RECOVERABLE, not fatal —
+  // exactly the signature a real reconnect produces (capture order
+  // temporarily diverging from market-time order). No longer blocks;
+  // still reported, and still what msdBuildExperimentDataset's purge
+  // gap logic protects against near any boundary it's found close to.
   let clockDiscontinuities = 0;
   for (let i = 1; i < sorted.length; i++) { if (sorted[i].timestamp < sorted[i - 1].timestamp) clockDiscontinuities++; }
-  push('No Clock Discontinuities (capture order matches epoch order)', clockDiscontinuities, clockDiscontinuities === 0, true);
+  push('Clock Discontinuities Detected (capture order vs epoch order)', clockDiscontinuities, clockDiscontinuities === 0, false);
 
-  // Missing ticks / sampling gaps / likely mid-session interruptions —
-  // see the module docblock above for why gaps beyond a plausible
-  // session length are downgraded to a warning instead of critical.
-  let warningGaps = 0, criticalGaps = 0, sessionBoundaryGaps = 0, maxGapSeconds = 0;
+  // REDESIGN: mid-session interruptions are RECOVERABLE, not fatal —
+  // confirmed real, expected events (internet outages, reconnects) for
+  // this platform's actual collection conditions. msdBuildExperimentDataset
+  // now segments the dataset at every such gap and purges around each
+  // boundary automatically (msdSegmentContinuousSessions +
+  // msdPurgeSegmentBoundaries), building the experiment from the union
+  // of valid segments rather than being blocked by their existence.
+  let warningGaps = 0, interruptionGaps = 0, sessionBoundaryGaps = 0, maxGapSeconds = 0;
+  const adaptiveThreshold = msdGetInterruptionThreshold(symbol);
   for (let i = 1; i < sorted.length; i++) {
     const gap = sorted[i].epoch - sorted[i - 1].epoch;
     if (gap > maxGapSeconds) maxGapSeconds = gap;
     if (gap > MSD_GAP_SESSION_BOUNDARY_SECONDS) sessionBoundaryGaps++;
-    else if (gap > MSD_EXPECTED_TICK_INTERVAL_SECONDS * MSD_GAP_CRITICAL_MULTIPLE) criticalGaps++;
+    else if (gap > adaptiveThreshold) interruptionGaps++;
     else if (gap > MSD_EXPECTED_TICK_INTERVAL_SECONDS * MSD_GAP_WARNING_MULTIPLE) warningGaps++;
   }
   push('No Large Sampling Gaps (>5x expected interval)', warningGaps, warningGaps === 0, false);
-  push('No Likely Mid-Session Interruptions (60s-1hr gap)', criticalGaps, criticalGaps === 0, true, { maxGapSeconds });
+  push('Mid-Session Interruptions Detected (auto-segmented)', interruptionGaps, interruptionGaps === 0, false, { maxGapSeconds, adaptiveThreshold });
   push('Session Boundaries Noted (>1hr gap — presumed normal, not corruption)', sessionBoundaryGaps, true, false);
 
   const criticalFailures = checks.filter(c => c.critical && !c.ok);
@@ -9644,36 +9905,31 @@ function msdValidateDataset(dataset, config){
     totalObservations > 0 ? { train: dataset.trainSet.length / totalObservations, val: dataset.valSet.length / totalObservations, test: dataset.testSet.length / totalObservations } : null,
     dataset.trainSet.length > 0, false);
 
-  // Phase 7G: corrupted feature vectors — every known indicator field
-  // must be finite (catches NaN/Infinity from a computation bug or a
-  // genuinely bad tick), plus range checks for the conventionally
-  // 0-100-bounded oscillators specifically (RSI, ADX, stochastic, +DI/-DI,
-  // Choppiness Index) — a value like RSI=340 is not a valid indicator
-  // reading under any circumstance, corrupted or not.
-  const boundedFields = ['rsi', 'adx', 'stochK', 'stochD', 'pdi', 'ndi', 'chop'];
-  let nonFiniteCount = 0, outOfRangeCount = 0;
+  // REDESIGN: corrupted rows are RECOVERABLE, not automatically fatal —
+  // "small numbers of corrupted rows" per the redesign spec. Uses the
+  // shared msdIsRowCorrupted predicate (also used by msdRunExperiment's
+  // exclusion step, so detection and exclusion always agree). Only the
+  // RATE decides fatality — a systemic problem (many bad rows) blocks
+  // the experiment; a handful of bad rows from ordinary collection noise
+  // does not, since msdRunExperiment excludes them automatically before
+  // training. Sub-counts (non-finite / out-of-range / incomplete label)
+  // are still reported individually for diagnostics, matching what the
+  // old three separate checks reported — only the fatality decision
+  // changed, not the visibility.
+  let nonFiniteCount = 0, outOfRangeCount = 0, incompleteLabelCount = 0, corruptedRowCount = 0;
   allSnapshots.forEach(s => {
-    MSD_KNOWN_FEATURE_KEYS.forEach(k => {
-      const v = s[k];
-      if (v != null && !Number.isFinite(v)) nonFiniteCount++;
-    });
-    boundedFields.forEach(k => {
-      const v = s[k];
-      if (v != null && Number.isFinite(v) && (v < 0 || v > 100)) outOfRangeCount++;
-    });
+    let rowBad = false;
+    MSD_KNOWN_FEATURE_KEYS.forEach(k => { const v = s[k]; if (v != null && !Number.isFinite(v)) { nonFiniteCount++; rowBad = true; } });
+    MSD_BOUNDED_INDICATOR_FIELDS.forEach(k => { const v = s[k]; if (v != null && Number.isFinite(v) && (v < 0 || v > 100)) { outOfRangeCount++; rowBad = true; } });
+    if ((s.outcome === 'positive' && !Number.isFinite(s.leadTime)) || (s.outcome === 'negative' && s.leadTime != null)) { incompleteLabelCount++; rowBad = true; }
+    if (rowBad) corruptedRowCount++;
   });
-  push('No Corrupted Feature Values (NaN/Infinity)', nonFiniteCount, nonFiniteCount === 0, true);
-  push('Bounded Indicators Within Valid Range (0-100)', outOfRangeCount, outOfRangeCount === 0, true);
-
-  // Phase 7G: incomplete labels — a positive snapshot without a finite
-  // leadTime, or a negative snapshot that somehow carries one, means the
-  // labeling process itself broke down for that row, independent of
-  // whether the underlying features are fine.
-  const incompleteLabels = allSnapshots.filter(s =>
-    (s.outcome === 'positive' && !Number.isFinite(s.leadTime)) ||
-    (s.outcome === 'negative' && s.leadTime != null)
-  ).length;
-  push('No Incomplete Labels', incompleteLabels, incompleteLabels === 0, true);
+  const corruptionRate = totalObservations > 0 ? corruptedRowCount / totalObservations : 0;
+  const corruptionFatal = corruptionRate > MSD_CORRUPTION_RATE_FATAL_THRESHOLD;
+  push('No Corrupted Feature Values (NaN/Infinity)', nonFiniteCount, nonFiniteCount === 0, false);
+  push('Bounded Indicators Within Valid Range (0-100)', outOfRangeCount, outOfRangeCount === 0, false);
+  push('No Incomplete Labels', incompleteLabelCount, incompleteLabelCount === 0, false);
+  push('Corruption Rate Within Tolerance (row-level exclusion below this, fatal above)', corruptionRate, !corruptionFatal, true, { corruptedRowCount, totalObservations, threshold: MSD_CORRUPTION_RATE_FATAL_THRESHOLD });
 
   const criticalFailures = checks.filter(c => c.critical && !c.ok);
   return { checks, allOk: checks.every(c => c.ok), criticalFailures, hasCriticalFailure: criticalFailures.length > 0 };
@@ -10308,6 +10564,16 @@ async function msdRunExperimentUi(){
   setTxt('msdExpTestCount', result.dataset.testSet.length);
   setTxt('msdExpPositiveCount', result.dataset.meta.positiveCount);
   setTxt('msdExpNegativeCount', result.dataset.meta.negativeSampledCount);
+
+  const recoveryEl = $("msdExpRecoveryReport");
+  if (recoveryEl) {
+    const r = result.record && result.record.dataRecoveryReport;
+    recoveryEl.innerHTML = r ? `
+      Raw ticks: ${r.totalRawTicks} · Duplicates removed: ${r.duplicateTicksRemoved} · Conflicting duplicates removed: ${r.conflictingDuplicatesRemoved} · Corrupted rows removed: ${r.corruptedRowsRemoved}<br>
+      Segments detected: ${r.segmentsDetected} · Retained: <span class="cell-pos">${r.segmentsRetained}</span> · Discarded (too small): <span class="${r.segmentsDiscarded?'cell-warn':''}">${r.segmentsDiscarded}</span><br>
+      Purge-gap removals — at segment boundaries: ${r.segmentBoundaryPurgeCount} · at train/val/test split boundaries: ${r.trainValPurgeCount}
+    ` : '<span class="sig-empty">No recovery report available.</span>';
+  }
 
   // Statistical Discovery Engine — runs on every experiment's dataset
   // before training would proceed. Displays the gate result and the
