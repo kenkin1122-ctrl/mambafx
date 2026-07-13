@@ -6956,8 +6956,20 @@ async function msdGetAllFindings(){
  * trained for this experiment yet — an honest "not yet known," not a
  * stale placeholder.
  */
-async function msdGetWinningModelForExperiment(experimentId){
-  const findings = await msdGetAllFindings();
+/**
+ * PERFORMANCE FIX: accepts an OPTIONAL precomputed findings array. When
+ * a caller (e.g. msdExperimentHistoryRefresh) needs this for MANY
+ * experiments at once, passing the findings in avoids each lookup
+ * independently re-fetching the ENTIRE KnowledgeBase store — a real,
+ * confirmed bug: with N experiments, the old code ran N full getAll()
+ * reads of the findings store concurrently (via Promise.all), which
+ * only got worse as both experiment count and findings count grew.
+ * IndexedDB transactions can queue across the whole origin, so a large
+ * pending backlog here could make OTHER pages feel stuck loading too,
+ * not just this one. Falls back to a fresh fetch when called standalone.
+ */
+async function msdGetWinningModelForExperiment(experimentId, precomputedFindings){
+  const findings = precomputedFindings || await msdGetAllFindings();
   return findings.find(f => f.type === 'model_performance' && f.experimentId === experimentId && f.isBest === true) || null;
 }
 
@@ -11383,11 +11395,17 @@ async function msdExperimentHistoryRefresh(){
   if (!experiments.length) { body.innerHTML = '<tr><td colspan="9" class="sig-empty">No experiments yet.</td></tr>'; return; }
   const sorted = experiments.slice().sort((a, b) => b.date - a.date); // most recent first
 
-  // One genuine, on-demand join per experiment — never a stored/stale label.
-  const winners = await Promise.all(sorted.map(e => msdGetWinningModelForExperiment(e.experimentId)));
+  // PERFORMANCE FIX: fetch the findings store ONCE, not once per
+  // experiment — the old code ran N concurrent full getAll() reads via
+  // Promise.all, which scaled badly as both experiment count and
+  // findings count grew (confirmed as a real cause of app-wide slowness
+  // once the KnowledgeBase store grew large).
+  const allFindings = await msdGetAllFindings();
+  const winners = sorted.map(e => msdGetWinningModelForExperiment(e.experimentId, allFindings));
+  const resolvedWinners = await Promise.all(winners);
 
   body.innerHTML = sorted.map((e, i) => {
-    const winner = winners[i];
+    const winner = resolvedWinners[i];
     const winnerCell = winner ? `${winner.modelName} (AUC ${winner.testAuc.toFixed(3)})` : '<span class="cell-mut">Not yet trained</span>';
     return `<tr>
     <td class="l">${e.experimentId}</td>
