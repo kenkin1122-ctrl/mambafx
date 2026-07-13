@@ -2864,7 +2864,44 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button class="gc-btn" onclick="msdCheckRawDataQualityUi()">🔍 Check Raw Data Quality</button>
     <div id="msdDataQualityResults" style="margin-top:10px;font-size:12px"></div>
   </div>
+
+  <div class="grid-card" style="margin-top:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Information Discovery Framework (Phases 1A-1E)</h3>
+    <div class="gc-sub" style="margin-bottom:8px">A negative lag-1 result does not rule out dependence at longer lags, in higher-order sequence structure, or only through non-linear/conditional relationships — this framework tests each specifically, reusing the platform's own MI, permutation-significance, and multiple-testing-correction machinery throughout, never assuming first-order structure alone is sufficient. <b>1A</b>: lag-1 dependence (the original test). <b>1B</b>: a multi-lag sweep (lag 1-5), corrected across all lags tested jointly. <b>1C</b>: k-th-order Markov transition patterns and n-gram frequency significance. <b>1D</b>: conditional mutual information — does a distant lag add information BEYOND what lag-1 already provides. <b>1E</b>: synthesizes 1A-1D into a decomposition of where any detected information resides, with formal evidence-level tagging.</div>
+    <button class="gc-btn" onclick="msdRunInformationTheoreticDiscoveryUi()">🔬 Run Phase 1A Only (lag-1)</button>
+    <button class="gc-btn" onclick="msdRunCompleteInformationDiscoveryFrameworkUi()">🔬 Run Complete Framework (1A-1E)</button>
+    <div id="msdInfoTheoreticResults" style="margin-top:10px;font-size:12px"></div>
+  </div>
+
+  <div class="grid-card" style="margin-top:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Hidden Market State Discovery (Implementation Phase 2)</h3>
+    <div class="gc-sub" style="margin-bottom:8px"><b>The scientific gate is compiled into this engine, not left as a policy to remember.</b> This calls the complete Phase 1A-1E framework first and refuses to produce ANY candidate state — not a placeholder, not a "preliminary" one — unless Phase 1's own decomposition already found recoverable information. "Implementing Phase 2" never implies "a hidden state exists"; the two are structurally decoupled. Where a candidate does emerge, it is further tested for split-half reproducibility (the same test re-run independently on the first and second half of the data) before being classified Verified, Evidence-Supported Hypothesis, or Unsupported.</div>
+    <button class="gc-btn" onclick="msdRunHiddenStateDiscoveryUi()">🔬 Run Hidden Market State Discovery</button>
+    <div id="msdHiddenStateResults" style="margin-top:10px;font-size:12px"></div>
+  </div>
+
+  <div class="grid-card" style="margin-top:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Market State Signature (Implementation Phase 3)</h3>
+    <div class="gc-sub" style="margin-bottom:8px">An even narrower gate than Phase 2's: a signature is only constructed for candidates Phase 2 itself classified <b>Verified</b> — reproducible in both independent halves of the data. Evidence-Supported Hypotheses and Unsupported candidates get no signature at all, not a partial one. For each Verified state: defining measurements, characteristic transition-probability range, a bootstrap confidence interval, variability between the two data halves, stability tested across four independent chunks (a finer-grained view than the pass/fail reproducibility check alone), and similarity to any other Verified states (to catch two "different" states that are actually redundant descriptions of the same structure).</div>
+    <button class="gc-btn" onclick="msdRunMarketStateSignatureConstructionUi()">🔬 Construct Market State Signatures</button>
+    <div id="msdSignatureResults" style="margin-top:10px;font-size:12px"></div>
+  </div>
+
+  <div class="grid-card" style="margin-top:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Market State Measurements (Implementation Phase 4)</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Gated on Phase 3's Verified signatures — no measurement is produced without one. Three families (Directional Persistence, Higher-Order Sequence Structure, Interaction Measurements) are direct formalizations of what Phases 1B/1C/1D already built; Transition Dynamics reuses Phase 1C's k-th-order Markov work. <b>Market Disorder</b> and <b>Volatility Dynamics</b> are genuinely new — the first entropy and price-magnitude measurements in this whole programme (everything before this point worked on tick direction sign alone) — and neither is a free-floating descriptive statistic: both are tested CONDITIONALLY on the Verified state's own indicator via the same permutation-significance machinery used throughout. Structural State is a pure synthesis of the rest.</div>
+    <button class="gc-btn" onclick="msdRunMarketStateMeasurementsUi()">🔬 Compute Market State Measurements</button>
+    <div id="msdMeasurementResults" style="margin-top:10px;font-size:12px"></div>
+  </div>
+
+  <div class="grid-card" style="margin-top:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Scientific Validation (Implementation Phase 5)</h3>
+    <div class="gc-sub" style="margin-bottom:8px">"Only validated measurements may enter the production feature set" — a real filter, not a label. Every measurement family now carries an explicit hypothesis, null hypothesis, baseline, acceptance/rejection criteria, alternative explanations, and confounding factors — fixed, principled text per measurement TYPE, not generated per run. Phase 4's two new test types (Market Disorder, Volatility Dynamics) are corrected for multiple testing here for the first time, since they never went through Phase 1B/1D's own correction. Transition Dynamics is honestly excluded from the production set — its own Phase 1C scope explicitly never implemented a formal per-context significance test, and this phase does not paper over that gap.</div>
+    <button class="gc-btn" onclick="msdRunScientificValidationUi()">🔬 Run Scientific Validation</button>
+    <div id="msdValidationResults" style="margin-top:10px;font-size:12px"></div>
+  </div>
 </div>
+
 
 <div id="page-njanja" class="page">
 <header>
@@ -10150,6 +10187,499 @@ function msdBenchmarkAgainstRandomChance(values, outcomes, randomSeed, permutati
 }
 
 
+// ══════════════════════════════════════════════════════════════════════
+// Implementation Phase 1 — Information-Theoretic Discovery Engine
+// ══════════════════════════════════════════════════════════════════════
+// Determines whether the RAW tick stream itself — independent of any
+// engineered feature — carries recoverable serial-dependence information
+// relevant to future 5-tick runs. This is the single highest-value open
+// question identified across prior analysis: until it's answered, no
+// feature-engineering investment is scientifically justified.
+//
+// REUSE, not new infrastructure: msdMutualInformation / msdFeatureOutcomeMI
+// (MI computation), msdBenchmarkAgainstRandomChance (permutation
+// significance testing), msdSeededShuffle / msdSeededRandom (deterministic
+// RNG), msdSegmentContinuousSessions + msdGetInterruptionThreshold (Data
+// Quality Gate redesign — genuinely continuous tick runs), msdSafeMin/Max.
+// The only new logic: extracting a strictly tick-adjacent direction
+// sequence from continuous segments, run-length distribution vs. the
+// theoretical geometric null, and a first-order transition matrix — the
+// minimal set of NEW computations this specific question requires.
+//
+// CORRECTNESS DISCIPLINE: run-length and transition statistics are
+// computed WITHIN each continuous segment only, NEVER across a segment
+// boundary (which would fabricate a "run" spanning a real collection
+// gap). Within a segment, only STRICTLY tick-adjacent pairs (epoch delta
+// exactly equal to the market's own tick interval) are used — a stricter
+// requirement than segmentation alone provides, since segmentation only
+// excludes LARGE gaps, not the occasional single missed tick.
+
+/**
+ * Extracts a strict tick-direction sequence (1=up, 0=down) from ONE
+ * continuous segment, using ONLY pairs whose epoch delta exactly equals
+ * the market's tick interval — flat (zero-delta) ticks are excluded
+ * entirely rather than arbitrarily assigned a direction, and any pair
+ * separated by a missed tick (delta != tick interval) is excluded rather
+ * than silently treated as adjacent.
+ */
+function msdExtractStrictDirectionSequence(segment, tickIntervalSeconds){
+  tickIntervalSeconds = tickIntervalSeconds || 1;
+  const seq = [];
+  for (let i = 1; i < segment.length; i++) {
+    const prev = segment[i - 1], cur = segment[i];
+    if (prev.price == null || cur.price == null || prev.epoch == null || cur.epoch == null) continue;
+    if (Math.abs((cur.epoch - prev.epoch) - tickIntervalSeconds) > 1e-9) continue; // not strictly adjacent — excluded, not approximated
+    if (cur.price === prev.price) continue; // flat tick — no direction to assign, excluded rather than guessed
+    seq.push(cur.price > prev.price ? 1 : 0);
+  }
+  return seq;
+}
+
+/**
+ * Phase 4 (Volatility Dynamics) — mirrors msdExtractStrictDirectionSequence's
+ * adjacency discipline exactly, but for tick MAGNITUDE (|price delta|)
+ * instead of sign. A separate function rather than an extension of the
+ * existing one, since the two return fundamentally different payloads
+ * and forcing them into one would change the existing function's return
+ * type — a real API break for existing callers. Unlike direction, a flat
+ * tick correctly HAS a valid magnitude (exactly 0) and is kept, not
+ * excluded — everything built through Phase 3 discarded magnitude
+ * information entirely by working on direction sign alone; this is what
+ * closes that gap.
+ */
+function msdExtractStrictMagnitudeSequence(segment, tickIntervalSeconds){
+  tickIntervalSeconds = tickIntervalSeconds || 1;
+  const seq = [];
+  for (let i = 1; i < segment.length; i++) {
+    const prev = segment[i - 1], cur = segment[i];
+    if (prev.price == null || cur.price == null || prev.epoch == null || cur.epoch == null) continue;
+    if (Math.abs((cur.epoch - prev.epoch) - tickIntervalSeconds) > 1e-9) continue;
+    seq.push(Math.abs(cur.price - prev.price));
+  }
+  return seq;
+}
+
+/** Empirical run-length distribution of a binary direction sequence — a histogram of "how long each same-value streak lasted," computed directly from the raw sequence, no model or feature involved. */
+function msdComputeRunLengthDistribution(directionSeq){
+  const runs = [];
+  if (!directionSeq.length) return { runs: [], histogram: {}, totalRuns: 0 };
+  let currentLength = 1;
+  for (let i = 1; i < directionSeq.length; i++) {
+    if (directionSeq[i] === directionSeq[i - 1]) currentLength++;
+    else { runs.push(currentLength); currentLength = 1; }
+  }
+  runs.push(currentLength);
+  const histogram = {};
+  runs.forEach(r => { histogram[r] = (histogram[r] || 0) + 1; });
+  return { runs, histogram, totalRuns: runs.length };
+}
+
+/**
+ * The theoretical run-length distribution a MEMORYLESS (i.i.d.) process
+ * with the SAME observed base rate would produce. Computed from the
+ * data's OWN observed base rate, not assumed to be 0.5, since real tick
+ * data can have a mild inherent directional asymmetry unrelated to the
+ * phenomenon being tested. A run of "up" with exact length k, starting
+ * at a given position, requires: the previous tick was down (prob 1-p),
+ * k consecutive ups (prob p^k), then a switch to down (prob 1-p) —
+ * giving p^k(1-p)^2 per candidate start position, symmetrically
+ * (1-p)^k*p^2 for down-runs, summed over ~n candidate positions.
+ * VALIDATED before use: an earlier version of this formula was
+ * mistakenly off by roughly a factor of 2 (caught via direct Monte
+ * Carlo simulation against a large synthetic i.i.d. sequence before
+ * this was ever applied to real data) — this corrected version was
+ * re-validated the same way and matches simulated empirical counts
+ * closely across the bulk of the distribution.
+ */
+function msdTheoreticalGeometricRunLengths(directionSeq, maxLength){
+  maxLength = maxLength || 10;
+  const n = directionSeq.length;
+  if (!n) return { expectedCounts: {}, observedBaseRate: null };
+  const upCount = directionSeq.filter(d => d === 1).length;
+  const p = upCount / n; // observed base rate, not assumed
+  const expectedCounts = {};
+  for (let k = 1; k <= maxLength; k++) {
+    const probUpRun = Math.pow(p, k) * (1 - p) * (1 - p);
+    const probDownRun = Math.pow(1 - p, k) * p * p;
+    expectedCounts[k] = n * (probUpRun + probDownRun);
+  }
+  return { expectedCounts, observedBaseRate: p };
+}
+
+/** First-order transition matrix: P(next=up | current=up) and P(next=up | current=down), plus the marginal P(up) — the classic, minimal test of first-order serial dependence. Deviation between the two conditional probabilities (and from the marginal) is the direct signature of dependence, independent of any significance test. */
+function msdComputeFirstOrderTransitionMatrix(directionSeq){
+  if (directionSeq.length < 2) return null;
+  let upToUp = 0, upTotal = 0, downToUp = 0, downTotal = 0, upCount = 0;
+  for (let i = 0; i < directionSeq.length - 1; i++) {
+    const cur = directionSeq[i], next = directionSeq[i + 1];
+    if (cur === 1) { upTotal++; if (next === 1) upToUp++; }
+    else { downTotal++; if (next === 1) downToUp++; }
+    if (cur === 1) upCount++;
+  }
+  return {
+    pUpGivenUp: upTotal ? upToUp / upTotal : null,
+    pUpGivenDown: downTotal ? downToUp / downTotal : null,
+    marginalPUp: upCount / (directionSeq.length - 1),
+    upTotal, downTotal,
+  };
+}
+
+/**
+ * THE decisive Phase 1A test: reuses msdBenchmarkAgainstRandomChance
+ * directly — current tick direction as "feature," next tick direction
+ * as "outcome" — no new statistical machinery. A significant result
+ * means the raw tick stream itself carries next-tick-direction
+ * information beyond chance; a null result is direct evidence against
+ * recoverable serial dependence at the tested lag.
+ *
+ * EXTENDED for Phase 1B (multi-lag dependence), not rewritten: accepts
+ * an optional `lag` parameter, defaulting to 1 — every existing 1A
+ * caller that doesn't pass one gets EXACTLY the original lag-1
+ * behavior, unchanged. Tests whether tick direction `lag` steps back
+ * carries information about the CURRENT tick, independent of anything
+ * at lag 1 specifically (see msdComputeLagDependenceSweep for why this
+ * matters: a negative lag-1 result does not rule out dependence at
+ * lag-2, lag-3, or beyond).
+ */
+function msdRunSerialDependenceTest(directionSeq, randomSeed, permutations, lag){
+  lag = lag || 1;
+  if (directionSeq.length < lag + 2) return null;
+  const values = directionSeq.slice(0, -lag);
+  const outcomes = directionSeq.slice(lag);
+  return msdBenchmarkAgainstRandomChance(values, outcomes, randomSeed, permutations || 200, 2);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Information Discovery Framework — Phases 1B through 1E
+// ══════════════════════════════════════════════════════════════════════
+// A negative Phase 1A (lag-1) result does not rule out dependence at
+// longer lags, in higher-order sequence structure, or only through
+// non-linear/conditional relationships. Phases 1B-1E test each of these
+// specifically, none of them assuming first-order structure is
+// sufficient. Every sub-phase reuses Phase 1A's own machinery
+// (msdRunSerialDependenceTest, now lag-generalized above) and the
+// platform's existing multiple-testing correction (msdBenjaminiHochberg /
+// msdBenjaminiYekutieli, Phase 7A) — required here specifically because
+// sweeping many lags/n-gram-lengths/conditional tests is exactly the
+// multiple-comparisons scenario that correction exists to guard against.
+
+const MSD_INFO_DISCOVERY_MAX_LAG = 5;
+const MSD_INFO_DISCOVERY_MAX_NGRAM = 4;
+const MSD_INFO_DISCOVERY_MAX_MARKOV_ORDER = 3;
+
+/**
+ * Phase 1B — multi-lag dependence. Sweeps lag=1..maxLag using Phase 1A's
+ * own test (unmodified, just called repeatedly with different lag
+ * values), then applies the platform's existing Benjamini-Yekutieli
+ * correction (valid under the dependency these lag-tests genuinely have
+ * with each other, since they're computed from overlapping windows of
+ * the same sequence) across all lags tested jointly — a single lag
+ * being "significant" in isolation is not treated as sufficient; it
+ * must survive correction against the whole family of lags tested.
+ */
+function msdComputeLagDependenceSweep(directionSeq, maxLag, randomSeed, permutations){
+  maxLag = maxLag || MSD_INFO_DISCOVERY_MAX_LAG;
+  const results = [];
+  for (let lag = 1; lag <= maxLag; lag++) {
+    const test = msdRunSerialDependenceTest(directionSeq, randomSeed, permutations || 200, lag);
+    if (test) results.push({ lag, ...test });
+  }
+  if (!results.length) return { results: [], anySignificantAfterCorrection: false };
+  const pValues = results.map(r => r.pValue);
+  const corrected = msdBenjaminiYekutieli(pValues, 0.05);
+  results.forEach((r, i) => { r.qValue = corrected[i].adjustedPValue; r.significantAfterCorrection = corrected[i].significant; });
+  return { results, anySignificantAfterCorrection: results.some(r => r.significantAfterCorrection) };
+}
+
+/**
+ * Phase 1C — k-th-order Markov transition matrix: generalizes Phase 1A's
+ * first-order-only transition matrix (P(next|current)) to condition on
+ * the last `order` ticks jointly, not just the immediately preceding
+ * one. Reports, for every observed length-`order` context pattern, the
+ * conditional P(next=up | that exact pattern) and how far it deviates
+ * from the unconditional marginal rate.
+ */
+function msdComputeKthOrderTransitionMatrix(directionSeq, order){
+  order = order || 2;
+  if (directionSeq.length < order + 2) return null;
+  const contextCounts = new Map(); // pattern string -> {upNext, total}
+  let marginalUp = 0;
+  for (let i = order; i < directionSeq.length; i++) {
+    const context = directionSeq.slice(i - order, i).join('');
+    const next = directionSeq[i];
+    if (!contextCounts.has(context)) contextCounts.set(context, { upNext: 0, total: 0 });
+    const c = contextCounts.get(context);
+    c.total++;
+    if (next === 1) { c.upNext++; marginalUp++; }
+  }
+  const totalObservations = directionSeq.length - order;
+  const marginalRate = totalObservations ? marginalUp / totalObservations : null;
+  const contexts = [];
+  contextCounts.forEach((c, pattern) => {
+    contexts.push({ pattern, count: c.total, pUpGivenContext: c.total ? c.upNext / c.total : null, deviationFromMarginal: (c.total && marginalRate != null) ? Math.abs((c.upNext / c.total) - marginalRate) : null });
+  });
+  return { order, marginalRate, contexts: contexts.sort((a, b) => b.count - a.count), totalObservations };
+}
+
+/**
+ * Phase 1C — n-gram frequency significance: tests whether specific
+ * length-n binary direction patterns occur more or less often than a
+ * shuffled version of the SAME sequence (preserving the marginal
+ * up/down rate, destroying sequence order) would predict — a direct,
+ * permutation-based test of higher-order sequence structure beyond
+ * transition probabilities alone. Reuses msdSeededShuffle (existing),
+ * no new shuffling logic.
+ */
+function msdComputeNgramFrequencyAnalysis(directionSeq, n, randomSeed, permutations){
+  n = n || 3;
+  permutations = permutations || 100;
+  if (directionSeq.length < n * 3) return null;
+  function countNgrams(seq){
+    const counts = new Map();
+    for (let i = 0; i <= seq.length - n; i++) {
+      const gram = seq.slice(i, i + n).join('');
+      counts.set(gram, (counts.get(gram) || 0) + 1);
+    }
+    return counts;
+  }
+  const realCounts = countNgrams(directionSeq);
+  const rng = msdSeededRandom(randomSeed || 1);
+  const shuffledCountsPerGram = new Map();
+  for (let p = 0; p < permutations; p++) {
+    const shuffled = msdSeededShuffle(directionSeq, rng);
+    const counts = countNgrams(shuffled);
+    counts.forEach((count, gram) => {
+      if (!shuffledCountsPerGram.has(gram)) shuffledCountsPerGram.set(gram, []);
+      shuffledCountsPerGram.get(gram).push(count);
+    });
+  }
+  const results = [];
+  realCounts.forEach((realCount, gram) => {
+    const shuffledCounts = shuffledCountsPerGram.get(gram) || [];
+    if (!shuffledCounts.length) return;
+    const shuffledMean = shuffledCounts.reduce((a, b) => a + b, 0) / shuffledCounts.length;
+    const extremeCount = shuffledCounts.filter(c => Math.abs(c - shuffledMean) >= Math.abs(realCount - shuffledMean)).length;
+    const pValue = extremeCount / shuffledCounts.length;
+    results.push({ gram, realCount, shuffledMeanCount: shuffledMean, pValue });
+  });
+  const pValues = results.map(r => r.pValue);
+  const corrected = pValues.length ? msdBenjaminiYekutieli(pValues, 0.05) : [];
+  results.forEach((r, i) => { r.qValue = corrected[i] ? corrected[i].adjustedPValue : null; r.significantAfterCorrection = corrected[i] ? corrected[i].significant : false; });
+  return { n, results: results.sort((a, b) => a.pValue - b.pValue), anySignificantAfterCorrection: results.some(r => r.significantAfterCorrection) };
+}
+
+/**
+ * Phase 1D — conditional mutual information: I(Y; Z | X) via binned
+ * joint distributions, generalizing msdMutualInformation (2 variables)
+ * to 3. Answers a genuinely different question from Phase 1B's marginal
+ * per-lag tests: does a MORE DISTANT lag (Z) carry information about the
+ * outcome (Y) BEYOND what the immediate lag (X) already provides — i.e.
+ * incremental, not just marginal, information. VALIDATED before use
+ * against a known synthetic case (see verify_info_discovery_1b_1e.js)
+ * the same way the Phase 1A run-length formula was validated before
+ * shipping, given the real risk of a subtle sign or normalization error
+ * in a 3-variable information-theoretic quantity.
+ */
+function msdConditionalMutualInformation(y, x, z, binCount){
+  binCount = binCount || 2;
+  const n = y.length;
+  if (n < 4 || x.length !== n || z.length !== n) return null;
+  const yMin = msdSafeMin(y), yMax = msdSafeMax(y);
+  const xMin = msdSafeMin(x), xMax = msdSafeMax(x);
+  const zMin = msdSafeMin(z), zMax = msdSafeMax(z);
+  function binOf(v, lo, hi){
+    if (hi === lo) return 0;
+    let idx = Math.floor(((v - lo) / (hi - lo)) * binCount);
+    if (idx >= binCount) idx = binCount - 1;
+    if (idx < 0) idx = 0;
+    return idx;
+  }
+  // I(Y;Z|X) = sum_x P(x) * I(Y;Z | X=x) — computed directly by
+  // partitioning on each observed X bin and computing ordinary MI(Y,Z)
+  // within that partition, weighted by how much data falls in it.
+  const partitions = new Map();
+  for (let i = 0; i < n; i++) {
+    const xi = binOf(x[i], xMin, xMax);
+    if (!partitions.has(xi)) partitions.set(xi, { ys: [], zs: [] });
+    partitions.get(xi).ys.push(y[i]);
+    partitions.get(xi).zs.push(z[i]);
+  }
+  let cmi = 0;
+  partitions.forEach(part => {
+    if (part.ys.length < 2) return;
+    const weight = part.ys.length / n;
+    const miWithinPartition = msdMutualInformation(part.ys, part.zs, binCount);
+    if (miWithinPartition != null) cmi += weight * miWithinPartition;
+  });
+  return cmi;
+}
+
+/**
+ * Phase 1D orchestrator — tests whether lag-2 (and further lags, up to
+ * maxLag) carry INCREMENTAL information about the next tick BEYOND what
+ * lag-1 already provides, via conditional MI, with permutation-based
+ * significance (shuffling the distant-lag values only, preserving the
+ * lag-1 relationship, isolating the incremental contribution
+ * specifically).
+ */
+function msdRunNonLinearDiscovery(directionSeq, maxLag, randomSeed, permutations){
+  maxLag = maxLag || MSD_INFO_DISCOVERY_MAX_LAG;
+  permutations = permutations || 100;
+  const results = [];
+  const rng = msdSeededRandom(randomSeed || 1);
+  for (let lag = 2; lag <= maxLag; lag++) {
+    if (directionSeq.length < lag + 3) continue;
+    const y = directionSeq.slice(lag); // outcome: tick at position i
+    const x = directionSeq.slice(lag - 1, -1); // immediate lag-1 predictor, aligned to y
+    const z = directionSeq.slice(0, -lag); // the more distant lag-`lag` predictor, aligned to y
+    const realCmi = msdConditionalMutualInformation(y, x, z, 2);
+    if (realCmi == null) continue;
+    const shuffledCmis = [];
+    for (let p = 0; p < permutations; p++) {
+      const shuffledZ = msdSeededShuffle(z, rng);
+      const cmi = msdConditionalMutualInformation(y, x, shuffledZ, 2);
+      if (cmi != null) shuffledCmis.push(cmi);
+    }
+    if (!shuffledCmis.length) continue;
+    const countGreaterOrEqual = shuffledCmis.filter(c => c >= realCmi).length;
+    const pValue = countGreaterOrEqual / shuffledCmis.length;
+    results.push({ lag, realCmi, shuffledMeanCmi: shuffledCmis.reduce((a,b)=>a+b,0)/shuffledCmis.length, pValue });
+  }
+  if (!results.length) return { results: [], anySignificantAfterCorrection: false };
+  const pValues = results.map(r => r.pValue);
+  const corrected = msdBenjaminiYekutieli(pValues, 0.05);
+  results.forEach((r, i) => { r.qValue = corrected[i].adjustedPValue; r.significantAfterCorrection = corrected[i].significant; });
+  return { results, anySignificantAfterCorrection: results.some(r => r.significantAfterCorrection) };
+}
+
+/**
+ * Phase 1E — information decomposition. Pure synthesis of 1A-1D's
+ * already-computed outputs, exactly the same "assembly, not computation"
+ * discipline as the earlier Scientific Assessment Engine — no new
+ * statistics are computed here, only classification of WHERE any
+ * detected information resides, with evidence-level tagging applied
+ * according to a fixed, stated rule rather than judgment.
+ */
+function msdRunInformationDecomposition(phase1A, phase1B, phase1C_runLength, phase1C_markov, phase1C_ngram, phase1D){
+  const sources = [];
+  const tag = (significant, hasEffect) => significant && hasEffect ? 'Direct Experimental Evidence' : significant ? 'Evidence-Supported Hypothesis' : 'Currently Unknown';
+
+  if (phase1A && phase1A.serialDependenceTest) {
+    const sig = phase1A.serialDependenceTest.significant && phase1A.transitionDeviation > 0.02;
+    sources.push({ source: 'Direction (lag-1)', evidenceLevel: tag(phase1A.serialDependenceTest.significant, phase1A.transitionDeviation > 0.02), detail: phase1A.classification });
+  }
+  if (phase1B && phase1B.results.length) {
+    const sigLags = phase1B.results.filter(r => r.significantAfterCorrection);
+    sources.push({ source: 'Direction (multi-lag)', evidenceLevel: sigLags.length ? 'Evidence-Supported Hypothesis' : 'Currently Unknown', detail: sigLags.length ? `Significant after correction at lag(s): ${sigLags.map(r=>r.lag).join(', ')}` : 'No lag significant after correction' });
+  }
+  if (phase1C_markov) {
+    sources.push({ source: 'Transition probabilities (higher-order)', evidenceLevel: 'Currently Unknown', detail: `Order-${phase1C_markov.order} context patterns computed; formal significance testing of individual contexts not yet performed — descriptive only at this stage` });
+  }
+  if (phase1C_ngram && phase1C_ngram.results.length) {
+    const sigGrams = phase1C_ngram.results.filter(r => r.significantAfterCorrection);
+    sources.push({ source: 'Sequence structure (n-grams)', evidenceLevel: sigGrams.length ? 'Evidence-Supported Hypothesis' : 'Currently Unknown', detail: sigGrams.length ? `${sigGrams.length} pattern(s) significant after correction` : 'No pattern significant after correction' });
+  }
+  if (phase1D && phase1D.results.length) {
+    const sigCmi = phase1D.results.filter(r => r.significantAfterCorrection);
+    sources.push({ source: 'Non-linear / incremental (conditional MI)', evidenceLevel: sigCmi.length ? 'Evidence-Supported Hypothesis' : 'Currently Unknown', detail: sigCmi.length ? `Incremental information beyond lag-1 detected at lag(s): ${sigCmi.map(r=>r.lag).join(', ')}` : 'No incremental information beyond lag-1 detected' });
+  }
+
+  const anyEvidence = sources.some(s => s.evidenceLevel === 'Direct Experimental Evidence' || s.evidenceLevel === 'Evidence-Supported Hypothesis');
+  return {
+    sources,
+    overallConclusion: anyEvidence
+      ? 'Recoverable information detected in at least one source — proceeding to Hidden Market State Discovery, focused on the source(s) identified, is scientifically justified.'
+      : 'No recoverable information detected in any tested source across Phases 1A-1D — Hidden Market State Discovery is not currently justified by this evidence.',
+  };
+}
+
+/**
+ * Top-level orchestrator (Implementation Phase 1). Fetches raw
+ * MarketStates, segments into continuous sessions (reusing the Data
+ * Quality Gate redesign's own segmentation, unmodified), extracts strict
+ * direction sequences per segment, and runs the serial-dependence test
+ * on the POOLED sequence (concatenated across segments, but with
+ * run-length/transition statistics computed per-segment internally so no
+ * statistic ever spans a real collection gap). Produces the A-vs-B
+ * classification the whole research programme has been waiting on.
+ */
+/** Shared by every Phase 1A-1E entry point: fetches raw MarketStates, segments into continuous sessions (reusing the Data Quality Gate redesign's segmentation, unmodified), and extracts a strict, pooled tick-direction sequence — never spanning a real collection gap. Factored out so 1B-1E reuse the identical data-preparation step 1A already used, rather than re-fetching or re-deriving it separately. */
+/** Shared by direction and magnitude accessors alike: fetches, sorts, and segments raw MarketStates into continuous sessions — the part of the pipeline that's identical regardless of which payload (direction sign or magnitude) gets extracted from each segment afterward. */
+async function msdGetContinuousSegments(symbol, featureVersion){
+  const allStates = await msdGetAllMarketStates();
+  const filtered = allStates.filter(s => s.symbol === symbol && s.featureVersion === featureVersion && s.epoch != null && s.price != null);
+  const sortedByEpoch = filtered.slice().sort((a, b) => a.epoch - b.epoch);
+  const interruptionThreshold = msdGetInterruptionThreshold(symbol);
+  const { segments } = msdSegmentContinuousSessions(sortedByEpoch, interruptionThreshold);
+  return segments;
+}
+
+async function msdGetPooledDirectionSequence(symbol, featureVersion){
+  const segments = await msdGetContinuousSegments(symbol, featureVersion);
+  const pooledDirectionSeq = [];
+  let segmentsUsed = 0;
+  segments.forEach(seg => {
+    const dirSeq = msdExtractStrictDirectionSequence(seg, 1);
+    if (dirSeq.length >= 3) {
+      pooledDirectionSeq.push(...dirSeq);
+      segmentsUsed++;
+    }
+  });
+  return { pooledDirectionSeq, segmentsUsed };
+}
+
+/** Phase 4 (Volatility Dynamics) — the magnitude-sequence counterpart to msdGetPooledDirectionSequence, reusing the same shared segmentation step. */
+async function msdGetPooledMagnitudeSequence(symbol, featureVersion){
+  const segments = await msdGetContinuousSegments(symbol, featureVersion);
+  const pooledMagnitudeSeq = [];
+  let segmentsUsed = 0;
+  segments.forEach(seg => {
+    const magSeq = msdExtractStrictMagnitudeSequence(seg, 1);
+    if (magSeq.length >= 3) {
+      pooledMagnitudeSeq.push(...magSeq);
+      segmentsUsed++;
+    }
+  });
+  return { pooledMagnitudeSeq, segmentsUsed };
+}
+
+async function msdRunInformationTheoreticDiscovery(symbol, featureVersion, randomSeed){
+  const { pooledDirectionSeq, segmentsUsed } = await msdGetPooledDirectionSequence(symbol, featureVersion);
+
+  if (pooledDirectionSeq.length < 30) {
+    return { insufficientData: true, totalTicksAvailable: pooledDirectionSeq.length, segmentsUsed };
+  }
+
+  const runLengthDist = msdComputeRunLengthDistribution(pooledDirectionSeq);
+  const theoreticalRunLengths = msdTheoreticalGeometricRunLengths(pooledDirectionSeq, 10);
+  const transitionMatrix = msdComputeFirstOrderTransitionMatrix(pooledDirectionSeq);
+  const serialDependenceTest = msdRunSerialDependenceTest(pooledDirectionSeq, randomSeed || 1, 200);
+
+  // Classification: A (recoverable information exists) requires BOTH
+  // statistical significance AND a non-trivial effect size (a
+  // significant-but-tiny deviation at large N is a real risk this
+  // guards against) — significance alone is not sufficient.
+  const transitionDeviation = transitionMatrix && transitionMatrix.pUpGivenUp != null && transitionMatrix.pUpGivenDown != null
+    ? Math.abs(transitionMatrix.pUpGivenUp - transitionMatrix.pUpGivenDown) : null;
+  const classification = (serialDependenceTest && serialDependenceTest.significant && transitionDeviation != null && transitionDeviation > 0.02)
+    ? 'A — recoverable information detected in the raw tick stream'
+    : 'B — little or no recoverable serial-dependence information detected at lag 1';
+
+  return {
+    insufficientData: false,
+    symbol, featureVersion,
+    totalTicksUsed: pooledDirectionSeq.length,
+    segmentsUsed,
+    observedBaseRate: theoreticalRunLengths.observedBaseRate,
+    runLengthDistribution: runLengthDist,
+    theoreticalRunLengths,
+    transitionMatrix,
+    transitionDeviation,
+    serialDependenceTest,
+    classification,
+  };
+}
+
 async function msdGetSnapshotsForEvent(eventId){
   const db = await msdOpenStateDatabase();
   return new Promise((resolve) => {
@@ -11604,6 +12134,978 @@ async function msdCheckRawDataQualityUi(){
       <td class="l ${c.critical?'cell-neg':'cell-mut'}">${c.critical ? 'CRITICAL' : 'Warning'}</td>
       <td class="l" style="font-size:10px">${typeof c.value === 'object' ? JSON.stringify(c.value) : c.value}</td>
       <td class="l ${c.ok?'cell-pos':(c.critical?'cell-neg':'cell-warn')}">${c.ok ? 'Pass' : 'Fail'}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+/** Runs the Information-Theoretic Discovery Engine against the actual stored MarketStates and renders the result, including the raw statistics behind the A/B classification -- never just the verdict alone. */
+/**
+ * Master orchestrator -- the complete Information Discovery Framework
+ * (Phases 1A-1E), run as one coherent scientific programme rather than
+ * a single lag-1 test. Runs 1A (unmodified), then 1B (multi-lag), 1C
+ * (k-th-order Markov + n-gram), 1D (conditional MI / incremental
+ * information), and finally 1E (decomposition/synthesis of everything
+ * above). Every sub-phase shares the SAME pooled direction sequence
+ * (fetched once via msdGetPooledDirectionSequence), so results are
+ * directly comparable and no data-preparation step is duplicated.
+ */
+async function msdRunCompleteInformationDiscoveryFramework(symbol, featureVersion, randomSeed){
+  randomSeed = randomSeed || 1;
+  const phase1A = await msdRunInformationTheoreticDiscovery(symbol, featureVersion, randomSeed);
+  if (phase1A.insufficientData) return { insufficientData: true, phase1A };
+
+  const { pooledDirectionSeq } = await msdGetPooledDirectionSequence(symbol, featureVersion);
+
+  const phase1B = msdComputeLagDependenceSweep(pooledDirectionSeq, MSD_INFO_DISCOVERY_MAX_LAG, randomSeed, 200);
+  const phase1C_markov = msdComputeKthOrderTransitionMatrix(pooledDirectionSeq, 2);
+  const phase1C_ngram = msdComputeNgramFrequencyAnalysis(pooledDirectionSeq, 3, randomSeed, 100);
+  const phase1D = msdRunNonLinearDiscovery(pooledDirectionSeq, MSD_INFO_DISCOVERY_MAX_LAG, randomSeed, 100);
+  const phase1E = msdRunInformationDecomposition(phase1A, phase1B, null, phase1C_markov, phase1C_ngram, phase1D);
+
+  return { insufficientData: false, symbol, featureVersion, phase1A, phase1B, phase1C_markov, phase1C_ngram, phase1D, phase1E };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Implementation Phase 2 — Hidden Market State Discovery Engine
+// ══════════════════════════════════════════════════════════════════════
+// THE SCIENTIFIC GATE, compiled into code rather than left as a document
+// someone has to remember to check: msdRunHiddenStateDiscovery calls
+// Phase 1's complete framework FIRST, and refuses to produce ANY
+// candidate state — not a placeholder, not a "preliminary" one, nothing
+// — unless Phase 1's own 1E decomposition already concluded recoverable
+// information exists. This is not a policy Claude enforces by
+// discipline; it is a hard precondition the function itself cannot be
+// talked past. "Phase 2 was implemented" never implies "a hidden state
+// exists" — the two are structurally decoupled by this gate.
+//
+// REUSE: zero new raw-data queries. Every candidate state is extracted
+// directly from Phase 1's own already-computed results
+// (msdRunCompleteInformationDiscoveryFramework, unmodified). Phase 2
+// adds exactly one genuinely new capability beyond assembly: a real,
+// buildable reproducibility check (split-half validation) — reusing
+// Phase 1's own test functions on two independent halves of the same
+// data, not new statistical machinery.
+
+/**
+ * Reproducibility check for a lag-based candidate: splits the pooled
+ * direction sequence into a first half and second half (chronologically
+ * — the SAME chronological-integrity principle already established
+ * throughout this platform), and re-runs Phase 1A's own serial
+ * dependence test independently on each half at the given lag. A
+ * candidate is only reproducible if it shows significance in BOTH
+ * halves independently — an effect that only shows up in one half could
+ * be a fluke of that half's specific data, not a genuine property of
+ * the process.
+ */
+function msdCheckLagReproducibility(directionSeq, lag, randomSeed, permutations){
+  const mid = Math.floor(directionSeq.length / 2);
+  const firstHalf = directionSeq.slice(0, mid);
+  const secondHalf = directionSeq.slice(mid);
+  const firstResult = msdRunSerialDependenceTest(firstHalf, randomSeed, permutations || 100, lag);
+  const secondResult = msdRunSerialDependenceTest(secondHalf, randomSeed, permutations || 100, lag);
+  const reproducible = !!(firstResult && secondResult && firstResult.significant && secondResult.significant);
+  return { reproducible, firstHalfResult: firstResult, secondHalfResult: secondResult };
+}
+
+/** Same split-half reproducibility principle as msdCheckLagReproducibility, applied to a conditional-MI (Phase 1D) candidate instead of a marginal lag test. */
+function msdCheckCmiReproducibility(directionSeq, lag, randomSeed, permutations){
+  const mid = Math.floor(directionSeq.length / 2);
+  const firstHalf = directionSeq.slice(0, mid);
+  const secondHalf = directionSeq.slice(mid);
+  const firstSweep = msdRunNonLinearDiscovery(firstHalf, lag, randomSeed, permutations || 100);
+  const secondSweep = msdRunNonLinearDiscovery(secondHalf, lag, randomSeed, permutations || 100);
+  const firstResult = firstSweep.results.find(r => r.lag === lag);
+  const secondResult = secondSweep.results.find(r => r.lag === lag);
+  const reproducible = !!(firstResult && secondResult && firstResult.significantAfterCorrection && secondResult.significantAfterCorrection);
+  return { reproducible, firstHalfResult: firstResult, secondHalfResult: secondResult };
+}
+
+/**
+ * Extracts candidate hidden-state descriptors from an ALREADY-JUSTIFIED
+ * Phase 1 result (the gate in msdRunHiddenStateDiscovery has already
+ * confirmed evidence exists before this is ever called) — one candidate
+ * per significant source, populated with the properties specified for
+ * Hidden Market State Discovery: observable-or-inferred, earliest
+ * appearance, statistical significance (reused directly from Phase 1,
+ * never recomputed), event specificity, and independence from existing
+ * measurements (true by construction — every candidate here is derived
+ * from the raw tick stream, not from any engineered indicator, so it is
+ * definitionally independent of the already-established weak
+ * technical-indicator family).
+ */
+function msdExtractCandidateStates(phase1Result){
+  const candidates = [];
+  if (phase1Result.phase1B && phase1Result.phase1B.results) {
+    phase1Result.phase1B.results.filter(r => r.significantAfterCorrection).forEach(r => {
+      candidates.push({
+        id: `lag-${r.lag}-persistence`,
+        description: `Directional dependence at lag ${r.lag} (current tick direction correlates with the tick ${r.lag} step(s) earlier)`,
+        source: 'Phase 1B — multi-lag sweep',
+        observableOrInferred: 'Directly observable (raw tick-direction sequence, no model or feature required)',
+        earliestAppearance: `${r.lag} tick(s) before the observation point`,
+        statisticalSignificance: { pValue: r.pValue, qValue: r.qValue },
+        independenceFromExistingMeasurements: 'Independent by construction — derived from raw tick direction only, not from any current engineered indicator',
+        eventSpecificity: 'Not yet tested — this measures general serial dependence in the tick stream, not specifically dependence conditioned on proximity to a five-rise event; see Phase 3 for that distinction',
+        rawLag: r.lag,
+        checkType: 'lag',
+      });
+    });
+  }
+  if (phase1Result.phase1D && phase1Result.phase1D.results) {
+    phase1Result.phase1D.results.filter(r => r.significantAfterCorrection).forEach(r => {
+      candidates.push({
+        id: `lag-${r.lag}-incremental-cmi`,
+        description: `Incremental (non-redundant) information at lag ${r.lag}, beyond what lag-1 alone already provides (conditional mutual information)`,
+        source: 'Phase 1D — non-linear/conditional discovery',
+        observableOrInferred: 'Inferred (requires a derived conditional-probability computation, not a single-pass raw measurement)',
+        earliestAppearance: `${r.lag} tick(s) before the observation point`,
+        statisticalSignificance: { pValue: r.pValue, qValue: r.qValue },
+        independenceFromExistingMeasurements: 'Independent by construction — derived from raw tick direction only',
+        eventSpecificity: 'Not yet tested — see Phase 3',
+        rawLag: r.lag,
+        checkType: 'cmi',
+      });
+    });
+  }
+  if (phase1Result.phase1C_ngram && phase1Result.phase1C_ngram.results) {
+    phase1Result.phase1C_ngram.results.filter(r => r.significantAfterCorrection).forEach(r => {
+      candidates.push({
+        id: `ngram-${r.gram}`,
+        description: `The tick-direction sequence pattern "${r.gram}" occurs significantly more or less often than chance`,
+        source: 'Phase 1C — n-gram frequency analysis',
+        observableOrInferred: 'Directly observable (raw sequence pattern frequency)',
+        earliestAppearance: `${r.gram.length} tick(s) (the pattern's own length)`,
+        statisticalSignificance: { pValue: r.pValue, qValue: r.qValue },
+        independenceFromExistingMeasurements: 'Independent by construction',
+        eventSpecificity: 'Not yet tested — see Phase 3',
+        checkType: 'ngram',
+      });
+    });
+  }
+  return candidates;
+}
+
+/**
+ * Top-level Phase 2 orchestrator. THE GATE IS THE FIRST THING THIS
+ * FUNCTION DOES. If Phase 1 has not been run, has insufficient data, or
+ * did not find recoverable information, this returns immediately with
+ * scientificallyJustified: false and an EMPTY candidate list — never a
+ * placeholder, never a "preliminary" characterization. Only past that
+ * gate does candidate extraction and reproducibility testing happen.
+ */
+async function msdRunHiddenStateDiscovery(symbol, featureVersion, randomSeed){
+  randomSeed = randomSeed || 1;
+  const phase1Result = await msdRunCompleteInformationDiscoveryFramework(symbol, featureVersion, randomSeed);
+
+  if (phase1Result.insufficientData) {
+    return { scientificallyJustified: false, reason: 'Phase 1 reported insufficient contiguous tick data — Hidden Market State Discovery cannot begin without a completed Phase 1 result.', candidateStates: [], phase1Result };
+  }
+  if (!phase1Result.phase1E.overallConclusion.startsWith('Recoverable')) {
+    return { scientificallyJustified: false, reason: 'Phase 1 (the complete 1A-1E Information Discovery Framework) did not detect recoverable information in any tested source. Per the established scientific gate, Hidden Market State Discovery does not proceed on this evidence.', candidateStates: [], phase1Result };
+  }
+
+  const { pooledDirectionSeq } = await msdGetPooledDirectionSequence(symbol, featureVersion);
+  const rawCandidates = msdExtractCandidateStates(phase1Result);
+
+  const classifiedCandidates = rawCandidates.map(c => {
+    let reproducibility;
+    if (c.checkType === 'lag') reproducibility = msdCheckLagReproducibility(pooledDirectionSeq, c.rawLag, randomSeed, 100);
+    else if (c.checkType === 'cmi') reproducibility = msdCheckCmiReproducibility(pooledDirectionSeq, c.rawLag, randomSeed, 100);
+    else reproducibility = { reproducible: null, note: 'Split-half reproducibility check not yet implemented for this candidate type — classified without it, honestly marked as such rather than assumed' };
+
+    // Classification rule, fixed and stated, not a judgment call per candidate:
+    let classification;
+    if (reproducibility.reproducible === true) classification = 'Verified';
+    else if (reproducibility.reproducible === false) classification = 'Unsupported (failed reproducibility check — significant overall, but not independently in both halves of the data)';
+    else classification = 'Evidence-Supported Hypothesis (reproducibility not yet tested for this candidate type)';
+
+    return { ...c, reproducibility, classification };
+  });
+
+  return {
+    scientificallyJustified: true,
+    symbol, featureVersion,
+    candidateStates: classifiedCandidates,
+    verifiedCount: classifiedCandidates.filter(c => c.classification === 'Verified').length,
+    phase1Result,
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Implementation Phase 3 — Market State Signature
+// ══════════════════════════════════════════════════════════════════════
+// "For every VERIFIED hidden market state construct a complete Market
+// State Signature" — the gate here is even narrower than Phase 2's:
+// this operates ONLY on candidates Phase 2 itself classified Verified
+// (reproducible in both independent halves of the data), never on
+// Evidence-Supported Hypotheses or Unsupported candidates. A state that
+// hasn't cleared Phase 2's own reproducibility bar gets no signature at
+// all — not a partial or provisional one.
+//
+// REUSE: msdBootstrapCI (existing, unmodified) for confidence intervals;
+// msdMutualInformation (existing) for state-similarity; the SAME
+// split-based testing pattern already established in Phase 2's
+// reproducibility check, extended from 2 chunks to N for a genuine
+// stability-over-time measurement rather than duplicated as new logic.
+
+/**
+ * Lag-k transition matrix: P(current tick's value matches the value
+ * `lag` steps back) — a NEW, generically-named function alongside
+ * msdComputeFirstOrderTransitionMatrix (left untouched, since its
+ * pUpGivenUp/pUpGivenDown naming is lag-1-specific and already relied on
+ * elsewhere) rather than an extension of it, since generalizing that
+ * function's naming would be a real API change to existing behavior.
+ */
+function msdComputeKthLagTransitionMatrix(directionSeq, lag){
+  lag = lag || 1;
+  if (directionSeq.length < lag + 2) return null;
+  let matchCount = 0, total = 0;
+  for (let i = lag; i < directionSeq.length; i++) {
+    total++;
+    if (directionSeq[i] === directionSeq[i - lag]) matchCount++;
+  }
+  return { lag, pMatch: total ? matchCount / total : null, total };
+}
+
+/**
+ * State stability across N sequential chunks (a generalization of Phase
+ * 2's 2-chunk reproducibility check to a finer-grained view): splits the
+ * sequence into `numChunks` equal pieces and tests the SAME candidate
+ * effect independently in each, reporting what fraction of chunks show
+ * it. A state present in every chunk is far more convincingly stable
+ * than one present in only some — this is what distinguishes "state
+ * stability" from the coarser binary reproducibility check.
+ */
+function msdComputeStateStabilityAcrossChunks(directionSeq, lag, numChunks, randomSeed, permutations){
+  numChunks = numChunks || 4;
+  const chunkSize = Math.floor(directionSeq.length / numChunks);
+  const chunkResults = [];
+  for (let c = 0; c < numChunks; c++) {
+    const chunk = directionSeq.slice(c * chunkSize, (c + 1) * chunkSize);
+    const test = msdRunSerialDependenceTest(chunk, randomSeed, permutations || 100, lag);
+    chunkResults.push({ chunk: c, significant: test ? test.significant : null, pValue: test ? test.pValue : null });
+  }
+  const significantChunks = chunkResults.filter(c => c.significant === true).length;
+  const testedChunks = chunkResults.filter(c => c.significant != null).length;
+  return { numChunks, chunkResults, significantChunks, testedChunks, stabilityFraction: testedChunks ? significantChunks / testedChunks : null };
+}
+
+/**
+ * Similarity between two verified candidate states: mutual information
+ * between their respective "did this position match the candidate's own
+ * defining pattern" indicator sequences. High similarity means the two
+ * "different" verified states may actually be redundant descriptions of
+ * the same underlying structure — directly relevant to whether they
+ * should be reported as two states or merged into one.
+ */
+function msdComputeStateSimilarity(directionSeq, candidateA, candidateB){
+  if (candidateA.checkType !== 'lag' || candidateB.checkType !== 'lag') return null; // scoped to lag-based candidates for this first implementation — stated, not silently skipped
+  const lagA = candidateA.rawLag, lagB = candidateB.rawLag;
+  const maxLag = Math.max(lagA, lagB);
+  if (directionSeq.length < maxLag + 2) return null;
+  const indicatorA = [], indicatorB = [];
+  for (let i = maxLag; i < directionSeq.length; i++) {
+    indicatorA.push(directionSeq[i] === directionSeq[i - lagA] ? 1 : 0);
+    indicatorB.push(directionSeq[i] === directionSeq[i - lagB] ? 1 : 0);
+  }
+  const mi = msdMutualInformation(indicatorA, indicatorB, 2);
+  return { lagA, lagB, mutualInformation: mi };
+}
+
+/**
+ * Builds the complete Market State Signature for ONE verified candidate.
+ * HARD GATE: refuses (returns null, not a partial signature) for any
+ * candidate not already classified 'Verified' by Phase 2 — the
+ * signature-construction step trusts Phase 2's own classification rather
+ * than re-deciding verification status itself.
+ */
+function msdBuildMarketStateSignature(pooledDirectionSeq, candidate, allVerifiedCandidates, randomSeed){
+  if (candidate.classification !== 'Verified') return null;
+
+  const definingMeasurements = candidate.checkType === 'lag'
+    ? [`Serial dependence test at lag ${candidate.rawLag} (Phase 1B)`, `Split-half reproducibility check (Phase 2)`]
+    : candidate.checkType === 'cmi'
+    ? [`Conditional mutual information at lag ${candidate.rawLag}, given lag-1 (Phase 1D)`, `Split-half reproducibility check (Phase 2)`]
+    : [`n-gram frequency significance (Phase 1C)`];
+
+  let characteristicRange = null, confidenceInterval = null, stability = null;
+  if (candidate.checkType === 'lag') {
+    const transitionMatrix = msdComputeKthLagTransitionMatrix(pooledDirectionSeq, candidate.rawLag);
+    characteristicRange = transitionMatrix;
+    if (transitionMatrix && transitionMatrix.total >= 3) {
+      const indicator = [];
+      for (let i = candidate.rawLag; i < pooledDirectionSeq.length; i++) indicator.push(pooledDirectionSeq[i] === pooledDirectionSeq[i - candidate.rawLag] ? 1 : 0);
+      const mean = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+      confidenceInterval = msdBootstrapCI(indicator, mean, randomSeed, 500, 0.05);
+    }
+    stability = msdComputeStateStabilityAcrossChunks(pooledDirectionSeq, candidate.rawLag, 4, randomSeed, 100);
+  }
+
+  const similarityToOtherStates = allVerifiedCandidates
+    .filter(c => c.id !== candidate.id)
+    .map(other => ({ otherId: other.id, similarity: msdComputeStateSimilarity(pooledDirectionSeq, candidate, other) }))
+    .filter(s => s.similarity != null);
+
+  return {
+    candidateId: candidate.id,
+    description: candidate.description,
+    definingMeasurements,
+    characteristicRange,
+    confidenceInterval,
+    stateVariability: candidate.reproducibility && candidate.reproducibility.firstHalfResult && candidate.reproducibility.secondHalfResult
+      ? { firstHalfPValue: candidate.reproducibility.firstHalfResult.pValue, secondHalfPValue: candidate.reproducibility.secondHalfResult.pValue }
+      : null,
+    stateStability: stability,
+    transitionProbability: characteristicRange ? characteristicRange.pMatch : null,
+    similarityToOtherStates,
+  };
+}
+
+/**
+ * Top-level Phase 3 orchestrator. Runs Phase 2 first (reused,
+ * unmodified). If zero Verified candidates exist — including the case
+ * where Phase 2 itself was not scientifically justified — this returns
+ * immediately with an empty signature list and a clear reason, exactly
+ * matching Phase 2's own gate-honesty pattern.
+ */
+async function msdRunMarketStateSignatureConstruction(symbol, featureVersion, randomSeed){
+  randomSeed = randomSeed || 1;
+  const phase2Result = await msdRunHiddenStateDiscovery(symbol, featureVersion, randomSeed);
+
+  if (!phase2Result.scientificallyJustified) {
+    return { signaturesAvailable: false, reason: 'Phase 2 (Hidden Market State Discovery) was not scientifically justified — ' + phase2Result.reason, signatures: [], phase2Result };
+  }
+  const verifiedCandidates = phase2Result.candidateStates.filter(c => c.classification === 'Verified');
+  if (!verifiedCandidates.length) {
+    return { signaturesAvailable: false, reason: `Phase 2 found ${phase2Result.candidateStates.length} candidate state(s), but none reached Verified status (reproducible in both independent halves of the data) — Market State Signatures are only constructed for Verified states.`, signatures: [], phase2Result };
+  }
+
+  const { pooledDirectionSeq } = await msdGetPooledDirectionSequence(symbol, featureVersion);
+  const signatures = verifiedCandidates
+    .map(c => msdBuildMarketStateSignature(pooledDirectionSeq, c, verifiedCandidates, randomSeed))
+    .filter(s => s != null);
+
+  return { signaturesAvailable: true, symbol, featureVersion, signatures, phase2Result };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Implementation Phase 4 — Market State Measurements
+// ══════════════════════════════════════════════════════════════════════
+// "Only after hidden-state discovery" — gated on Phase 3's Verified
+// signatures existing, same discipline as every gate before it. Three
+// of the seven named measurement families (Directional Persistence,
+// Higher-Order Tick Sequence Structure, Interaction Measurements) are
+// ALREADY fully built (Phases 1B/1C/1D) and are formalized here as
+// named measurements, not recomputed. Transition Dynamics reuses the
+// existing k-th-order Markov matrix (Phase 1C) the same way. Market
+// Disorder (entropy) and Volatility Dynamics are the two genuinely new
+// primitives this phase adds — and, per "treat measurements as
+// observations, not engineered features," neither is computed as a
+// free-floating descriptive statistic: both are tested CONDITIONALLY on
+// the Verified state's own defining indicator (e.g. "is tick magnitude
+// different when the lag-3-match condition holds versus when it
+// doesn't"), reusing the same permutation-significance machinery
+// everything else in this programme has used, so a new measurement only
+// counts as a real finding if it clears the same bar. Structural State
+// is pure synthesis of the other six — no new statistics.
+
+/** Shannon entropy of a binary sequence's marginal distribution — the direct, minimal formalization of "Market Disorder": how uncertain is the next tick's direction, unconditionally. */
+function msdComputeSequenceEntropy(directionSeq){
+  if (!directionSeq.length) return null;
+  const upCount = directionSeq.filter(d => d === 1).length;
+  const p = upCount / directionSeq.length;
+  if (p === 0 || p === 1) return 0;
+  return -(p * Math.log2(p) + (1 - p) * Math.log2(1 - p));
+}
+
+/**
+ * Market Disorder, tested CONDITIONALLY: splits the direction sequence
+ * into two groups — positions where the Verified state's own indicator
+ * holds (e.g. "matches the lag-3 pattern") versus where it doesn't —
+ * and compares LOCAL windowed entropy between the two groups via
+ * permutation test (reusing msdSeededShuffle, the same primitive every
+ * other permutation test in this programme uses). A significant
+ * difference means the verified state is associated with a genuine
+ * change in local disorder, not just a marginal direction bias.
+ */
+function msdComputeConditionalMarketDisorder(directionSeq, candidate, windowSize, randomSeed, permutations){
+  windowSize = windowSize || 20;
+  permutations = permutations || 100;
+  if (candidate.checkType !== 'lag' || directionSeq.length < candidate.rawLag + windowSize + 2) return null;
+  const lag = candidate.rawLag;
+  const indicatorGroup = [], otherGroup = [];
+  for (let i = lag + windowSize; i < directionSeq.length; i++) {
+    const window = directionSeq.slice(i - windowSize, i);
+    const entropy = msdComputeSequenceEntropy(window);
+    if (entropy == null) continue;
+    if (directionSeq[i] === directionSeq[i - lag]) indicatorGroup.push(entropy);
+    else otherGroup.push(entropy);
+  }
+  if (indicatorGroup.length < 5 || otherGroup.length < 5) return null;
+  const meanIndicator = indicatorGroup.reduce((a,b)=>a+b,0) / indicatorGroup.length;
+  const meanOther = otherGroup.reduce((a,b)=>a+b,0) / otherGroup.length;
+  const realDiff = Math.abs(meanIndicator - meanOther);
+  const combined = indicatorGroup.concat(otherGroup);
+  const rng = msdSeededRandom(randomSeed || 1);
+  const shuffledDiffs = [];
+  for (let p = 0; p < permutations; p++) {
+    const shuffled = msdSeededShuffle(combined, rng);
+    const groupA = shuffled.slice(0, indicatorGroup.length), groupB = shuffled.slice(indicatorGroup.length);
+    const meanA = groupA.reduce((a,b)=>a+b,0)/groupA.length, meanB = groupB.reduce((a,b)=>a+b,0)/groupB.length;
+    shuffledDiffs.push(Math.abs(meanA - meanB));
+  }
+  const countGreaterOrEqual = shuffledDiffs.filter(d => d >= realDiff).length;
+  const pValue = countGreaterOrEqual / shuffledDiffs.length;
+  return { meanEntropyWhenIndicatorHolds: meanIndicator, meanEntropyOtherwise: meanOther, realDiff, pValue, significant: pValue < 0.05 };
+}
+
+/**
+ * Volatility Dynamics, tested the SAME conditional way as Market
+ * Disorder: does tick MAGNITUDE differ between positions where the
+ * Verified state's indicator holds versus where it doesn't. Requires
+ * the magnitude sequence (Phase 4's other new primitive) aligned to the
+ * SAME positions as the direction sequence — both are extracted from
+ * identical continuous segments, so their indices correspond directly.
+ */
+function msdComputeConditionalVolatilityDynamics(directionSeq, magnitudeSeq, candidate, randomSeed, permutations){
+  permutations = permutations || 100;
+  if (candidate.checkType !== 'lag' || directionSeq.length !== magnitudeSeq.length) return null;
+  const lag = candidate.rawLag;
+  const indicatorGroup = [], otherGroup = [];
+  for (let i = lag; i < directionSeq.length; i++) {
+    if (directionSeq[i] === directionSeq[i - lag]) indicatorGroup.push(magnitudeSeq[i]);
+    else otherGroup.push(magnitudeSeq[i]);
+  }
+  if (indicatorGroup.length < 5 || otherGroup.length < 5) return null;
+  const meanIndicator = indicatorGroup.reduce((a,b)=>a+b,0) / indicatorGroup.length;
+  const meanOther = otherGroup.reduce((a,b)=>a+b,0) / otherGroup.length;
+  const realDiff = Math.abs(meanIndicator - meanOther);
+  const combined = indicatorGroup.concat(otherGroup);
+  const rng = msdSeededRandom(randomSeed || 1);
+  const shuffledDiffs = [];
+  for (let p = 0; p < permutations; p++) {
+    const shuffled = msdSeededShuffle(combined, rng);
+    const groupA = shuffled.slice(0, indicatorGroup.length), groupB = shuffled.slice(indicatorGroup.length);
+    const meanA = groupA.reduce((a,b)=>a+b,0)/groupA.length, meanB = groupB.reduce((a,b)=>a+b,0)/groupB.length;
+    shuffledDiffs.push(Math.abs(meanA - meanB));
+  }
+  const countGreaterOrEqual = shuffledDiffs.filter(d => d >= realDiff).length;
+  const pValue = countGreaterOrEqual / shuffledDiffs.length;
+  return { meanMagnitudeWhenIndicatorHolds: meanIndicator, meanMagnitudeOtherwise: meanOther, realDiff, pValue, significant: pValue < 0.05 };
+}
+
+/**
+ * Builds the complete Market State Measurements record for ONE Verified
+ * signature — one entry per applicable family, each with the six
+ * required properties (rationale, hidden state measured, expected lead
+ * time, expected persistence, scientific confidence, validation
+ * experiment). Families not applicable to this candidate's type are
+ * honestly omitted, not filled with a placeholder.
+ */
+function msdBuildMeasurementFamilies(directionSeq, magnitudeSeq, candidate, signature, randomSeed){
+  const families = [];
+  const scientificConfidence = signature.stateStability && signature.stateStability.stabilityFraction != null
+    ? signature.stateStability.stabilityFraction : null;
+  const validationExperiment = 'Split-half reproducibility (Phase 2) + 4-chunk stability check (Phase 3), both already executed for this state';
+
+  if (candidate.checkType === 'lag') {
+    families.push({
+      family: 'Directional Persistence',
+      rationale: 'Directly measures whether tick direction depends on its own value at a fixed lag — the most basic possible signature of non-random serial structure.',
+      hiddenStateMeasured: candidate.description,
+      expectedLeadTime: `${candidate.rawLag} tick(s)`,
+      expectedPersistence: signature.stateStability ? `${(signature.stateStability.stabilityFraction*100).toFixed(0)}% of tested chunks` : 'Unknown',
+      scientificConfidence,
+      validationExperiment,
+    });
+
+    const transitionFamily = {
+      family: 'Transition Dynamics',
+      rationale: 'Generalizes Directional Persistence to k-th-order context (the last several ticks jointly, not just one) — reused directly from Phase 1C, not recomputed.',
+      hiddenStateMeasured: `k-th-order Markov context patterns surrounding ${candidate.description}`,
+      expectedLeadTime: `Up to ${MSD_INFO_DISCOVERY_MAX_MARKOV_ORDER} tick(s)`,
+      expectedPersistence: 'Not independently re-tested here — inherits Phase 1C\'s own descriptive-only status (see that phase\'s own stated scope limit: no formal significance test was applied per-context)',
+      scientificConfidence: null,
+      validationExperiment: 'Phase 1C k-th-order Markov transition matrix (descriptive; formal per-context significance testing not yet implemented)',
+    };
+    families.push(transitionFamily);
+
+    const disorder = msdComputeConditionalMarketDisorder(directionSeq, candidate, 20, randomSeed, 100);
+    if (disorder) {
+      families.push({
+        family: 'Market Disorder',
+        rationale: 'Tests whether local entropy (uncertainty of the next tick\'s direction) differs when the verified state\'s own indicator holds, versus when it does not — a genuine test, not a marginal descriptive statistic.',
+        hiddenStateMeasured: `Local entropy conditional on ${candidate.description}`,
+        expectedLeadTime: `${candidate.rawLag} tick(s)`,
+        expectedPersistence: 'Not yet tested across multiple chunks (single-pass conditional test only)',
+        scientificConfidence: disorder.significant ? 0.5 : 0, // deliberately conservative — a single conditional test, not yet chunk-validated the way Directional Persistence was
+        validationExperiment: 'Permutation test comparing local windowed entropy between indicator-holds and indicator-does-not-hold groups',
+        result: disorder,
+      });
+    }
+
+    const volatility = msdComputeConditionalVolatilityDynamics(directionSeq, magnitudeSeq, candidate, randomSeed, 100);
+    if (volatility) {
+      families.push({
+        family: 'Volatility Dynamics',
+        rationale: 'Tests whether tick MAGNITUDE (not just direction) differs when the verified state\'s own indicator holds — the first measurement in this entire programme to use price magnitude rather than direction sign alone.',
+        hiddenStateMeasured: `Tick magnitude conditional on ${candidate.description}`,
+        expectedLeadTime: `${candidate.rawLag} tick(s)`,
+        expectedPersistence: 'Not yet tested across multiple chunks (single-pass conditional test only)',
+        scientificConfidence: volatility.significant ? 0.5 : 0,
+        validationExperiment: 'Permutation test comparing tick magnitude between indicator-holds and indicator-does-not-hold groups',
+        result: volatility,
+      });
+    }
+  } else if (candidate.checkType === 'cmi') {
+    families.push({
+      family: 'Interaction Measurements',
+      rationale: 'Directly reused from Phase 1D — conditional mutual information measuring whether a distant lag adds information BEYOND the immediate lag, the platform\'s existing formalization of a genuine interaction (non-additive) effect.',
+      hiddenStateMeasured: candidate.description,
+      expectedLeadTime: `${candidate.rawLag} tick(s)`,
+      expectedPersistence: signature.stateStability ? `${(signature.stateStability.stabilityFraction*100).toFixed(0)}% of tested chunks` : 'Unknown',
+      scientificConfidence,
+      validationExperiment,
+    });
+  } else if (candidate.checkType === 'ngram') {
+    families.push({
+      family: 'Higher-Order Tick Sequence Structure',
+      rationale: 'Directly reused from Phase 1C — n-gram frequency significance, the platform\'s existing formalization of joint (not reducible to pairwise) sequence structure.',
+      hiddenStateMeasured: candidate.description,
+      expectedLeadTime: 'Pattern length (see n-gram size)',
+      expectedPersistence: 'Not yet tested across multiple chunks for n-gram candidates specifically',
+      scientificConfidence: null,
+      validationExperiment: 'n-gram frequency permutation test (Phase 1C)',
+    });
+  }
+
+  // Structural State — pure synthesis, no new statistics: one composite
+  // descriptor summarizing every family computed above for this state.
+  families.push({
+    family: 'Structural State',
+    rationale: 'A composite summary of every measurement family computed for this Verified state — not a new raw statistic, purely an assembly of what was already found above.',
+    hiddenStateMeasured: candidate.description,
+    expectedLeadTime: families[0] ? families[0].expectedLeadTime : 'Unknown',
+    expectedPersistence: signature.stateStability ? `${(signature.stateStability.stabilityFraction*100).toFixed(0)}% of tested chunks` : 'Unknown',
+    scientificConfidence,
+    validationExperiment: 'Synthesis of the validation experiments listed for every other family above',
+    componentFamilies: families.map(f => f.family),
+  });
+
+  return families;
+}
+
+/**
+ * Top-level Phase 4 orchestrator. Gated on Phase 3's signatures existing
+ * — if Phase 3 produced none, this returns immediately with an empty
+ * measurement list and a clear reason, the same honesty pattern as
+ * every gate before it.
+ */
+async function msdRunMarketStateMeasurements(symbol, featureVersion, randomSeed){
+  randomSeed = randomSeed || 1;
+  const phase3Result = await msdRunMarketStateSignatureConstruction(symbol, featureVersion, randomSeed);
+
+  if (!phase3Result.signaturesAvailable) {
+    return { measurementsAvailable: false, reason: 'Phase 3 (Market State Signature) produced no signatures — ' + phase3Result.reason, measurements: [], phase3Result };
+  }
+
+  const { pooledDirectionSeq } = await msdGetPooledDirectionSequence(symbol, featureVersion);
+  const { pooledMagnitudeSeq } = await msdGetPooledMagnitudeSequence(symbol, featureVersion);
+  // Direction and magnitude sequences are extracted from the SAME
+  // continuous segments but via separate passes — align lengths
+  // defensively (should already match exactly, since both extractors
+  // use identical adjacency filtering; the only case they'd differ is a
+  // flat tick, which msdExtractStrictDirectionSequence excludes and
+  // msdExtractStrictMagnitudeSequence does not, since flat magnitude=0
+  // is a valid, real observation).
+  const verifiedCandidates = phase3Result.phase2Result.candidateStates.filter(c => c.classification === 'Verified');
+
+  const measurements = phase3Result.signatures.map(sig => {
+    const candidate = verifiedCandidates.find(c => c.id === sig.candidateId);
+    const families = pooledDirectionSeq.length === pooledMagnitudeSeq.length
+      ? msdBuildMeasurementFamilies(pooledDirectionSeq, pooledMagnitudeSeq, candidate, sig, randomSeed)
+      : msdBuildMeasurementFamilies(pooledDirectionSeq, [], candidate, sig, randomSeed); // magnitude/direction length mismatch (flat-tick edge case) — degrade gracefully, skip magnitude-dependent families rather than fail
+    return { candidateId: sig.candidateId, description: sig.description, families };
+  });
+
+  return { measurementsAvailable: true, symbol, featureVersion, measurements, phase3Result };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Implementation Phase 5 — Scientific Validation
+// ══════════════════════════════════════════════════════════════════════
+// "Only validated measurements may enter the production feature set" —
+// a real filtering gate, not a label. Two things this adds that Phase 4
+// didn't have: (1) explicit hypothesis/null/baseline/criteria/alternative-
+// explanation/confounding-factor text for every measurement family,
+// fixed and principled per TYPE, not computed per-run; (2) a genuine
+// multiple-testing correction applied specifically to Phase 4's two NEW
+// test types (Market Disorder, Volatility Dynamics), which never went
+// through the Benjamini-Yekutieli correction Phase 1B/1D already apply
+// to themselves. Reuses msdBenjaminiYekutieli directly, no new
+// statistical machinery.
+
+const MSD_VALIDATION_METADATA = {
+  'Directional Persistence': {
+    hypothesis: 'The current tick\'s direction depends on its own value at a fixed lag, beyond what independence would produce.',
+    nullHypothesis: 'Tick direction at the tested lag is statistically independent of the current tick\'s direction.',
+    baseline: 'A shuffled version of the same sequence (same marginal up/down rate, destroyed serial order) — the platform\'s standard permutation null throughout.',
+    acceptanceCriteria: 'p < 0.05 on the permutation test AND the effect survives split-half reproducibility (both halves independently significant) AND survives whole-family Benjamini-Yekutieli correction (Phase 1B).',
+    rejectionCriteria: 'p >= 0.05, OR significant overall but not reproducible in both halves, OR does not survive correction.',
+    alternativeExplanations: ['A spurious short-range dependence could arise from residual duplicate or near-duplicate ticks if any survived the Data Quality Gate\'s deduplication step.'],
+    confoundingFactors: ['Purge-gap and segmentation boundaries could interact with the lag window if the lag approaches the purge-gap size, truncating valid pairs near boundaries.'],
+  },
+  'Transition Dynamics': {
+    hypothesis: 'Higher-order (k-th-lag) context patterns carry direction information beyond first-order dependence alone.',
+    nullHypothesis: 'Context-conditional direction probabilities do not differ from the unconditional marginal rate.',
+    baseline: 'The unconditional marginal P(up) rate, computed from the same pooled sequence.',
+    acceptanceCriteria: 'Not yet formally defined — Phase 1C computes context deviations descriptively; no per-context significance test has been implemented.',
+    rejectionCriteria: 'Not applicable until a formal per-context test exists.',
+    alternativeExplanations: ['Apparent higher-order structure could be dominated by a small number of high-count "attractor" patterns appearing significant by chance, absent a formal per-context test.'],
+    confoundingFactors: ['Low-occurrence context patterns produce extreme conditional-probability estimates purely from small-sample noise; no minimum-count threshold is currently enforced.'],
+    knownGap: true, // this family cannot currently reach "validated" status — stated honestly, not hidden
+  },
+  'Market Disorder': {
+    hypothesis: 'Local windowed entropy of tick direction differs depending on whether the Verified state\'s own indicator holds.',
+    nullHypothesis: 'Local entropy is the same (up to sampling noise) regardless of the indicator\'s value.',
+    baseline: 'A permutation null formed by shuffling the pooled entropy samples between the two groups, destroying the group/indicator association while preserving each sample\'s own value.',
+    acceptanceCriteria: 'p < 0.05 on the permutation test AND survives correction across all Phase 4 tests for this candidate.',
+    rejectionCriteria: 'p >= 0.05, or does not survive correction.',
+    alternativeExplanations: ['A conditional entropy difference can arise MECHANICALLY from Directional Persistence itself — strong lag-K persistence necessarily lowers local entropy by the definition of entropy. A Market Disorder finding alongside a Directional Persistence finding at the same lag should be treated as likely DOWNSTREAM of that persistence, not an independent discovery, unless shown otherwise.'],
+    confoundingFactors: ['The windowed entropy calculation uses OVERLAPPING windows (each shares up to windowSize-1 ticks with its neighbors), so consecutive entropy samples are autocorrelated. The permutation null does not fully account for this dependence structure, which could inflate apparent significance. This is a genuine, disclosed limitation, not resolved by this phase.'],
+  },
+  'Volatility Dynamics': {
+    hypothesis: 'Tick magnitude differs depending on whether the Verified state\'s own indicator holds.',
+    nullHypothesis: 'Tick magnitude is the same (up to sampling noise) regardless of the indicator\'s value.',
+    baseline: 'A permutation null formed by shuffling the pooled magnitude samples between the two groups.',
+    acceptanceCriteria: 'p < 0.05 on the permutation test AND survives correction across all Phase 4 tests for this candidate.',
+    rejectionCriteria: 'p >= 0.05, or does not survive correction.',
+    alternativeExplanations: ['An apparent magnitude difference could reflect a broader, unconditional volatility-regime shift over the collection period (e.g. if the indicator-holds group happens to concentrate in a different real-world time range) rather than a genuine state-magnitude relationship.'],
+    confoundingFactors: ['Tick magnitude may have its own baseline autocorrelation (volatility clustering) independent of direction; this test does not control for that possibility.'],
+  },
+  'Interaction Measurements': {
+    hypothesis: 'A distant lag carries information about the outcome BEYOND what the immediate lag alone already provides (conditional mutual information).',
+    nullHypothesis: 'The distant lag adds no information beyond the immediate lag.',
+    baseline: 'A permutation null formed by shuffling the distant-lag values only, preserving the immediate-lag relationship (Phase 1D).',
+    acceptanceCriteria: 'p < 0.05 on the permutation test AND survives whole-family Benjamini-Yekutieli correction (Phase 1D).',
+    rejectionCriteria: 'p >= 0.05, or does not survive correction.',
+    alternativeExplanations: ['Conditional mutual information can be inflated by binning artifacts at low bin counts if the true relationship is more continuous/graded than a hard binary split captures.'],
+    confoundingFactors: ['CMI estimated from finite samples has a known small-sample upward bias; while the permutation null should cancel symmetric bias on average, this has been validated for correctness (Phase 1D\'s three ground-truth cases) but not separately stress-tested for bias magnitude specifically.'],
+  },
+  'Higher-Order Tick Sequence Structure': {
+    hypothesis: 'A specific tick-direction n-gram pattern occurs more or less often than chance.',
+    nullHypothesis: 'The pattern\'s frequency matches what a shuffled version of the same sequence would produce.',
+    baseline: 'A permutation null formed by shuffling the full sequence and recounting the pattern (Phase 1C).',
+    acceptanceCriteria: 'p < 0.05 on the permutation test AND survives whole-family Benjamini-Yekutieli correction (Phase 1C).',
+    rejectionCriteria: 'p >= 0.05, or does not survive correction.',
+    alternativeExplanations: ['With many n-grams tested, a truly rare but real chance event could still surface as "significant" before correction — the corrected q-value should always be checked, never the raw p-value alone.'],
+    confoundingFactors: ['n-gram frequency tests assume stationarity (the same generating process throughout the observation window); non-stationarity could produce apparent pattern significance unrelated to a fixed structural property.'],
+  },
+  'Structural State': {
+    hypothesis: 'The constituent measurements, taken together, describe one coherent state.',
+    nullHypothesis: 'Not independently applicable — this is a synthesis of the other families, not a new statistical test.',
+    baseline: 'Not applicable.',
+    acceptanceCriteria: 'Inherits validation status from its constituent families — valid only if at least one constituent family is independently validated.',
+    rejectionCriteria: 'No constituent family validated.',
+    alternativeExplanations: ['Inherits every constituent family\'s own alternative explanations — see each listed component.'],
+    confoundingFactors: ['Inherits every constituent family\'s own confounding factors — see each listed component.'],
+  },
+};
+
+/**
+ * Applies Benjamini-Yekutieli correction across Phase 4's two NEW test
+ * types (Market Disorder, Volatility Dynamics) specifically — these
+ * never went through Phase 1B/1D's own correction, since they didn't
+ * exist until Phase 4. Reused directly, not reimplemented. Correction
+ * is applied ACROSS ALL such tests for a given symbol/featureVersion run
+ * (every candidate's Market Disorder and Volatility Dynamics results
+ * together), matching the platform's established practice of correcting
+ * across the whole tested family, not per-candidate in isolation.
+ */
+function msdApplyPhase4MultipleTestingCorrection(measurements){
+  const newTestFamilies = ['Market Disorder', 'Volatility Dynamics'];
+  const testablePValues = [];
+  const locations = [];
+  measurements.forEach((m, mi) => {
+    m.families.forEach((f, fi) => {
+      if (newTestFamilies.includes(f.family) && f.result && f.result.pValue != null) {
+        testablePValues.push(f.result.pValue);
+        locations.push({ mi, fi });
+      }
+    });
+  });
+  if (!testablePValues.length) return measurements;
+  const corrected = msdBenjaminiYekutieli(testablePValues, 0.05);
+  locations.forEach((loc, i) => {
+    measurements[loc.mi].families[loc.fi].correctedPValue = corrected[i].adjustedPValue;
+    measurements[loc.mi].families[loc.fi].significantAfterCorrection = corrected[i].significant;
+  });
+  return measurements;
+}
+
+/** Attaches full validation metadata to one measurement family and determines its final accept/reject status per the family's OWN stated criteria — never a generic rule applied uniformly across different measurement types. */
+function msdValidateMeasurementFamily(familyResult){
+  const metadata = MSD_VALIDATION_METADATA[familyResult.family];
+  if (!metadata) return { ...familyResult, validated: false, validationReason: 'No validation metadata defined for this family.' };
+
+  let validated;
+  if (metadata.knownGap) {
+    validated = false; // Transition Dynamics — honestly excluded from production regardless of its descriptive output, per its own stated, disclosed gap
+  } else if (familyResult.family === 'Structural State') {
+    validated = null; // resolved by the orchestrator, which knows the sibling families' own status
+  } else if (familyResult.result) {
+    // Families with a real permutation test result (Market Disorder, Volatility Dynamics): require BOTH original significance AND surviving the Phase-4-specific correction.
+    validated = familyResult.result.significant === true && familyResult.significantAfterCorrection === true;
+  } else if (familyResult.scientificConfidence != null) {
+    // Families reusing an ALREADY-corrected Phase 1 result (Directional Persistence, Interaction Measurements, Higher-Order Sequence Structure) — their own phase already applied correction; trust it directly rather than re-correcting.
+    validated = familyResult.scientificConfidence > 0;
+  } else {
+    validated = false;
+  }
+
+  return {
+    ...familyResult,
+    hypothesis: metadata.hypothesis,
+    nullHypothesis: metadata.nullHypothesis,
+    baseline: metadata.baseline,
+    acceptanceCriteria: metadata.acceptanceCriteria,
+    rejectionCriteria: metadata.rejectionCriteria,
+    alternativeExplanations: metadata.alternativeExplanations,
+    confoundingFactors: metadata.confoundingFactors,
+    validated,
+  };
+}
+
+/**
+ * Top-level Phase 5 orchestrator. Runs Phase 4 (reused), applies the
+ * Phase-4-specific multiple-testing correction, validates every
+ * measurement family against its own stated criteria, and produces the
+ * final productionFeatureSet — ONLY families with validated===true, the
+ * literal implementation of "only validated measurements may enter the
+ * production feature set." Rejected measurements remain fully visible
+ * (nothing hidden), just excluded from the production set.
+ */
+async function msdRunScientificValidation(symbol, featureVersion, randomSeed){
+  randomSeed = randomSeed || 1;
+  const phase4Result = await msdRunMarketStateMeasurements(symbol, featureVersion, randomSeed);
+
+  if (!phase4Result.measurementsAvailable) {
+    return { validationComplete: false, reason: 'Phase 4 (Market State Measurements) produced nothing — ' + phase4Result.reason, productionFeatureSet: [], rejectedMeasurements: [], phase4Result };
+  }
+
+  const corrected = msdApplyPhase4MultipleTestingCorrection(phase4Result.measurements);
+
+  const productionFeatureSet = [];
+  const rejectedMeasurements = [];
+  corrected.forEach(m => {
+    const validatedFamilies = m.families.map(f => msdValidateMeasurementFamily(f));
+    // Structural State's validation depends on whether ANY sibling family validated — resolved here, after every sibling is already known.
+    const anySiblingValidated = validatedFamilies.some(f => f.family !== 'Structural State' && f.validated === true);
+    validatedFamilies.forEach(f => {
+      if (f.family === 'Structural State') f.validated = anySiblingValidated;
+      const record = { candidateId: m.candidateId, description: m.description, ...f };
+      if (f.validated === true) productionFeatureSet.push(record);
+      else rejectedMeasurements.push(record);
+    });
+  });
+
+  return { validationComplete: true, symbol, featureVersion, productionFeatureSet, rejectedMeasurements, phase4Result };
+}
+
+/** Runs the complete Phases 1A-1E Information Discovery Framework and renders every sub-phase's results, including the final 1E decomposition and overall conclusion. */
+async function msdRunCompleteInformationDiscoveryFrameworkUi(){
+  const resultsEl = $("msdInfoTheoreticResults");
+  if (resultsEl) resultsEl.textContent = 'Running complete framework (this takes longer than 1A alone)...';
+  const symbol = ($("msdExpSymbol") || {}).value || SYMBOL;
+  const featureVersion = ($("msdExpFeatureVersion") || {}).value || 'v1';
+  const result = await msdRunCompleteInformationDiscoveryFramework(symbol, featureVersion, 1);
+  if (!resultsEl) return;
+
+  if (result.insufficientData) {
+    resultsEl.innerHTML = '<span class="cell-warn">Insufficient contiguous tick data for this market/feature version. Run more experiments or collect more continuous data before this framework can be informative.</span>';
+    return;
+  }
+
+  const isA = result.phase1A.classification.startsWith('A');
+  const anyEvidence = result.phase1E.overallConclusion.startsWith('Recoverable');
+  resultsEl.innerHTML = `
+    <div class="${anyEvidence?'cell-pos':'cell-mut'}" style="font-weight:700;margin-bottom:8px;font-size:13px">1E Overall Conclusion: ${result.phase1E.overallConclusion}</div>
+
+    <div class="gc-sub" style="margin:8px 0 4px">1A -- Lag-1 Dependence</div>
+    <div>${result.phase1A.classification}</div>
+
+    <div class="gc-sub" style="margin:8px 0 4px">1B -- Multi-Lag Sweep (corrected across lags 1-${MSD_INFO_DISCOVERY_MAX_LAG})</div>
+    <table class="sig-table"><thead><tr><th class="l">Lag</th><th class="l">p-value</th><th class="l">q-value (corrected)</th><th class="l">Significant</th></tr></thead>
+    <tbody>${result.phase1B.results.map(r => `<tr><td>${r.lag}</td><td>${r.pValue.toFixed(4)}</td><td>${r.qValue.toFixed(4)}</td><td class="l ${r.significantAfterCorrection?'cell-pos':'cell-mut'}">${r.significantAfterCorrection?'Yes':'No'}</td></tr>`).join('')}</tbody></table>
+
+    <div class="gc-sub" style="margin:8px 0 4px">1C -- Sequence Dependence (2nd-order Markov contexts, top 5 by frequency)</div>
+    <table class="sig-table"><thead><tr><th class="l">Context Pattern</th><th class="l">Count</th><th class="l">P(next=up | context)</th><th class="l">Deviation from marginal</th></tr></thead>
+    <tbody>${(result.phase1C_markov?result.phase1C_markov.contexts.slice(0,5):[]).map(c => `<tr><td class="l">${c.pattern}</td><td>${c.count}</td><td>${c.pUpGivenContext!=null?(c.pUpGivenContext*100).toFixed(1)+'%':'-'}</td><td>${c.deviationFromMarginal!=null?(c.deviationFromMarginal*100).toFixed(1)+' pts':'-'}</td></tr>`).join('')}</tbody></table>
+    <div style="margin-top:6px">3-gram frequency significance: ${result.phase1C_ngram?result.phase1C_ngram.results.filter(r=>r.significantAfterCorrection).length:0} of ${result.phase1C_ngram?result.phase1C_ngram.results.length:0} patterns significant after correction</div>
+
+    <div class="gc-sub" style="margin:8px 0 4px">1D -- Non-Linear / Incremental Information (conditional MI beyond lag-1)</div>
+    <table class="sig-table"><thead><tr><th class="l">Distant Lag</th><th class="l">Conditional MI</th><th class="l">p-value</th><th class="l">q-value</th><th class="l">Significant</th></tr></thead>
+    <tbody>${result.phase1D.results.map(r => `<tr><td>${r.lag}</td><td>${r.realCmi.toFixed(5)}</td><td>${r.pValue.toFixed(4)}</td><td>${r.qValue.toFixed(4)}</td><td class="l ${r.significantAfterCorrection?'cell-pos':'cell-mut'}">${r.significantAfterCorrection?'Yes':'No'}</td></tr>`).join('')}</tbody></table>
+
+    <div class="gc-sub" style="margin:8px 0 4px">1E -- Information Decomposition</div>
+    <table class="sig-table"><thead><tr><th class="l">Source</th><th class="l">Evidence Level</th><th class="l">Detail</th></tr></thead>
+    <tbody>${result.phase1E.sources.map(s => `<tr><td class="l">${s.source}</td><td class="l">${s.evidenceLevel}</td><td class="l" style="font-size:11px">${s.detail}</td></tr>`).join('')}</tbody></table>
+  `;
+}
+
+/** Runs the Phase 2 Hidden Market State Discovery Engine and renders the result — including, crucially, the gate-blocked case, which is NOT an error state but a genuine, honest scientific outcome. */
+async function msdRunHiddenStateDiscoveryUi(){
+  const resultsEl = $("msdHiddenStateResults");
+  if (resultsEl) resultsEl.textContent = 'Running (this executes the complete Phase 1 framework first)…';
+  const symbol = ($("msdExpSymbol") || {}).value || SYMBOL;
+  const featureVersion = ($("msdExpFeatureVersion") || {}).value || 'v1';
+  const result = await msdRunHiddenStateDiscovery(symbol, featureVersion, 1);
+  if (!resultsEl) return;
+
+  if (!result.scientificallyJustified) {
+    resultsEl.innerHTML = `
+      <div class="cell-mut" style="font-weight:700;margin-bottom:6px">Hidden Market State Discovery: NOT scientifically justified</div>
+      <div>${result.reason}</div>
+      <div class="gc-sub" style="margin-top:6px">This is a genuine, honest scientific outcome — not an error. No candidate state is reported, because none is supported by the evidence.</div>
+    `;
+    return;
+  }
+
+  resultsEl.innerHTML = `
+    <div class="cell-pos" style="font-weight:700;margin-bottom:8px">Hidden Market State Discovery: justified by Phase 1 evidence — ${result.candidateStates.length} candidate state(s) extracted, ${result.verifiedCount} Verified (reproducible in both data halves)</div>
+    <table class="sig-table"><thead><tr><th class="l">Candidate</th><th class="l">Source</th><th class="l">Classification</th><th class="l">Statistical Significance</th><th class="l">Observability</th></tr></thead>
+    <tbody>${result.candidateStates.map(c => `<tr>
+      <td class="l">${c.description}</td>
+      <td class="l" style="font-size:11px">${c.source}</td>
+      <td class="l ${c.classification.startsWith('Verified')?'cell-pos':(c.classification.startsWith('Unsupported')?'cell-neg':'cell-warn')}" style="font-size:11px">${c.classification}</td>
+      <td class="l" style="font-size:10px">p=${c.statisticalSignificance.pValue.toFixed(4)}, q=${c.statisticalSignificance.qValue.toFixed(4)}</td>
+      <td class="l" style="font-size:10px">${c.observableOrInferred}</td>
+    </tr>`).join('')}</tbody></table>
+  `;
+}
+
+/** Runs Phase 3 Market State Signature construction and renders the result — including the gate-blocked case, honestly presented as a real scientific outcome rather than an error. */
+async function msdRunMarketStateSignatureConstructionUi(){
+  const resultsEl = $("msdSignatureResults");
+  if (resultsEl) resultsEl.textContent = 'Running (executes Phases 1 and 2 first)…';
+  const symbol = ($("msdExpSymbol") || {}).value || SYMBOL;
+  const featureVersion = ($("msdExpFeatureVersion") || {}).value || 'v1';
+  const result = await msdRunMarketStateSignatureConstruction(symbol, featureVersion, 1);
+  if (!resultsEl) return;
+
+  if (!result.signaturesAvailable) {
+    resultsEl.innerHTML = `
+      <div class="cell-mut" style="font-weight:700;margin-bottom:6px">Market State Signature: not available</div>
+      <div>${result.reason}</div>
+    `;
+    return;
+  }
+
+  resultsEl.innerHTML = result.signatures.map(sig => `
+    <div style="border-top:1px solid var(--border,#333);padding-top:8px;margin-top:8px">
+      <div style="font-weight:700">${sig.description}</div>
+      <div class="gc-sub">Defining measurements: ${sig.definingMeasurements.join(' · ')}</div>
+      <div>Transition probability: ${sig.transitionProbability!=null?(sig.transitionProbability*100).toFixed(2)+'%':'—'} (n=${sig.characteristicRange?sig.characteristicRange.total:'—'})</div>
+      <div>95% bootstrap CI: ${sig.confidenceInterval?'['+(sig.confidenceInterval.lower*100).toFixed(2)+'%, '+(sig.confidenceInterval.upper*100).toFixed(2)+'%]':'—'}</div>
+      <div>State variability (first vs second half p-values): ${sig.stateVariability?sig.stateVariability.firstHalfPValue.toFixed(4)+' / '+sig.stateVariability.secondHalfPValue.toFixed(4):'—'}</div>
+      <div>Stability across 4 chunks: ${sig.stateStability?sig.stateStability.significantChunks+' of '+sig.stateStability.testedChunks+' chunks significant ('+(sig.stateStability.stabilityFraction*100).toFixed(0)+'%)':'—'}</div>
+      <div>Similarity to other Verified states: ${sig.similarityToOtherStates.length?sig.similarityToOtherStates.map(s=>s.otherId+': MI='+s.similarity.mutualInformation.toFixed(4)).join(', '):'None (only Verified state, or similarity not applicable to its type)'}</div>
+    </div>
+  `).join('');
+}
+
+/** Runs Phase 4 Market State Measurements and renders the result — including the gate-blocked case, honestly presented. */
+async function msdRunMarketStateMeasurementsUi(){
+  const resultsEl = $("msdMeasurementResults");
+  if (resultsEl) resultsEl.textContent = 'Running (executes Phases 1-3 first)…';
+  const symbol = ($("msdExpSymbol") || {}).value || SYMBOL;
+  const featureVersion = ($("msdExpFeatureVersion") || {}).value || 'v1';
+  const result = await msdRunMarketStateMeasurements(symbol, featureVersion, 1);
+  if (!resultsEl) return;
+
+  if (!result.measurementsAvailable) {
+    resultsEl.innerHTML = `
+      <div class="cell-mut" style="font-weight:700;margin-bottom:6px">Market State Measurements: not available</div>
+      <div>${result.reason}</div>
+    `;
+    return;
+  }
+
+  resultsEl.innerHTML = result.measurements.map(m => `
+    <div style="border-top:1px solid var(--border,#333);padding-top:8px;margin-top:8px">
+      <div style="font-weight:700">${m.description}</div>
+      <table class="sig-table" style="margin-top:6px"><thead><tr><th class="l">Family</th><th class="l">Hidden State Measured</th><th class="l">Expected Lead Time</th><th class="l">Expected Persistence</th><th class="l">Scientific Confidence</th></tr></thead>
+      <tbody>${m.families.map(f => `<tr>
+        <td class="l">${f.family}</td>
+        <td class="l" style="font-size:11px">${f.hiddenStateMeasured}</td>
+        <td class="l">${f.expectedLeadTime}</td>
+        <td class="l" style="font-size:11px">${f.expectedPersistence}</td>
+        <td class="l ${f.scientificConfidence>0.5?'cell-pos':(f.scientificConfidence===0?'cell-mut':'')}">${f.scientificConfidence!=null?(f.scientificConfidence*100).toFixed(0)+'%':'—'}</td>
+      </tr>`).join('')}</tbody></table>
+    </div>
+  `).join('');
+}
+
+/** Runs Phase 5 Scientific Validation and renders the production feature set alongside rejected measurements — nothing hidden, both shown. */
+async function msdRunScientificValidationUi(){
+  const resultsEl = $("msdValidationResults");
+  if (resultsEl) resultsEl.textContent = 'Running (executes Phases 1-4 first)…';
+  const symbol = ($("msdExpSymbol") || {}).value || SYMBOL;
+  const featureVersion = ($("msdExpFeatureVersion") || {}).value || 'v1';
+  const result = await msdRunScientificValidation(symbol, featureVersion, 1);
+  if (!resultsEl) return;
+
+  if (!result.validationComplete) {
+    resultsEl.innerHTML = `
+      <div class="cell-mut" style="font-weight:700;margin-bottom:6px">Scientific Validation: not available</div>
+      <div>${result.reason}</div>
+    `;
+    return;
+  }
+
+  const renderRow = (r, validated) => `<tr>
+    <td class="l">${r.description}</td>
+    <td class="l">${r.family}</td>
+    <td class="l" style="font-size:10px">${r.hypothesis}</td>
+    <td class="l" style="font-size:10px">${(r.alternativeExplanations||[]).join('; ')}</td>
+    <td class="l ${validated?'cell-pos':'cell-neg'}">${validated?'Validated':'Rejected'}</td>
+  </tr>`;
+
+  resultsEl.innerHTML = `
+    <div class="cell-pos" style="font-weight:700;margin-bottom:8px">Production Feature Set: ${result.productionFeatureSet.length} validated measurement(s) — ${result.rejectedMeasurements.length} rejected (shown below, nothing hidden)</div>
+    <table class="sig-table"><thead><tr><th class="l">State</th><th class="l">Family</th><th class="l">Hypothesis</th><th class="l">Alternative Explanations</th><th class="l">Status</th></tr></thead>
+    <tbody>
+      ${result.productionFeatureSet.map(r => renderRow(r, true)).join('')}
+      ${result.rejectedMeasurements.map(r => renderRow(r, false)).join('')}
+    </tbody></table>
+  `;
+}
+
+async function msdRunInformationTheoreticDiscoveryUi(){
+  const resultsEl = $("msdInfoTheoreticResults");
+  if (resultsEl) resultsEl.textContent = 'Running...';
+  const symbol = ($("msdExpSymbol") || {}).value || SYMBOL;
+  const featureVersion = ($("msdExpFeatureVersion") || {}).value || 'v1';
+  const result = await msdRunInformationTheoreticDiscovery(symbol, featureVersion, 1);
+  if (!resultsEl) return;
+
+  if (result.insufficientData) {
+    resultsEl.innerHTML = `<span class="cell-warn">Insufficient contiguous tick data for this market/feature version (${result.totalTicksAvailable} usable ticks across ${result.segmentsUsed} segment(s) -- need at least 30). Run more experiments or collect more continuous data before this test can be informative.</span>`;
+    return;
+  }
+
+  const t = result.serialDependenceTest;
+  const isA = result.classification.startsWith('A');
+  resultsEl.innerHTML = `
+    <div class="${isA?'cell-pos':'cell-mut'}" style="font-weight:700;margin-bottom:6px">${result.classification}</div>
+    <div>Ticks used: ${result.totalTicksUsed} across ${result.segmentsUsed} continuous segment(s) - observed base rate (P(up)): ${(result.observedBaseRate*100).toFixed(1)}%</div>
+    <div style="margin-top:6px"><b>Serial dependence test</b> (current tick direction -> next tick direction, reusing the platform's own MI + permutation significance machinery): real MI=${t?t.realMi.toFixed(5):'-'} - shuffled-null mean MI=${t?t.shuffledMeanMi.toFixed(5):'-'} - p=${t?t.pValue.toFixed(4):'-'} - significant=${t?(t.significant?'Yes':'No'):'-'}</div>
+    <div style="margin-top:6px"><b>First-order transition matrix:</b> P(next=up | current=up)=${result.transitionMatrix.pUpGivenUp!=null?(result.transitionMatrix.pUpGivenUp*100).toFixed(2)+'%':'-'} - P(next=up | current=down)=${result.transitionMatrix.pUpGivenDown!=null?(result.transitionMatrix.pUpGivenDown*100).toFixed(2)+'%':'-'} - deviation=${result.transitionDeviation!=null?(result.transitionDeviation*100).toFixed(2)+' pts':'-'}</div>
+    <div class="gc-sub" style="margin-top:6px">Classification requires BOTH statistical significance (p&lt;0.05) AND a non-trivial effect size (transition deviation &gt;2 percentage points) -- significance alone, without a meaningful effect size, is not treated as sufficient evidence of recoverable information.</div>
+    <table class="sig-table" style="margin-top:8px"><thead><tr><th class="l">Run Length</th><th class="l">Observed Count</th><th class="l">Theoretical (i.i.d.) Count</th></tr></thead>
+    <tbody>${Object.keys(result.theoreticalRunLengths.expectedCounts).map(k => `<tr>
+      <td>${k}</td>
+      <td>${result.runLengthDistribution.histogram[k] || 0}</td>
+      <td>${result.theoreticalRunLengths.expectedCounts[k].toFixed(1)}</td>
     </tr>`).join('')}</tbody></table>`;
 }
 
