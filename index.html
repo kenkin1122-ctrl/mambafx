@@ -2579,6 +2579,22 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       <tbody id="msdDiscoveryFeaturesBody"><tr><td colspan="8" class="sig-empty">No data yet.</td></tr></tbody></table>
   </div>
 
+  <div class="grid-card" id="msdControlCard" style="margin-bottom:16px;display:none">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">🧪 Pipeline Negative Control (Phase 2)</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Runs the EXACT SAME pipeline as above — Statistical Discovery Engine, then all four registered analyzers, then the same Maturity Engine/whole-repository Benjamini-Yekutieli correction used by the real Discovery Repository — against relabeled variants of THIS experiment's dataset, where the true feature-outcome relationship has been deliberately destroyed. A well-calibrated pipeline should report a Verified rate close to the nominal false-positive rate; a rate far above it means something in the accumulation pipeline is inflating significance and no real Verified engineered-feature discovery should be trusted until that's fixed. All synthetic evidence is written to an isolated ledger — never to the real Discovery Repository — so this can never contaminate a genuine discoveryKey's evidence history.</div>
+    <label for="msdControlMethod">Relabeling Method</label>
+    <select id="msdControlMethod" style="width:100%;max-width:320px;margin-bottom:8px">
+      <option value="label_permutation">Label Permutation (reshuffle real labels)</option>
+      <option value="randomized_label">Randomized Label (i.i.d. redraw at empirical rate)</option>
+      <option value="matched_null">Matched-Null Event Relabeling (regenerate event structure)</option>
+    </select>
+    <label for="msdControlTrials">Trials</label>
+    <input type="number" id="msdControlTrials" value="30" min="5" style="width:80px;margin-bottom:8px">
+    <br><button class="gc-btn" onclick="msdRunPipelineNegativeControlUi()">🧪 Run Negative Control</button>
+    <span id="msdControlStatus" class="gc-sub" style="margin-left:10px"></span>
+    <div id="msdControlResults" style="margin-top:10px;font-size:12px"></div>
+  </div>
+
   <div class="grid-card" id="msdMlCard" style="margin-bottom:16px;display:none">
     <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Machine Learning</h3>
     <div class="gc-sub" style="margin-bottom:8px">Trains the same XGBoost/LightGBM/CatBoost tree approximations used elsewhere in this app — not a second implementation — on this experiment's Training set. Best model chosen by Validation AUC (never Test, to avoid leaking test information into model selection); Test metrics below are the honest, held-out figure. Results are recorded permanently to KnowledgeBase.</div>
@@ -6229,6 +6245,16 @@ async function msdRunExperiment(config){
     // removals) — extending Phase 7E's provenance chain, not sitting
     // outside it.
     dataRecoveryReport: dataset.meta.recoveryReport || null,
+    // Phase 2 (Scientific Infrastructure) — additive fields only, so
+    // older experiment records simply lack them (read as absent, never
+    // fabricated) rather than requiring a migration. environment powers
+    // cross-browser reproducibility checks; analyzerNamesAtRunTime
+    // records WHICH analyzers existed when this experiment ran, since
+    // the registry can grow over time and a later re-summarization
+    // should be able to tell whether an old experiment was ever seen by
+    // an analyzer that didn't exist yet at the time it ran.
+    environment: msdCaptureEnvironmentInfo(),
+    analyzerNamesAtRunTime: msdRegisteredAnalyzers.map(fn => fn.name),
   };
   const writeResult = await msdWriteExperiment(record);
   return { experimentId, dataset, record, writeResult };
@@ -7289,10 +7315,20 @@ function msdGetMaturityPromotionRules(){ return MSD_MATURITY_PROMOTION_RULES; }
  * update — a discoveryKey accumulates evidence records over time, and
  * its current state is always derived from all of them together.
  */
-async function msdRecordDiscoveryEvidence(evidence){
-  const finding = {
+async function msdRecordDiscoveryEvidence(evidence, opts){
+  // Phase 2 (Scientific Infrastructure): opts is OPTIONAL and defaults to
+  // exactly the original behavior — { type: 'research_discovery',
+  // writeFn: msdWriteFinding }. Every pre-existing call site passes only
+  // `evidence` and is completely unaffected. The Pipeline-Level Negative
+  // Control is the one caller that supplies opts, redirecting `type` to
+  // 'control_discovery' and `writeFn` to msdWriteControlFinding so
+  // synthetic evidence physically lands in NegativeControlLedger, never
+  // in KnowledgeBase — reusing this exact function rather than
+  // duplicating its field list a second time.
+  opts = opts || {};
+  const finding = Object.assign({
     findingId: msdGenerateFindingId(),
-    type: 'research_discovery',
+    type: opts.type || 'research_discovery',
     discoveryKey: evidence.discoveryKey,
     discoveryType: evidence.discoveryType,
     researchSessionId: evidence.researchSessionId,
@@ -7309,8 +7345,9 @@ async function msdRecordDiscoveryEvidence(evidence){
     registrationId: evidence.registrationId,
     statisticalEvidence: evidence.statisticalEvidence,
     discoveredAt: Date.now(),
-  };
-  const writeResult = await msdWriteFinding(finding);
+  }, opts.extra || {});
+  const writeFn = opts.writeFn || msdWriteFinding;
+  const writeResult = await writeFn(finding);
   return { finding, writeResult };
 }
 
@@ -8794,7 +8831,11 @@ async function msdVerifyProvenanceIntegrity(discoveryKey){
   return { discoveryId: discoveryKey, allReproducible: results.every(r => r.ok), experiments: results };
 }
 
-async function msdRunResearchSession(experimentRecord, discoveryResult, trainResult, dataset){
+async function msdRunResearchSession(experimentRecord, discoveryResult, trainResult, dataset, recordOpts){
+  // recordOpts is OPTIONAL (Phase 2: Scientific Infrastructure) — every
+  // pre-existing caller passes 4 arguments and is unaffected. The
+  // Pipeline-Level Negative Control is the only caller that supplies it,
+  // to redirect evidence writes into the isolated NegativeControlLedger.
   const researchSessionId = msdGenerateResearchSessionId();
   const regimeInfo = dataset ? msdComputeDominantRegimeLabel(dataset) : null;
   const results = [];
@@ -8807,7 +8848,7 @@ async function msdRunResearchSession(experimentRecord, discoveryResult, trainRes
       continue;
     }
     for (const evidence of evidenceList) {
-      const recorded = await msdRecordDiscoveryEvidence(evidence);
+      const recorded = await msdRecordDiscoveryEvidence(evidence, recordOpts);
       results.push(recorded);
     }
   }
@@ -9625,6 +9666,542 @@ function msdMarketStateAnalyzer(experimentRecord, discoveryResult, trainResult, 
 }
 
 msdRegisterDiscoveryAnalyzer(msdMarketStateAnalyzer);
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 2 — Scientific Infrastructure & Research Integrity Foundation
+// ══════════════════════════════════════════════════════════════════════
+// Four pieces, in dependency order: (1) an architecturally ISOLATED
+// ledger for negative-control evidence, so a bug here can never
+// contaminate a real discoveryKey; (2) the Pipeline-Level Negative
+// Control itself — the primary objective of this phase; (3) the
+// immutable Generation Registry; (4) the unified nine-stage Feature
+// Lifecycle, layered as a translation/action layer over the EXISTING,
+// unmodified Maturity Engine rather than a replacement for it; (5) the
+// Experiment Manifest and the one new reproducibility field (execution
+// environment) it captures. Every statistic reused below (permutation
+// testing, Benjamini-Hochberg/Yekutieli, the full analyzer registry, the
+// Maturity Engine, msdSummarizeDiscovery) is the EXACT existing function,
+// called with different data — nothing statistical is reimplemented.
+
+// ────────────────────────────────────────────────────────────────────
+// 2.1 — NegativeControlLedger: architecturally isolated from KnowledgeBase
+// ────────────────────────────────────────────────────────────────────
+// A SEPARATE IndexedDB database, not merely a separate object store in
+// the same one — deliberate belt-and-suspenders. Even a future bug that
+// reused a store name or a discoveryKey prefix could not make synthetic
+// control evidence visible to any KnowledgeBase reader, because it is
+// not in the same database at all. Same append-only add()-not-put()
+// pattern as every other permanent store in this app.
+
+const MSD_CONTROL_DB_NAME    = 'mfx_msd_negative_control';
+const MSD_CONTROL_DB_VERSION = 1;
+const MSD_CONTROL_STORE      = 'NegativeControlLedger';
+
+let _msdControlDbPromise = null;
+
+function msdOpenControlDatabase(){
+  if (_msdControlDbPromise) return _msdControlDbPromise;
+  _msdControlDbPromise = new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') { reject(new Error('IndexedDB is not available in this environment')); return; }
+    const req = indexedDB.open(MSD_CONTROL_DB_NAME, MSD_CONTROL_DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(MSD_CONTROL_STORE)) {
+        const store = db.createObjectStore(MSD_CONTROL_STORE, { keyPath: 'findingId' });
+        store.createIndex('controlRunId', 'controlRunId', { unique: false });
+        store.createIndex('discoveryKey', 'discoveryKey', { unique: false });
+      }
+    };
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror   = (e) => reject(e.target.error);
+  });
+  return _msdControlDbPromise;
+}
+
+/** Appends ONE control finding. Uses add(), never put() — same append-only guarantee as msdWriteFinding, in a physically separate database. */
+async function msdWriteControlFinding(finding){
+  if (!finding || !finding.findingId) return { ok: false, error: 'finding is missing findingId' };
+  try {
+    const db = await msdOpenControlDatabase();
+    return await new Promise((resolve) => {
+      const req = db.transaction(MSD_CONTROL_STORE, 'readwrite').objectStore(MSD_CONTROL_STORE).add(finding);
+      req.onsuccess = () => resolve({ ok: true });
+      req.onerror   = (e) => { e.preventDefault(); resolve({ ok: false, error: 'duplicate or invalid findingId — write rejected (append-only store)' }); };
+    });
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function msdGetAllControlFindings(){
+  const db = await msdOpenControlDatabase();
+  return new Promise((resolve) => {
+    const req = db.transaction(MSD_CONTROL_STORE, 'readonly').objectStore(MSD_CONTROL_STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror   = () => resolve([]);
+  });
+}
+
+/** Test/debug only — never called from production code paths. */
+function msdResetControlDatabase(){
+  if (_msdControlDbPromise) _msdControlDbPromise.then(db => db.close()).catch(() => {});
+  _msdControlDbPromise = null;
+  return new Promise((resolve) => {
+    if (typeof indexedDB === 'undefined') { resolve(); return; }
+    const req = indexedDB.deleteDatabase(MSD_CONTROL_DB_NAME);
+    req.onsuccess = () => resolve();
+    req.onerror   = () => resolve();
+    req.onblocked = () => resolve();
+  });
+}
+
+let msdControlRunSeq = 0;
+function msdGenerateControlRunId(){ return 'ctrl_' + msdSessionId + '_' + (++msdControlRunSeq) + '_' + Date.now(); }
+
+// ────────────────────────────────────────────────────────────────────
+// 2.2 — Pipeline-Level Negative Control (primary objective of this phase)
+// ────────────────────────────────────────────────────────────────────
+// WHY THIS IS NEEDED even though per-discovery permutation testing
+// already exists (msdFindOptimalThreshold etc. already shuffle labels
+// and recompute a p-value for ONE feature in ONE experiment): that only
+// validates one discovery's p-value in isolation. Nothing previously
+// validated the REPOSITORY-LEVEL process — many experiments,
+// accumulating evidence, interacting with the whole-repository
+// Benjamini-Yekutieli correction and the Maturity Engine's promotion
+// rules over time. A bug anywhere in that accumulation path (e.g. in
+// replication counting, or in how discoveryKeys group evidence) could
+// let noise climb to "Verified" even though every individual p-value
+// was honestly computed. This section runs the ENTIRE real pipeline —
+// unmodified dataset builder output, unmodified msdRunStatisticalDiscovery,
+// unmodified analyzer registry, unmodified msdSummarizeDiscovery/
+// msdComputeFalseDiscoveryControl — against data known to contain no
+// real feature-outcome relationship, and checks whether the fraction of
+// discoveryKeys that reach Verified stays close to the nominal
+// false-positive rate the correction promises.
+//
+// THREE RELABELING METHODS, increasingly strict nulls:
+//   A. Label Permutation   — reshuffles the real outcome column among the
+//      real snapshots. Preserves the exact positive/negative COUNT.
+//   B. Randomized Label    — redraws each label independently as
+//      Bernoulli(empirical positive rate). Does not preserve the exact
+//      count, but destroys any structure in WHICH labels co-occur.
+//   C. Matched-Null Event Relabeling — regenerates the EVENT structure
+//      itself: an independent i.i.d. synthetic direction sequence
+//      (same length, same marginal up-rate as the real pooled sequence)
+//      is generated, synthetic five-run starts are detected in it with
+//      the same rule the live detector uses, and real snapshots are
+//      relabeled by ordinal position relative to those synthetic events.
+//      Real engineered-feature VALUES are kept exactly as recorded —
+//      this control does not re-simulate price/indicator values from
+//      scratch (see the Research Debt Register for that larger,
+//      separate undertaking).
+
+const MSD_CONTROL_DEFAULT_TRIALS = 30; // stated, configurable — enough for a stable empirical rate without becoming a second full backtest
+
+/** Method A. Returns a NEW dataset; every snapshot is shallow-copied before its outcome is replaced, so nothing here can mutate a real MarketStates-derived object. */
+function msdBuildPermutedLabelDataset(dataset, seed){
+  const rng = msdSeededRandom(seed);
+  const allSnapshots = dataset.trainSet.concat(dataset.valSet, dataset.testSet);
+  const outcomes = allSnapshots.map(s => s.outcome);
+  const shuffled = msdSeededShuffle(outcomes, rng);
+  let cursor = 0;
+  const relabel = (snapshots) => snapshots.map(s => Object.assign({}, s, { outcome: shuffled[cursor++] }));
+  return {
+    trainSet: relabel(dataset.trainSet),
+    valSet:   relabel(dataset.valSet),
+    testSet:  relabel(dataset.testSet),
+    meta: Object.assign({}, dataset.meta, { negativeControlMethod: 'label_permutation', negativeControlSeed: seed }),
+  };
+}
+
+/** Method B. */
+function msdBuildRandomizedLabelDataset(dataset, seed){
+  const rng = msdSeededRandom(seed);
+  const allSnapshots = dataset.trainSet.concat(dataset.valSet, dataset.testSet);
+  const positiveRate = allSnapshots.length ? allSnapshots.filter(s => s.outcome === 'positive').length / allSnapshots.length : 0;
+  const relabel = (snapshots) => snapshots.map(s => Object.assign({}, s, { outcome: rng() < positiveRate ? 'positive' : 'negative' }));
+  return {
+    trainSet: relabel(dataset.trainSet),
+    valSet:   relabel(dataset.valSet),
+    testSet:  relabel(dataset.testSet),
+    meta: Object.assign({}, dataset.meta, { negativeControlMethod: 'randomized_label', negativeControlSeed: seed, empiricalPositiveRateUsed: positiveRate }),
+  };
+}
+
+/**
+ * Pure, batch-equivalent version of the live streaming Run/Event
+ * Detector's "five strictly increasing ticks" rule, applied to a plain
+ * array of direction values (1 = up, 0 = not-up) instead of live price
+ * ticks. This is NOT a replacement for msdRunState's streaming detector
+ * and does not track Actual Run Length or emit immutable Event records —
+ * it exists solely so the Matched-Null control has something to detect
+ * synthetic run-START positions with, since there is no live price
+ * stream to attach the real detector to for offline synthetic data.
+ */
+function msdDetectRunStartsInDirectionSequence(directionSeq){
+  const starts = [];
+  let count = 0, anchorIdx = null;
+  for (let i = 0; i < directionSeq.length; i++){
+    if (directionSeq[i] === 1){
+      if (count === 0) anchorIdx = i;
+      count++;
+      if (count === 5) starts.push(anchorIdx);
+    } else {
+      count = 0; anchorIdx = null;
+    }
+  }
+  return starts;
+}
+
+/** Generates an i.i.d. synthetic direction sequence: each tick drawn independently as "up" with the given probability. Deliberately destroys ALL sequential dependence (autocorrelation, regime persistence, clustering) while preserving only the single marginal statistic already established from real data (the overall up-rate) — the textbook definition of a matched null for a process this platform's own Phase 1A-1E baseline already found no reproducible sequential dependence in. */
+function msdGenerateMatchedNullDirectionSequence(length, upRate, seed){
+  const rng = msdSeededRandom(seed);
+  const seq = new Array(length);
+  for (let i = 0; i < length; i++) seq[i] = rng() < upRate ? 1 : 0;
+  return seq;
+}
+
+/** Method C. Real feature values are untouched; only which ordinal position counts as "positive" is regenerated from an independent memoryless process. */
+function msdBuildMatchedNullDataset(dataset, seed, lookbackWindow){
+  const allSnapshots = dataset.trainSet.concat(dataset.valSet, dataset.testSet).slice().sort((a, b) => a.epoch - b.epoch);
+  const n = allSnapshots.length;
+  const window = lookbackWindow || 20;
+  if (!n) return { trainSet: [], valSet: [], testSet: [], meta: Object.assign({}, dataset.meta, { negativeControlMethod: 'matched_null', negativeControlSeed: seed, note: 'empty dataset' }) };
+
+  const realPositiveRate = allSnapshots.filter(s => s.outcome === 'positive').length / n;
+  const syntheticDirections = msdGenerateMatchedNullDirectionSequence(n, realPositiveRate, seed);
+  const runStarts = new Set(msdDetectRunStartsInDirectionSequence(syntheticDirections));
+
+  const relabeled = allSnapshots.map((s, i) => {
+    let nearEvent = false;
+    for (let k = 0; k < window && i + k < n; k++){ if (runStarts.has(i + k)) { nearEvent = true; break; } }
+    return Object.assign({}, s, { outcome: nearEvent ? 'positive' : 'negative' });
+  });
+
+  const trainN = dataset.trainSet.length, valN = dataset.valSet.length;
+  return {
+    trainSet: relabeled.slice(0, trainN),
+    valSet:   relabeled.slice(trainN, trainN + valN),
+    testSet:  relabeled.slice(trainN + valN),
+    meta: Object.assign({}, dataset.meta, {
+      negativeControlMethod: 'matched_null', negativeControlSeed: seed,
+      syntheticUpRateUsed: realPositiveRate, syntheticRunCount: runStarts.size, lookbackWindowUsed: window,
+    }),
+  };
+}
+
+/**
+ * Runs the FULL discovery pipeline — unmodified msdRunStatisticalDiscovery,
+ * unmodified analyzer registry via msdRunResearchSession — against
+ * `numTrials` independently-seeded relabeled variants of one REAL,
+ * already-built experiment dataset, recording every resulting piece of
+ * evidence into NegativeControlLedger (never KnowledgeBase). Returns a
+ * permanent calibration report (also written to the REAL KnowledgeBase —
+ * the SUMMARY is a legitimate scientific artifact, unlike the raw
+ * synthetic evidence it is derived from).
+ */
+async function msdRunPipelineNegativeControl(realDataset, realExperimentRecord, method, numTrials, baseSeed){
+  method = (method === 'randomized_label' || method === 'matched_null') ? method : 'label_permutation';
+  numTrials = Number.isInteger(numTrials) && numTrials > 0 ? numTrials : MSD_CONTROL_DEFAULT_TRIALS;
+  baseSeed = Number.isInteger(baseSeed) ? baseSeed : 1;
+  const controlRunId = msdGenerateControlRunId();
+  const derivedLookbackWindow = (realExperimentRecord && realExperimentRecord.lookbackWindow != null) ? realExperimentRecord.lookbackWindow : 20;
+
+  const trialSummaries = [];
+  for (let t = 0; t < numTrials; t++){
+    const seed = baseSeed + t * 104729; // large prime stride — per-trial seeds can't collide with each other or with a real experiment's own seed space
+    let trialDataset;
+    if (method === 'label_permutation') trialDataset = msdBuildPermutedLabelDataset(realDataset, seed);
+    else if (method === 'randomized_label') trialDataset = msdBuildRandomizedLabelDataset(realDataset, seed);
+    else trialDataset = msdBuildMatchedNullDataset(realDataset, seed, derivedLookbackWindow);
+
+    const discoveryResult = msdRunStatisticalDiscovery(trialDataset, { randomSeed: seed });
+    const fakeExperimentRecord = Object.assign({}, realExperimentRecord, {
+      experimentId: 'control_' + controlRunId + '_trial' + t,
+      randomSeed: seed,
+      registrationId: null,
+    });
+    const sessionResult = await msdRunResearchSession(fakeExperimentRecord, discoveryResult, null, trialDataset, {
+      type: 'control_discovery',
+      writeFn: msdWriteControlFinding,
+      extra: { controlRunId, trialIndex: t, negativeControlMethod: method },
+    });
+    trialSummaries.push({ trialIndex: t, seed, recordedCount: sessionResult.recordedCount, readyForTraining: discoveryResult.readyForTraining });
+  }
+
+  const calibration = await msdEvaluateControlCalibration(controlRunId);
+  const report = {
+    controlRunId, method, numTrials, baseSeed,
+    codeVersion: MSD_CODE_VERSION,
+    statisticalEngineVersion: MSD_STATISTICAL_ENGINE_VERSION,
+    analyzerCount: msdRegisteredAnalyzers.length,
+    sourceExperimentId: realExperimentRecord ? realExperimentRecord.experimentId : null,
+    trialSummaries, calibration,
+    runAt: Date.now(),
+  };
+  await msdRecordControlCalibrationReport(report);
+  return report;
+}
+
+/**
+ * Reads back only THIS control run's evidence, groups by discoveryKey,
+ * and runs it through the EXACT SAME summarization/FDR/maturity pipeline
+ * real discoveries go through (msdSummarizeDiscovery +
+ * msdComputeFalseDiscoveryControl, the same two-pass pattern
+ * msdGetDiscoverySummaries itself uses) — reused unmodified, applied to
+ * control data instead of KnowledgeBase data.
+ */
+async function msdEvaluateControlCalibration(controlRunId){
+  const allControlFindings = await msdGetAllControlFindings();
+  const thisRun = allControlFindings.filter(f => f.type === 'control_discovery' && f.controlRunId === controlRunId);
+  const grouped = {};
+  thisRun.forEach(f => { (grouped[f.discoveryKey] = grouped[f.discoveryKey] || []).push(f); });
+  const keys = Object.keys(grouped);
+
+  if (!keys.length) {
+    return { discoveryKeyCount: 0, note: 'No discoveryKeys were generated under this control run — cannot assess calibration from zero candidates. This is NOT itself evidence of good calibration, only of an underpowered or over-conservative run; do not report a Pass on this basis.' };
+  }
+
+  const preliminary = keys.map(k => msdSummarizeDiscovery(k, grouped[k], null, {}, {}));
+  const fdc = msdComputeFalseDiscoveryControl(preliminary);
+  const summaries = keys.map(k => msdSummarizeDiscovery(k, grouped[k], fdc.perDiscovery[k] || null, {}, {}));
+
+  const byMaturity = { observation: 0, candidate: 0, repeatable: 0, verified: 0 };
+  summaries.forEach(s => { byMaturity[s.maturityLevel] = (byMaturity[s.maturityLevel] || 0) + 1; });
+
+  const nominalAlpha = 0.05;
+  const verifiedRate = summaries.length ? byMaturity.verified / summaries.length : 0;
+  const candidateOrAboveRate = summaries.length ? (summaries.length - byMaturity.observation) / summaries.length : 0;
+  const withinTolerance = verifiedRate <= nominalAlpha * 3; // generous, explicitly-stated 3x tolerance given single-run sample noise — not silently exactly nominalAlpha
+
+  return {
+    discoveryKeyCount: summaries.length,
+    byMaturity, verifiedRate, candidateOrAboveRate, nominalAlpha,
+    verifiedRateWithinNominal: withinTolerance,
+    passFail: withinTolerance
+      ? 'PASS (Verified rate under negative control is within tolerance of the nominal false-positive rate)'
+      : 'FAIL (Verified rate under negative control exceeds tolerance — investigate the accumulation pipeline before trusting any real Verified engineered-feature discovery)',
+  };
+}
+
+/** Permanent, in the REAL KnowledgeBase — the calibration SUMMARY is a legitimate scientific record; only the raw synthetic per-trial evidence stays isolated in NegativeControlLedger. */
+async function msdRecordControlCalibrationReport(report){
+  const finding = {
+    findingId: msdGenerateFindingId(),
+    type: 'negative_control_report',
+    controlRunId: report.controlRunId,
+    method: report.method,
+    numTrials: report.numTrials,
+    sourceExperimentId: report.sourceExperimentId,
+    codeVersion: report.codeVersion,
+    statisticalEngineVersion: report.statisticalEngineVersion,
+    analyzerCount: report.analyzerCount,
+    calibration: report.calibration,
+    discoveredAt: report.runAt,
+  };
+  return await msdWriteFinding(finding);
+}
+
+async function msdGetAllNegativeControlReports(){
+  const all = await msdGetAllFindings();
+  return all.filter(f => f.type === 'negative_control_report').sort((a, b) => b.discoveredAt - a.discoveredAt);
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 2.3 — Immutable Generation Registry
+// ────────────────────────────────────────────────────────────────────
+// Mirrors msdRegisterExperiment's exact pattern (one append-only
+// KnowledgeBase finding, never updated). Applies the same "never
+// redefine what was already recorded" principle msdRegisterFeatureVersion
+// already established for schema versions, one level up: to the ORDERED
+// GROUPING of features into named scientific generations (Generation 1:
+// classical indicators, Generation 2: Transition Dynamics, etc. — see
+// the Research Roadmap for the currently-planned sequence).
+
+/** Registers one new generation. Numbers must be registered strictly in order starting at 1; an already-used number can never be redefined — register a new, higher number instead. */
+async function msdRegisterGeneration(generation){
+  const existing = await msdGetAllGenerations();
+  if (existing.some(g => g.generationNumber === generation.generationNumber)) {
+    return { ok: false, error: 'Generation ' + generation.generationNumber + ' is already registered — cannot redefine it. Register a new, higher generation number instead.' };
+  }
+  const maxExisting = existing.length ? msdSafeMax(existing.map(g => g.generationNumber)) : 0;
+  if (generation.generationNumber !== maxExisting + 1) {
+    return { ok: false, error: 'Generation numbers must be registered strictly in order — expected ' + (maxExisting + 1) + ', got ' + generation.generationNumber + '.' };
+  }
+  const invalidParents = (generation.parentGenerations || []).filter(p => !existing.some(g => g.generationNumber === p));
+  if (invalidParents.length) {
+    return { ok: false, error: 'Unknown parent generation(s): ' + invalidParents.join(', ') };
+  }
+  const generationId = 'gen_' + msdSessionId + '_' + msdRandomSuffix();
+  const finding = {
+    findingId: msdGenerateFindingId(),
+    type: 'generation_registration',
+    generationId,
+    generationNumber: generation.generationNumber,
+    label: generation.label || ('Generation ' + generation.generationNumber),
+    rationale: generation.rationale || '',
+    featureKeys: Array.isArray(generation.featureKeys) ? generation.featureKeys.slice() : [],
+    parentGenerations: Array.isArray(generation.parentGenerations) ? generation.parentGenerations.slice() : [],
+    codeVersion: MSD_CODE_VERSION,
+    registeredAt: Date.now(),
+  };
+  const writeResult = await msdWriteFinding(finding);
+  return { ok: true, generationId, finding, writeResult };
+}
+
+/** Every generation ever registered, oldest first — registration order IS scientific order here. */
+async function msdGetAllGenerations(){
+  const allFindings = await msdGetAllFindings();
+  return allFindings.filter(f => f.type === 'generation_registration').sort((a, b) => a.generationNumber - b.generationNumber);
+}
+
+/** Which generation (if any) first introduced a given feature key. Returns null for a feature never formally registered — an honest gap to surface, not a silent assumption of Generation 1. */
+async function msdGetGenerationForFeature(featureKey){
+  const all = await msdGetAllGenerations();
+  return all.find(g => g.featureKeys.includes(featureKey)) || null;
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 2.4 — Unified Feature Lifecycle
+// ────────────────────────────────────────────────────────────────────
+// Proposed -> Generated -> Measured -> Evidence-Supported -> Repeatable
+// -> Verified -> Production -> Deprecated -> Archived.
+//
+// DELIBERATELY NOT A REPLACEMENT for the existing Maturity Engine
+// (MSD_MATURITY_RANK: observation/candidate/repeatable/verified) — that
+// engine is correct, tested, and every already-written KnowledgeBase
+// finding is immutable, so its stored vocabulary can never be renamed in
+// place. This section is a TRANSLATION + ACTION layer on top: it maps
+// the existing evidence-maturity strings onto the new unified vocabulary
+// at read time, and adds three genuinely new, explicit ACTIONS
+// (Production/Deprecated/Archived) that the evidence-only engine has no
+// concept of, since those are governance decisions, not derived
+// statistics.
+
+const MSD_UNIFIED_STAGE_ORDER = ['Proposed', 'Generated', 'Measured', 'Evidence-Supported', 'Repeatable', 'Verified', 'Production', 'Deprecated', 'Archived'];
+
+/** Translation, not a rename — see the section note above. */
+function msdTranslateMaturityToUnifiedStage(internalLevel){
+  if (internalLevel === 'candidate') return 'Evidence-Supported';
+  if (internalLevel === 'repeatable') return 'Repeatable';
+  if (internalLevel === 'verified') return 'Verified';
+  return 'Measured'; // 'observation' — evidence exists but hasn't cleared the Candidate bar yet
+}
+
+/**
+ * Computes ONE discoveryKey/featureKey's position in the unified
+ * lifecycle from independently-sourced facts, composed rather than
+ * re-derived: (1) a Generation Registry entry exists (Proposed); (2) at
+ * least one valid computed value exists in MarketStates (Generated) —
+ * callers should pass this from the existing per-feature validity audit,
+ * not a new one; (3) the existing Maturity Engine's own classification
+ * (Measured/Evidence-Supported/Repeatable/Verified); (4) the most recent
+ * explicit action finding, if any (Production/Deprecated/Archived).
+ */
+function msdComputeUnifiedLifecycleStage(opts){
+  opts = opts || {};
+  let stage = opts.hasGenerationRecord ? 'Proposed' : 'Proposed';
+  if (opts.hasValidMarketStateValue) stage = 'Generated';
+  if (opts.maturityLevel) stage = msdTranslateMaturityToUnifiedStage(opts.maturityLevel);
+  if (opts.latestAction === 'production_selection') stage = 'Production';
+  if (opts.latestAction === 'deprecation') stage = 'Deprecated';
+  if (opts.latestAction === 'archival') stage = 'Archived';
+  return stage;
+}
+
+/** Explicit governance ACTION: promotes a Verified discovery into the production feature set. Refuses unless CURRENT derived maturity is actually 'verified' — Production is a promotion FROM Verified, never a shortcut around it. */
+async function msdPromoteToProduction(discoveryKey, rationale){
+  const summaries = await msdGetDiscoverySummaries();
+  const summary = summaries.find(s => s.discoveryKey === discoveryKey);
+  if (!summary) return { ok: false, error: 'Unknown discoveryKey: ' + discoveryKey };
+  if (summary.maturityLevel !== 'verified') return { ok: false, error: 'Only Verified discoveries may be promoted to Production (current: ' + summary.maturityLevel + ').' };
+  const finding = {
+    findingId: msdGenerateFindingId(), type: 'production_selection', discoveryKey,
+    rationale: rationale || '', codeVersion: MSD_CODE_VERSION, actionedAt: Date.now(),
+  };
+  return { ok: true, writeResult: await msdWriteFinding(finding) };
+}
+
+/** Explicit ACTION: marks a discovery Deprecated (still valid evidence, no longer recommended for new production use — typically because Redundancy Elimination found it dominated by another feature). Requires a supersededBy reference, not a bare "no longer wanted." */
+async function msdDeprecateFeature(discoveryKey, rationale, supersededByDiscoveryKey){
+  const finding = {
+    findingId: msdGenerateFindingId(), type: 'deprecation', discoveryKey,
+    rationale: rationale || '', supersededBy: supersededByDiscoveryKey || null,
+    codeVersion: MSD_CODE_VERSION, actionedAt: Date.now(),
+  };
+  return { ok: true, writeResult: await msdWriteFinding(finding) };
+}
+
+/** Explicit, terminal ACTION. Never a delete — KnowledgeBase has no delete path; this is a permanent record that a discovery is retired, not a removal of its history. */
+async function msdArchiveFeature(discoveryKey, rationale){
+  const finding = {
+    findingId: msdGenerateFindingId(), type: 'archival', discoveryKey,
+    rationale: rationale || '', codeVersion: MSD_CODE_VERSION, actionedAt: Date.now(),
+  };
+  return { ok: true, writeResult: await msdWriteFinding(finding) };
+}
+
+/** Every lifecycle-action finding for a discoveryKey, chronological — the append-only action history the unified-stage function's "most recent action" reads from. */
+async function msdGetLifecycleActions(discoveryKey){
+  const all = await msdGetAllFindings();
+  return all
+    .filter(f => (f.type === 'production_selection' || f.type === 'deprecation' || f.type === 'archival') && f.discoveryKey === discoveryKey)
+    .sort((a, b) => a.actionedAt - b.actionedAt);
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 2.5 — Experiment Manifest & Reproducibility Infrastructure
+// ────────────────────────────────────────────────────────────────────
+// Pure assembly of data that already exists across the Experiment
+// record — same "read what's already computed, add nothing new"
+// posture as the Research Report and Discovery Provenance views. Adds
+// exactly one genuinely new field this phase collects: which
+// browser/engine actually ran the computation, since this platform's
+// statistical compute is entirely client-side (no server-side compute
+// exists — the Cloudflare Worker backend handles OAuth only).
+
+function msdBuildExperimentManifest(experimentRecord, analyzerNamesAtRunTime, environmentInfo){
+  return {
+    experimentId: experimentRecord.experimentId,
+    symbol: experimentRecord.symbol,
+    featureVersion: experimentRecord.featureVersion,
+    leadTime: experimentRecord.leadTime,
+    randomSeed: experimentRecord.randomSeed,
+    lookbackWindow: experimentRecord.lookbackWindow,
+    datasetFingerprint: experimentRecord.datasetFingerprint,
+    featureFingerprint: experimentRecord.featureFingerprint,
+    trainSnapshotIds: experimentRecord.trainSnapshotIds,
+    valSnapshotIds: experimentRecord.valSnapshotIds,
+    testSnapshotIds: experimentRecord.testSnapshotIds,
+    datasetEpochMin: experimentRecord.datasetEpochMin,
+    datasetEpochMax: experimentRecord.datasetEpochMax,
+    registrationId: experimentRecord.registrationId,
+    codeVersion: MSD_CODE_VERSION,
+    statisticalEngineVersion: MSD_STATISTICAL_ENGINE_VERSION,
+    analyzerNamesAtRunTime: (analyzerNamesAtRunTime || []).slice(),
+    environment: environmentInfo || null,
+  };
+}
+
+/** The one new reproducibility field this phase adds. Cannot itself fix cross-engine floating-point drift — it only makes such drift DETECTABLE after the fact, which is the necessary first step (see the Research Debt Register: "re-run one frozen experiment across >=2 browsers" is the follow-up this enables but does not itself perform). */
+function msdCaptureEnvironmentInfo(){
+  return {
+    userAgent: (typeof navigator !== 'undefined' && navigator.userAgent) ? navigator.userAgent : 'unknown',
+    capturedAt: Date.now(),
+  };
+}
+
+/** Field-by-field diff between two manifests. Surfaces facts; does not judge whether a given mismatch matters (a differing userAgent is expected; a differing datasetFingerprint given identical snapshot IDs would not be) — same posture as every other audit view in this app. */
+function msdCompareExperimentManifests(manifestA, manifestB){
+  const keys = Array.from(new Set(Object.keys(manifestA || {}).concat(Object.keys(manifestB || {}))));
+  const diffs = [];
+  keys.forEach(k => {
+    const a = JSON.stringify((manifestA || {})[k]);
+    const b = JSON.stringify((manifestB || {})[k]);
+    if (a !== b) diffs.push({ field: k, a: (manifestA || {})[k], b: (manifestB || {})[k] });
+  });
+  return { identical: diffs.length === 0, diffs };
+}
 
 // ══════════════════════════════════════════════════════════════════════
 // Market State Discovery Engine — Machine Learning
@@ -11263,6 +11840,47 @@ async function msdTrainModelUi(){
   msdRefreshScientificAssessmentUi(); // automatic update after every completed experiment, as required — never persisted, always recomputed fresh from the current Knowledge Base
 }
 
+/**
+ * Phase 2 (Scientific Infrastructure) — UI trigger for the Pipeline-Level
+ * Negative Control. Relabels the CURRENT experiment's dataset (never
+ * builds a new one — this control's entire point is to exercise the
+ * exact same downstream pipeline the real experiment above just used)
+ * and reports whether the observed Verified rate under a known-null
+ * relationship stays within tolerance of the nominal false-positive
+ * rate.
+ */
+async function msdRunPipelineNegativeControlUi(){
+  const statusEl = $("msdControlStatus");
+  const resultsEl = $("msdControlResults");
+  const last = window._msdLastExperiment;
+  if (!last || !last.result || !last.result.dataset) {
+    if (resultsEl) resultsEl.innerHTML = '<span class="cell-neg">Run an experiment above first — this control relabels ITS dataset rather than building a new one.</span>';
+    return;
+  }
+  const method = $("msdControlMethod") ? $("msdControlMethod").value : 'label_permutation';
+  const trials = parseInt($("msdControlTrials") ? $("msdControlTrials").value : '30', 10) || 30;
+  if (statusEl) statusEl.textContent = 'Running ' + trials + ' trials (' + method + ')…';
+  if (resultsEl) resultsEl.innerHTML = '';
+
+  let report;
+  try {
+    report = await msdRunPipelineNegativeControl(last.result.dataset, last.result.record, method, trials, last.result.record.randomSeed || 1);
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Error: ' + e.message;
+    return;
+  }
+
+  const c = report.calibration;
+  if (statusEl) statusEl.textContent = 'Control run ' + report.controlRunId + ' complete — permanently recorded to KnowledgeBase.';
+  if (resultsEl) {
+    resultsEl.innerHTML = !c.discoveryKeyCount
+      ? '<span class="gc-sub">' + (c.note || 'No discoveryKeys were generated under this control.') + '</span>'
+      : `<div class="em-card" style="margin-bottom:8px"><div class="em-lab">Calibration</div><div class="em-val ${c.verifiedRateWithinNominal ? 'up' : 'down'}">${c.passFail}</div></div>
+         DiscoveryKeys generated: <b>${c.discoveryKeyCount}</b> · Verified rate: <b>${(c.verifiedRate*100).toFixed(1)}%</b> (nominal ${(c.nominalAlpha*100).toFixed(0)}%, tolerance 3×)<br>
+         By stage: Observation ${c.byMaturity.observation} · Candidate ${c.byMaturity.candidate} · Repeatable ${c.byMaturity.repeatable} · Verified ${c.byMaturity.verified}`;
+  }
+}
+
 /** Fetches and renders the Scientific Assessment — called automatically after every completed experiment (see msdTrainModelUi above), and available on demand via its own refresh button. */
 async function msdRefreshScientificAssessmentUi(precomputedSummaries){
   const el = $("msdScientificAssessment");
@@ -11354,6 +11972,8 @@ async function msdRunLeadTimeSweepUi(){
 function msdRenderDiscoveryResult(discovery){
   const card = $("msdDiscoveryCard");
   if (card) card.style.display = 'block';
+  const controlCard = $("msdControlCard"); // Phase 2 — Pipeline Negative Control becomes available as soon as there's a fresh experiment dataset to relabel
+  if (controlCard) controlCard.style.display = 'block';
   const gateEl = $("msdDiscoveryGate");
   if (gateEl) {
     gateEl.textContent = discovery.readyForTraining ? '✅ Ready for training' : '⛔ Not ready: ' + discovery.reasons.join('; ');
