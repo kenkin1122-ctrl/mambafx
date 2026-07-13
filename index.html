@@ -2900,6 +2900,41 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button class="gc-btn" onclick="msdRunScientificValidationUi()">🔬 Run Scientific Validation</button>
     <div id="msdValidationResults" style="margin-top:10px;font-size:12px"></div>
   </div>
+
+  <div class="grid-card" style="margin-top:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Measurement Quality Audit (Implementation Phase 6)</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Audits ONLY Phase 5's production feature set — validated measurements get compared pairwise for mutual information, correlation, and incremental information gain (reusing Phase 3's similarity and Phase 1D's conditional MI directly), plus a parameter-sensitivity check (does a lag-based finding hold at nearby lags, or is it isolated to one exact value). Classifies each as <b>Unique</b>, <b>Redundant</b> (highly similar/correlated with another validated measurement), or <b>Proxy</b> (adds essentially no new information beyond another, even without strong raw correlation). "Stability across lead times" is honestly left untested — it requires conditioning on proximity to an actual five-tick event, which Phase 2 already disclosed doesn't exist in this pipeline yet.</div>
+    <button class="gc-btn" onclick="msdRunMeasurementQualityAuditUi()">🔬 Run Measurement Quality Audit</button>
+    <div id="msdAuditResults" style="margin-top:10px;font-size:12px"></div>
+  </div>
+
+  <div class="grid-card" style="margin-top:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Hidden State Separability (Implementation Phase 7)</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Complements Phase 6's indicator-level redundancy check with a cluster-level question: when a state's indicator holds, does the market's feature profile at those moments (local entropy, tick magnitude — both already computed in Phase 4) actually differ from another state's moments? Computes state overlap (Jaccard), within/between-state variance, a separability ratio, and classification confidence, for every pair of Phase 6's non-Redundant candidates. Merge is recommended only when high overlap AND low separability BOTH agree — one signal alone is not treated as sufficient evidence to merge two states into one.</div>
+    <button class="gc-btn" onclick="msdRunHiddenStateSeparabilityAnalysisUi()">🔬 Run Hidden State Separability Analysis</button>
+    <div id="msdSeparabilityResults" style="margin-top:10px;font-size:12px"></div>
+  </div>
+
+  <div class="grid-card" style="margin-top:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Hidden State Transition Analysis (Implementation Phase 8)</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Gated on Phase 7 producing at least 2 distinct (not merge-recommended) states. Builds a discrete state-label sequence (which distinct states are active at each position), computes a genuine Markov transition matrix over these labels, run-length "transition duration" per label, reversibility classification (does B→A occur about as often as A→B, or essentially never), and the dominant and failed transition paths — all direct reads of the transition matrix, no new statistics beyond it.</div>
+    <button class="gc-btn" onclick="msdRunStateTransitionAnalysisUi()">🔬 Run State Transition Analysis</button>
+    <div id="msdTransitionResults" style="margin-top:10px;font-size:12px"></div>
+  </div>
+
+  <div class="grid-card" style="margin-top:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Lead-Time Evolution (Implementation Phase 9)</h3>
+    <div class="gc-sub" style="margin-bottom:8px"><b>Closes a gap disclosed since Phase 2:</b> nothing built through Phase 8 conditions on the actual five-tick-rising event at all. This phase detects real events directly from the direction sequence ("five strictly increasing ticks" = "five consecutive 1s," this pipeline's own direction convention), then tests whether each non-Redundant state's activation rate is elevated above its own marginal baseline at lead times 1 through 5 ticks before event onset — using a Wilson score interval, reused directly, for significance. Reports earliest significant appearance, peak strength, and growth/decay trend (Mann-Kendall, reused). "Different market regimes" is honestly disclosed as untestable — this raw-tick pipeline has no volatility-regime concept at all.</div>
+    <button class="gc-btn" onclick="msdRunLeadTimeEvolutionAnalysisUi()">🔬 Run Lead-Time Evolution Analysis</button>
+    <div id="msdEvolutionResults" style="margin-top:10px;font-size:12px"></div>
+  </div>
+
+  <div class="grid-card" style="margin-top:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Temporal Stability Audit (Implementation Phase 10 — Final Phase)</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Verifies every non-Redundant state across four dimensions. <b>Chronological datasets</b> reuses Phase 3's chunk-stability check directly. <b>Independent datasets</b> is tested via each real detected continuous segment independently — actual collection-session boundaries, not an arbitrary equal split. <b>Trading sessions</b> is a genuinely new test: UTC hour-of-day buckets, since even a continuously-traded synthetic instrument could show platform-wide time-of-day patterns. <b>Market conditions</b> is honestly disclosed as untestable, matching Phase 9's identical disclosure — this pipeline has no volatility-regime concept. Classifies every state as Stable, Moderately Stable, or Unstable based on the fraction of independent checks that remain significant.</div>
+    <button class="gc-btn" onclick="msdRunTemporalStabilityAuditUi()">🔬 Run Temporal Stability Audit</button>
+    <div id="msdStabilityAuditResults" style="margin-top:10px;font-size:12px"></div>
+  </div>
 </div>
 
 
@@ -12911,6 +12946,757 @@ async function msdRunScientificValidation(symbol, featureVersion, randomSeed){
   return { validationComplete: true, symbol, featureVersion, productionFeatureSet, rejectedMeasurements, phase4Result };
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// Implementation Phase 6 — Measurement Quality Audit
+// ══════════════════════════════════════════════════════════════════════
+// Operates ONLY on Phase 5's production feature set (validated
+// measurements) — auditing something that was already rejected would
+// be pointless. For every PAIR of validated measurements: mutual
+// information and Pearson correlation (redundancy signals), conditional
+// mutual information (incremental information gain — does measurement B
+// add anything BEYOND measurement A), reusing msdComputeStateSimilarity
+// (Phase 3) and msdConditionalMutualInformation (Phase 1D) directly. Two
+// genuinely new pieces: a standard Pearson correlation (simpler,
+// complementary to MI) and a parameter-sensitivity check (does a
+// lag-based finding hold at nearby lags, or is it a fluke of one exact
+// value). "Stability across lead times" is honestly left untested here
+// — it requires event-conditioning that Phase 2 already disclosed does
+// not exist yet (eventSpecificity: "Not yet tested"); this phase does
+// not invent a substitute.
+
+/** Standard Pearson correlation coefficient — a simpler, more interpretable complement to mutual information for two equal-length numeric sequences. */
+function msdComputePearsonCorrelation(a, b){
+  const n = a.length;
+  if (n !== b.length || n < 2) return null;
+  const meanA = a.reduce((x,y)=>x+y,0)/n, meanB = b.reduce((x,y)=>x+y,0)/n;
+  let cov = 0, varA = 0, varB = 0;
+  for (let i = 0; i < n; i++) {
+    const da = a[i]-meanA, db = b[i]-meanB;
+    cov += da*db; varA += da*da; varB += db*db;
+  }
+  if (varA === 0 || varB === 0) return 0;
+  return cov / Math.sqrt(varA * varB);
+}
+
+/**
+ * Parameter sensitivity for a lag-based candidate: does the finding hold
+ * up at lag±1, or is it isolated to exactly one lag value? A genuine
+ * underlying dependence structure typically degrades gracefully near
+ * its true lag rather than vanishing completely one step away — a
+ * measurement significant ONLY at one exact value and nowhere nearby is
+ * more consistent with a statistical fluke of that specific value than
+ * a robust structural property.
+ */
+function msdComputeParameterSensitivity(directionSeq, candidate, randomSeed, permutations){
+  if (candidate.checkType !== 'lag') return { applicable: false };
+  const lag = candidate.rawLag;
+  const nearbyLags = [lag - 1, lag + 1].filter(l => l >= 1);
+  const nearbyResults = nearbyLags.map(l => {
+    const test = msdRunSerialDependenceTest(directionSeq, randomSeed, permutations || 100, l);
+    return { lag: l, significant: test ? test.significant : null, pValue: test ? test.pValue : null };
+  });
+  return { applicable: true, testedLag: lag, nearbyResults, anyNearbySignificant: nearbyResults.some(r => r.significant === true) };
+}
+
+/**
+ * Incremental information gain between two validated measurements:
+ * literally conditional mutual information (Phase 1D, reused directly)
+ * between measurement B's indicator and the pooled outcome, GIVEN
+ * measurement A's indicator — how much NEW information B contributes
+ * beyond what A already provides. Scoped to lag-based indicator pairs
+ * for this first implementation, matching msdComputeStateSimilarity's
+ * own stated scope limit.
+ */
+function msdComputeIncrementalInformationGain(directionSeq, candidateA, candidateB){
+  if (candidateA.checkType !== 'lag' || candidateB.checkType !== 'lag') return null;
+  const lagA = candidateA.rawLag, lagB = candidateB.rawLag;
+  const maxLag = Math.max(lagA, lagB);
+  if (directionSeq.length < maxLag + 3) return null;
+  const outcome = [], indicatorA = [], indicatorB = [];
+  for (let i = maxLag; i < directionSeq.length - 1; i++) {
+    outcome.push(directionSeq[i + 1]);
+    indicatorA.push(directionSeq[i] === directionSeq[i - lagA] ? 1 : 0);
+    indicatorB.push(directionSeq[i] === directionSeq[i - lagB] ? 1 : 0);
+  }
+  return msdConditionalMutualInformation(outcome, indicatorA, indicatorB, 2);
+}
+
+const MSD_REDUNDANCY_MI_THRESHOLD = 0.1; // mutual information above this between two validated measurements' indicators is treated as meaningful overlap
+const MSD_REDUNDANCY_CORRELATION_THRESHOLD = 0.5; // Pearson |r| above this likewise
+const MSD_PROXY_INCREMENTAL_GAIN_THRESHOLD = 0.01; // incremental information gain below this means "adds essentially nothing new beyond another already-validated measurement"
+
+/**
+ * Top-level Phase 6 orchestrator. Gated on Phase 5's production feature
+ * set — audits ONLY validated measurements, computing every pairwise
+ * comparison among lag-based ones (the only type with a well-defined
+ * indicator sequence for this first implementation) plus a
+ * parameter-sensitivity check for each. Classifies every measurement as
+ * Unique, Redundant (high similarity/correlation with another validated
+ * measurement), or Proxy (low incremental gain over another, even if not
+ * strongly correlated in the raw sense).
+ */
+async function msdRunMeasurementQualityAudit(symbol, featureVersion, randomSeed){
+  randomSeed = randomSeed || 1;
+  const phase5Result = await msdRunScientificValidation(symbol, featureVersion, randomSeed);
+
+  if (!phase5Result.validationComplete || !phase5Result.productionFeatureSet.length) {
+    return { auditComplete: false, reason: phase5Result.validationComplete ? 'Phase 5 (Scientific Validation) produced an empty production feature set — nothing to audit.' : 'Phase 5 (Scientific Validation) did not complete — ' + phase5Result.reason, auditedMeasurements: [], phase5Result };
+  }
+
+  const { pooledDirectionSeq } = await msdGetPooledDirectionSequence(symbol, featureVersion);
+  const allVerifiedCandidates = phase5Result.phase4Result.phase3Result.phase2Result.candidateStates.filter(c => c.classification === 'Verified');
+  const lagBasedRecords = phase5Result.productionFeatureSet
+    .map(r => ({ record: r, candidate: allVerifiedCandidates.find(c => c.id === r.candidateId) }))
+    .filter(x => x.candidate && x.candidate.checkType === 'lag');
+
+  const auditedMeasurements = lagBasedRecords.map(({ record, candidate }) => {
+    // BUG FIX: previously excluded only the exact same (candidateId,
+    // family) pair, but still compared DIFFERENT families of the SAME
+    // candidate against each other — e.g. Directional Persistence and
+    // Volatility Dynamics for the same lag. Since msdComputeStateSimilarity
+    // operates on the candidate's shared indicator (rawLag), not the
+    // family, two families of one candidate are trivially identical when
+    // compared this way, and were being flagged "Redundant" with each
+    // other purely as an artifact — not because they represent competing
+    // discoveries. Redundancy is a CROSS-candidate concept; same-candidate
+    // family pairs are excluded entirely, not just the exact duplicate.
+    const pairwise = lagBasedRecords
+      .filter(other => other.record.candidateId !== record.candidateId)
+      .map(other => {
+        const similarity = msdComputeStateSimilarity(pooledDirectionSeq, candidate, other.candidate);
+        const correlation = (() => {
+          const maxLag = Math.max(candidate.rawLag, other.candidate.rawLag);
+          if (pooledDirectionSeq.length < maxLag + 2) return null;
+          const indA = [], indB = [];
+          for (let i = maxLag; i < pooledDirectionSeq.length; i++) {
+            indA.push(pooledDirectionSeq[i] === pooledDirectionSeq[i - candidate.rawLag] ? 1 : 0);
+            indB.push(pooledDirectionSeq[i] === pooledDirectionSeq[i - other.candidate.rawLag] ? 1 : 0);
+          }
+          return msdComputePearsonCorrelation(indA, indB);
+        })();
+        const incrementalGain = msdComputeIncrementalInformationGain(pooledDirectionSeq, candidate, other.candidate);
+        return { otherCandidateId: other.record.candidateId, otherFamily: other.record.family, mutualInformation: similarity ? similarity.mutualInformation : null, correlation, incrementalGain };
+      });
+
+    const parameterSensitivity = msdComputeParameterSensitivity(pooledDirectionSeq, candidate, randomSeed, 100);
+
+    const isRedundant = pairwise.some(p => (p.mutualInformation != null && p.mutualInformation > MSD_REDUNDANCY_MI_THRESHOLD) || (p.correlation != null && Math.abs(p.correlation) > MSD_REDUNDANCY_CORRELATION_THRESHOLD));
+    const isProxy = !isRedundant && pairwise.length > 0 && pairwise.every(p => p.incrementalGain != null && p.incrementalGain < MSD_PROXY_INCREMENTAL_GAIN_THRESHOLD);
+    const classification = isRedundant ? 'Redundant' : isProxy ? 'Proxy' : 'Unique';
+
+    return {
+      candidateId: record.candidateId, family: record.family, description: record.description,
+      pairwiseComparisons: pairwise,
+      parameterSensitivity,
+      stabilityAcrossDatasets: 'See Phase 3 state stability (4-chunk check) — reused directly, not recomputed',
+      stabilityAcrossLeadTimes: 'Not yet testable — requires event-conditioning (proximity to an actual five-tick run), which Phase 2 already disclosed does not exist in this pipeline yet (eventSpecificity: "Not yet tested")',
+      classification,
+    };
+  });
+
+  return { auditComplete: true, symbol, featureVersion, auditedMeasurements, phase5Result };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Implementation Phase 7 — Hidden State Separability
+// ══════════════════════════════════════════════════════════════════════
+// Complements Phase 6's INDICATOR-level redundancy check (are two
+// measurements' defining conditions correlated) with a CLUSTER-level
+// question: when a state's indicator holds, does the market's observable
+// feature profile at those moments actually differ from another state's
+// moments, or do they carve out largely the same, indistinguishable set
+// of observations? Feature space here is [local windowed entropy, tick
+// magnitude] — both already computed in Phase 4, reused directly, not
+// recomputed. Operates only on Phase 6's non-Redundant (Unique or Proxy)
+// candidates — a pair Phase 6 already flagged Redundant has its answer
+// already; re-litigating it here would be redundant work about
+// redundancy itself.
+
+const MSD_SEPARABILITY_MERGE_OVERLAP_THRESHOLD = 0.6; // Jaccard overlap above this is "substantially the same set of moments"
+const MSD_SEPARABILITY_MERGE_RATIO_THRESHOLD = 1.5; // separability ratio (between/within variance) below this is "not meaningfully distinct clusters"
+
+/** Jaccard overlap between two lag-based candidates' indicator-holds position sets — the fraction of the union of both "state active" moments that are shared by both. */
+function msdComputeStateOverlap(directionSeq, candidateA, candidateB){
+  const maxLag = Math.max(candidateA.rawLag, candidateB.rawLag);
+  if (directionSeq.length < maxLag + 2) return null;
+  let intersection = 0, union = 0;
+  for (let i = maxLag; i < directionSeq.length; i++) {
+    const holdsA = directionSeq[i] === directionSeq[i - candidateA.rawLag];
+    const holdsB = directionSeq[i] === directionSeq[i - candidateB.rawLag];
+    if (holdsA || holdsB) union++;
+    if (holdsA && holdsB) intersection++;
+  }
+  return union ? intersection / union : null;
+}
+
+/**
+ * Cluster separability between two candidates' indicator-holds position
+ * sets, in [local entropy, magnitude] feature space: within-cluster
+ * variance (average squared distance from each cluster's own centroid)
+ * versus between-cluster variance (squared distance between the two
+ * centroids) — a direct, minimal F-ratio-style separability measure. A
+ * ratio well above 1 means the two clusters sit meaningfully apart in
+ * feature space; a ratio near or below 1 means they're not
+ * distinguishable by these features, whatever their indicator overlap.
+ */
+function msdComputeClusterSeparability(directionSeq, magnitudeSeq, candidateA, candidateB, windowSize){
+  windowSize = windowSize || 20;
+  const maxLag = Math.max(candidateA.rawLag, candidateB.rawLag);
+  const start = maxLag + windowSize;
+  if (directionSeq.length < start + 2 || directionSeq.length !== magnitudeSeq.length) return null;
+
+  const featuresA = [], featuresB = [];
+  for (let i = start; i < directionSeq.length; i++) {
+    const window = directionSeq.slice(i - windowSize, i);
+    const entropy = msdComputeSequenceEntropy(window);
+    if (entropy == null) continue;
+    const magnitude = magnitudeSeq[i];
+    if (directionSeq[i] === directionSeq[i - candidateA.rawLag]) featuresA.push([entropy, magnitude]);
+    if (directionSeq[i] === directionSeq[i - candidateB.rawLag]) featuresB.push([entropy, magnitude]);
+  }
+  if (featuresA.length < 5 || featuresB.length < 5) return null;
+
+  const centroid = arr => [arr.reduce((s,f)=>s+f[0],0)/arr.length, arr.reduce((s,f)=>s+f[1],0)/arr.length];
+  const centroidA = centroid(featuresA), centroidB = centroid(featuresB);
+  const sqDist = (p, c) => (p[0]-c[0])*(p[0]-c[0]) + (p[1]-c[1])*(p[1]-c[1]);
+  const withinA = featuresA.reduce((s,f)=>s+sqDist(f,centroidA),0) / featuresA.length;
+  const withinB = featuresB.reduce((s,f)=>s+sqDist(f,centroidB),0) / featuresB.length;
+  const withinVariance = (withinA + withinB) / 2;
+  const betweenVariance = sqDist(centroidA, centroidB);
+  const separabilityRatio = withinVariance > 0 ? betweenVariance / withinVariance : (betweenVariance > 0 ? Infinity : 0);
+
+  return { centroidA, centroidB, withinVariance, betweenVariance, separabilityRatio, nA: featuresA.length, nB: featuresB.length };
+}
+
+/**
+ * Top-level Phase 7 orchestrator. Gated on Phase 6's audit completing
+ * with at least two non-Redundant candidates to compare (separability
+ * between exactly one state and nothing is not a meaningful question).
+ * Merge is recommended only when BOTH high overlap AND low separability
+ * agree — converging evidence, not either signal alone — per "merge
+ * states only when experimental evidence supports doing so."
+ */
+async function msdRunHiddenStateSeparabilityAnalysis(symbol, featureVersion, randomSeed){
+  randomSeed = randomSeed || 1;
+  const phase6Result = await msdRunMeasurementQualityAudit(symbol, featureVersion, randomSeed);
+
+  if (!phase6Result.auditComplete) {
+    return { separabilityComplete: false, reason: 'Phase 6 (Measurement Quality Audit) did not complete — ' + phase6Result.reason, comparisons: [], phase6Result };
+  }
+
+  const allCandidates = phase6Result.phase5Result.phase4Result.phase3Result.phase2Result.candidateStates.filter(c => c.classification === 'Verified' && c.checkType === 'lag');
+  const nonRedundantCandidateIds = [...new Set(
+    phase6Result.auditedMeasurements.filter(m => m.classification !== 'Redundant').map(m => m.candidateId)
+  )];
+  const candidates = allCandidates.filter(c => nonRedundantCandidateIds.includes(c.id));
+
+  if (candidates.length < 2) {
+    return { separabilityComplete: false, reason: `Only ${candidates.length} non-Redundant candidate(s) available after Phase 6 — separability analysis requires at least 2 to compare.`, comparisons: [], phase6Result };
+  }
+
+  const { pooledDirectionSeq } = await msdGetPooledDirectionSequence(symbol, featureVersion);
+  const { pooledMagnitudeSeq } = await msdGetPooledMagnitudeSequence(symbol, featureVersion);
+  const alignedMagnitudeSeq = pooledDirectionSeq.length === pooledMagnitudeSeq.length ? pooledMagnitudeSeq : null;
+
+  const comparisons = [];
+  for (let i = 0; i < candidates.length; i++) {
+    for (let j = i + 1; j < candidates.length; j++) {
+      const candidateA = candidates[i], candidateB = candidates[j];
+      const overlap = msdComputeStateOverlap(pooledDirectionSeq, candidateA, candidateB);
+      const separability = alignedMagnitudeSeq ? msdComputeClusterSeparability(pooledDirectionSeq, alignedMagnitudeSeq, candidateA, candidateB, 20) : null;
+
+      const highOverlap = overlap != null && overlap > MSD_SEPARABILITY_MERGE_OVERLAP_THRESHOLD;
+      const lowSeparability = separability != null && separability.separabilityRatio < MSD_SEPARABILITY_MERGE_RATIO_THRESHOLD;
+      const mergeRecommended = highOverlap && lowSeparability; // BOTH must agree — converging evidence required
+
+      const classificationConfidence = separability != null
+        ? (separability.separabilityRatio > 3 ? 'High' : separability.separabilityRatio > MSD_SEPARABILITY_MERGE_RATIO_THRESHOLD ? 'Medium' : 'Low')
+        : 'Unknown (insufficient data for cluster separability)';
+
+      comparisons.push({
+        stateA: candidateA.id, stateB: candidateB.id,
+        stateOverlap: overlap,
+        withinStateVariance: separability ? separability.withinVariance : null,
+        betweenStateVariance: separability ? separability.betweenVariance : null,
+        clusterSeparabilityRatio: separability ? separability.separabilityRatio : null,
+        classificationConfidence,
+        mergeRecommended,
+        mergeRationale: mergeRecommended
+          ? `High overlap (${(overlap*100).toFixed(0)}%) AND low cluster separability (ratio=${separability.separabilityRatio.toFixed(2)}) both support treating these as one state, not two.`
+          : 'Insufficient converging evidence to merge — states remain distinct pending further evidence.',
+      });
+    }
+  }
+
+  return { separabilityComplete: true, symbol, featureVersion, comparisons, phase6Result };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Implementation Phase 8 — Hidden State Transition Analysis
+// ══════════════════════════════════════════════════════════════════════
+// Operates on Phase 7's distinct (not-recommended-for-merging) states.
+// Builds a discrete state-label sequence (which distinct states are
+// active at each position — generalizing the binary indicator concept
+// used throughout to a multi-category label), then computes a genuine
+// Markov transition matrix over these labels — the SAME transition-
+// probability concept used since Phase 1A, generalized from binary to
+// multi-category rather than reimplemented from scratch. Run-length
+// generalizes the existing binary run-length code the same way.
+// Reversibility, dominant paths, and the transition graph itself are
+// pure reads of the transition matrix — no new statistics there.
+
+/**
+ * Builds a discrete state-label sequence from 2+ distinct lag-based
+ * candidates: at each position, determines which candidates' indicators
+ * are active and encodes the combination as a label (e.g. "A", "B",
+ * "A+B", "Neither"). Generalizes cleanly to any number of candidates,
+ * though interpretability degrades past a handful.
+ */
+function msdBuildStateLabelSequence(directionSeq, candidates){
+  const maxLag = Math.max(...candidates.map(c => c.rawLag));
+  const labels = [];
+  for (let i = maxLag; i < directionSeq.length; i++) {
+    const active = candidates.filter(c => directionSeq[i] === directionSeq[i - c.rawLag]).map(c => c.id);
+    labels.push(active.length ? active.join('+') : 'Neither');
+  }
+  return labels;
+}
+
+/** Multi-category Markov transition matrix over a discrete label sequence — generalizes msdComputeFirstOrderTransitionMatrix's binary-only concept to any number of categories. */
+function msdComputeStateTransitionMatrix(labelSeq){
+  const counts = new Map(); // "from" -> Map("to" -> count)
+  const fromTotals = new Map();
+  for (let i = 1; i < labelSeq.length; i++) {
+    const from = labelSeq[i - 1], to = labelSeq[i];
+    if (!counts.has(from)) counts.set(from, new Map());
+    counts.get(from).set(to, (counts.get(from).get(to) || 0) + 1);
+    fromTotals.set(from, (fromTotals.get(from) || 0) + 1);
+  }
+  const matrix = {};
+  counts.forEach((toMap, from) => {
+    matrix[from] = {};
+    toMap.forEach((count, to) => { matrix[from][to] = count / fromTotals.get(from); });
+  });
+  return matrix;
+}
+
+/** Generalizes msdComputeRunLengthDistribution from binary to multi-category: for each distinct label, the empirical distribution of how many consecutive positions it persisted for once entered — "transition duration." */
+function msdComputeMultiCategoryRunLengths(labelSeq){
+  const runsByLabel = {};
+  if (!labelSeq.length) return runsByLabel;
+  let currentLabel = labelSeq[0], currentLength = 1;
+  for (let i = 1; i < labelSeq.length; i++) {
+    if (labelSeq[i] === currentLabel) currentLength++;
+    else {
+      if (!runsByLabel[currentLabel]) runsByLabel[currentLabel] = [];
+      runsByLabel[currentLabel].push(currentLength);
+      currentLabel = labelSeq[i]; currentLength = 1;
+    }
+  }
+  if (!runsByLabel[currentLabel]) runsByLabel[currentLabel] = [];
+  runsByLabel[currentLabel].push(currentLength);
+  return runsByLabel;
+}
+
+const MSD_TRANSITION_NONTRIVIAL_THRESHOLD = 0.05; // a transition probability below this is treated as "essentially never observed" for reversibility/failed-path purposes
+
+/**
+ * Classifies every observed X->Y transition as Reversible (Y->X is also
+ * observed with non-trivial probability) or Irreversible (Y->X is
+ * essentially never observed), directly from the transition matrix —
+ * no new computation, a pure read of what msdComputeStateTransitionMatrix
+ * already produced.
+ */
+function msdClassifyTransitionReversibility(transitionMatrix){
+  const classifications = [];
+  Object.keys(transitionMatrix).forEach(from => {
+    Object.keys(transitionMatrix[from]).forEach(to => {
+      if (from === to) return; // self-loops aren't "transitions" in the reversibility sense
+      const forwardProb = transitionMatrix[from][to];
+      if (forwardProb < MSD_TRANSITION_NONTRIVIAL_THRESHOLD) return; // not a meaningful transition to begin with
+      const reverseProb = (transitionMatrix[to] && transitionMatrix[to][from]) || 0;
+      classifications.push({
+        from, to, forwardProb, reverseProb,
+        classification: reverseProb >= MSD_TRANSITION_NONTRIVIAL_THRESHOLD ? 'Reversible' : 'Irreversible',
+      });
+    });
+  });
+  return classifications;
+}
+
+/**
+ * Dominant transition path from each state (the highest-probability next
+ * label) and failed transition paths (label pairs that both appear
+ * elsewhere in the graph as sources, but the direct transition between
+ * them is at or near zero — a theoretically possible but essentially
+ * never-observed path).
+ */
+function msdIdentifyDominantAndFailedPaths(transitionMatrix){
+  const allLabels = Object.keys(transitionMatrix);
+  const dominantPaths = allLabels.map(from => {
+    const toMap = transitionMatrix[from];
+    let bestTo = null, bestProb = -1;
+    Object.keys(toMap).forEach(to => { if (toMap[to] > bestProb) { bestProb = toMap[to]; bestTo = to; } });
+    return { from, to: bestTo, probability: bestProb };
+  });
+  const failedPaths = [];
+  allLabels.forEach(from => {
+    allLabels.forEach(to => {
+      if (from === to) return;
+      const prob = (transitionMatrix[from] && transitionMatrix[from][to]) || 0;
+      if (prob < MSD_TRANSITION_NONTRIVIAL_THRESHOLD) failedPaths.push({ from, to, probability: prob });
+    });
+  });
+  return { dominantPaths, failedPaths };
+}
+
+/** Assembles the Hidden State Transition Graph — nodes (distinct labels observed) and edges (every non-trivial observed transition with its probability) — a pure data-structure assembly of what's already computed. */
+function msdBuildStateTransitionGraph(transitionMatrix){
+  const nodes = Object.keys(transitionMatrix);
+  const edges = [];
+  nodes.forEach(from => {
+    Object.keys(transitionMatrix[from]).forEach(to => {
+      if (transitionMatrix[from][to] >= MSD_TRANSITION_NONTRIVIAL_THRESHOLD) {
+        edges.push({ from, to, probability: transitionMatrix[from][to] });
+      }
+    });
+  });
+  return { nodes, edges };
+}
+
+/**
+ * Top-level Phase 8 orchestrator. Gated on Phase 7 completing with at
+ * least 2 distinct (not merge-recommended) states — transition analysis
+ * between states requires at least two states to transition between.
+ */
+async function msdRunStateTransitionAnalysis(symbol, featureVersion, randomSeed){
+  randomSeed = randomSeed || 1;
+  const phase7Result = await msdRunHiddenStateSeparabilityAnalysis(symbol, featureVersion, randomSeed);
+
+  if (!phase7Result.separabilityComplete) {
+    return { transitionAnalysisComplete: false, reason: 'Phase 7 (Hidden State Separability) did not complete — ' + phase7Result.reason, phase7Result };
+  }
+
+  const distinctPairs = phase7Result.comparisons.filter(c => !c.mergeRecommended);
+  const distinctStateIds = [...new Set(distinctPairs.flatMap(c => [c.stateA, c.stateB]))];
+  if (distinctStateIds.length < 2) {
+    return { transitionAnalysisComplete: false, reason: `Only ${distinctStateIds.length} distinct (non-merged) state(s) available after Phase 7 — transition analysis requires at least 2.`, phase7Result };
+  }
+
+  const allCandidates = phase7Result.phase6Result.phase5Result.phase4Result.phase3Result.phase2Result.candidateStates.filter(c => c.classification === 'Verified' && c.checkType === 'lag');
+  const distinctCandidates = allCandidates.filter(c => distinctStateIds.includes(c.id));
+
+  const { pooledDirectionSeq } = await msdGetPooledDirectionSequence(symbol, featureVersion);
+  const labelSeq = msdBuildStateLabelSequence(pooledDirectionSeq, distinctCandidates);
+  const transitionMatrix = msdComputeStateTransitionMatrix(labelSeq);
+  const runLengthsByLabel = msdComputeMultiCategoryRunLengths(labelSeq);
+  const reversibility = msdClassifyTransitionReversibility(transitionMatrix);
+  const { dominantPaths, failedPaths } = msdIdentifyDominantAndFailedPaths(transitionMatrix);
+  const graph = msdBuildStateTransitionGraph(transitionMatrix);
+
+  const transitionDurations = {};
+  Object.keys(runLengthsByLabel).forEach(label => {
+    const runs = runLengthsByLabel[label];
+    transitionDurations[label] = { meanDuration: runs.reduce((a,b)=>a+b,0) / runs.length, maxDuration: Math.max(...runs), occurrences: runs.length };
+  });
+
+  return {
+    transitionAnalysisComplete: true, symbol, featureVersion,
+    distinctStateIds, transitionMatrix, transitionDurations, reversibility, dominantPaths, failedPaths, graph,
+    phase7Result,
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Implementation Phase 9 — Lead-Time Evolution
+// ══════════════════════════════════════════════════════════════════════
+// CLOSES A GAP DISCLOSED SINCE PHASE 2: every prior phase's
+// eventSpecificity field said "Not yet tested" — nothing built through
+// Phase 8 conditions on the actual five-consecutive-rising-tick event at
+// all. This phase's entire purpose is lead-time evolution, so that gap
+// cannot be disclosed-and-skipped here; closing it is this phase's
+// necessary first step. "Five strictly increasing ticks" is exactly
+// "five consecutive 1s in the direction sequence" — this pipeline's own
+// direction-extraction convention (Phase 1) already makes this a direct,
+// correct match to the original event definition, requiring no new
+// data, only a new scan over what's already extracted.
+//
+// Gated on Phase 6's audit (any non-Redundant candidate), not Phase 8's
+// stricter pairwise requirement — "characterize the evolution of every
+// hidden state" is meaningful for a single state on its own, and
+// requiring a second, distinct state here would be an unnecessary
+// additional gate Phase 9's own definition doesn't call for.
+//
+// "Different market regimes" is honestly disclosed as NOT TESTABLE with
+// current instrumentation — this raw-tick-only pipeline has no
+// volatility-regime or OHLC-bar concept at all, and fabricating one here
+// would violate the same discipline every other disclosed gap in this
+// programme has followed.
+
+const MSD_EVENT_RUN_LENGTH = 5; // the defining length of the event itself — five strictly increasing ticks
+const MSD_LEAD_TIME_MAX = 5; // ticks before event onset to characterize, matching the original project's own lead-time table (1,2,3,5,8 in the early reports; this phase uses a dense 1-5 sweep since it's now testing the pipeline's own state indicators, not retraining a model at each horizon)
+
+/**
+ * Detects every "five strictly increasing ticks" event WITHIN one
+ * continuous segment's direction sequence — never spanning a segment
+ * boundary, same correctness discipline as every other per-segment
+ * computation in this programme. Returns the list of event-start
+ * indices: position i such that directionSeq[i+1 .. i+5] are all 1
+ * (Tick 1 through Tick 5 of the event), i.e. i itself is "lead time 1"
+ * — the tick immediately preceding the event.
+ */
+function msdDetectFiveTickRisingEventsInSegment(directionSeq){
+  const eventStarts = [];
+  for (let i = 0; i <= directionSeq.length - MSD_EVENT_RUN_LENGTH - 1; i++) {
+    let allUp = true;
+    for (let k = 1; k <= MSD_EVENT_RUN_LENGTH; k++) {
+      if (directionSeq[i + k] !== 1) { allUp = false; break; }
+    }
+    if (allUp) eventStarts.push(i);
+  }
+  return eventStarts;
+}
+
+/**
+ * For one segment, one candidate, and its detected event starts:
+ * computes, for each lead time L=1..maxLeadTime, whether the candidate's
+ * indicator was active at the tick L steps before event onset, and also
+ * the candidate's marginal (unconditional) activation rate over the
+ * whole segment for baseline comparison. Returns raw counts (successes,
+ * totals) per lead time and marginal — aggregated ACROSS segments by the
+ * caller, never averaged per-segment (small segments would otherwise be
+ * weighted equally to large ones, which is not the correct aggregation).
+ */
+function msdComputeSegmentLeadTimeCounts(directionSeq, eventStarts, candidate, maxLeadTime){
+  const lag = candidate.rawLag;
+  const perLead = {};
+  for (let L = 1; L <= maxLeadTime; L++) perLead[L] = { successes: 0, total: 0 };
+
+  eventStarts.forEach(eventStart => {
+    for (let L = 1; L <= maxLeadTime; L++) {
+      const p = eventStart - L + 1; // position corresponding to lead time L
+      if (p - lag < 0 || p < 0) continue; // not enough history at this position — excluded, not approximated
+      perLead[L].total++;
+      if (directionSeq[p] === directionSeq[p - lag]) perLead[L].successes++;
+    }
+  });
+
+  let marginalSuccesses = 0, marginalTotal = 0;
+  for (let p = lag; p < directionSeq.length; p++) {
+    marginalTotal++;
+    if (directionSeq[p] === directionSeq[p - lag]) marginalSuccesses++;
+  }
+
+  return { perLead, marginalSuccesses, marginalTotal, eventCount: eventStarts.length };
+}
+
+/**
+ * Top-level Phase 9 orchestrator. For every non-Redundant candidate
+ * (Phase 6), detects real five-tick-rising events per continuous
+ * segment, aggregates lead-time activation rates across all segments,
+ * compares each lead time's rate against the candidate's own marginal
+ * baseline via a Wilson score interval (reused directly, not
+ * reimplemented), and characterizes the resulting curve's shape
+ * (earliest significant appearance, peak strength, growth/decay pattern
+ * via Mann-Kendall, reused directly) — the first place in this entire
+ * programme any of this pipeline's own findings are actually tested
+ * against the real, defining event, rather than only against raw serial
+ * dependence in the abstract.
+ */
+async function msdRunLeadTimeEvolutionAnalysis(symbol, featureVersion, randomSeed){
+  randomSeed = randomSeed || 1;
+  const phase6Result = await msdRunMeasurementQualityAudit(symbol, featureVersion, randomSeed);
+
+  if (!phase6Result.auditComplete) {
+    return { evolutionComplete: false, reason: 'Phase 6 (Measurement Quality Audit) did not complete — ' + phase6Result.reason, phase6Result };
+  }
+
+  const allCandidates = phase6Result.phase5Result.phase4Result.phase3Result.phase2Result.candidateStates.filter(c => c.classification === 'Verified' && c.checkType === 'lag');
+  const nonRedundantIds = [...new Set(phase6Result.auditedMeasurements.filter(m => m.classification !== 'Redundant').map(m => m.candidateId))];
+  const candidates = allCandidates.filter(c => nonRedundantIds.includes(c.id));
+
+  if (!candidates.length) {
+    return { evolutionComplete: false, reason: 'No non-Redundant Verified candidates available after Phase 6 — lead-time evolution has nothing to characterize.', phase6Result };
+  }
+
+  const segments = await msdGetContinuousSegments(symbol, featureVersion);
+  const segmentDirectionSeqs = segments.map(seg => msdExtractStrictDirectionSequence(seg, 1)).filter(seq => seq.length >= MSD_EVENT_RUN_LENGTH + 2);
+
+  const stateEvolutions = candidates.map(candidate => {
+    let totalEvents = 0;
+    const aggregatedPerLead = {};
+    for (let L = 1; L <= MSD_LEAD_TIME_MAX; L++) aggregatedPerLead[L] = { successes: 0, total: 0 };
+    let aggregatedMarginalSuccesses = 0, aggregatedMarginalTotal = 0;
+
+    segmentDirectionSeqs.forEach(seq => {
+      const eventStarts = msdDetectFiveTickRisingEventsInSegment(seq);
+      totalEvents += eventStarts.length;
+      if (!eventStarts.length) return;
+      const counts = msdComputeSegmentLeadTimeCounts(seq, eventStarts, candidate, MSD_LEAD_TIME_MAX);
+      for (let L = 1; L <= MSD_LEAD_TIME_MAX; L++) {
+        aggregatedPerLead[L].successes += counts.perLead[L].successes;
+        aggregatedPerLead[L].total += counts.perLead[L].total;
+      }
+      aggregatedMarginalSuccesses += counts.marginalSuccesses;
+      aggregatedMarginalTotal += counts.marginalTotal;
+    });
+
+    const marginalRate = aggregatedMarginalTotal ? aggregatedMarginalSuccesses / aggregatedMarginalTotal : null;
+    const leadTimeCurve = [];
+    for (let L = 1; L <= MSD_LEAD_TIME_MAX; L++) {
+      const { successes, total } = aggregatedPerLead[L];
+      const rate = total ? successes / total : null;
+      const ci = total ? msdWilsonScoreInterval(successes, total) : { lower: null, upper: null };
+      const significantlyAboveBaseline = rate != null && marginalRate != null && ci.lower > marginalRate;
+      const significantlyBelowBaseline = rate != null && marginalRate != null && ci.upper < marginalRate;
+      leadTimeCurve.push({ leadTime: L, rate, total, confidenceInterval: ci, significantlyAboveBaseline, significantlyBelowBaseline });
+    }
+
+    const validRates = leadTimeCurve.filter(c => c.rate != null);
+    const earliestSignificantAppearance = leadTimeCurve.filter(c => c.significantlyAboveBaseline).map(c => c.leadTime).sort((a,b) => b - a)[0] || null; // largest lead time (furthest back) that's still significant = "earliest appearance"
+    const peakEntry = validRates.length ? validRates.reduce((best, c) => c.rate > best.rate ? c : best, validRates[0]) : null;
+    const trend = validRates.length >= 3 ? msdMannKendallTrend(validRates.map(c => c.rate)) : null;
+
+    return {
+      candidateId: candidate.id,
+      totalEventsDetected: totalEvents,
+      marginalRate,
+      leadTimeCurve,
+      earliestSignificantAppearance,
+      peakStrength: peakEntry ? { leadTime: peakEntry.leadTime, rate: peakEntry.rate } : null,
+      growthDecayTrend: trend ? { tau: trend.tau, pValue: trend.pValue, interpretation: trend.tau < 0 ? 'Strengthening as the event approaches (rate decreasing with lead time = decreasing distance)' : trend.tau > 0 ? 'Weakening as the event approaches' : 'No consistent monotonic trend' } : null,
+      differentMarketRegimes: 'Not testable with current instrumentation — this raw-tick-only pipeline has no volatility-regime or bar-based concept at all; fabricating one here would violate this programme\'s own disclosure discipline.',
+    };
+  });
+
+  return {
+    evolutionComplete: true, symbol, featureVersion,
+    multipleHiddenStates: candidates.length > 1,
+    stateEvolutions,
+    phase6Result,
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Implementation Phase 10 — Temporal Stability Audit
+// ══════════════════════════════════════════════════════════════════════
+// Final phase of the original implementation spec. Verifies every
+// non-Redundant state across four dimensions, each honestly scoped to
+// what this single-symbol, raw-tick pipeline can actually test:
+//   - Chronological datasets: reuses Phase 3's msdComputeStateStabilityAcrossChunks
+//     directly (already built, already tested) — equal-sized sequential
+//     chunks of the pooled sequence.
+//   - Independent datasets: operationalized as each REAL detected
+//     continuous segment (msdSegmentContinuousSessions, Data Quality Gate
+//     redesign) tested independently — the closest genuine analog to
+//     separate collection periods available with one symbol's data,
+//     distinct from chronological chunks which ignore real session
+//     boundaries entirely.
+//   - Trading sessions: operationalized as hour-of-day buckets (UTC,
+//     derived directly from epoch) — even a continuously-traded
+//     synthetic instrument could show systematic time-of-day patterns
+//     tied to platform-wide activity. A genuinely new test, not a reuse.
+//   - Market conditions: honestly disclosed as NOT TESTABLE — this
+//     pipeline has no volatility-regime or bar-based concept at all,
+//     matching Phase 9's identical disclosure for "different market
+//     regimes" rather than fabricating one here.
+
+const MSD_STABILITY_HOUR_BUCKETS = 4; // 6-hour UTC buckets — coarse enough to retain statistical power per bucket, fine enough to catch a genuine time-of-day pattern if one exists
+const MSD_STABLE_THRESHOLD = 0.75; // fraction of independent checks remaining significant, at or above which a state is classified Stable
+const MSD_MODERATELY_STABLE_THRESHOLD = 0.4; // at or above which (but below Stable) a state is classified Moderately Stable; below this, Unstable
+
+/** Tests a candidate's serial-dependence effect independently WITHIN each real continuous segment — distinct from chronological chunks, since segments are actual detected collection-session boundaries, not an arbitrary equal split of the pooled sequence. */
+function msdTestStabilityAcrossSegments(segments, candidate, randomSeed, permutations){
+  const results = segments.map((seg, i) => {
+    const dirSeq = msdExtractStrictDirectionSequence(seg, 1);
+    if (dirSeq.length < candidate.rawLag + 3) return { segment: i, applicable: false };
+    const test = msdRunSerialDependenceTest(dirSeq, randomSeed, permutations || 100, candidate.rawLag);
+    return { segment: i, applicable: true, significant: test ? test.significant : null };
+  });
+  const applicable = results.filter(r => r.applicable);
+  const significantCount = applicable.filter(r => r.significant === true).length;
+  return { results, applicableSegments: applicable.length, significantSegments: significantCount, stabilityFraction: applicable.length ? significantCount / applicable.length : null };
+}
+
+/** Tests a candidate's serial-dependence effect independently within each UTC hour-of-day bucket — a genuinely new stability dimension ("trading sessions"), not a reuse of chronological chunking. */
+function msdTestStabilityAcrossHourBuckets(pooledStates, candidate, numBuckets, randomSeed, permutations){
+  numBuckets = numBuckets || MSD_STABILITY_HOUR_BUCKETS;
+  const bucketSize = 24 / numBuckets;
+  const byBucket = Array.from({ length: numBuckets }, () => []);
+  pooledStates.forEach(s => {
+    if (s.epoch == null) return;
+    const hourOfDayUtc = Math.floor((s.epoch % 86400) / 3600);
+    const bucket = Math.min(numBuckets - 1, Math.floor(hourOfDayUtc / bucketSize));
+    byBucket[bucket].push(s);
+  });
+  const results = byBucket.map((states, i) => {
+    const dirSeq = msdExtractStrictDirectionSequence(states, 1);
+    if (dirSeq.length < candidate.rawLag + 3) return { bucket: i, applicable: false };
+    const test = msdRunSerialDependenceTest(dirSeq, randomSeed, permutations || 100, candidate.rawLag);
+    return { bucket: i, applicable: true, significant: test ? test.significant : null, n: states.length };
+  });
+  const applicable = results.filter(r => r.applicable);
+  const significantCount = applicable.filter(r => r.significant === true).length;
+  return { results, applicableBuckets: applicable.length, significantBuckets: significantCount, stabilityFraction: applicable.length ? significantCount / applicable.length : null,
+    note: 'Hour-of-day buckets are UTC, derived directly from epoch — no timezone conversion is applied or assumed.' };
+}
+
+/**
+ * Top-level Phase 10 orchestrator (final phase). Gated on Phase 6's
+ * audit, same reasoning as Phase 9 — temporal stability is a per-state
+ * property, not requiring a second, distinct state to compare against.
+ * Aggregates all three testable dimensions into a single stability
+ * fraction and applies the fixed, stated classification rule.
+ */
+async function msdRunTemporalStabilityAudit(symbol, featureVersion, randomSeed){
+  randomSeed = randomSeed || 1;
+  const phase6Result = await msdRunMeasurementQualityAudit(symbol, featureVersion, randomSeed);
+
+  if (!phase6Result.auditComplete) {
+    return { auditComplete: false, reason: 'Phase 6 (Measurement Quality Audit) did not complete — ' + phase6Result.reason, phase6Result };
+  }
+
+  const allCandidates = phase6Result.phase5Result.phase4Result.phase3Result.phase2Result.candidateStates.filter(c => c.classification === 'Verified' && c.checkType === 'lag');
+  const nonRedundantIds = [...new Set(phase6Result.auditedMeasurements.filter(m => m.classification !== 'Redundant').map(m => m.candidateId))];
+  const candidates = allCandidates.filter(c => nonRedundantIds.includes(c.id));
+
+  if (!candidates.length) {
+    return { auditComplete: false, reason: 'No non-Redundant Verified candidates available after Phase 6 — temporal stability has nothing to audit.', phase6Result };
+  }
+
+  const { pooledDirectionSeq } = await msdGetPooledDirectionSequence(symbol, featureVersion);
+  const segments = await msdGetContinuousSegments(symbol, featureVersion);
+  const allStates = await msdGetAllMarketStates();
+  const pooledStates = allStates.filter(s => s.symbol === symbol && s.featureVersion === featureVersion && s.epoch != null && s.price != null).sort((a,b) => a.epoch - b.epoch);
+
+  const stateAudits = candidates.map(candidate => {
+    const chronological = msdComputeStateStabilityAcrossChunks(pooledDirectionSeq, candidate.rawLag, 4, randomSeed, 100);
+    const independentDatasets = msdTestStabilityAcrossSegments(segments, candidate, randomSeed, 100);
+    const tradingSessions = msdTestStabilityAcrossHourBuckets(pooledStates, candidate, MSD_STABILITY_HOUR_BUCKETS, randomSeed, 100);
+    const marketConditions = 'Not testable with current instrumentation — this raw-tick-only pipeline has no volatility-regime or bar-based concept at all, matching Phase 9\'s identical disclosure for "different market regimes."';
+
+    const testableFractions = [chronological.stabilityFraction, independentDatasets.stabilityFraction, tradingSessions.stabilityFraction].filter(f => f != null);
+    const overallStabilityFraction = testableFractions.length ? testableFractions.reduce((a,b)=>a+b,0) / testableFractions.length : null;
+
+    const classification = overallStabilityFraction == null ? 'Unknown (insufficient data across dimensions)'
+      : overallStabilityFraction >= MSD_STABLE_THRESHOLD ? 'Stable'
+      : overallStabilityFraction >= MSD_MODERATELY_STABLE_THRESHOLD ? 'Moderately Stable'
+      : 'Unstable';
+
+    return {
+      candidateId: candidate.id,
+      chronologicalDatasets: { stabilityFraction: chronological.stabilityFraction, significantChunks: chronological.significantChunks, testedChunks: chronological.testedChunks },
+      independentDatasets,
+      tradingSessions,
+      marketConditions,
+      overallStabilityFraction,
+      classification,
+    };
+  });
+
+  return { auditComplete: true, symbol, featureVersion, stateAudits, phase6Result };
+}
+
 /** Runs the complete Phases 1A-1E Information Discovery Framework and renders every sub-phase's results, including the final 1E decomposition and overall conclusion. */
 async function msdRunCompleteInformationDiscoveryFrameworkUi(){
   const resultsEl = $("msdInfoTheoreticResults");
@@ -13078,6 +13864,163 @@ async function msdRunScientificValidationUi(){
       ${result.rejectedMeasurements.map(r => renderRow(r, false)).join('')}
     </tbody></table>
   `;
+}
+
+/** Runs Phase 6 Measurement Quality Audit and renders the classification alongside the pairwise comparisons that produced it. */
+async function msdRunMeasurementQualityAuditUi(){
+  const resultsEl = $("msdAuditResults");
+  if (resultsEl) resultsEl.textContent = 'Running (executes Phases 1-5 first)…';
+  const symbol = ($("msdExpSymbol") || {}).value || SYMBOL;
+  const featureVersion = ($("msdExpFeatureVersion") || {}).value || 'v1';
+  const result = await msdRunMeasurementQualityAudit(symbol, featureVersion, 1);
+  if (!resultsEl) return;
+
+  if (!result.auditComplete) {
+    resultsEl.innerHTML = `
+      <div class="cell-mut" style="font-weight:700;margin-bottom:6px">Measurement Quality Audit: not available</div>
+      <div>${result.reason}</div>
+    `;
+    return;
+  }
+
+  resultsEl.innerHTML = result.auditedMeasurements.map(m => `
+    <div style="border-top:1px solid var(--border,#333);padding-top:8px;margin-top:8px">
+      <div style="font-weight:700">${m.description} <span class="${m.classification==='Unique'?'cell-pos':(m.classification==='Redundant'?'cell-neg':'cell-warn')}">[${m.classification}]</span></div>
+      <div class="gc-sub" style="margin-top:4px">Parameter sensitivity: ${m.parameterSensitivity.applicable ? 'tested lag ' + m.parameterSensitivity.testedLag + ', nearby lags significant: ' + (m.parameterSensitivity.anyNearbySignificant?'Yes':'No') : 'Not applicable to this measurement type'}</div>
+      ${m.pairwiseComparisons.length ? `<table class="sig-table" style="margin-top:6px"><thead><tr><th class="l">Compared To</th><th class="l">Mutual Information</th><th class="l">Correlation</th><th class="l">Incremental Gain</th></tr></thead>
+      <tbody>${m.pairwiseComparisons.map(p => `<tr><td class="l">${p.otherFamily}</td><td>${p.mutualInformation!=null?p.mutualInformation.toFixed(4):'—'}</td><td>${p.correlation!=null?p.correlation.toFixed(3):'—'}</td><td>${p.incrementalGain!=null?p.incrementalGain.toFixed(4):'—'}</td></tr>`).join('')}</tbody></table>` : '<div class="gc-sub">No other validated measurement to compare against</div>'}
+    </div>
+  `).join('');
+}
+
+/** Runs Phase 7 Hidden State Separability Analysis and renders every pairwise comparison, including the merge recommendation and its rationale. */
+async function msdRunHiddenStateSeparabilityAnalysisUi(){
+  const resultsEl = $("msdSeparabilityResults");
+  if (resultsEl) resultsEl.textContent = 'Running (executes Phases 1-6 first)…';
+  const symbol = ($("msdExpSymbol") || {}).value || SYMBOL;
+  const featureVersion = ($("msdExpFeatureVersion") || {}).value || 'v1';
+  const result = await msdRunHiddenStateSeparabilityAnalysis(symbol, featureVersion, 1);
+  if (!resultsEl) return;
+
+  if (!result.separabilityComplete) {
+    resultsEl.innerHTML = `
+      <div class="cell-mut" style="font-weight:700;margin-bottom:6px">Hidden State Separability: not available</div>
+      <div>${result.reason}</div>
+    `;
+    return;
+  }
+
+  resultsEl.innerHTML = `
+    <table class="sig-table"><thead><tr><th class="l">State A</th><th class="l">State B</th><th class="l">Overlap</th><th class="l">Separability Ratio</th><th class="l">Confidence</th><th class="l">Merge?</th></tr></thead>
+    <tbody>${result.comparisons.map(c => `<tr>
+      <td class="l">${c.stateA}</td>
+      <td class="l">${c.stateB}</td>
+      <td class="l">${c.stateOverlap!=null?(c.stateOverlap*100).toFixed(0)+'%':'—'}</td>
+      <td class="l">${c.clusterSeparabilityRatio!=null?c.clusterSeparabilityRatio.toFixed(2):'—'}</td>
+      <td class="l">${c.classificationConfidence}</td>
+      <td class="l ${c.mergeRecommended?'cell-warn':'cell-pos'}">${c.mergeRecommended?'Merge':'Keep Distinct'}</td>
+    </tr>`).join('')}</tbody></table>
+    <div class="gc-sub" style="margin-top:8px">${result.comparisons.map(c => c.stateA + ' vs ' + c.stateB + ': ' + c.mergeRationale).join('<br>')}</div>
+  `;
+}
+
+/** Runs Phase 8 State Transition Analysis and renders the transition matrix, durations, reversibility, and graph. */
+async function msdRunStateTransitionAnalysisUi(){
+  const resultsEl = $("msdTransitionResults");
+  if (resultsEl) resultsEl.textContent = 'Running (executes Phases 1-7 first)…';
+  const symbol = ($("msdExpSymbol") || {}).value || SYMBOL;
+  const featureVersion = ($("msdExpFeatureVersion") || {}).value || 'v1';
+  const result = await msdRunStateTransitionAnalysis(symbol, featureVersion, 1);
+  if (!resultsEl) return;
+
+  if (!result.transitionAnalysisComplete) {
+    resultsEl.innerHTML = `
+      <div class="cell-mut" style="font-weight:700;margin-bottom:6px">State Transition Analysis: not available</div>
+      <div>${result.reason}</div>
+    `;
+    return;
+  }
+
+  resultsEl.innerHTML = `
+    <div class="gc-sub" style="margin-bottom:6px">Distinct states: ${result.distinctStateIds.join(', ')}</div>
+    <table class="sig-table"><thead><tr><th class="l">From</th><th class="l">To</th><th class="l">Probability</th><th class="l">Reversibility</th></tr></thead>
+    <tbody>${result.reversibility.map(r => `<tr><td class="l">${r.from}</td><td class="l">${r.to}</td><td>${(r.forwardProb*100).toFixed(1)}%</td><td class="l ${r.classification==='Reversible'?'cell-warn':'cell-pos'}">${r.classification}</td></tr>`).join('')}</tbody></table>
+    <div class="gc-sub" style="margin:8px 0 4px">Transition durations (mean consecutive occurrences)</div>
+    <table class="sig-table"><thead><tr><th class="l">Label</th><th class="l">Mean Duration</th><th class="l">Max Duration</th><th class="l">Occurrences</th></tr></thead>
+    <tbody>${Object.keys(result.transitionDurations).map(label => `<tr><td class="l">${label}</td><td>${result.transitionDurations[label].meanDuration.toFixed(2)}</td><td>${result.transitionDurations[label].maxDuration}</td><td>${result.transitionDurations[label].occurrences}</td></tr>`).join('')}</tbody></table>
+    <div class="gc-sub" style="margin:8px 0 4px">Dominant paths: ${result.dominantPaths.map(p => p.from + '→' + p.to + ' (' + (p.probability*100).toFixed(0) + '%)').join(', ')}</div>
+    <div class="gc-sub">Failed paths (near-zero probability): ${result.failedPaths.length ? result.failedPaths.map(p => p.from + '→' + p.to).join(', ') : 'None'}</div>
+  `;
+}
+
+/** Runs Phase 9 Lead-Time Evolution Analysis and renders each state's lead-time curve, peak, and trend. */
+async function msdRunLeadTimeEvolutionAnalysisUi(){
+  const resultsEl = $("msdEvolutionResults");
+  if (resultsEl) resultsEl.textContent = 'Running (executes Phases 1-6 first, then detects real events)…';
+  const symbol = ($("msdExpSymbol") || {}).value || SYMBOL;
+  const featureVersion = ($("msdExpFeatureVersion") || {}).value || 'v1';
+  const result = await msdRunLeadTimeEvolutionAnalysis(symbol, featureVersion, 1);
+  if (!resultsEl) return;
+
+  if (!result.evolutionComplete) {
+    resultsEl.innerHTML = `
+      <div class="cell-mut" style="font-weight:700;margin-bottom:6px">Lead-Time Evolution: not available</div>
+      <div>${result.reason}</div>
+    `;
+    return;
+  }
+
+  resultsEl.innerHTML = `
+    <div class="gc-sub" style="margin-bottom:6px">Multiple hidden states: ${result.multipleHiddenStates ? 'Yes' : 'No'} (${result.stateEvolutions.length} state(s) characterized)</div>
+    ${result.stateEvolutions.map(s => `
+      <div style="border-top:1px solid var(--border,#333);padding-top:8px;margin-top:8px">
+        <div style="font-weight:700">${s.candidateId} — ${s.totalEventsDetected} real five-tick event(s) detected</div>
+        <div class="gc-sub">Marginal baseline rate: ${s.marginalRate!=null?(s.marginalRate*100).toFixed(2)+'%':'—'}</div>
+        <table class="sig-table" style="margin-top:6px"><thead><tr><th class="l">Lead Time</th><th class="l">Rate</th><th class="l">95% CI</th><th class="l">vs Baseline</th></tr></thead>
+        <tbody>${s.leadTimeCurve.map(c => `<tr>
+          <td>${c.leadTime}</td>
+          <td>${c.rate!=null?(c.rate*100).toFixed(2)+'%':'—'} (n=${c.total})</td>
+          <td>${c.confidenceInterval.lower!=null?'['+(c.confidenceInterval.lower*100).toFixed(1)+'%, '+(c.confidenceInterval.upper*100).toFixed(1)+'%]':'—'}</td>
+          <td class="l ${c.significantlyAboveBaseline?'cell-pos':(c.significantlyBelowBaseline?'cell-neg':'')}">${c.significantlyAboveBaseline?'Above':(c.significantlyBelowBaseline?'Below':'No difference')}</td>
+        </tr>`).join('')}</tbody></table>
+        <div class="gc-sub" style="margin-top:6px">Earliest significant appearance: ${s.earliestSignificantAppearance!=null?s.earliestSignificantAppearance+' ticks before event':'None detected'} · Peak strength: ${s.peakStrength?'lead '+s.peakStrength.leadTime+' ('+(s.peakStrength.rate*100).toFixed(2)+'%)':'—'}</div>
+        <div class="gc-sub">Growth/decay trend: ${s.growthDecayTrend?s.growthDecayTrend.interpretation+' (tau='+s.growthDecayTrend.tau.toFixed(2)+', p='+s.growthDecayTrend.pValue.toFixed(4)+')':'Not enough lead times with data to test'}</div>
+        <div class="gc-sub">Different market regimes: ${s.differentMarketRegimes}</div>
+      </div>
+    `).join('')}
+  `;
+}
+
+/** Runs Phase 10 Temporal Stability Audit (final phase) and renders each state's stability across all four dimensions and its final classification. */
+async function msdRunTemporalStabilityAuditUi(){
+  const resultsEl = $("msdStabilityAuditResults");
+  if (resultsEl) resultsEl.textContent = 'Running (executes Phases 1-6 first)…';
+  const symbol = ($("msdExpSymbol") || {}).value || SYMBOL;
+  const featureVersion = ($("msdExpFeatureVersion") || {}).value || 'v1';
+  const result = await msdRunTemporalStabilityAudit(symbol, featureVersion, 1);
+  if (!resultsEl) return;
+
+  if (!result.auditComplete) {
+    resultsEl.innerHTML = `
+      <div class="cell-mut" style="font-weight:700;margin-bottom:6px">Temporal Stability Audit: not available</div>
+      <div>${result.reason}</div>
+    `;
+    return;
+  }
+
+  resultsEl.innerHTML = result.stateAudits.map(s => `
+    <div style="border-top:1px solid var(--border,#333);padding-top:8px;margin-top:8px">
+      <div style="font-weight:700">${s.candidateId} <span class="${s.classification==='Stable'?'cell-pos':(s.classification==='Unstable'?'cell-neg':'cell-warn')}">[${s.classification}]</span></div>
+      <div class="gc-sub">Overall stability fraction: ${s.overallStabilityFraction!=null?(s.overallStabilityFraction*100).toFixed(0)+'%':'—'}</div>
+      <table class="sig-table" style="margin-top:6px"><thead><tr><th class="l">Dimension</th><th class="l">Result</th></tr></thead>
+      <tbody>
+        <tr><td class="l">Chronological datasets</td><td>${s.chronologicalDatasets.stabilityFraction!=null?s.chronologicalDatasets.significantChunks+'/'+s.chronologicalDatasets.testedChunks+' chunks ('+(s.chronologicalDatasets.stabilityFraction*100).toFixed(0)+'%)':'—'}</td></tr>
+        <tr><td class="l">Independent datasets (real segments)</td><td>${s.independentDatasets.stabilityFraction!=null?s.independentDatasets.significantSegments+'/'+s.independentDatasets.applicableSegments+' segments ('+(s.independentDatasets.stabilityFraction*100).toFixed(0)+'%)':'—'}</td></tr>
+        <tr><td class="l">Trading sessions (UTC hour buckets)</td><td>${s.tradingSessions.stabilityFraction!=null?s.tradingSessions.significantBuckets+'/'+s.tradingSessions.applicableBuckets+' buckets ('+(s.tradingSessions.stabilityFraction*100).toFixed(0)+'%)':'—'}</td></tr>
+        <tr><td class="l">Market conditions</td><td style="font-size:11px">${s.marketConditions}</td></tr>
+      </tbody></table>
+    </div>
+  `).join('');
 }
 
 async function msdRunInformationTheoreticDiscoveryUi(){
