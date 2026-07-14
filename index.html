@@ -10470,6 +10470,13 @@ async function msdRegisterBehavior(behavior){
     description: behavior.description || '',
     theoreticalRationale: behavior.theoreticalRationale || '',
     suggestedFamilies: Array.isArray(behavior.suggestedFamilies) ? behavior.suggestedFamilies.slice() : [],
+    // Provenance — see msdRegisterHypothesis for the full rationale;
+    // added here for consistency across all three proposal types ahead
+    // of autonomous generation, defaulting to 'human' so every existing
+    // call site is unaffected.
+    proposedBy: behavior.proposedBy === 'autonomous' ? 'autonomous' : 'human',
+    confidence: behavior.confidence != null ? behavior.confidence : null,
+    noveltyScore: behavior.noveltyScore != null ? behavior.noveltyScore : null,
     codeVersion: MSD_CODE_VERSION,
     registeredAt: Date.now(),
   };
@@ -10743,6 +10750,16 @@ async function msdGetCurrentLabComponentMaturity(componentKey){
 async function msdRegisterHypothesis(hypothesis){
   if (!hypothesis || !hypothesis.label) return { ok: false, error: 'A hypothesis requires at least a label.' };
   if (!hypothesis.parentBehaviorId) return { ok: false, error: 'parentBehaviorId is required — a hypothesis must derive from a registered Behaviour (Module 1 precedes Module 3).' };
+  // Falsifiability requirement, added ahead of autonomous hypothesis
+  // generation: an Explanation already required a distinguishing
+  // prediction (Phase 8) — a Hypothesis itself did not, which was an
+  // inconsistency between two closely related objects. "No hypothesis
+  // should be accepted without being falsifiable" is now a hard
+  // precondition, not a documented intention, matching how every other
+  // scientific-integrity rule in this lab is enforced.
+  if (!hypothesis.falsifiablePrediction) {
+    return { ok: false, error: 'falsifiablePrediction is required — a hypothesis must state what observation would disprove it before it can be registered.' };
+  }
   const behavior = await msdGetBehavior(hypothesis.parentBehaviorId);
   if (!behavior) return { ok: false, error: 'parentBehaviorId "' + hypothesis.parentBehaviorId + '" does not reference a registered behavior.' };
   // Phase 6.5: consistent governance enforcement up the chain — a
@@ -10755,11 +10772,29 @@ async function msdRegisterHypothesis(hypothesis){
     const prior = await msdGetHypothesis(hypothesis.refinesHypothesisId);
     if (!prior) return { ok: false, error: 'refinesHypothesisId "' + hypothesis.refinesHypothesisId + '" does not reference a registered hypothesis.' };
   }
+  // Phase 10 traceability requirement: an autonomous proposal must never
+  // be created "randomly" — it must cite the specific ranked Research
+  // Opportunity that justified it. A human proposal has no such
+  // requirement (a human's own judgment is its own justification), so
+  // this only applies when proposedBy is explicitly 'autonomous'.
+  if (hypothesis.proposedBy === 'autonomous' && !hypothesis.sourceOpportunityRef) {
+    return { ok: false, error: 'An autonomous proposal must cite sourceOpportunityRef — the specific Research Opportunity that justified it. Autonomous proposals may never be created without a traceable reason.' };
+  }
   const hypothesisId = 'hyp_' + msdSessionId + '_' + msdRandomSuffix();
   const finding = {
     findingId: msdGenerateFindingId(), type: 'hypothesis_registration', hypothesisId,
     label: hypothesis.label, statement: hypothesis.statement || '', parentBehaviorId: hypothesis.parentBehaviorId,
+    falsifiablePrediction: hypothesis.falsifiablePrediction,
     rationale: hypothesis.rationale || '', refinesHypothesisId: hypothesis.refinesHypothesisId || null,
+    // Provenance, per the strategic-direction refinement: every future
+    // autonomous proposal must be traceable and distinguishable from a
+    // human one. Defaults to 'human' — every existing call site that
+    // doesn't pass this explicitly is unaffected and correctly
+    // classified, not silently mislabeled as autonomous.
+    proposedBy: hypothesis.proposedBy === 'autonomous' ? 'autonomous' : 'human',
+    confidence: hypothesis.confidence != null ? hypothesis.confidence : null,
+    noveltyScore: hypothesis.noveltyScore != null ? hypothesis.noveltyScore : null,
+    sourceOpportunityRef: hypothesis.sourceOpportunityRef || null,
     codeVersion: MSD_CODE_VERSION, registeredAt: Date.now(),
   };
   const writeResult = await msdWriteDiscoveryLabFinding(finding);
@@ -10819,15 +10854,16 @@ async function msdRetireHypothesis(hypothesisId, rationale){
   return { ok: true, writeResult: await msdWriteDiscoveryLabFinding(finding) };
 }
 
-// MOVED IN PHASE 5 to the Discovery Lab store. Both action types live in
-// the same store as the Hypothesis registrations they act on, so this
-// still needs a full-store-minus-index scan across TWO types — an
-// acceptable cost at this store's expected scale (thousands of
-// hypotheses, not millions), unlike the single-type scans elsewhere.
+// FIXED, per the pre-Phase-9 review: this did a full-store scan despite
+// the hypothesisId and sourceHypothesisIds (multiEntry) indices having
+// existed on this exact store, unused, since Phase 6.5. Two indexed
+// lookups replace the scan — cheaper to fix than it was to find, since
+// the index was already there.
 async function msdGetHypothesisActions(hypothesisId){
-  const all = await msdGetAllDiscoveryLabFindings();
-  return all
-    .filter(f => (f.type === 'hypothesis_retirement' && f.hypothesisId === hypothesisId) || (f.type === 'hypothesis_merge' && (f.sourceHypothesisIds || []).includes(hypothesisId)))
+  const retirements = await msdGetDiscoveryLabFindingsByIndex('hypothesisId', hypothesisId);
+  const merges = await msdGetDiscoveryLabFindingsByIndex('sourceHypothesisIds', hypothesisId);
+  return retirements.filter(f => f.type === 'hypothesis_retirement')
+    .concat(merges.filter(f => f.type === 'hypothesis_merge'))
     .sort((a, b) => a.actionedAt - b.actionedAt);
 }
 
@@ -10858,6 +10894,10 @@ async function msdRegisterCandidateMeasurement(candidate){
   if (hypothesisActions.some(a => a.type === 'hypothesis_retirement' || a.type === 'hypothesis_merge')) {
     return { ok: false, error: 'Hypothesis "' + candidate.parentHypothesisId + '" has been retired or merged away — no new Candidate Measurements may be registered against it.' };
   }
+  // Phase 10 traceability requirement — see msdRegisterHypothesis for the full rationale.
+  if (candidate.proposedBy === 'autonomous' && !candidate.sourceOpportunityRef) {
+    return { ok: false, error: 'An autonomous proposal must cite sourceOpportunityRef — the specific Research Opportunity that justified it. Autonomous proposals may never be created without a traceable reason.' };
+  }
 
   const candidateId = 'cand_' + msdSessionId + '_' + msdRandomSuffix();
   const finding = {
@@ -10867,6 +10907,10 @@ async function msdRegisterCandidateMeasurement(candidate){
     proposedFamily: candidate.proposedFamily || null,
     alternativeMeasurementsConsidered: Array.isArray(candidate.alternativeMeasurementsConsidered) ? candidate.alternativeMeasurementsConsidered.slice() : [],
     rationale: candidate.rationale || '',
+    proposedBy: candidate.proposedBy === 'autonomous' ? 'autonomous' : 'human',
+    confidence: candidate.confidence != null ? candidate.confidence : null,
+    noveltyScore: candidate.noveltyScore != null ? candidate.noveltyScore : null,
+    sourceOpportunityRef: candidate.sourceOpportunityRef || null,
     codeVersion: MSD_CODE_VERSION, registeredAt: Date.now(),
   };
   const writeResult = await msdWriteDiscoveryLabFinding(finding);
@@ -11118,6 +11162,48 @@ async function msdRunMeasurementCompetition(featureKeys, summariesOverride){
     : [];
 
   return { entrants: ranked, winner: winner ? winner.featureKey : null, recommendedRetirements };
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Permanent competition reports — gap fix, per the pre-Phase-9 review.
+// Neither competition function above wrote anything permanent before
+// now; "failed competitions" (explicitly requested as part of Scientific
+// Memory) literally could not be preserved because a competition result
+// wasn't a persisted object. These wrap the existing, unmodified
+// competition functions' output — no competition logic is duplicated,
+// only the result is now optionally snapshotted.
+// ────────────────────────────────────────────────────────────────────
+
+/** Permanent snapshot of a Discovery Competition evaluation. A "surviving" verdict today is a snapshot, not a lock — evidence can still shift later. */
+async function msdRecordDiscoveryCompetitionReport(competitionResult){
+  const finding = {
+    findingId: msdGenerateFindingId(), type: 'discovery_competition_report',
+    behaviorId: competitionResult.behaviorId, hypotheses: competitionResult.hypotheses,
+    codeVersion: MSD_CODE_VERSION, recordedAt: Date.now(),
+  };
+  return { ok: true, writeResult: await msdWriteFinding(finding) };
+}
+
+async function msdGetDiscoveryCompetitionReports(behaviorId){
+  const all = await msdGetAllFindings();
+  return all.filter(f => f.type === 'discovery_competition_report' && f.behaviorId === behaviorId).sort((a, b) => a.recordedAt - b.recordedAt);
+}
+
+/** Permanent snapshot of a Measurement Competition evaluation. */
+async function msdRecordMeasurementCompetitionReport(competitionResult, contextLabel){
+  const finding = {
+    findingId: msdGenerateFindingId(), type: 'measurement_competition_report',
+    contextLabel: contextLabel || null, entrants: competitionResult.entrants,
+    winner: competitionResult.winner, recommendedRetirements: competitionResult.recommendedRetirements,
+    codeVersion: MSD_CODE_VERSION, recordedAt: Date.now(),
+  };
+  return { ok: true, writeResult: await msdWriteFinding(finding) };
+}
+
+async function msdGetMeasurementCompetitionReports(contextLabel){
+  const all = await msdGetAllFindings();
+  const reports = all.filter(f => f.type === 'measurement_competition_report').sort((a, b) => a.recordedAt - b.recordedAt);
+  return contextLabel ? reports.filter(r => r.contextLabel === contextLabel) : reports;
 }
 
 
@@ -11456,6 +11542,35 @@ async function msdGetBehaviorMetricsReports(behaviorId){
   return all.filter(f => f.type === 'behavior_metrics_report' && f.behaviorId === behaviorId).sort((a, b) => a.recordedAt - b.recordedAt);
 }
 
+/**
+ * Cross-behaviour rollup — gap fix, per the pre-Phase-9 review. Every
+ * metric before this was per-behaviour, called one at a time; there was
+ * no way to ask "which behaviour family is actually worth pursuing"
+ * without computing each manually and comparing by hand. Reuses
+ * msdComputeBehaviorDiscoveryMetrics for every registered Behaviour,
+ * unchanged, and ranks the results — no new statistics, only
+ * aggregation across what already exists. perFeatureStatusInputs applies
+ * to every behaviour's computation identically; pass a merged map
+ * covering every featureKey across every behaviour being compared.
+ */
+async function msdCompareBehaviorProductivity(perFeatureStatusInputs){
+  const behaviors = await msdGetAllBehaviors();
+  const results = [];
+  for (const b of behaviors) {
+    const metrics = await msdComputeBehaviorDiscoveryMetrics(b.behaviorId, perFeatureStatusInputs);
+    if (!metrics.error) results.push(metrics);
+  }
+  // Ranked by discoveryEfficiency, nulls (nothing proposed yet) sorted
+  // last — "no data" is never confused with "tried and produced zero."
+  const ranked = results.slice().sort((a, b) => {
+    if (a.discoveryEfficiency == null && b.discoveryEfficiency == null) return 0;
+    if (a.discoveryEfficiency == null) return 1;
+    if (b.discoveryEfficiency == null) return -1;
+    return b.discoveryEfficiency - a.discoveryEfficiency;
+  });
+  return { behaviors: ranked, computedAt: Date.now() };
+}
+
 // ────────────────────────────────────────────────────────────────────
 // 7.2 — Scientific Memory
 // ────────────────────────────────────────────────────────────────────
@@ -11470,20 +11585,31 @@ const MSD_SCIENTIFIC_MEMORY_TYPES = [
   'candidate_measurement_retirement', 'candidate_measurement_supersession', 'candidate_measurement_archival',
   'behavior_retirement', 'behavior_archival',
   'deprecation', 'archival',
+  'explanation_test', // filtered below to refuted tests only — see msdGetScientificMemory
 ];
 
+/**
+ * Gap fix, per the pre-Phase-9 review: Phase 7 defined this before Phase
+ * 8 introduced Explanations, so a Refuted mechanistic explanation was
+ * never captured as a failed idea. 'explanation_test' is now in the
+ * type list above, but only REFUTED tests (predictionHeld === false)
+ * are surfaced — a Supported test is positive evidence, not a failure,
+ * and doesn't belong in a ledger whose entire purpose is remembering
+ * what didn't work.
+ */
 async function msdGetScientificMemory(){
   const discoveryLabFindings = await msdGetAllDiscoveryLabFindings();
   const engineeringLabFindings = await msdGetAllEngineeringLabFindings();
   const sharedFindings = await msdGetAllFindings();
 
   const all = discoveryLabFindings.concat(engineeringLabFindings, sharedFindings)
-    .filter(f => MSD_SCIENTIFIC_MEMORY_TYPES.includes(f.type));
+    .filter(f => MSD_SCIENTIFIC_MEMORY_TYPES.includes(f.type))
+    .filter(f => f.type !== 'explanation_test' || f.predictionHeld === false);
 
   const entries = all.map(f => ({
     memoryId: f.findingId,
     kind: f.type,
-    subjectId: f.behaviorId || f.hypothesisId || f.candidateId || f.discoveryKey || null,
+    subjectId: f.behaviorId || f.hypothesisId || f.candidateId || f.explanationId || f.discoveryKey || null,
     rationale: f.rationale || '',
     recordedAt: f.actionedAt || f.recordedAt || null,
   })).sort((a, b) => (a.recordedAt || 0) - (b.recordedAt || 0));
@@ -11623,6 +11749,7 @@ const MSD_GEN1_BEHAVIOURS = {
     theoreticalRationale: 'A genuine directional run plausibly requires some prior build-up of directional pressure, even in a synthetic instrument — this is a candidate behaviour to test, not an assumed truth (per the existing baseline, raw tick-direction alone shows no such structure; this asks whether magnitude-aware directional measures fare differently).',
     hypothesisLabel: 'Rising ADX/DI directional strength precedes a run',
     hypothesisStatement: 'ADX and the DI spread are elevated, or measurably rising, in the ticks preceding a five-consecutive-rise event, relative to their own baseline.',
+    falsifiablePrediction: 'If false, ADX and the DI spread show no measurable difference (mean level or trend) in the window preceding a five-run compared to matched random control windows of the same length.',
   },
   momentum: {
     label: 'Momentum build-up before a run',
@@ -11630,6 +11757,7 @@ const MSD_GEN1_BEHAVIOURS = {
     theoreticalRationale: 'Raw tick-direction sign discards magnitude and rate-of-change information entirely; momentum oscillators are designed to capture exactly what sign-only analysis cannot, making this a genuinely different bet than the tested-and-rejected raw-tick baseline, not the same one restated.',
     hypothesisLabel: 'Momentum extremity/acceleration precedes a run',
     hypothesisStatement: 'RSI, MACD, MACD histogram, CCI, Stochastic, or Rate-of-Change show a measurable extremity or acceleration in the window preceding a five-consecutive-rise event.',
+    falsifiablePrediction: 'If false, none of RSI, MACD, MACD histogram, CCI, Stochastic, or Rate-of-Change show measurable extremity or acceleration above their own baseline distribution in the window preceding a five-run, relative to matched random control windows.',
   },
   volatility: {
     label: 'Volatility compression or expansion before a run',
@@ -11637,6 +11765,7 @@ const MSD_GEN1_BEHAVIOURS = {
     theoreticalRationale: 'A classical technical-analysis intuition (volatility compression often precedes a breakout) — explicitly treated here as an untested hypothesis to falsify, not an assumed mechanism, consistent with this project\'s philosophy.',
     hypothesisLabel: 'Volatility contraction precedes a run',
     hypothesisStatement: 'ATR, Bollinger Band Width, or the Choppiness Index show measurable contraction (or, alternatively, expansion — both directions are worth testing) in the window preceding a five-consecutive-rise event.',
+    falsifiablePrediction: 'If false, ATR, Bollinger Band Width, and the Choppiness Index are all statistically indistinguishable from matched random control windows in the period preceding a five-run.',
   },
   price_structure: {
     label: 'Price position within its recent statistical range before a run',
@@ -11644,6 +11773,7 @@ const MSD_GEN1_BEHAVIOURS = {
     theoreticalRationale: 'Distinct from momentum: this is about position within a range, not the rate of change of that position — worth testing as its own behaviour rather than folding into momentum.',
     hypothesisLabel: 'Extreme %B position precedes a run',
     hypothesisStatement: 'Price sits at a measurably extreme position within its Bollinger channel (%B near 0 or 1, or bands themselves unusually narrow/wide) in the window preceding a five-consecutive-rise event.',
+    falsifiablePrediction: 'If false, %B and Bollinger Band Width show no measurable extremity before a five-run relative to matched random control windows.',
   },
   trend_direction: {
     label: 'Smoothed short-term trend direction before a run',
@@ -11651,6 +11781,7 @@ const MSD_GEN1_BEHAVIOURS = {
     theoreticalRationale: 'The simplest, most classical possible measurement — worth including precisely because it is the most likely to be redundant with the others; a genuine test should include the baseline case, not just the more sophisticated ones.',
     hypothesisLabel: 'EMA stacking/slope precedes a run',
     hypothesisStatement: 'The 5/10/20-period EMAs show a measurable ordering (e.g. ema5 > ema10 > ema20) or slope in the window preceding a five-consecutive-rise event.',
+    falsifiablePrediction: 'If false, EMA ordering and slope show no measurable difference before a five-run compared to matched random control windows.',
   },
 };
 
@@ -11701,7 +11832,7 @@ async function msdBootstrapGeneration1(){
     if (hypothesis) {
       report.hypotheses[group] = { alreadyExisted: true, hypothesisId: hypothesis.hypothesisId };
     } else {
-      const hResult = await msdRegisterHypothesis({ label: def.hypothesisLabel, statement: def.hypothesisStatement, parentBehaviorId: behavior.behaviorId });
+      const hResult = await msdRegisterHypothesis({ label: def.hypothesisLabel, statement: def.hypothesisStatement, falsifiablePrediction: def.falsifiablePrediction, parentBehaviorId: behavior.behaviorId });
       if (!hResult.ok) { report.errors.push('Hypothesis ' + group + ': ' + hResult.error); continue; }
       hypothesis = { hypothesisId: hResult.hypothesisId };
       report.hypotheses[group] = { alreadyExisted: false, hypothesisId: hResult.hypothesisId };
@@ -11965,6 +12096,859 @@ async function msdGetBayesianPosteriorReports(discoveryKey){
   return all.filter(f => f.type === 'bayesian_posterior_report' && f.discoveryKey === discoveryKey).sort((a, b) => a.recordedAt - b.recordedAt);
 }
 
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 9 — Gap & Curiosity Analysis Engine
+// ══════════════════════════════════════════════════════════════════════
+// The entry point for autonomous discovery. Completely stateless: every
+// function here reads existing registries/competitions/Bayesian
+// layer/Scientific Memory and returns a computed result — the ONLY write
+// anywhere in this file is the final, optional permanent Research
+// Opportunity Report, mirroring every other "evaluate, then optionally
+// record" pattern already established in this lab.
+//
+// CORE DESIGN PRINCIPLE (see the answer given before implementing):
+// opportunities are ranked by REDUCTION IN UNCERTAINTY, not by bare
+// structural absence. A genuine Bayesian/frequentist disagreement or an
+// already-flagged statistical contradiction represents real, present
+// uncertainty worth resolving now; an empty registry slot only
+// represents the absence of information, a weaker signal. Scored
+// accordingly below — contradiction and disagreement opportunities start
+// from a materially higher base value than bare coverage gaps.
+
+const MSD_GAP_ENGINE_DEFAULT_BUDGET = 10;
+
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 9 (EXTENDED) — Expected Discovery Value, Portfolio Balance,
+// Scientific Surprise, and Assumption Challenge
+// ══════════════════════════════════════════════════════════════════════
+// Extends the Gap & Curiosity Analysis Engine in place — no new
+// registries, no new laboratory. All four concepts below combine as
+// MULTIPLIERS on the SAME base expectedValue the engine already
+// computes, rather than four separate parallel scoring systems bolted
+// together — a deliberate simplification: one coherent, auditable score
+// per opportunity (every multiplier is logged in evidenceSupporting),
+// not four scores a reader would have to reconcile by hand.
+
+// ────────────────────────────────────────────────────────────────────
+// Resolving which Behaviour an opportunity belongs to (needed by both
+// the productivity and surprise multipliers below)
+// ────────────────────────────────────────────────────────────────────
+
+/** Every opportunity type traces back to a Behaviour eventually — this walks whichever chain applies. Returns null for opportunity types with no single owning Behaviour (unrepresented_family_generation is a taxonomy-wide gap, not tied to one). */
+async function msdResolveBehaviorIdForOpportunity(opportunity){
+  if (opportunity.opportunityType === 'missing_hypothesis' || opportunity.opportunityType === 'ontology_challenge') {
+    return opportunity.subjectId;
+  }
+  if (opportunity.opportunityType === 'missing_candidate_measurement') {
+    const h = await msdGetHypothesis(opportunity.subjectId);
+    return h ? h.parentBehaviorId : null;
+  }
+  if (opportunity.opportunityType === 'missing_feature_engineering') {
+    const c = await msdGetCandidateMeasurement(opportunity.subjectId);
+    if (!c) return null;
+    const h = await msdGetHypothesis(c.parentHypothesisId);
+    return h ? h.parentBehaviorId : null;
+  }
+  if (opportunity.opportunityType === 'contradictory_evidence' || opportunity.opportunityType === 'bayesian_frequentist_disagreement') {
+    const colonIdx = opportunity.subjectId.indexOf(':');
+    const discoveryType = colonIdx > -1 ? opportunity.subjectId.slice(0, colonIdx) : null;
+    const featureKeys = msdExtractFeatureKeysFromDiscoveryKey(discoveryType, opportunity.subjectId);
+    for (const fk of featureKeys) {
+      const entry = await msdGetFeatureOntology(fk);
+      if (entry) return entry.parentBehaviorId;
+    }
+    return null;
+  }
+  return null;
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 1 — Expected Discovery Value: a productivity-aware multiplier
+// ────────────────────────────────────────────────────────────────────
+
+/** Reuses msdComputeBehaviorDiscoveryMetrics (Phase 7) directly. A Behaviour with a strong track record of turning hypotheses into Verified features gets a boost; one with a poor record gets a discount — but "no track record yet" is explicitly neutral (1.0), never treated as evidence of low value, since absence of data is not evidence of futility. */
+/** Reuses msdComputeBehaviorDiscoveryMetrics (Phase 7) directly. A Behaviour with a strong track record of turning hypotheses into Verified features gets a boost; one with a poor record gets a discount — but "no track record yet" is explicitly neutral (1.0), never treated as evidence of low value, since absence of data is not evidence of futility. perFeatureStatusInputs is the SAME caller-supplied map every other Evidence-Lifecycle-aware function in this lab already requires (msdGetKnowledgeGraphForBehavior, msdRunDiscoveryCompetition, msdComputeBehaviorDiscoveryMetrics itself) — this function does not invent its own source for that data. */
+async function msdComputeBehaviorProductivityMultiplier(behaviorId, perFeatureStatusInputs){
+  if (!behaviorId) return 1.0;
+  const metrics = await msdComputeBehaviorDiscoveryMetrics(behaviorId, perFeatureStatusInputs || {});
+  if (metrics.error || metrics.discoveryEfficiency == null) return 1.0;
+  return Math.max(0.4, Math.min(1.6, 0.6 + metrics.discoveryEfficiency));
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 3 — Scientific Surprise Score
+// ────────────────────────────────────────────────────────────────────
+
+/** A Behaviour whose hypothesis-survival rate diverges sharply from the lab-wide average is "surprising" — either surprisingly productive or surprisingly unproductive — and that divergence is itself a reason to investigate further there, since surprising areas are exactly where the lab's own productivity model is most likely to be wrong. Needs at least 2 Behaviours with data to have an average to diverge from. allBehaviorMetrics is the caller-supplied output of msdCompareBehaviorProductivity — computed once per analysis run, not once per opportunity. */
+function msdComputeBehaviorSurpriseMultiplier(behaviorId, allBehaviorMetrics){
+  if (!behaviorId) return 1.0;
+  const thisMetrics = allBehaviorMetrics.find(m => m.behaviorId === behaviorId);
+  if (!thisMetrics || thisMetrics.hypothesisSurvivalRate == null) return 1.0;
+  const ratesWithData = allBehaviorMetrics.filter(m => m.hypothesisSurvivalRate != null).map(m => m.hypothesisSurvivalRate);
+  if (ratesWithData.length < 2) return 1.0;
+  const labAverage = ratesWithData.reduce((s, r) => s + r, 0) / ratesWithData.length;
+  const divergence = Math.abs(thisMetrics.hypothesisSurvivalRate - labAverage);
+  return 1.0 + Math.min(0.5, divergence);
+}
+
+/** Contradiction and Bayesian/frequentist disagreement ARE the surprise signal directly at the discoveryKey level — a contradiction is surprising by definition (evidence that shouldn't coexist, does), disagreement slightly less starkly so. Flat, stated multipliers rather than a computed divergence, since there's no single "expected" baseline to diverge from at this level the way there is for behaviour-level survival rates. */
+function msdComputeOpportunityTypeSurpriseMultiplier(opportunityType){
+  if (opportunityType === 'contradictory_evidence') return 1.5;
+  if (opportunityType === 'bayesian_frequentist_disagreement') return 1.3;
+  return 1.0;
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 4 — Assumption Challenge
+// ────────────────────────────────────────────────────────────────────
+
+/** Extends msdCompareBehaviorProductivity (Phase 9) rather than building a new taxonomy-revision system: a Behaviour with substantial investment (>= MIN_ATTEMPTS hypotheses tried) and zero survivors is flagged not as "try another hypothesis here" (that's msdDetectStructuralGaps' job) but as "reconsider whether this Behaviour is the right framing at all" — the ontology-level challenge the original review named as a real gap. Deliberately exempt from the productivity multiplier above (which would otherwise penalize the exact opportunities this detector exists to surface). */
+async function msdDetectOntologyChallenges(){
+  const MIN_ATTEMPTS = 5;
+  const comparison = await msdCompareBehaviorProductivity({});
+  return comparison.behaviors
+    .filter(m => m.hypothesesProposed >= MIN_ATTEMPTS && (m.hypothesisSurvivalRate === 0))
+    .map(m => ({
+      opportunityType: 'ontology_challenge', subjectId: m.behaviorId, subjectLabel: m.behaviorLabel,
+      baseValue: 0.6, confidence: 'moderate',
+      evidenceSupporting: [
+        m.hypothesesProposed + ' hypotheses proposed under "' + m.behaviorLabel + '", ' + m.hypothesesRetired +
+        ' retired, zero survivors — consider whether this Behaviour is the right framing at all, not just whether the next Hypothesis under it will fare better.',
+      ],
+    }));
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 2 — Discovery Portfolio Balance: greedy diversity re-ranking
+// ────────────────────────────────────────────────────────────────────
+
+/** Maximal-marginal-relevance style greedy re-ranking: repeatedly picks the highest-scoring remaining opportunity, then applies a diminishing-returns penalty (x0.7 per prior pick) to every remaining opportunity sharing the same Behaviour — so a single productive Behaviour can't monopolize the whole budget. Opportunities with no resolved behaviorId (e.g. unrepresented_family_generation) are grouped under a shared 'none' bucket and diversified against each other the same way. */
+function msdApplyPortfolioBalance(scoredOpportunities){
+  const remaining = scoredOpportunities.slice();
+  const chosen = [];
+  const pickCounts = {};
+  while (remaining.length) {
+    let bestIdx = 0, bestAdjusted = -Infinity;
+    for (let i = 0; i < remaining.length; i++) {
+      const key = remaining[i].behaviorId || 'none';
+      const penalty = Math.pow(0.7, pickCounts[key] || 0);
+      const adjusted = remaining[i].expectedValue * penalty;
+      if (adjusted > bestAdjusted) { bestAdjusted = adjusted; bestIdx = i; }
+    }
+    const next = remaining.splice(bestIdx, 1)[0];
+    const key = next.behaviorId || 'none';
+    pickCounts[key] = (pickCounts[key] || 0) + 1;
+    chosen.push(next);
+  }
+  return chosen;
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Structural gap, contradiction/disagreement, and over-concentration
+// detectors (original Phase 9 — restored here after a splice error
+// during this session's Phase 9 extension work accidentally deleted
+// them along with a duplicate block; re-verified byte-identical against
+// the pristine source used for Phase 9's own original test run before
+// reinsertion)
+// ────────────────────────────────────────────────────────────────────
+
+async function msdDetectStructuralGaps(){
+  const behaviors = await msdGetAllBehaviors();
+  const candidates = await msdGetAllCandidateMeasurements();
+  const ontology = await msdGetAllFeatureOntologyEntries();
+  const generations = await msdGetAllGenerations();
+  const families = await msdGetAllFeatureFamilies();
+  const opportunities = [];
+
+  for (const b of behaviors) {
+    const bActions = await msdGetBehaviorActions(b.behaviorId);
+    if (bActions.some(a => a.type === 'behavior_retirement' || a.type === 'behavior_archival')) continue;
+    const hypsUnder = await msdGetHypothesesForBehavior(b.behaviorId);
+    let activeCount = 0;
+    for (const h of hypsUnder) {
+      const actions = await msdGetHypothesisActions(h.hypothesisId);
+      if (!actions.some(a => a.type === 'hypothesis_retirement' || a.type === 'hypothesis_merge')) activeCount++;
+    }
+    if (!activeCount) {
+      opportunities.push({
+        opportunityType: 'missing_hypothesis', subjectId: b.behaviorId, subjectLabel: b.label,
+        baseValue: 0.5, confidence: 'moderate',
+        evidenceSupporting: ['Behaviour "' + b.label + '" has zero currently-active registered Hypotheses.'],
+      });
+    }
+  }
+
+  const allHypotheses = await msdGetAllHypotheses();
+  for (const h of allHypotheses) {
+    const hActions = await msdGetHypothesisActions(h.hypothesisId);
+    if (hActions.some(a => a.type === 'hypothesis_retirement' || a.type === 'hypothesis_merge')) continue;
+    const candsUnder = await msdGetCandidateMeasurementsForHypothesis(h.hypothesisId);
+    let activeCount = 0;
+    for (const c of candsUnder) {
+      const actions = await msdGetCandidateMeasurementActions(c.candidateId);
+      if (!actions.some(a => a.type === 'candidate_measurement_retirement' || a.type === 'candidate_measurement_supersession' || a.type === 'candidate_measurement_archival')) activeCount++;
+    }
+    if (!activeCount) {
+      opportunities.push({
+        opportunityType: 'missing_candidate_measurement', subjectId: h.hypothesisId, subjectLabel: h.label,
+        baseValue: 0.5, confidence: 'moderate',
+        evidenceSupporting: ['Hypothesis "' + h.label + '" has zero currently-active registered Candidate Measurements.'],
+      });
+    }
+  }
+
+  for (const c of candidates) {
+    const cActions = await msdGetCandidateMeasurementActions(c.candidateId);
+    if (cActions.some(a => a.type === 'candidate_measurement_retirement' || a.type === 'candidate_measurement_supersession' || a.type === 'candidate_measurement_archival')) continue;
+    const hasOntology = ontology.some(e => e.parentCandidateMeasurementId === c.candidateId);
+    if (!hasOntology) {
+      opportunities.push({
+        opportunityType: 'missing_feature_engineering', subjectId: c.candidateId, subjectLabel: c.label,
+        baseValue: 0.4, confidence: 'moderate',
+        evidenceSupporting: ['Candidate Measurement "' + c.label + '" has not yet been implemented as a Feature.'],
+      });
+    }
+  }
+
+  for (const g of generations) {
+    for (const fam of families) {
+      const represented = ontology.some(e => e.generationNumber === g.generationNumber && e.family === fam);
+      if (!represented) {
+        opportunities.push({
+          opportunityType: 'unrepresented_family_generation', subjectId: 'gen' + g.generationNumber + ':' + fam,
+          subjectLabel: 'Generation ' + g.generationNumber + ' × ' + fam,
+          baseValue: 0.2, confidence: 'low',
+          evidenceSupporting: ['No Feature in Generation ' + g.generationNumber + ' has ever been classified under Family "' + fam + '".'],
+        });
+      }
+    }
+  }
+
+  return opportunities;
+}
+
+async function msdDetectEvidenceContradictions(){
+  const summaries = await msdGetDiscoverySummaries();
+  return summaries
+    .filter(s => s.contradiction && s.contradiction.contradicted)
+    .map(s => ({
+      opportunityType: 'contradictory_evidence', subjectId: s.discoveryKey, subjectLabel: s.discoveryKey,
+      baseValue: 0.8, confidence: 'high',
+      evidenceSupporting: ['The existing Maturity Engine\'s contradiction gate flagged this discoveryKey' + (s.contradiction.likelyCause ? ': ' + s.contradiction.likelyCause : '.') ],
+    }));
+}
+
+async function msdDetectBayesianFrequentistDisagreement(){
+  const summaries = await msdGetDiscoverySummaries();
+  const opportunities = [];
+  for (const summary of summaries) {
+    const posterior = await msdComputeBayesianPosterior(summary.discoveryKey);
+    if (posterior.posteriorMean == null) continue;
+    const frequentistHigh = summary.maturityLevel === 'verified' || summary.maturityLevel === 'repeatable';
+    const bayesianHigh = posterior.posteriorMean >= 0.7;
+    const bayesianLow = posterior.posteriorMean <= 0.3;
+    if ((frequentistHigh && bayesianLow) || (!frequentistHigh && bayesianHigh)) {
+      const intervalWidth = posterior.credibleInterval95.upper - posterior.credibleInterval95.lower;
+      opportunities.push({
+        opportunityType: 'bayesian_frequentist_disagreement', subjectId: summary.discoveryKey, subjectLabel: summary.discoveryKey,
+        baseValue: 0.7 + Math.min(0.2, intervalWidth), confidence: 'high',
+        evidenceSupporting: [
+          'Frequentist maturity: ' + summary.maturityLevel + '.',
+          'Bayesian posterior mean: ' + posterior.posteriorMean.toFixed(3) + ' (95% interval ' + posterior.credibleInterval95.lower.toFixed(3) + '-' + posterior.credibleInterval95.upper.toFixed(3) + ').',
+        ],
+      });
+    }
+  }
+  return opportunities;
+}
+
+async function msdCountPriorRejectionsUnderParent(opportunityType, subjectId){
+  if (opportunityType === 'missing_hypothesis') {
+    const all = await msdGetHypothesesForBehavior(subjectId);
+    let count = 0;
+    for (const h of all) {
+      const actions = await msdGetHypothesisActions(h.hypothesisId);
+      if (actions.some(a => a.type === 'hypothesis_retirement')) count++;
+    }
+    return count;
+  }
+  if (opportunityType === 'missing_candidate_measurement') {
+    const all = await msdGetCandidateMeasurementsForHypothesis(subjectId);
+    let count = 0;
+    for (const c of all) {
+      const actions = await msdGetCandidateMeasurementActions(c.candidateId);
+      if (actions.some(a => a.type === 'candidate_measurement_retirement')) count++;
+    }
+    return count;
+  }
+  return 0;
+}
+
+async function msdDetectOverConcentration(){
+  const behaviors = await msdGetAllBehaviors();
+  if (behaviors.length < 2) return [];
+  const hypotheses = await msdGetAllHypotheses();
+  const candidates = await msdGetAllCandidateMeasurements();
+
+  const counts = behaviors.map(b => {
+    const hypsUnder = hypotheses.filter(h => h.parentBehaviorId === b.behaviorId);
+    const hypIds = new Set(hypsUnder.map(h => h.hypothesisId));
+    const candsUnder = candidates.filter(c => hypIds.has(c.parentHypothesisId));
+    return { behaviorId: b.behaviorId, label: b.label, hypothesisCount: hypsUnder.length, candidateCount: candsUnder.length };
+  });
+  const meanHyp = counts.reduce((s, c) => s + c.hypothesisCount, 0) / counts.length;
+  const meanCand = counts.reduce((s, c) => s + c.candidateCount, 0) / counts.length;
+
+  return counts
+    .filter(c => (meanHyp > 0 && c.hypothesisCount > meanHyp * 2) || (meanCand > 0 && c.candidateCount > meanCand * 2))
+    .map(c => ({
+      behaviorId: c.behaviorId, label: c.label, hypothesisCount: c.hypothesisCount, candidateCount: c.candidateCount,
+      meanHypothesisCount: meanHyp, meanCandidateCount: meanCand,
+      recommendation: 'Consider diversifying research effort away from "' + c.label + '" — it holds more than double the lab-wide average in registered Hypotheses/Candidate Measurements.',
+    }));
+}
+
+
+// ────────────────────────────────────────────────────────────────────
+// Orchestrator (points 1, 5, 6, 9) and permanent report (points 7, 8)
+// ────────────────────────────────────────────────────────────────────
+
+/**
+ * Runs every detector (structural gaps, contradictions, Bayesian/
+ * frequentist disagreement, and — new — ontology challenges), scores
+ * each opportunity as baseValue x memoryDecay x productivityMultiplier
+ * x surpriseMultiplier (Expected Discovery Value and Scientific
+ * Surprise combined into one coherent, auditable score rather than
+ * separate parallel systems), applies Discovery Portfolio Balance
+ * (greedy diversity re-ranking across Behaviours) BEFORE the budget cut
+ * — so the budget reflects a diversified slate, not just the raw top-N
+ * by score — and returns only the top `budget` opportunities. Fully
+ * stateless; nothing is written unless msdRecordResearchOpportunityReport
+ * is called separately, mirroring every other evaluate-then-record
+ * pattern in this lab.
+ */
+async function msdRunGapCuriosityAnalysis(budget, perFeatureStatusInputs){
+  budget = Number.isInteger(budget) && budget > 0 ? budget : MSD_GAP_ENGINE_DEFAULT_BUDGET;
+
+  let raw = await msdDetectStructuralGaps();
+  raw = raw.concat(await msdDetectEvidenceContradictions());
+  raw = raw.concat(await msdDetectBayesianFrequentistDisagreement());
+  raw = raw.concat(await msdDetectOntologyChallenges());
+
+  // Computed once per run, reused by every opportunity's surprise
+  // multiplier — cheap relative to computing it per-opportunity.
+  // perFeatureStatusInputs is the SAME caller-supplied map every other
+  // Evidence-Lifecycle-aware function already requires (sourced from the
+  // Measurement Quality Audit / discovery summaries) — passed through so
+  // the productivity multiplier below can actually reflect real
+  // Verified/Production status instead of always seeing empty data.
+  const allBehaviorMetrics = (await msdCompareBehaviorProductivity(perFeatureStatusInputs || {})).behaviors;
+
+  const scored = [];
+  for (const o of raw) {
+    // Contradiction/disagreement opportunities for a subject Scientific
+    // Memory already shows was governed away (deprecated/archived) are
+    // dropped entirely — already handled, not merely lower-priority.
+    if (o.opportunityType === 'contradictory_evidence' || o.opportunityType === 'bayesian_frequentist_disagreement') {
+      const memoryForSubject = await msdGetScientificMemoryForSubject(o.subjectId);
+      if (memoryForSubject.length) continue;
+    }
+    const priorRejections = (o.opportunityType === 'missing_hypothesis' || o.opportunityType === 'missing_candidate_measurement')
+      ? await msdCountPriorRejectionsUnderParent(o.opportunityType, o.subjectId)
+      : 0;
+    const decayFactor = Math.pow(0.6, priorRejections);
+
+    const behaviorId = await msdResolveBehaviorIdForOpportunity(o);
+    // Ontology-challenge opportunities are deliberately exempt from the
+    // productivity multiplier — applying it here would penalize exactly
+    // the low-productivity areas this detector exists to surface.
+    const productivityMultiplier = (o.opportunityType === 'ontology_challenge') ? 1.0 : await msdComputeBehaviorProductivityMultiplier(behaviorId, perFeatureStatusInputs);
+    const surpriseMultiplier = (o.opportunityType === 'contradictory_evidence' || o.opportunityType === 'bayesian_frequentist_disagreement')
+      ? msdComputeOpportunityTypeSurpriseMultiplier(o.opportunityType)
+      : msdComputeBehaviorSurpriseMultiplier(behaviorId, allBehaviorMetrics);
+
+    const expectedValue = Math.max(0.05, o.baseValue * decayFactor * productivityMultiplier * surpriseMultiplier);
+    const evidenceNotes = [];
+    if (priorRejections) evidenceNotes.push(priorRejections + ' prior rejection(s) recorded under this exact parent — deprioritized, not excluded, since repeated failure is evidence, not proof of permanent futility.');
+    if (productivityMultiplier !== 1.0) evidenceNotes.push('Behaviour productivity multiplier: ' + productivityMultiplier.toFixed(2) + ' (from its own Verified-feature-per-hypothesis track record).');
+    if (surpriseMultiplier !== 1.0) evidenceNotes.push('Scientific Surprise multiplier: ' + surpriseMultiplier.toFixed(2) + '.');
+
+    scored.push(Object.assign({}, o, { expectedValue, priorRejections, behaviorId, productivityMultiplier, surpriseMultiplier, evidenceSupporting: o.evidenceSupporting.concat(evidenceNotes) }));
+  }
+
+  // Discovery Portfolio Balance: diversify across Behaviours BEFORE the
+  // budget cut, not just sort by raw score — otherwise one highly
+  // productive Behaviour could monopolize the entire budget every cycle.
+  const balanced = msdApplyPortfolioBalance(scored);
+  const selected = balanced.slice(0, budget);
+  const rejected = balanced.slice(budget);
+
+  return {
+    selected,
+    rejectedCount: rejected.length,
+    rejectedSummary: rejected.slice(0, 20).map(r => ({ opportunityType: r.opportunityType, subjectId: r.subjectId, expectedValue: r.expectedValue })),
+    totalOpportunitiesConsidered: balanced.length,
+    budget,
+    analyzedAt: Date.now(),
+  };
+}
+
+/** Permanent, reproducible Research Opportunity Report — why each opportunity was selected (evidenceSupporting + expectedValue), why others weren't (rejectedSummary), the ranking (selected's order), and confidence (per-opportunity, from the detector that produced it). */
+async function msdRecordResearchOpportunityReport(analysisResult, concentrationResult){
+  const finding = {
+    findingId: msdGenerateFindingId(), type: 'research_opportunity_report',
+    selected: analysisResult.selected, rejectedCount: analysisResult.rejectedCount,
+    rejectedSummary: analysisResult.rejectedSummary, totalOpportunitiesConsidered: analysisResult.totalOpportunitiesConsidered,
+    budget: analysisResult.budget, overConcentration: concentrationResult || [],
+    codeVersion: MSD_CODE_VERSION, recordedAt: analysisResult.analyzedAt,
+  };
+  return { ok: true, writeResult: await msdWriteFinding(finding) };
+}
+
+async function msdGetResearchOpportunityReports(){
+  const all = await msdGetAllFindings();
+  return all.filter(f => f.type === 'research_opportunity_report').sort((a, b) => b.recordedAt - a.recordedAt);
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 10 — Autonomous Hypothesis & Candidate Measurement Generators
+// ══════════════════════════════════════════════════════════════════════
+// Consumes the Gap & Curiosity Analysis Engine's ranked Research
+// Opportunity Queue directly — these generators NEVER invent an
+// opportunity of their own. Every registration call passes
+// `sourceOpportunityRef`, and both msdRegisterHypothesis and
+// msdRegisterCandidateMeasurement now HARD-REFUSE an autonomous
+// proposal that omits it — "never create proposals randomly" is a code
+// precondition here, not a design intention.
+//
+// HONEST SCOPE, stated plainly rather than oversold: without either
+// real Market State data to mine or an LLM-in-the-loop, genuine
+// scientific reasoning cannot be mechanically synthesized. What follows
+// is template-based generation — real, registered, fully traceable, and
+// gated by every precondition a human proposal already follows — but
+// it does not "understand" market behaviour. The Hypothesis generator
+// reuses the Behaviour's own already-written description as its
+// content; the Candidate Measurement generator proposes generic
+// mathematical-approach templates (statistical, temporal, probabilistic,
+// nonlinear) that still require a human — or a future, data-driven
+// generator — to bind to a real computable feature before Feature
+// Ontology registration is possible. Confidence scores are deliberately
+// capped below what a human-vetted proposal might claim, reflecting
+// that mechanical template generation carries less epistemic weight
+// than domain reasoning. Only two opportunity types have a generator;
+// contradiction/disagreement/ontology-challenge/taxonomy-gap
+// opportunities are left for a human or a future, more sophisticated
+// generator — proposing a genuinely new explanation for a contradiction
+// needs real reasoning this generator cannot honestly provide.
+
+const MSD_AUTONOMOUS_GENERATION_DEFAULT_BUDGET = 5; // separate from the Gap Engine's own proposal budget — bounded independently at each stage, per the confirmed principle
+
+/**
+ * Deliberately incomplete relative to the original ten-approach
+ * wishlist (statistical/geometric/information-theoretic/temporal/
+ * probabilistic/spectral/entropy-based/nonlinear/topology-inspired/
+ * graph-based) — four are implemented honestly; the rest need either
+ * real data to parametrize meaningfully or substantially more
+ * mathematical infrastructure than a template string can represent
+ * without misrepresenting what it actually computes. Logged as future
+ * work in the Research Debt Register, not silently dropped.
+ */
+const MSD_CANDIDATE_TEMPLATE_LIBRARY = [
+  { approach: 'statistical', sketchTemplate: 'Rolling z-score of the behaviour\'s primary signal against its own N-period rolling mean and standard deviation.' },
+  { approach: 'temporal', sketchTemplate: 'First-difference (rate of change) of the behaviour\'s primary signal over a short lookback window.' },
+  { approach: 'probabilistic', sketchTemplate: 'Empirical percentile rank of the current value within its own recent rolling distribution.' },
+  { approach: 'nonlinear', sketchTemplate: 'Squared or absolute deviation from a rolling median — magnitude of departure regardless of sign.' },
+];
+
+/** A stable, reproducible reference string for one Research Opportunity — opportunities aren't individually persisted with their own IDs (only the aggregate Report is), so this deterministic type+subject key is what every autonomous registration cites, and what a human can cross-reference back against a recorded Report's `selected` array. */
+function msdBuildOpportunityRef(opportunity){
+  return 'gap:' + opportunity.opportunityType + ':' + opportunity.subjectId;
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// AUTONOMOUS SCIENTIFIC REVIEWER — inserted between the Autonomous
+// Proposal Generators and Discovery Lab registration
+// ══════════════════════════════════════════════════════════════════════
+// No new laboratory, no new database: review decisions are Discovery Lab
+// findings (type 'scientific_review_decision'), reusing the exact same
+// store the reviewed proposals themselves live in. The Reviewer NEVER
+// modifies a proposal — it only decides whether the generators' existing
+// registration call proceeds. Rejection means "never submitted to the
+// registry," never a deletion of anything, since nothing was written for
+// a rejected proposal in the first place.
+//
+// DELIBERATELY NOT REBUILT HERE (see the review preceding this code):
+// "expected information gain" is read from the originating Research
+// Opportunity's own expectedValue via sourceOpportunityRef, never
+// recomputed — avoiding a second, competing score. "Redundancy with
+// existing Features" is explicitly NOT re-checked here — that remains
+// Measurement Redundancy Competition's job (see Debt Register R-031),
+// and building a second, weaker version of it here would let both stay
+// half-finished instead of fixing the one that owns this.
+//
+// HONEST SCOPE: "scientific plausibility" and "internal logical
+// consistency" are checked as stated MECHANICAL PROXIES, not real
+// semantic understanding — the same "no LLM-in-the-loop" limitation
+// already disclosed for the generators themselves (R-037/R-038).
+
+const MSD_REVIEW_DUPLICATE_REJECT_THRESHOLD = 0.8;   // word-overlap similarity above this -> likely duplicate, reject
+const MSD_REVIEW_DUPLICATE_REFINE_THRESHOLD = 0.5;   // above this but below reject -> request refinement
+const MSD_REVIEW_TEMPLATE_ECHO_THRESHOLD = 0.6;      // proposal content this similar to its own parent's text -> flag as under-customized, not rejected
+
+/** Jaccard similarity on lowercased word sets — simple, deterministic, fully auditable. Not claimed to be more than what it is: a word-overlap heuristic, not semantic similarity. */
+function msdComputeTextSimilarity(a, b){
+  const wordsOf = (s) => new Set(String(s || '').toLowerCase().match(/[a-z0-9]+/g) || []);
+  const setA = wordsOf(a), setB = wordsOf(b);
+  if (!setA.size && !setB.size) return 0;
+  let intersection = 0;
+  setA.forEach(w => { if (setB.has(w)) intersection++; });
+  const union = setA.size + setB.size - intersection;
+  return union ? intersection / union : 0;
+}
+
+/**
+ * Reviews a not-yet-registered proposal against every existing ACTIVE
+ * object of the same type (retired/merged/archived ones excluded — a
+ * proposal resembling a dead branch isn't a duplicate concern the same
+ * way). Returns { decision, reasoning[], confidence, duplicateOf }.
+ * Pure and stateless — recording the decision permanently is a separate
+ * step (msdRecordScientificReviewDecision), same evaluate-then-record
+ * posture as every other governance function in this lab.
+ */
+async function msdRunAutonomousScientificReview(proposal, subjectType){
+  const reasoning = [];
+  let decision = 'approve';
+
+  // Falsifiability / traceability — re-confirmed here as the FIRST line
+  // of defense (this runs BEFORE registration, so the registration
+  // functions' own hard preconditions haven't fired yet); defense in
+  // depth, not redundant restating, since a rejected review never
+  // reaches the registration call at all.
+  if (subjectType === 'hypothesis' && !proposal.falsifiablePrediction) {
+    reasoning.push('No falsifiablePrediction stated — a hypothesis must say what observation would disprove it.');
+    decision = 'reject';
+  }
+  if (proposal.proposedBy === 'autonomous' && !proposal.sourceOpportunityRef) {
+    reasoning.push('No sourceOpportunityRef — an autonomous proposal must trace back to a ranked Research Opportunity.');
+    decision = 'reject';
+  }
+
+  // Novelty / duplication against existing ACTIVE objects of the same type.
+  let mostSimilar = null, mostSimilarScore = 0;
+  if (decision !== 'reject') {
+    if (subjectType === 'behavior') {
+      const existing = await msdGetAllBehaviors();
+      for (const b of existing) {
+        const bActions = await msdGetBehaviorActions(b.behaviorId);
+        if (bActions.some(a => a.type === 'behavior_retirement' || a.type === 'behavior_archival')) continue;
+        const score = msdComputeTextSimilarity(proposal.label + ' ' + (proposal.description || ''), b.label + ' ' + (b.description || ''));
+        if (score > mostSimilarScore) { mostSimilarScore = score; mostSimilar = b.behaviorId; }
+      }
+    } else if (subjectType === 'hypothesis') {
+      const existing = await msdGetHypothesesForBehavior(proposal.parentBehaviorId);
+      for (const h of existing) {
+        const actions = await msdGetHypothesisActions(h.hypothesisId);
+        if (actions.some(a => a.type === 'hypothesis_retirement' || a.type === 'hypothesis_merge')) continue;
+        const score = msdComputeTextSimilarity(proposal.label + ' ' + (proposal.statement || ''), h.label + ' ' + (h.statement || ''));
+        if (score > mostSimilarScore) { mostSimilarScore = score; mostSimilar = h.hypothesisId; }
+      }
+    } else if (subjectType === 'candidate_measurement') {
+      const existing = await msdGetCandidateMeasurementsForHypothesis(proposal.parentHypothesisId);
+      for (const c of existing) {
+        const actions = await msdGetCandidateMeasurementActions(c.candidateId);
+        if (actions.some(a => a.type === 'candidate_measurement_retirement' || a.type === 'candidate_measurement_supersession' || a.type === 'candidate_measurement_archival')) continue;
+        const score = msdComputeTextSimilarity(proposal.label + ' ' + (proposal.mathematicalSketch || ''), c.label + ' ' + (c.mathematicalSketch || ''));
+        if (score > mostSimilarScore) { mostSimilarScore = score; mostSimilar = c.candidateId; }
+      }
+    }
+
+    if (mostSimilarScore >= MSD_REVIEW_DUPLICATE_REJECT_THRESHOLD) {
+      reasoning.push('Word-overlap similarity ' + mostSimilarScore.toFixed(2) + ' against an existing active ' + subjectType + ' (' + mostSimilar + ') exceeds the duplicate-reject threshold.');
+      decision = 'reject';
+    } else if (mostSimilarScore >= MSD_REVIEW_DUPLICATE_REFINE_THRESHOLD) {
+      reasoning.push('Word-overlap similarity ' + mostSimilarScore.toFixed(2) + ' against an existing active ' + subjectType + ' (' + mostSimilar + ') suggests possible redundancy — recommend refining before or instead of registering.');
+      decision = 'request_refinement';
+    }
+  }
+
+  // Mechanical proxy for "scientific plausibility" / "logical
+  // consistency": does the proposal's own distinguishing content
+  // (falsifiablePrediction / mathematicalSketch) say anything beyond
+  // echoing its parent's own text? A template that just restates its
+  // parent verbatim is registerable (not wrong), but weak — flagged as
+  // a recommendation, not a rejection.
+  if (decision === 'approve') {
+    let echoScore = 0;
+    if (subjectType === 'hypothesis') {
+      const behavior = await msdGetBehavior(proposal.parentBehaviorId);
+      if (behavior) echoScore = msdComputeTextSimilarity(proposal.falsifiablePrediction, behavior.description);
+    } else if (subjectType === 'candidate_measurement') {
+      const hypothesis = await msdGetHypothesis(proposal.parentHypothesisId);
+      if (hypothesis) echoScore = msdComputeTextSimilarity(proposal.mathematicalSketch, hypothesis.statement);
+    }
+    if (echoScore >= MSD_REVIEW_TEMPLATE_ECHO_THRESHOLD) {
+      reasoning.push('This proposal\'s distinguishing content closely mirrors its parent\'s own text (word-overlap ' + echoScore.toFixed(2) + ') — likely mechanically templated rather than independently reasoned. Registerable, but recommend a human strengthen the distinguishing content before relying on it.');
+      decision = 'approve_with_recommendations';
+    }
+  }
+
+  // Expected information gain — READ from the originating opportunity,
+  // never recomputed (see the section header note above).
+  let expectedInformationGain = null;
+  if (proposal.sourceOpportunityRef) {
+    const reports = await msdGetResearchOpportunityReports();
+    outer:
+    for (const report of reports) {
+      for (const opp of report.selected) {
+        if (msdBuildOpportunityRef(opp) === proposal.sourceOpportunityRef) {
+          expectedInformationGain = opp.expectedValue;
+          break outer;
+        }
+      }
+    }
+    reasoning.push(expectedInformationGain != null
+      ? 'Originating Research Opportunity expected value: ' + expectedInformationGain.toFixed(3) + ' (read from the Gap Engine, not recomputed).'
+      : 'Originating Research Opportunity could not be located in any recorded report — expected value unknown.');
+  }
+
+  if (decision === 'approve' && reasoning.length === 0) {
+    reasoning.push('No novelty, falsifiability, traceability, or template-echo concerns found.');
+  }
+
+  return { decision, reasoning, mostSimilarScore, duplicateOf: mostSimilar, expectedInformationGain };
+}
+
+/** Permanent, append-only decision record — the "complete, permanent reasoning trail" requirement. Includes a full snapshot of the reviewed proposal content, since a review decision should remain reconstructable even if the proposal itself later changes (it can't — proposals are immutable once registered — but this also covers the REJECTED case, where no registered copy of the proposal exists anywhere else). */
+async function msdRecordScientificReviewDecision(proposal, subjectType, reviewResult){
+  const reviewId = 'rev_' + msdSessionId + '_' + msdRandomSuffix();
+  const finding = {
+    findingId: msdGenerateFindingId(), type: 'scientific_review_decision', reviewId,
+    subjectType, proposalSnapshot: proposal, decision: reviewResult.decision,
+    reasoning: reviewResult.reasoning, mostSimilarScore: reviewResult.mostSimilarScore,
+    duplicateOf: reviewResult.duplicateOf, expectedInformationGain: reviewResult.expectedInformationGain,
+    sourceOpportunityRef: proposal.sourceOpportunityRef || null,
+    codeVersion: MSD_CODE_VERSION, reviewedAt: Date.now(),
+  };
+  const writeResult = await msdWriteDiscoveryLabFinding(finding);
+  return { ok: true, reviewId, writeResult };
+}
+
+async function msdGetAllScientificReviewDecisions(){
+  const all = await msdGetAllDiscoveryLabFindings('scientific_review_decision');
+  return all.sort((a, b) => a.reviewedAt - b.reviewedAt);
+}
+
+/** Permanently links a review decision to the object it produced, ONLY once registration actually succeeds — the link that lets msdComputeReviewerPerformanceMetrics later ask "did the thing this review approved actually survive?" */
+async function msdLinkReviewDecisionToOutcome(reviewId, resultingId){
+  const finding = {
+    findingId: msdGenerateFindingId(), type: 'scientific_review_outcome_link',
+    reviewId, resultingId, codeVersion: MSD_CODE_VERSION, linkedAt: Date.now(),
+  };
+  return { ok: true, writeResult: await msdWriteDiscoveryLabFinding(finding) };
+}
+
+async function msdGetReviewOutcomeLink(reviewId){
+  const all = await msdGetAllDiscoveryLabFindings('scientific_review_outcome_link');
+  return all.find(f => f.reviewId === reviewId) || null;
+}
+
+/** A human recording their own verdict on an already-made review decision — the input msdComputeReviewerPerformanceMetrics needs for agreement-with-human-review, false-rejection, and false-approval rates. Never overwrites the original decision (append-only) — this is a comparison record, not a correction. */
+async function msdRecordHumanReviewOverride(reviewId, humanDecision, rationale){
+  const decisions = await msdGetAllScientificReviewDecisions();
+  const original = decisions.find(d => d.reviewId === reviewId);
+  if (!original) return { ok: false, error: 'Unknown reviewId: ' + reviewId };
+  const validDecisions = ['approve', 'approve_with_recommendations', 'request_refinement', 'reject'];
+  if (!validDecisions.includes(humanDecision)) return { ok: false, error: 'humanDecision must be one of: ' + validDecisions.join(', ') };
+  const finding = {
+    findingId: msdGenerateFindingId(), type: 'scientific_review_human_override', reviewId,
+    humanDecision, rationale: rationale || '', codeVersion: MSD_CODE_VERSION, actionedAt: Date.now(),
+  };
+  return { ok: true, writeResult: await msdWriteDiscoveryLabFinding(finding) };
+}
+
+async function msdGetHumanReviewOverrides(reviewId){
+  const all = await msdGetAllDiscoveryLabFindings('scientific_review_human_override');
+  return all.filter(f => f.reviewId === reviewId);
+}
+
+/**
+ * Permanent performance metrics for the Reviewer itself — approval/
+ * rejection/refinement rates always computable; agreement-with-later-
+ * evidence, agreement-with-human-review, false-approval, and
+ * false-rejection rates are computed wherever the necessary outcome
+ * links / human overrides exist, and reported as null (not zero) where
+ * they don't yet — "no data" is never presented as "0% agreement."
+ */
+async function msdComputeReviewerPerformanceMetrics(){
+  const decisions = await msdGetAllScientificReviewDecisions();
+  if (!decisions.length) {
+    return { totalDecisions: 0, approvalRate: null, rejectionRate: null, refinementRate: null, agreementWithLaterEvidence: null, agreementWithHumanReview: null, falseApprovalRate: null, falseRejectionRate: null };
+  }
+
+  const countOf = (d) => decisions.filter(x => x.decision === d).length;
+  const approvals = countOf('approve') + countOf('approve_with_recommendations');
+  const rejections = countOf('reject');
+  const refinements = countOf('request_refinement');
+
+  let survivedCount = 0, approvedWithOutcomeCount = 0;
+  let humanAgreeCount = 0, humanComparableCount = 0;
+  let falseApprovals = 0, falseRejections = 0, falseApprovalDenominator = 0, falseRejectionDenominator = 0;
+
+  for (const d of decisions) {
+    const link = await msdGetReviewOutcomeLink(d.reviewId);
+    const isApproval = d.decision === 'approve' || d.decision === 'approve_with_recommendations';
+
+    if (link && isApproval) {
+      approvedWithOutcomeCount++;
+      // "Survived" means: for a hypothesis, never retired/merged; for a
+      // candidate measurement, never retired/superseded/archived.
+      let survived = true;
+      if (d.subjectType === 'hypothesis') {
+        const actions = await msdGetHypothesisActions(link.resultingId);
+        survived = !actions.some(a => a.type === 'hypothesis_retirement' || a.type === 'hypothesis_merge');
+      } else if (d.subjectType === 'candidate_measurement') {
+        const actions = await msdGetCandidateMeasurementActions(link.resultingId);
+        survived = !actions.some(a => a.type === 'candidate_measurement_retirement' || a.type === 'candidate_measurement_supersession' || a.type === 'candidate_measurement_archival');
+      }
+      if (survived) survivedCount++;
+      falseApprovalDenominator++;
+      if (!survived) falseApprovals++;
+    }
+
+    const overrides = await msdGetHumanReviewOverrides(d.reviewId);
+    if (overrides.length) {
+      const latestHuman = overrides[overrides.length - 1].humanDecision;
+      humanComparableCount++;
+      if (latestHuman === d.decision) humanAgreeCount++;
+      if (d.decision === 'reject' && latestHuman !== 'reject') {
+        falseRejectionDenominator++;
+        falseRejections++;
+      } else if (d.decision === 'reject') {
+        falseRejectionDenominator++;
+      }
+    }
+  }
+
+  return {
+    totalDecisions: decisions.length,
+    approvalRate: approvals / decisions.length,
+    rejectionRate: rejections / decisions.length,
+    refinementRate: refinements / decisions.length,
+    agreementWithLaterEvidence: approvedWithOutcomeCount ? survivedCount / approvedWithOutcomeCount : null,
+    agreementWithHumanReview: humanComparableCount ? humanAgreeCount / humanComparableCount : null,
+    falseApprovalRate: falseApprovalDenominator ? falseApprovals / falseApprovalDenominator : null,
+    falseRejectionRate: falseRejectionDenominator ? falseRejections / falseRejectionDenominator : null,
+    computedAt: Date.now(),
+  };
+}
+/** Generates ONE autonomous Hypothesis for a missing_hypothesis opportunity. Reuses the Behaviour's own already-written description/rationale rather than inventing new domain content — this is template assembly, not reasoning. */
+async function msdGenerateAutonomousHypothesis(opportunity){
+  if (opportunity.opportunityType !== 'missing_hypothesis') {
+    return { ok: false, error: 'msdGenerateAutonomousHypothesis only handles missing_hypothesis opportunities; got "' + opportunity.opportunityType + '".' };
+  }
+  const behavior = await msdGetBehavior(opportunity.subjectId);
+  if (!behavior) return { ok: false, error: 'Opportunity references an unknown behaviorId: ' + opportunity.subjectId };
+
+  const opportunityRef = msdBuildOpportunityRef(opportunity);
+  const statement = behavior.description
+    ? behavior.description
+    : 'The behaviour "' + behavior.label + '" produces a measurable difference in the window preceding a five-consecutive-rise event.';
+  const falsifiablePrediction = 'If false, no measurement of "' + behavior.label + '" shows a statistically distinguishable difference between the window preceding a five-run and matched random control windows of the same length.';
+
+  const proposal = {
+    label: 'Autonomously proposed hypothesis for "' + behavior.label + '"',
+    statement, falsifiablePrediction,
+    parentBehaviorId: behavior.behaviorId,
+    rationale: 'Generated by the Autonomous Generation cycle from Research Opportunity ' + opportunityRef + ' (expected value ' + (opportunity.expectedValue != null ? opportunity.expectedValue.toFixed(3) : 'n/a') + ').',
+    proposedBy: 'autonomous',
+    confidence: opportunity.expectedValue != null ? Math.min(0.6, opportunity.expectedValue) : 0.3, // capped below a typical human-vetted confidence — mechanical generation, not domain reasoning
+    noveltyScore: null, // no data-driven novelty comparison exists yet — see the Research Debt Register
+    sourceOpportunityRef: opportunityRef,
+  };
+
+  // Autonomous Scientific Reviewer: an independent evaluation between
+  // generation and registration. Never modifies the proposal — only
+  // decides whether the registration call below fires at all.
+  const review = await msdRunAutonomousScientificReview(proposal, 'hypothesis');
+  const reviewRecord = await msdRecordScientificReviewDecision(proposal, 'hypothesis', review);
+  if (review.decision === 'reject' || review.decision === 'request_refinement') {
+    return { ok: false, error: 'Rejected by Autonomous Scientific Review (' + review.decision + '): ' + review.reasoning.join(' '), review, reviewId: reviewRecord.reviewId };
+  }
+
+  const registration = await msdRegisterHypothesis(proposal);
+  if (registration.ok) await msdLinkReviewDecisionToOutcome(reviewRecord.reviewId, registration.hypothesisId);
+  return Object.assign({}, registration, { review, reviewId: reviewRecord.reviewId });
+}
+
+/** Generates up to maxTemplates autonomous Candidate Measurements for a missing_candidate_measurement opportunity, drawn from the template library above. Each is independently reviewed before registration. */
+async function msdGenerateAutonomousCandidateMeasurements(opportunity, maxTemplates){
+  if (opportunity.opportunityType !== 'missing_candidate_measurement') {
+    return { ok: false, error: 'msdGenerateAutonomousCandidateMeasurements only handles missing_candidate_measurement opportunities; got "' + opportunity.opportunityType + '".' };
+  }
+  const hypothesis = await msdGetHypothesis(opportunity.subjectId);
+  if (!hypothesis) return { ok: false, error: 'Opportunity references an unknown hypothesisId: ' + opportunity.subjectId };
+
+  maxTemplates = Number.isInteger(maxTemplates) && maxTemplates > 0 ? Math.min(maxTemplates, MSD_CANDIDATE_TEMPLATE_LIBRARY.length) : 1;
+  const opportunityRef = msdBuildOpportunityRef(opportunity);
+  const registered = [];
+  for (const template of MSD_CANDIDATE_TEMPLATE_LIBRARY.slice(0, maxTemplates)) {
+    const proposal = {
+      label: hypothesis.label + ' — ' + template.approach + ' measurement (autonomous)',
+      mathematicalSketch: template.sketchTemplate + ' Requires concrete binding to a real computable base signal before Feature Ontology registration — this proposes a mathematical APPROACH, not yet an implementable formula.',
+      parentHypothesisId: hypothesis.hypothesisId,
+      rationale: 'Generated by the Autonomous Generation cycle from Research Opportunity ' + opportunityRef + ', using the "' + template.approach + '" template.',
+      proposedBy: 'autonomous',
+      confidence: opportunity.expectedValue != null ? Math.min(0.5, opportunity.expectedValue) : 0.25,
+      noveltyScore: null,
+      sourceOpportunityRef: opportunityRef,
+    };
+
+    const review = await msdRunAutonomousScientificReview(proposal, 'candidate_measurement');
+    const reviewRecord = await msdRecordScientificReviewDecision(proposal, 'candidate_measurement', review);
+    if (review.decision === 'reject' || review.decision === 'request_refinement') {
+      registered.push({ ok: false, error: 'Rejected by Autonomous Scientific Review (' + review.decision + '): ' + review.reasoning.join(' '), review, reviewId: reviewRecord.reviewId });
+      continue;
+    }
+    const result = await msdRegisterCandidateMeasurement(proposal);
+    if (result.ok) await msdLinkReviewDecisionToOutcome(reviewRecord.reviewId, result.candidateId);
+    registered.push(Object.assign({}, result, { review, reviewId: reviewRecord.reviewId }));
+  }
+  return { ok: true, registered };
+}
+
+/**
+ * Orchestrator: consumes msdRunGapCuriosityAnalysis's ranked queue
+ * directly and generates proposals for the two opportunity types with a
+ * generator, up to its OWN generation budget (separate from the Gap
+ * Engine's own proposal budget — bounded independently at each stage).
+ * Every other opportunity type in the queue is intentionally left
+ * ungenerated — see the section comment above for why.
+ */
+async function msdRunAutonomousGenerationCycle(generationBudget, gapAnalysisBudget, perFeatureStatusInputs){
+  generationBudget = Number.isInteger(generationBudget) && generationBudget > 0 ? generationBudget : MSD_AUTONOMOUS_GENERATION_DEFAULT_BUDGET;
+  const analysis = await msdRunGapCuriosityAnalysis(gapAnalysisBudget, perFeatureStatusInputs);
+
+  const results = [];
+  let generatedCount = 0;
+  for (const opportunity of analysis.selected) {
+    if (generatedCount >= generationBudget) break;
+    if (opportunity.opportunityType === 'missing_hypothesis') {
+      const r = await msdGenerateAutonomousHypothesis(opportunity);
+      results.push({ opportunityRef: msdBuildOpportunityRef(opportunity), generatorUsed: 'hypothesis', result: r });
+      if (r.ok) generatedCount++;
+    } else if (opportunity.opportunityType === 'missing_candidate_measurement') {
+      const r = await msdGenerateAutonomousCandidateMeasurements(opportunity, 1);
+      results.push({ opportunityRef: msdBuildOpportunityRef(opportunity), generatorUsed: 'candidate_measurement', result: r });
+      if (r.ok) generatedCount++;
+    }
+  }
+
+  return { generationBudget, gapAnalysis: analysis, results, generatedCount, ranAt: Date.now() };
+}
 // Market State Discovery Engine — Machine Learning
 // ══════════════════════════════════════════════════════════════════════
 // Per the locked architecture: Statistical Discovery Engine -> Machine
@@ -23965,6 +24949,20 @@ function lmvRenderStats(){
   set('lmvPending', s.pending+_lmvPendingQ.length);
 }
 
+// UI-only: renders the ACTUAL recorded tick-by-tick sequence for a
+// resolved Live Model Validation row as colored arrows, one per real
+// tick in row.pTicks (never reconstructed — these are the exact
+// {price, dir} ticks already collected live in lmvResolveRow above).
+// Falls back to the plain '—' text for any record that somehow lacks
+// pTicks (e.g. malformed/legacy in-memory state), so this can never
+// throw regardless of what's in _lmvRecords.
+function lmvRenderActualArrows(pTicks){
+  if(!Array.isArray(pTicks) || !pTicks.length) return '<span class="cell-mut">—</span>';
+  return pTicks.map(t=>
+    `<span style="color:${t.dir===1?'var(--up)':'var(--down)'};font-weight:800;font-size:12px">${t.dir===1?'▲':'▼'}</span>`
+  ).join('<span style="width:2px;display:inline-block"></span>');
+}
+
 function lmvRenderTable(){
   const body=$("lmvBody");
   if(!body) return;
@@ -23989,7 +24987,7 @@ function lmvRenderTable(){
       <td>${f2(r.pCB)}</td>
       <td style="font-weight:700;color:var(--accent)">${f2(r.avgProb)}</td>
       <td class="l cell-mut" style="font-size:9px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.top5}">${r.top5}</td>
-      <td class="l ${actCls}">${r.actual}</td>
+      <td class="l ${actCls}" title="${r.actual==='—'?'No clean 5-tick run formed':r.actual}" style="white-space:nowrap;letter-spacing:1px">${lmvRenderActualArrows(r.pTicks)}</td>
       <td>${runStr}</td>
       <td class="${resCls}" style="font-weight:700">${r.result}</td>
       <td class="l cell-mut" style="font-size:9px">${r.status}</td>
