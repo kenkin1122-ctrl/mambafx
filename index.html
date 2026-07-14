@@ -2579,6 +2579,14 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       <tbody id="msdDiscoveryFeaturesBody"><tr><td colspan="8" class="sig-empty">No data yet.</td></tr></tbody></table>
   </div>
 
+  <div class="grid-card" id="msdGen1BootstrapCard" style="margin-bottom:16px">
+    <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">🧬 Generation 1 Bootstrap</h3>
+    <div class="gc-sub" style="margin-bottom:8px">Registers the full Behaviour → Hypothesis → Candidate Measurement → Feature Ontology chain for all 21 classical v1 indicators (grouped into 5 genuine behaviours: directional trend strength, momentum, volatility, price structure, and smoothed trend direction), plus Generation 1 itself. Required before any evidence can be recorded (Phase 6.5's traceability precondition) — until this runs, the Statistical Discovery Engine produces discovery results but records zero evidence. Idempotent: safe to run more than once, reports what already existed rather than duplicating anything.</div>
+    <button class="gc-btn" onclick="msdRunGen1BootstrapUi()">🧬 Run Generation 1 Bootstrap</button>
+    <span id="msdGen1BootstrapStatus" class="gc-sub" style="margin-left:10px"></span>
+    <div id="msdGen1BootstrapResults" style="margin-top:10px;font-size:12px"></div>
+  </div>
+
   <div class="grid-card" id="msdControlCard" style="margin-bottom:16px;display:none">
     <h3 style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">🧪 Pipeline Negative Control (Phase 2)</h3>
     <div class="gc-sub" style="margin-bottom:8px">Runs the EXACT SAME pipeline as above — Statistical Discovery Engine, then all four registered analyzers, then the same Maturity Engine/whole-repository Benjamini-Yekutieli correction used by the real Discovery Repository — against relabeled variants of THIS experiment's dataset, where the true feature-outcome relationship has been deliberately destroyed. A well-calibrated pipeline should report a Verified rate close to the nominal false-positive rate; a rate far above it means something in the accumulation pipeline is inflating significance and no real Verified engineered-feature discovery should be trusted until that's fixed. All synthetic evidence is written to an isolated ledger — never to the real Discovery Repository — so this can never contaminate a genuine discoveryKey's evidence history.</div>
@@ -7325,7 +7333,19 @@ async function msdRecordDiscoveryEvidence(evidence, opts){
   // synthetic evidence physically lands in NegativeControlLedger, never
   // in KnowledgeBase — reusing this exact function rather than
   // duplicating its field list a second time.
+  //
+  // Phase 6.5 (Traceability): evidence may never be recorded without a
+  // complete, validated scientific lineage — a HARD BLOCK, not a
+  // warning, applied uniformly to both the real and control paths since
+  // both describe the same real features. See the Research Debt
+  // Register for the operational consequence: until the classical
+  // feature set has a registered Feature Ontology entry, this rejects
+  // every evidence write the pre-existing analyzers attempt.
   opts = opts || {};
+  const lineage = await msdResolveEvidenceLineage(evidence.discoveryType, evidence.discoveryKey);
+  if (!lineage.ok) {
+    return { finding: null, writeResult: { ok: false, error: lineage.error } };
+  }
   const finding = Object.assign({
     findingId: msdGenerateFindingId(),
     type: opts.type || 'research_discovery',
@@ -7345,6 +7365,15 @@ async function msdRecordDiscoveryEvidence(evidence, opts){
     registrationId: evidence.registrationId,
     statisticalEvidence: evidence.statisticalEvidence,
     discoveredAt: Date.now(),
+    // Denormalized lineage (Phase 6.5) — every piece of evidence
+    // permanently carries its full scientific chain, not just a
+    // discoveryKey string convention a reader would have to re-derive.
+    underlyingFeatureKeys: lineage.featureKeys,
+    behaviorIds: lineage.behaviorIds,
+    hypothesisIds: lineage.hypothesisIds,
+    candidateMeasurementIds: lineage.candidateMeasurementIds,
+    generationNumbers: lineage.generationNumbers,
+    families: lineage.families,
   }, opts.extra || {});
   const writeFn = opts.writeFn || msdWriteFinding;
   const writeResult = await writeFn(finding);
@@ -8852,7 +8881,14 @@ async function msdRunResearchSession(experimentRecord, discoveryResult, trainRes
       results.push(recorded);
     }
   }
-  return { researchSessionId, analyzerCount: msdRegisteredAnalyzers.length, recordedCount: results.filter(r => r.writeResult).length, results, regimeInfo };
+  // Phase 6.5: recordedCount now checks writeResult.ok, not just
+  // writeResult's truthiness. Pre-existing quirk (noted, left alone, in
+  // Phase 2 — see Debt Register R-010) that became consequential once
+  // evidence-recording could be REJECTED for lacking a scientific
+  // lineage (6.5.1): without this fix, a rejected write would still be
+  // counted as "recorded," silently hiding a traceability failure behind
+  // a normal-looking count.
+  return { researchSessionId, analyzerCount: msdRegisteredAnalyzers.length, recordedCount: results.filter(r => r.writeResult && r.writeResult.ok).length, results, regimeInfo };
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -10110,11 +10146,25 @@ function msdComputeUnifiedLifecycleStage(opts){
 }
 
 /** Explicit governance ACTION: promotes a Verified discovery into the production feature set. Refuses unless CURRENT derived maturity is actually 'verified' — Production is a promotion FROM Verified, never a shortcut around it. */
-async function msdPromoteToProduction(discoveryKey, rationale){
-  const summaries = await msdGetDiscoverySummaries();
+async function msdPromoteToProduction(discoveryKey, rationale, summariesOverride){
+  // Phase 6.5: summariesOverride mirrors the exact testability pattern
+  // msdRunMeasurementCompetition already established — omit it in
+  // production and this reads the real, live discovery summaries.
+  const summaries = summariesOverride || await msdGetDiscoverySummaries();
   const summary = summaries.find(s => s.discoveryKey === discoveryKey);
   if (!summary) return { ok: false, error: 'Unknown discoveryKey: ' + discoveryKey };
   if (summary.maturityLevel !== 'verified') return { ok: false, error: 'Only Verified discoveries may be promoted to Production (current: ' + summary.maturityLevel + ').' };
+  // Phase 6.5 (Promotion Governance): statistical maturity is necessary
+  // but not sufficient. A discoveryKey can be Verified and still
+  // ineligible if the Hypothesis it traces back to was retired or
+  // merged away AFTER the evidence was gathered — e.g. a mechanism
+  // later found to be flawed. Governance always overrides derived
+  // statistical status, same principle Discovery Competition already
+  // enforces, applied here at the point it matters most.
+  const governance = await msdCheckUpstreamGovernanceForDiscoveryKey(discoveryKey);
+  if (!governance.ok) {
+    return { ok: false, error: 'Cannot promote — the originating Hypothesis(es) [' + governance.blockingHypothesisIds.join(', ') + '] have been retired or merged away since this evidence was gathered. Statistical maturity does not override governance.' };
+  }
   const finding = {
     findingId: msdGenerateFindingId(), type: 'production_selection', discoveryKey,
     rationale: rationale || '', codeVersion: MSD_CODE_VERSION, actionedAt: Date.now(),
@@ -10203,7 +10253,1718 @@ function msdCompareExperimentManifests(manifestA, manifestB){
   return { identical: diffs.length === 0, diffs };
 }
 
+
 // ══════════════════════════════════════════════════════════════════════
+// PHASE 3 — Scientific Taxonomy Foundation: Behaviour Library, Feature
+// Families, and the Feature Ontology
+// ══════════════════════════════════════════════════════════════════════
+// DEVELOPMENT MODE (explicit, per instruction): everything below is
+// INFRASTRUCTURE — registries, a fixed taxonomy, and a derived-status
+// view. Nothing here asserts a scientific conclusion. Every status
+// function returns one of four explicit labels, never a bare boolean or
+// silence, so "not yet checked" can never be confused with "checked and
+// fine":
+//   - Not Yet Proposed
+//   - Awaiting Real Market State Data
+//   - Awaiting Empirical Validation
+//   - Awaiting Production Verification
+//   - Implemented Scientific Infrastructure (terminal: in production,
+//     backed by Verified evidence)
+//
+// SCOPE OF THIS PHASE, stated explicitly: this implements the TAXONOMY
+// layer only (Behaviour Registry, Feature Families, Feature Ontology,
+// and the derived status/lineage views) — the data model everything
+// else depends on. It does NOT yet implement the Scientific Feature
+// Discovery Engine / Feature Engineering Engine separation, the
+// independent discovery pipelines, or the Scientific Meta-Metrics —
+// those are scoped as their own subsequent phases in the Research
+// Roadmap, per the "one phase at a time" rule already governing this
+// programme.
+//
+// MSD_DEV_MODE_STATUS (the five-label enum this comment describes) was
+// removed in Phase 5 along with its only two consumers — see 3.4 below.
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 5 — Independent Laboratories: Discovery Lab / Engineering Lab
+// ══════════════════════════════════════════════════════════════════════
+// Physically separate storage for "what do we think and why" (Discovery:
+// Behaviour, Hypothesis, Candidate Measurement) versus "how do we compute
+// it" (Engineering: Feature Ontology) — mirroring the exact isolation
+// pattern already proven for NegativeControlLedger, applied here for a
+// different reason: not fraud-proofing a synthetic control, but making
+// "Engineering may not invent a hypothesis" a WRITE-ISOLATION guarantee
+// (a bug can't cross a database boundary) rather than only a runtime
+// precondition check (which a future refactor could accidentally weaken).
+// Labs are write-isolated, not read-isolated: Engineering Lab code reads
+// Discovery Lab records routinely (to validate a Candidate Measurement
+// exists) — it can just never WRITE one. Evidence, Maturity, Generation,
+// Feature Family, and Lab Component tracking stay in the original,
+// unmodified KnowledgeBase: they're produced by RUNNING experiments and
+// by classifying/governing what either lab produces, not owned by
+// either lab itself. Both new stores get a `type` index from the start —
+// the scalability fix this review's own audit called for, applied here
+// where it costs nothing (both stores start empty).
+
+const MSD_DISCOVERY_LAB_DB_NAME = 'mfx_msd_discovery_lab';
+const MSD_DISCOVERY_LAB_DB_VERSION = 2; // Phase 6.5: bumped for parent-ID indices (scalability)
+const MSD_DISCOVERY_LAB_STORE = 'DiscoveryLab';
+let _msdDiscoveryLabDbPromise = null;
+
+function msdOpenDiscoveryLabDatabase(){
+  if (_msdDiscoveryLabDbPromise) return _msdDiscoveryLabDbPromise;
+  _msdDiscoveryLabDbPromise = new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') { reject(new Error('IndexedDB is not available in this environment')); return; }
+    const req = indexedDB.open(MSD_DISCOVERY_LAB_DB_NAME, MSD_DISCOVERY_LAB_DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      let store;
+      if (!db.objectStoreNames.contains(MSD_DISCOVERY_LAB_STORE)) {
+        store = db.createObjectStore(MSD_DISCOVERY_LAB_STORE, { keyPath: 'findingId' });
+        store.createIndex('type', 'type', { unique: false });
+      } else {
+        store = e.target.transaction.objectStore(MSD_DISCOVERY_LAB_STORE);
+      }
+      // Phase 6.5: parent-ID indices, added idempotently. Fields don't
+      // exist on every finding type sharing this store (e.g. behaviorId
+      // only exists on behavior_registration/actions) — IndexedDB
+      // indices tolerate that fine, a finding simply isn't included in
+      // an index for a field it lacks. sourceHypothesisIds is
+      // multiEntry since it's an array field (hypothesis_merge records).
+      if (!store.indexNames.contains('behaviorId')) store.createIndex('behaviorId', 'behaviorId', { unique: false });
+      if (!store.indexNames.contains('parentBehaviorId')) store.createIndex('parentBehaviorId', 'parentBehaviorId', { unique: false });
+      if (!store.indexNames.contains('hypothesisId')) store.createIndex('hypothesisId', 'hypothesisId', { unique: false });
+      if (!store.indexNames.contains('parentHypothesisId')) store.createIndex('parentHypothesisId', 'parentHypothesisId', { unique: false });
+      if (!store.indexNames.contains('candidateId')) store.createIndex('candidateId', 'candidateId', { unique: false });
+      if (!store.indexNames.contains('sourceHypothesisIds')) store.createIndex('sourceHypothesisIds', 'sourceHypothesisIds', { unique: false, multiEntry: true });
+    };
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror   = (e) => reject(e.target.error);
+  });
+  return _msdDiscoveryLabDbPromise;
+}
+
+async function msdWriteDiscoveryLabFinding(finding){
+  if (!finding || !finding.findingId) return { ok: false, error: 'finding is missing findingId' };
+  try {
+    const db = await msdOpenDiscoveryLabDatabase();
+    return await new Promise((resolve) => {
+      const req = db.transaction(MSD_DISCOVERY_LAB_STORE, 'readwrite').objectStore(MSD_DISCOVERY_LAB_STORE).add(finding);
+      req.onsuccess = () => resolve({ ok: true });
+      req.onerror   = (e) => { e.preventDefault(); resolve({ ok: false, error: 'duplicate or invalid findingId — write rejected (append-only store)' }); };
+    });
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+/** Reads by type via the index when a type is given (the scalability fix — no full-store scan), or everything if omitted. */
+async function msdGetAllDiscoveryLabFindings(type){
+  const db = await msdOpenDiscoveryLabDatabase();
+  return new Promise((resolve) => {
+    const store = db.transaction(MSD_DISCOVERY_LAB_STORE, 'readonly').objectStore(MSD_DISCOVERY_LAB_STORE);
+    const req = type ? store.index('type').getAll(type) : store.getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror   = () => resolve([]);
+  });
+}
+
+/** Phase 6.5: generic indexed lookup for Discovery Lab — replaces get-all-and-filter for the hot paths (msdGetHypothesesForBehavior, msdGetCandidateMeasurementsForHypothesis, etc.) */
+async function msdGetDiscoveryLabFindingsByIndex(indexName, value){
+  const db = await msdOpenDiscoveryLabDatabase();
+  return new Promise((resolve) => {
+    const store = db.transaction(MSD_DISCOVERY_LAB_STORE, 'readonly').objectStore(MSD_DISCOVERY_LAB_STORE);
+    const req = store.index(indexName).getAll(value);
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror   = () => resolve([]);
+  });
+}
+
+const MSD_ENGINEERING_LAB_DB_NAME = 'mfx_msd_engineering_lab';
+const MSD_ENGINEERING_LAB_DB_VERSION = 2; // Phase 6.5: bumped for parent-ID + featureKey indices (scalability)
+const MSD_ENGINEERING_LAB_STORE = 'EngineeringLab';
+let _msdEngineeringLabDbPromise = null;
+
+function msdOpenEngineeringLabDatabase(){
+  if (_msdEngineeringLabDbPromise) return _msdEngineeringLabDbPromise;
+  _msdEngineeringLabDbPromise = new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') { reject(new Error('IndexedDB is not available in this environment')); return; }
+    const req = indexedDB.open(MSD_ENGINEERING_LAB_DB_NAME, MSD_ENGINEERING_LAB_DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      let store;
+      if (!db.objectStoreNames.contains(MSD_ENGINEERING_LAB_STORE)) {
+        store = db.createObjectStore(MSD_ENGINEERING_LAB_STORE, { keyPath: 'findingId' });
+        store.createIndex('type', 'type', { unique: false });
+      } else {
+        store = e.target.transaction.objectStore(MSD_ENGINEERING_LAB_STORE);
+      }
+      // Phase 6.5: featureKey is the hottest new lookup path — every
+      // evidence write now resolves lineage via msdGetFeatureOntology
+      // (6.5.1) — so this index matters more than any other added here.
+      if (!store.indexNames.contains('featureKey')) store.createIndex('featureKey', 'featureKey', { unique: false });
+      if (!store.indexNames.contains('parentBehaviorId')) store.createIndex('parentBehaviorId', 'parentBehaviorId', { unique: false });
+      if (!store.indexNames.contains('parentHypothesisId')) store.createIndex('parentHypothesisId', 'parentHypothesisId', { unique: false });
+      if (!store.indexNames.contains('parentCandidateMeasurementId')) store.createIndex('parentCandidateMeasurementId', 'parentCandidateMeasurementId', { unique: false });
+    };
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror   = (e) => reject(e.target.error);
+  });
+  return _msdEngineeringLabDbPromise;
+}
+
+async function msdWriteEngineeringLabFinding(finding){
+  if (!finding || !finding.findingId) return { ok: false, error: 'finding is missing findingId' };
+  try {
+    const db = await msdOpenEngineeringLabDatabase();
+    return await new Promise((resolve) => {
+      const req = db.transaction(MSD_ENGINEERING_LAB_STORE, 'readwrite').objectStore(MSD_ENGINEERING_LAB_STORE).add(finding);
+      req.onsuccess = () => resolve({ ok: true });
+      req.onerror   = (e) => { e.preventDefault(); resolve({ ok: false, error: 'duplicate or invalid findingId — write rejected (append-only store)' }); };
+    });
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function msdGetAllEngineeringLabFindings(type){
+  const db = await msdOpenEngineeringLabDatabase();
+  return new Promise((resolve) => {
+    const store = db.transaction(MSD_ENGINEERING_LAB_STORE, 'readonly').objectStore(MSD_ENGINEERING_LAB_STORE);
+    const req = type ? store.index('type').getAll(type) : store.getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror   = () => resolve([]);
+  });
+}
+
+/** Phase 6.5: generic indexed lookup for Engineering Lab — used by msdGetFeatureOntology, now the hottest lookup path in the whole lab (6.5.1). */
+async function msdGetEngineeringLabFindingsByIndex(indexName, value){
+  const db = await msdOpenEngineeringLabDatabase();
+  return new Promise((resolve) => {
+    const store = db.transaction(MSD_ENGINEERING_LAB_STORE, 'readonly').objectStore(MSD_ENGINEERING_LAB_STORE);
+    const req = store.index(indexName).getAll(value);
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror   = () => resolve([]);
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 3.1 — Behaviour Registry: the root of Observed Behaviour -> Hypothesis
+// -> Candidate Measurement -> Engineered Feature -> Evidence ->
+// Production Feature
+// ────────────────────────────────────────────────────────────────────
+// Registers ONLY the root: a named, described market behaviour,
+// deliberately BEFORE any measurement of it exists — this is what makes
+// "Feature Engineering follows Scientific Feature Discovery, never the
+// reverse" a checkable precondition rather than a documented intention
+// (enforced in 3.3 below). Mirrors msdRegisterGeneration's exact
+// append-only pattern. MOVED IN PHASE 5 to the Discovery Lab store.
+
+async function msdRegisterBehavior(behavior){
+  if (!behavior || !behavior.label) return { ok: false, error: 'A behavior requires at least a label.' };
+  const behaviorId = 'behav_' + msdSessionId + '_' + msdRandomSuffix();
+  const finding = {
+    findingId: msdGenerateFindingId(),
+    type: 'behavior_registration',
+    behaviorId,
+    label: behavior.label,
+    description: behavior.description || '',
+    theoreticalRationale: behavior.theoreticalRationale || '',
+    suggestedFamilies: Array.isArray(behavior.suggestedFamilies) ? behavior.suggestedFamilies.slice() : [],
+    codeVersion: MSD_CODE_VERSION,
+    registeredAt: Date.now(),
+  };
+  const writeResult = await msdWriteDiscoveryLabFinding(finding);
+  return { ok: true, behaviorId, finding, writeResult };
+}
+
+async function msdGetAllBehaviors(){
+  const all = await msdGetAllDiscoveryLabFindings('behavior_registration');
+  return all.sort((a, b) => a.registeredAt - b.registeredAt);
+}
+
+async function msdGetBehavior(behaviorId){
+  const all = await msdGetAllBehaviors();
+  return all.find(b => b.behaviorId === behaviorId) || null;
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 3.2 — Feature Family Taxonomy
+
+// ────────────────────────────────────────────────────────────────────
+// A feature belongs to exactly one Generation (WHEN it was introduced —
+// Phase 2) and exactly one Family (WHAT KIND of behaviour it measures)
+// — two independent, orthogonal classifications. The canonical list
+// below is the starting point; new families register the same way
+// msdRegisterFeatureVersion already allows new schema versions, but —
+// unlike that in-memory-only registry (see Research Debt Register) —
+// custom families are KnowledgeBase-backed from the start, so one
+// survives a page reload.
+
+const MSD_FEATURE_FAMILIES = [
+  'Classical Market Measurements', 'Transition Dynamics', 'Persistence', 'Exhaustion',
+  'Stability', 'Information Theory', 'Entropy', 'Market Geometry', 'Temporal Behaviour',
+  'Multi-Scale Behaviour', 'Physics-Inspired Measurements', 'Complexity Measurements',
+  'Regime Measurements', 'Interaction Features', 'Latent State Measurements',
+  'Market Flow Proxies', 'Behavioural Measurements',
+];
+
+async function msdRegisterFeatureFamily(familyLabel, description){
+  if (MSD_FEATURE_FAMILIES.includes(familyLabel)) return { ok: false, error: 'Family "' + familyLabel + '" already exists in the canonical list.' };
+  const existingCustom = await msdGetAllCustomFeatureFamilies();
+  if (existingCustom.some(f => f.familyLabel === familyLabel)) return { ok: false, error: 'Family "' + familyLabel + '" was already registered.' };
+  const finding = {
+    findingId: msdGenerateFindingId(), type: 'family_registration', familyLabel,
+    description: description || '', codeVersion: MSD_CODE_VERSION, registeredAt: Date.now(),
+  };
+  return { ok: true, writeResult: await msdWriteFinding(finding) };
+}
+
+async function msdGetAllCustomFeatureFamilies(){
+  const all = await msdGetAllFindings();
+  return all.filter(f => f.type === 'family_registration').sort((a, b) => a.registeredAt - b.registeredAt);
+}
+
+async function msdGetAllFeatureFamilies(){
+  const custom = await msdGetAllCustomFeatureFamilies();
+  return MSD_FEATURE_FAMILIES.concat(custom.map(f => f.familyLabel));
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 3.3 — Feature Ontology
+// ────────────────────────────────────────────────────────────────────
+// One immutable record per feature key: parent lineage, Generation,
+// Family, Mathematical Definition, Units, Lookback Window, Lead-Time,
+// Dependencies, Transformations, Provenance, Scientific Interpretation,
+// Known Failure Conditions. Evidence Level is deliberately NOT stored
+// here — it is derived on demand (3.4 below / 4.4 in Phase 4) from the
+// existing Maturity Engine, so there is exactly one place evidence
+// maturity is ever computed, never two competing copies.
+//
+// REVISED IN PHASE 4: originally required only parentBehaviorId. Now
+// requires parentCandidateMeasurementId instead — Module 5 (Feature
+// Engineering) may ONLY implement a measurement Module 2/4 (Scientific
+// Feature Discovery / Candidate Measurement Discovery) already proposed,
+// never invent one of its own. parentHypothesisId and parentBehaviorId
+// are DERIVED by walking the candidate's own lineage, not accepted as
+// independent inputs — a single source of truth for the chain, so a
+// caller can never register a feature whose stated behaviour doesn't
+// actually match its stated candidate measurement's real parent. Safe to
+// tighten now: zero Feature Ontology entries existed under the old
+// signature at the time of this revision (see Research Debt Register).
+
+async function msdRegisterFeatureOntology(entry){
+  if (!entry || !entry.featureKey) return { ok: false, error: 'featureKey is required.' };
+
+  const existing = await msdGetAllFeatureOntologyEntries();
+  if (existing.some(e => e.featureKey === entry.featureKey)) {
+    return { ok: false, error: 'Feature "' + entry.featureKey + '" already has an Ontology entry — cannot redefine it. A changed definition should be registered as a new, distinctly-named feature.' };
+  }
+  if (!entry.parentCandidateMeasurementId) {
+    return { ok: false, error: 'parentCandidateMeasurementId is required — Feature Engineering (Module 5) may not invent a measurement; it may only implement one already proposed via msdRegisterCandidateMeasurement (Module 2/4).' };
+  }
+  const candidate = await msdGetCandidateMeasurement(entry.parentCandidateMeasurementId);
+  if (!candidate) return { ok: false, error: 'parentCandidateMeasurementId "' + entry.parentCandidateMeasurementId + '" does not reference a registered Candidate Measurement.' };
+  // Phase 6.5: consistent governance enforcement up the chain — a
+  // retired, superseded, or archived Candidate Measurement can never be
+  // implemented as a Feature ("Candidate Measurements should never
+  // remain permanently active after scientific rejection" applies here
+  // exactly as it does one level down).
+  const candidateActions = await msdGetCandidateMeasurementActions(entry.parentCandidateMeasurementId);
+  if (candidateActions.some(a => a.type === 'candidate_measurement_retirement' || a.type === 'candidate_measurement_supersession' || a.type === 'candidate_measurement_archival')) {
+    return { ok: false, error: 'Candidate Measurement "' + entry.parentCandidateMeasurementId + '" has been retired, superseded, or archived — it may not be implemented as a Feature.' };
+  }
+  const hypothesis = await msdGetHypothesis(candidate.parentHypothesisId);
+  if (!hypothesis) return { ok: false, error: 'Internal consistency error: the referenced Candidate Measurement points at a hypothesis that no longer resolves.' };
+
+  const generations = await msdGetAllGenerations();
+  if (!generations.some(g => g.generationNumber === entry.generationNumber)) {
+    return { ok: false, error: 'generationNumber ' + entry.generationNumber + ' is not registered in the Generation Registry.' };
+  }
+
+  const families = await msdGetAllFeatureFamilies();
+  if (!families.includes(entry.family)) {
+    return { ok: false, error: 'family "' + entry.family + '" is not a recognized Feature Family — register it first via msdRegisterFeatureFamily, or use one of: ' + families.join(', ') };
+  }
+
+  const finding = {
+    findingId: msdGenerateFindingId(),
+    type: 'feature_ontology_registration',
+    featureKey: entry.featureKey,
+    parentCandidateMeasurementId: entry.parentCandidateMeasurementId,
+    parentHypothesisId: candidate.parentHypothesisId,
+    parentBehaviorId: hypothesis.parentBehaviorId,
+    generationNumber: entry.generationNumber,
+    family: entry.family,
+    mathematicalDefinition: entry.mathematicalDefinition || '',
+    units: entry.units || 'dimensionless',
+    lookbackWindow: entry.lookbackWindow != null ? entry.lookbackWindow : null,
+    leadTime: entry.leadTime != null ? entry.leadTime : null,
+    dependencies: Array.isArray(entry.dependencies) ? entry.dependencies.slice() : [],
+    transformations: entry.transformations || '',
+    scientificInterpretation: entry.scientificInterpretation || '',
+    knownFailureConditions: entry.knownFailureConditions || '',
+    codeVersion: MSD_CODE_VERSION,
+    registeredAt: Date.now(),
+  };
+  const writeResult = await msdWriteEngineeringLabFinding(finding);
+  return { ok: true, finding, writeResult };
+}
+
+// MOVED IN PHASE 5 to the Engineering Lab store — this is the one object
+// type that lab genuinely owns; everything it needs from Discovery
+// (Candidate Measurement, Hypothesis, Generation, Family) is a READ
+// across the lab boundary, never a write.
+async function msdGetAllFeatureOntologyEntries(){
+  const all = await msdGetAllEngineeringLabFindings('feature_ontology_registration');
+  return all.sort((a, b) => a.registeredAt - b.registeredAt);
+}
+
+/** Phase 6.5: indexed lookup — the hottest path in the lab now that every evidence write resolves lineage through this. Was get-all-and-filter; now a direct featureKey index query. */
+async function msdGetFeatureOntology(featureKey){
+  const matches = await msdGetEngineeringLabFindingsByIndex('featureKey', featureKey);
+  return matches.length ? matches[0] : null;
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 3.4 — Derived Scientific Status: REMOVED in Phase 5
+// ────────────────────────────────────────────────────────────────────
+// This section previously held msdGetFeatureDevelopmentStatus and
+// msdGetBehaviorLineage — Phase 3's five-way status label and its
+// companion lineage view, both marked superseded in Phase 4 and now
+// removed per this review's own "one phase of grace, then delete"
+// recommendation. Confirmed zero external callers before removal (they
+// only ever called each other). Use msdComputeEvidenceLifecycleStage
+// and msdGetKnowledgeGraphForBehavior instead — both do the same job
+// with the two-axis model applied correctly.
+
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 4 — Two-Axis Maturity Model, Scientific Hypothesis Registry
+// (Module 3), Candidate Measurement Registry (Module 2/4), and the
+// Knowledge Graph
+// ══════════════════════════════════════════════════════════════════════
+// SCOPE OF THIS PHASE, stated explicitly: this fills in the MISSING
+// LINKS in the Behaviour -> Hypothesis -> Candidate Measurement ->
+// Engineered Feature -> Evidence -> Production chain (Behaviour and
+// Feature Ontology already existed from Phase 3; Hypothesis and
+// Candidate Measurement did not). It also separates infrastructure
+// maturity from scientific evidence into two independent registries, per
+// explicit instruction. It does NOT yet implement Modules 1, 2, 4, 5, 6,
+// 7 as full standalone engines, the Independent Discovery Pipelines, or
+// the Meta-Metrics — those remain later phases in the Research Roadmap;
+// building all of them at once would mean far less testing rigor per
+// piece, which this programme's own governance explicitly does not want.
+
+// ────────────────────────────────────────────────────────────────────
+// 4.1 — Two-Axis Maturity Model
+// ────────────────────────────────────────────────────────────────────
+// AXIS 1 (this section): Infrastructure Maturity — Planned / Under
+// Development / Implemented / Tested / Operational (simplified in Phase
+// 5 — see below). Applies to LABORATORY COMPONENTS (registries, engines,
+// pipelines) — never to individual scientific discoveries.
+// AXIS 2 (section 4.4): the Scientific Evidence Lifecycle — Observed
+// Behaviour through Archived. Applies ONLY to individual discoveries,
+// never to infrastructure. The two must never be conflated (Phase 3's
+// msdGetFeatureDevelopmentStatus did exactly that; it was superseded in
+// Phase 4 and removed in Phase 5 once confirmed to have zero external
+// callers).
+//
+// SIMPLIFIED IN PHASE 5: originally six levels, including "Awaiting
+// Empirical Validation" and "Empirically Validated" — those were
+// scientific-sounding words for what is really just a software-testing
+// question when applied to INFRASTRUCTURE rather than a discovery.
+// Collapsed to the five levels below, per this review's own
+// recommendation and the updated instruction that proposed them.
+
+const MSD_INFRA_MATURITY_LEVELS = [
+  'Planned', 'Under Development', 'Implemented', 'Tested', 'Operational',
+];
+
+/** Registers one lab component (a registry, engine, or pipeline) so its maturity can be tracked. Refuses a duplicate componentKey — register once, then use msdSetLabComponentMaturity for every subsequent status change (append-only history, never a mutation). */
+async function msdRegisterLabComponent(component){
+  if (!component || !component.componentKey || !component.label) return { ok: false, error: 'componentKey and label are required.' };
+  const existing = await msdGetAllLabComponents();
+  if (existing.some(c => c.componentKey === component.componentKey)) {
+    return { ok: false, error: 'Lab component "' + component.componentKey + '" is already registered.' };
+  }
+  const finding = {
+    findingId: msdGenerateFindingId(), type: 'lab_component_registration',
+    componentKey: component.componentKey, label: component.label, module: component.module || null,
+    description: component.description || '', codeVersion: MSD_CODE_VERSION, registeredAt: Date.now(),
+  };
+  const writeResult = await msdWriteFinding(finding);
+  return { ok: true, writeResult };
+}
+
+async function msdGetAllLabComponents(){
+  const all = await msdGetAllFindings();
+  return all.filter(f => f.type === 'lab_component_registration').sort((a, b) => a.registeredAt - b.registeredAt);
+}
+
+/** Appends a new maturity state for a registered component. Refuses an unrecognized maturity label or an unregistered componentKey — this is a hard-typed enum, not a free-text field, so a typo can never silently become a new, undocumented maturity level. */
+async function msdSetLabComponentMaturity(componentKey, maturity, note){
+  if (!MSD_INFRA_MATURITY_LEVELS.includes(maturity)) {
+    return { ok: false, error: 'Unrecognized infrastructure maturity level: "' + maturity + '". Must be one of: ' + MSD_INFRA_MATURITY_LEVELS.join(', ') };
+  }
+  const components = await msdGetAllLabComponents();
+  if (!components.some(c => c.componentKey === componentKey)) {
+    return { ok: false, error: 'Unknown lab component: "' + componentKey + '" — register it first via msdRegisterLabComponent.' };
+  }
+  const finding = {
+    findingId: msdGenerateFindingId(), type: 'lab_component_maturity_update',
+    componentKey, maturity, note: note || '', codeVersion: MSD_CODE_VERSION, actionedAt: Date.now(),
+  };
+  const writeResult = await msdWriteFinding(finding);
+  return { ok: true, writeResult };
+}
+
+async function msdGetLabComponentMaturityHistory(componentKey){
+  const all = await msdGetAllFindings();
+  return all.filter(f => f.type === 'lab_component_maturity_update' && f.componentKey === componentKey).sort((a, b) => a.actionedAt - b.actionedAt);
+}
+
+/** Current maturity = the last entry in the append-only history. A registered component with no maturity update yet is honestly 'Planned' — never defaulted to something more advanced than has actually been recorded. */
+async function msdGetCurrentLabComponentMaturity(componentKey){
+  const history = await msdGetLabComponentMaturityHistory(componentKey);
+  return history.length ? history[history.length - 1].maturity : 'Planned';
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 4.2 — Scientific Hypothesis Registry (Module 3)
+// ────────────────────────────────────────────────────────────────────
+// Sits between Behaviour and Candidate Measurement. Every hypothesis
+// requires an existing parent Behaviour — mirrors the Feature Ontology's
+// own precondition pattern one level up the chain. "Refine" is
+// deliberately NOT a separate mutation function: refining a hypothesis
+// means registering a NEW hypothesis with refinesHypothesisId set,
+// reusing this exact function rather than adding a second write path
+// for what is really the same operation (register) with one more field.
+
+async function msdRegisterHypothesis(hypothesis){
+  if (!hypothesis || !hypothesis.label) return { ok: false, error: 'A hypothesis requires at least a label.' };
+  if (!hypothesis.parentBehaviorId) return { ok: false, error: 'parentBehaviorId is required — a hypothesis must derive from a registered Behaviour (Module 1 precedes Module 3).' };
+  const behavior = await msdGetBehavior(hypothesis.parentBehaviorId);
+  if (!behavior) return { ok: false, error: 'parentBehaviorId "' + hypothesis.parentBehaviorId + '" does not reference a registered behavior.' };
+  // Phase 6.5: consistent governance enforcement up the chain — a
+  // retired or archived Behaviour cannot accept new Hypotheses.
+  const behaviorActions = await msdGetBehaviorActions(hypothesis.parentBehaviorId);
+  if (behaviorActions.some(a => a.type === 'behavior_retirement' || a.type === 'behavior_archival')) {
+    return { ok: false, error: 'Behaviour "' + hypothesis.parentBehaviorId + '" has been retired or archived — no new Hypotheses may be registered against it.' };
+  }
+  if (hypothesis.refinesHypothesisId) {
+    const prior = await msdGetHypothesis(hypothesis.refinesHypothesisId);
+    if (!prior) return { ok: false, error: 'refinesHypothesisId "' + hypothesis.refinesHypothesisId + '" does not reference a registered hypothesis.' };
+  }
+  const hypothesisId = 'hyp_' + msdSessionId + '_' + msdRandomSuffix();
+  const finding = {
+    findingId: msdGenerateFindingId(), type: 'hypothesis_registration', hypothesisId,
+    label: hypothesis.label, statement: hypothesis.statement || '', parentBehaviorId: hypothesis.parentBehaviorId,
+    rationale: hypothesis.rationale || '', refinesHypothesisId: hypothesis.refinesHypothesisId || null,
+    codeVersion: MSD_CODE_VERSION, registeredAt: Date.now(),
+  };
+  const writeResult = await msdWriteDiscoveryLabFinding(finding);
+  return { ok: true, hypothesisId, finding, writeResult };
+}
+
+// MOVED IN PHASE 5 to the Discovery Lab store.
+async function msdGetAllHypotheses(){
+  const all = await msdGetAllDiscoveryLabFindings('hypothesis_registration');
+  return all.sort((a, b) => a.registeredAt - b.registeredAt);
+}
+
+async function msdGetHypothesis(hypothesisId){
+  const all = await msdGetAllHypotheses();
+  return all.find(h => h.hypothesisId === hypothesisId) || null;
+}
+
+/** Phase 6.5: indexed lookup — was get-all-and-filter across every hypothesis in Discovery Lab. */
+async function msdGetHypothesesForBehavior(behaviorId){
+  return msdGetDiscoveryLabFindingsByIndex('parentBehaviorId', behaviorId);
+}
+
+/** Merges two or more hypotheses: registers ONE new hypothesis (via msdRegisterHypothesis, so it goes through the exact same validation) and permanently records which sources fed into it — never deletes or mutates the sources. Requires every source to share the same parent Behaviour, since a merge across different behaviours would silently change what the merged hypothesis is actually about. */
+async function msdMergeHypotheses(sourceHypothesisIds, mergedHypothesis, rationale){
+  if (!Array.isArray(sourceHypothesisIds) || sourceHypothesisIds.length < 2) {
+    return { ok: false, error: 'Merging requires at least two source hypotheses.' };
+  }
+  const sources = [];
+  for (const id of sourceHypothesisIds) {
+    const h = await msdGetHypothesis(id);
+    if (!h) return { ok: false, error: 'Unknown source hypothesis: ' + id };
+    sources.push(h);
+  }
+  const behaviorIds = new Set(sources.map(s => s.parentBehaviorId));
+  if (behaviorIds.size !== 1) return { ok: false, error: 'All source hypotheses must share the same parent Behaviour to merge.' };
+
+  const registration = await msdRegisterHypothesis(Object.assign({}, mergedHypothesis, { parentBehaviorId: sources[0].parentBehaviorId }));
+  if (!registration.ok) return registration;
+
+  const finding = {
+    findingId: msdGenerateFindingId(), type: 'hypothesis_merge',
+    sourceHypothesisIds: sourceHypothesisIds.slice(), mergedIntoHypothesisId: registration.hypothesisId,
+    rationale: rationale || '', codeVersion: MSD_CODE_VERSION, actionedAt: Date.now(),
+  };
+  const writeResult = await msdWriteDiscoveryLabFinding(finding);
+  return { ok: true, mergedIntoHypothesisId: registration.hypothesisId, writeResult };
+}
+
+/** Explicit, terminal ACTION for an unsupported hypothesis. Never a delete — the hypothesis and its full evidence trail stay on permanent record. */
+async function msdRetireHypothesis(hypothesisId, rationale){
+  const h = await msdGetHypothesis(hypothesisId);
+  if (!h) return { ok: false, error: 'Unknown hypothesisId: ' + hypothesisId };
+  const finding = {
+    findingId: msdGenerateFindingId(), type: 'hypothesis_retirement', hypothesisId,
+    rationale: rationale || '', codeVersion: MSD_CODE_VERSION, actionedAt: Date.now(),
+  };
+  return { ok: true, writeResult: await msdWriteDiscoveryLabFinding(finding) };
+}
+
+// MOVED IN PHASE 5 to the Discovery Lab store. Both action types live in
+// the same store as the Hypothesis registrations they act on, so this
+// still needs a full-store-minus-index scan across TWO types — an
+// acceptable cost at this store's expected scale (thousands of
+// hypotheses, not millions), unlike the single-type scans elsewhere.
+async function msdGetHypothesisActions(hypothesisId){
+  const all = await msdGetAllDiscoveryLabFindings();
+  return all
+    .filter(f => (f.type === 'hypothesis_retirement' && f.hypothesisId === hypothesisId) || (f.type === 'hypothesis_merge' && (f.sourceHypothesisIds || []).includes(hypothesisId)))
+    .sort((a, b) => a.actionedAt - b.actionedAt);
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 4.3 — Candidate Measurement Registry (Module 2 / Module 4)
+// ────────────────────────────────────────────────────────────────────
+// Sits between Hypothesis and Engineered Feature. Represents "we propose
+// measuring this behaviour THIS way" — mathematically sketched, but not
+// yet a fully specified, implemented feature (that's the Feature
+// Ontology / Module 5's job, and it can only implement what's proposed
+// here — see the revised msdRegisterFeatureOntology above). family is
+// NOT validated against the canonical Feature Family list here — a
+// Candidate Measurement is allowed to propose a genuinely new family
+// (per this programme's own "Custom families may be discovered
+// automatically"); the canonical-list check happens later, once, at
+// Feature Ontology registration, which is the one place a family
+// actually needs to already exist.
+
+async function msdRegisterCandidateMeasurement(candidate){
+  if (!candidate || !candidate.label) return { ok: false, error: 'A candidate measurement requires at least a label.' };
+  if (!candidate.parentHypothesisId) return { ok: false, error: 'parentHypothesisId is required — a Candidate Measurement must derive from a registered Hypothesis (Module 3 precedes Module 2/4).' };
+  const hypothesis = await msdGetHypothesis(candidate.parentHypothesisId);
+  if (!hypothesis) return { ok: false, error: 'parentHypothesisId "' + candidate.parentHypothesisId + '" does not reference a registered hypothesis.' };
+  // Phase 6.5: consistent governance enforcement up the chain — a
+  // retired or merged-away Hypothesis cannot accept new Candidate
+  // Measurements (reuses msdGetHypothesisActions, Phase 4, unchanged).
+  const hypothesisActions = await msdGetHypothesisActions(candidate.parentHypothesisId);
+  if (hypothesisActions.some(a => a.type === 'hypothesis_retirement' || a.type === 'hypothesis_merge')) {
+    return { ok: false, error: 'Hypothesis "' + candidate.parentHypothesisId + '" has been retired or merged away — no new Candidate Measurements may be registered against it.' };
+  }
+
+  const candidateId = 'cand_' + msdSessionId + '_' + msdRandomSuffix();
+  const finding = {
+    findingId: msdGenerateFindingId(), type: 'candidate_measurement_registration', candidateId,
+    label: candidate.label, mathematicalSketch: candidate.mathematicalSketch || '',
+    parentHypothesisId: candidate.parentHypothesisId,
+    proposedFamily: candidate.proposedFamily || null,
+    alternativeMeasurementsConsidered: Array.isArray(candidate.alternativeMeasurementsConsidered) ? candidate.alternativeMeasurementsConsidered.slice() : [],
+    rationale: candidate.rationale || '',
+    codeVersion: MSD_CODE_VERSION, registeredAt: Date.now(),
+  };
+  const writeResult = await msdWriteDiscoveryLabFinding(finding);
+  return { ok: true, candidateId, finding, writeResult };
+}
+
+// MOVED IN PHASE 5 to the Discovery Lab store.
+async function msdGetAllCandidateMeasurements(){
+  const all = await msdGetAllDiscoveryLabFindings('candidate_measurement_registration');
+  return all.sort((a, b) => a.registeredAt - b.registeredAt);
+}
+
+async function msdGetCandidateMeasurement(candidateId){
+  const all = await msdGetAllCandidateMeasurements();
+  return all.find(c => c.candidateId === candidateId) || null;
+}
+
+/** Phase 6.5: indexed lookup — was get-all-and-filter across every candidate measurement in Discovery Lab. */
+async function msdGetCandidateMeasurementsForHypothesis(hypothesisId){
+  return msdGetDiscoveryLabFindingsByIndex('parentHypothesisId', hypothesisId);
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 4.4 — Scientific Evidence Lifecycle (Axis 2) and the Knowledge Graph
+// ────────────────────────────────────────────────────────────────────
+// The 11-stage lifecycle: Observed Behaviour -> Scientific Hypothesis ->
+// Candidate Measurement -> Engineered Feature -> Measured Feature ->
+// Evidence-Supported -> Repeatable -> Verified -> Production ->
+// Deprecated -> Archived. Composed entirely from facts that already
+// exist elsewhere (does a Hypothesis/Candidate/Ontology entry exist; the
+// existing Maturity Engine's candidate/repeatable/verified; the existing
+// Phase 2 action findings) — nothing about evidence maturity is computed
+// twice.
+
+const MSD_EVIDENCE_LIFECYCLE_STAGES = [
+  'Observed Behaviour', 'Scientific Hypothesis', 'Candidate Measurement', 'Engineered Feature',
+  'Measured Feature', 'Evidence-Supported', 'Repeatable', 'Verified', 'Production', 'Deprecated', 'Archived',
+];
+
+/**
+ * opts: { hasHypothesis, hasCandidateMeasurement, hasEngineeredFeature,
+ * hasValidMarketStateValue, maturityLevel ('observation'|'candidate'|
+ * 'repeatable'|'verified'), latestAction ('production_selection'|
+ * 'deprecation'|'archival') }. Every input is caller-supplied, sourced
+ * from the registries/engines that already authoritatively compute each
+ * fact — this function only sequences them.
+ */
+function msdComputeEvidenceLifecycleStage(opts){
+  opts = opts || {};
+  if (!opts.hasHypothesis) return 'Observed Behaviour';
+  if (!opts.hasCandidateMeasurement) return 'Scientific Hypothesis';
+  if (!opts.hasEngineeredFeature) return 'Candidate Measurement';
+  if (!opts.hasValidMarketStateValue) return 'Engineered Feature';
+  if (!opts.maturityLevel || opts.maturityLevel === 'observation') return 'Measured Feature';
+  if (opts.maturityLevel === 'candidate') return 'Evidence-Supported';
+  if (opts.maturityLevel === 'repeatable') return 'Repeatable';
+  if (opts.latestAction === 'production_selection') return 'Production';
+  if (opts.latestAction === 'deprecation') return 'Deprecated';
+  if (opts.latestAction === 'archival') return 'Archived';
+  if (opts.maturityLevel === 'verified') return 'Verified';
+  return 'Evidence-Supported';
+}
+
+/**
+ * The Knowledge Graph view for one Behaviour: every Hypothesis derived
+ * from it, every Candidate Measurement derived from each hypothesis,
+ * every Engineered Feature (Ontology entry) derived from each candidate,
+ * each annotated with its current Evidence Lifecycle stage. Pure,
+ * derived, nothing new stored — supersedes Phase 3's simpler
+ * msdGetBehaviorLineage (still functional, since Ontology entries still
+ * carry a derived parentBehaviorId, but this is the fuller view).
+ * perFeatureStatusInputs: same shape as msdGetBehaviorLineage expects.
+ */
+async function msdGetKnowledgeGraphForBehavior(behaviorId, perFeatureStatusInputs){
+  const behavior = await msdGetBehavior(behaviorId);
+  if (!behavior) return { error: 'Unknown behaviorId: ' + behaviorId };
+
+  const hypotheses = await msdGetHypothesesForBehavior(behaviorId);
+  const allCandidates = await msdGetAllCandidateMeasurements();
+  const allOntology = await msdGetAllFeatureOntologyEntries();
+
+  const hypothesisNodes = hypotheses.map(h => {
+    const candidates = allCandidates.filter(c => c.parentHypothesisId === h.hypothesisId);
+    const candidateNodes = candidates.map(c => {
+      const ontologyEntries = allOntology.filter(e => e.parentCandidateMeasurementId === c.candidateId);
+      const featureNodes = ontologyEntries.map(e => {
+        const inputs = (perFeatureStatusInputs || {})[e.featureKey] || {};
+        return {
+          featureKey: e.featureKey,
+          family: e.family,
+          generationNumber: e.generationNumber,
+          evidenceLifecycleStage: msdComputeEvidenceLifecycleStage(Object.assign(
+            { hasHypothesis: true, hasCandidateMeasurement: true, hasEngineeredFeature: true }, inputs,
+          )),
+        };
+      });
+      return { candidateId: c.candidateId, label: c.label, mathematicalSketch: c.mathematicalSketch, features: featureNodes };
+    });
+    return { hypothesisId: h.hypothesisId, label: h.label, statement: h.statement, candidates: candidateNodes };
+  });
+
+  return { behavior, hypotheses: hypothesisNodes };
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 6 — Discovery Competition & Measurement Redundancy Competition
+// ══════════════════════════════════════════════════════════════════════
+// Continuing the sequencing set out at the end of Phase 5: this phase
+// builds items 2 and 3 of the requested strengthening. Both reuse
+// existing machinery end-to-end — the Knowledge Graph traversal for
+// Discovery Competition, msdGetDiscoverySummaries (the exact function
+// production readers already use) for Measurement Competition — nothing
+// statistical is reimplemented. Both return RECOMMENDATIONS; neither
+// calls msdPromoteToProduction/msdDeprecateFeature/msdRetireHypothesis
+// itself. A competition result is a scientific judgment; executing it
+// (actually promoting or deprecating something) stays a separate,
+// deliberate governance action, exactly as those functions already work.
+
+// ────────────────────────────────────────────────────────────────────
+// 6.1 — Discovery Competition
+// ────────────────────────────────────────────────────────────────────
+// Classifies every Hypothesis competing to explain one Behaviour as
+// Surviving, Requires Refinement, Retired, or Merged — WITHOUT inventing
+// a new automatic-failure heuristic this project has no empirical basis
+// to calibrate yet (there is no real data to tell us how many
+// experiments-without-evidence should count as "failed"). Retired/Merged
+// reuse the existing, already-real hypothesis actions from Phase 4.
+// Surviving vs. Requires Refinement is derived purely from whether ANY
+// descendant feature (via this hypothesis's Candidate Measurements) has
+// reached Evidence-Supported or later in the Evidence Lifecycle —
+// reusing msdComputeEvidenceLifecycleStage via the Knowledge Graph
+// traversal, not a new classifier.
+
+/** Explicit governance action (Phase 4's action pattern) takes precedence over derived evidence in the output label — if a hypothesis was explicitly retired despite having a promising descendant feature, that contradiction is worth surfacing as "retired" (an explicit human/governance call already made), not silently overridden by an automatic "surviving" derived from data that predates or was judged insufficient at the time of that decision. */
+async function msdRunDiscoveryCompetition(behaviorId, perFeatureStatusInputs){
+  const graph = await msdGetKnowledgeGraphForBehavior(behaviorId, perFeatureStatusInputs);
+  if (graph.error) return graph;
+
+  const stageRank = (s) => MSD_EVIDENCE_LIFECYCLE_STAGES.indexOf(s);
+  const results = [];
+  for (const h of graph.hypotheses) {
+    const actions = await msdGetHypothesisActions(h.hypothesisId);
+    const wasRetired = actions.some(a => a.type === 'hypothesis_retirement');
+    const wasMergedAway = actions.some(a => a.type === 'hypothesis_merge' && (a.sourceHypothesisIds || []).includes(h.hypothesisId));
+
+    const allFeatureStages = h.candidates.flatMap(c => c.features.map(f => f.evidenceLifecycleStage));
+    const bestStage = allFeatureStages.length
+      ? allFeatureStages.reduce((best, s) => (stageRank(s) > stageRank(best) ? s : best), allFeatureStages[0])
+      : null;
+
+    let competitionStatus;
+    if (wasRetired) competitionStatus = 'retired';
+    else if (wasMergedAway) competitionStatus = 'merged';
+    else if (bestStage && stageRank(bestStage) >= stageRank('Evidence-Supported')) competitionStatus = 'surviving';
+    else if (bestStage) competitionStatus = 'requires_refinement';
+    else competitionStatus = 'untested'; // no descendant feature has reached Engineered Feature yet — no entry submitted, not a verdict
+
+    results.push({ hypothesisId: h.hypothesisId, label: h.label, competitionStatus, descendantFeatureCount: allFeatureStages.length, bestStage });
+  }
+  return { behaviorId, hypotheses: results };
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 6.2 — Measurement Redundancy Competition
+// ────────────────────────────────────────────────────────────────────
+// Ranks a group of competing featureKeys — typically every measurement
+// proposed for one Behaviour or one Hypothesis — using evidence ALREADY
+// computed by msdGetDiscoverySummaries: evidenceStabilityScore
+// (stability), supportingExperimentIds.length (a reproducibility proxy —
+// more independent experiments backing a finding is itself evidence of
+// reproducibility), and maturityLevel (has it actually cleared the
+// FDR-corrected significance bar). No new statistics are invented here.
+// Assumes the discoveryKey naming convention 'single_feature:' +
+// featureKey, which is exactly what the existing Single Feature analyzer
+// already uses — a featureKey with no matching discoveryKey yet simply
+// has no evidence to rank on, and is reported as such, never silently
+// dropped from the result.
+
+/** Which featureKeys were engineered directly under one hypothesis — trivial, reuses the parentHypothesisId Phase 4 already denormalizes onto every Feature Ontology entry. */
+async function msdGetFeatureKeysForHypothesis(hypothesisId){
+  const all = await msdGetAllFeatureOntologyEntries();
+  return all.filter(e => e.parentHypothesisId === hypothesisId).map(e => e.featureKey);
+}
+
+/** Every featureKey descending from one behaviour, across every hypothesis and candidate measurement under it — reuses the parentBehaviorId Phase 4 denormalizes the same way. */
+async function msdGetFeatureKeysForBehavior(behaviorId){
+  const all = await msdGetAllFeatureOntologyEntries();
+  return all.filter(e => e.parentBehaviorId === behaviorId).map(e => e.featureKey);
+}
+
+const MSD_MEASUREMENT_MATURITY_RANK = { observation: 0, candidate: 1, repeatable: 2, verified: 3 };
+
+/**
+ * Ranks competing featureKeys and recommends a winner plus retirement
+ * candidates among CO-VERIFIED competitors only — it never recommends
+ * retiring something that hasn't even reached Verified, since a
+ * not-yet-verified measurement isn't a proven redundant loser, it's just
+ * unproven, and those are different scientific judgments.
+ * summariesOverride exists for testing (and for any future caller that
+ * already has a fresh summaries list and wants to avoid recomputing
+ * it) — production callers should omit it and let this read the real,
+ * live discovery summaries via msdGetDiscoverySummaries.
+ */
+async function msdRunMeasurementCompetition(featureKeys, summariesOverride){
+  const summaries = summariesOverride || await msdGetDiscoverySummaries();
+  const byKey = {};
+  summaries.forEach(s => { byKey[s.discoveryKey] = s; });
+
+  // Phase 6.5 (Measurement Competition Governance): each entrant's most
+  // recent explicit governance action (production_selection/deprecation/
+  // archival — msdGetLifecycleActions, Phase 2, unchanged) is looked up
+  // alongside its statistical summary, the same principle Discovery
+  // Competition already enforces for hypotheses.
+  const entrants = [];
+  for (const featureKey of featureKeys) {
+    const summary = byKey['single_feature:' + featureKey];
+    const governance = await msdCheckLifecycleGovernanceForFeature(featureKey);
+    if (!summary) { entrants.push({ featureKey, hasEvidence: false, governanceStatus: governance.status }); continue; }
+    entrants.push({
+      featureKey, hasEvidence: true,
+      maturityLevel: summary.maturityLevel,
+      evidenceStabilityScore: summary.evidenceStabilityScore,
+      reproducibilityCount: summary.supportingExperimentIds.length,
+      evidenceCount: summary.evidenceCount,
+      governanceStatus: governance.status, // null | 'production_selection' | 'deprecation' | 'archival'
+    });
+  }
+
+  const ranked = entrants.slice().sort((a, b) => {
+    if (!a.hasEvidence && !b.hasEvidence) return 0;
+    if (!a.hasEvidence) return 1;
+    if (!b.hasEvidence) return -1;
+    const maturityDiff = (MSD_MEASUREMENT_MATURITY_RANK[b.maturityLevel] || 0) - (MSD_MEASUREMENT_MATURITY_RANK[a.maturityLevel] || 0);
+    if (maturityDiff !== 0) return maturityDiff;
+    const stabilityDiff = (b.evidenceStabilityScore || 0) - (a.evidenceStabilityScore || 0);
+    if (stabilityDiff !== 0) return stabilityDiff;
+    return (b.reproducibilityCount || 0) - (a.reproducibilityCount || 0);
+  });
+
+  // Governance overrides derived ranking: an explicitly deprecated or
+  // archived feature can never win, regardless of how strong its
+  // statistics look — the same "governance always overrides statistical
+  // status" principle enforced everywhere else in this lab.
+  const verifiedRanked = ranked.filter(e => e.hasEvidence && e.maturityLevel === 'verified' && e.governanceStatus !== 'deprecation' && e.governanceStatus !== 'archival');
+  const winner = verifiedRanked.length ? verifiedRanked[0] : null;
+  const recommendedRetirements = winner
+    ? verifiedRanked.slice(1).map(e => e.featureKey)
+    : [];
+
+  return { entrants: ranked, winner: winner ? winner.featureKey : null, recommendedRetirements };
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 6.5 — Scientific Architecture Consolidation & Traceability
+// ══════════════════════════════════════════════════════════════════════
+// No new scientific capability here — this phase closes the five gaps
+// the pre-Phase-7 whole-system audit found, and nothing else. Every
+// function below reuses an existing store, existing action pattern, or
+// existing getter; nothing statistical is introduced.
+//
+// OPERATIONAL CONSEQUENCE, stated up front rather than buried: section
+// 6.5.1 makes Evidence <-> Feature traceability a HARD PRECONDITION for
+// recording ANY evidence. Since zero Feature Ontology entries exist for
+// the classical indicator set (Generation 1 was never registered — see
+// Debt Register R-009), this means the pre-existing Statistical
+// Discovery Engine's four analyzers will record ZERO evidence until
+// Generation 1, a Behaviour, a Hypothesis, and a Candidate Measurement
+// are registered for each feature currently in use. This is intentional
+// — "Evidence should never exist without a complete scientific lineage"
+// — but it is a real, immediate operational change, not a
+// forward-looking one, and Njanja should know before running an
+// experiment expecting evidence to appear.
+
+// ────────────────────────────────────────────────────────────────────
+// 6.5.1 — Evidence <-> Feature Traceability
+// ────────────────────────────────────────────────────────────────────
+// Replaces the discoveryKey <-> featureKey STRING CONVENTION with a
+// validated relationship: every discoveryKey is parsed back to its
+// underlying featureKey(s) using each analyzer's OWN existing key format
+// (reused, not reimplemented), each featureKey is checked against a REAL
+// registered Feature Ontology entry, and the full lineage is denormalized
+// permanently onto the evidence record itself.
+
+/**
+ * market_state clusters conservatively trace to every dimension used in
+ * clustering (MSD_CLUSTER_FEATURE_KEYS, the existing fixed constant),
+ * since the compact canonical fingerprint doesn't reliably reconstruct
+ * which subset was "eligible" without re-parsing logic this function
+ * deliberately does not duplicate — over-inclusive, never under.
+ */
+function msdExtractFeatureKeysFromDiscoveryKey(discoveryType, discoveryKey){
+  if (!discoveryType || !discoveryKey) return [];
+  if (discoveryType === 'single_feature' || discoveryType === 'threshold') {
+    return [discoveryKey.slice(discoveryType.length + 1)];
+  }
+  if (discoveryType === 'combo') {
+    return discoveryKey.slice('combo:'.length).split('+').filter(Boolean);
+  }
+  if (discoveryType === 'market_state') {
+    return (typeof MSD_CLUSTER_FEATURE_KEYS !== 'undefined' && Array.isArray(MSD_CLUSTER_FEATURE_KEYS)) ? MSD_CLUSTER_FEATURE_KEYS.slice() : [];
+  }
+  return [];
+}
+
+/**
+ * Validates every feature key underlying one piece of evidence has a
+ * registered, non-rejected Feature Ontology entry, and returns the full
+ * de-duplicated lineage to denormalize. Rejects if ANY underlying
+ * feature lacks an entry — evidence must never exist without a complete
+ * scientific lineage, no partial credit.
+ */
+async function msdResolveEvidenceLineage(discoveryType, discoveryKey){
+  const featureKeys = msdExtractFeatureKeysFromDiscoveryKey(discoveryType, discoveryKey);
+  if (!featureKeys.length) {
+    return { ok: false, error: 'Could not determine which feature(s) discoveryKey "' + discoveryKey + '" (type ' + discoveryType + ') traces to.' };
+  }
+  const ontologyEntries = [];
+  for (const fk of featureKeys) {
+    const entry = await msdGetFeatureOntology(fk);
+    if (!entry) {
+      return { ok: false, error: 'Feature "' + fk + '" (underlying discoveryKey "' + discoveryKey + '") has no registered Feature Ontology entry — evidence cannot be recorded without a complete scientific lineage. Register it via msdRegisterFeatureOntology first.' };
+    }
+    ontologyEntries.push(entry);
+  }
+  return {
+    ok: true,
+    featureKeys,
+    behaviorIds: [...new Set(ontologyEntries.map(e => e.parentBehaviorId))],
+    hypothesisIds: [...new Set(ontologyEntries.map(e => e.parentHypothesisId))],
+    candidateMeasurementIds: [...new Set(ontologyEntries.map(e => e.parentCandidateMeasurementId))],
+    generationNumbers: [...new Set(ontologyEntries.map(e => e.generationNumber))],
+    families: [...new Set(ontologyEntries.map(e => e.family))],
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 6.5.2 — Behaviour Lifecycle (new — Behaviour had none before)
+// ────────────────────────────────────────────────────────────────────
+
+async function msdRetireBehavior(behaviorId, rationale){
+  const b = await msdGetBehavior(behaviorId);
+  if (!b) return { ok: false, error: 'Unknown behaviorId: ' + behaviorId };
+  const finding = { findingId: msdGenerateFindingId(), type: 'behavior_retirement', behaviorId, rationale: rationale || '', codeVersion: MSD_CODE_VERSION, actionedAt: Date.now() };
+  return { ok: true, writeResult: await msdWriteDiscoveryLabFinding(finding) };
+}
+
+async function msdArchiveBehavior(behaviorId, rationale){
+  const b = await msdGetBehavior(behaviorId);
+  if (!b) return { ok: false, error: 'Unknown behaviorId: ' + behaviorId };
+  const finding = { findingId: msdGenerateFindingId(), type: 'behavior_archival', behaviorId, rationale: rationale || '', codeVersion: MSD_CODE_VERSION, actionedAt: Date.now() };
+  return { ok: true, writeResult: await msdWriteDiscoveryLabFinding(finding) };
+}
+
+async function msdGetBehaviorActions(behaviorId){
+  const all = await msdGetAllDiscoveryLabFindings();
+  return all.filter(f => (f.type === 'behavior_retirement' || f.type === 'behavior_archival') && f.behaviorId === behaviorId).sort((a, b) => a.actionedAt - b.actionedAt);
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 6.5.3 — Candidate Measurement Lifecycle (new — had none before)
+// ────────────────────────────────────────────────────────────────────
+
+async function msdRetireCandidateMeasurement(candidateId, rationale){
+  const c = await msdGetCandidateMeasurement(candidateId);
+  if (!c) return { ok: false, error: 'Unknown candidateId: ' + candidateId };
+  const finding = { findingId: msdGenerateFindingId(), type: 'candidate_measurement_retirement', candidateId, rationale: rationale || '', codeVersion: MSD_CODE_VERSION, actionedAt: Date.now() };
+  return { ok: true, writeResult: await msdWriteDiscoveryLabFinding(finding) };
+}
+
+async function msdSupersedeCandidateMeasurement(candidateId, rationale, supersededByCandidateId){
+  const c = await msdGetCandidateMeasurement(candidateId);
+  if (!c) return { ok: false, error: 'Unknown candidateId: ' + candidateId };
+  if (supersededByCandidateId) {
+    const s = await msdGetCandidateMeasurement(supersededByCandidateId);
+    if (!s) return { ok: false, error: 'supersededByCandidateId "' + supersededByCandidateId + '" does not reference a registered Candidate Measurement.' };
+  }
+  const finding = { findingId: msdGenerateFindingId(), type: 'candidate_measurement_supersession', candidateId, supersededBy: supersededByCandidateId || null, rationale: rationale || '', codeVersion: MSD_CODE_VERSION, actionedAt: Date.now() };
+  return { ok: true, writeResult: await msdWriteDiscoveryLabFinding(finding) };
+}
+
+async function msdArchiveCandidateMeasurement(candidateId, rationale){
+  const c = await msdGetCandidateMeasurement(candidateId);
+  if (!c) return { ok: false, error: 'Unknown candidateId: ' + candidateId };
+  const finding = { findingId: msdGenerateFindingId(), type: 'candidate_measurement_archival', candidateId, rationale: rationale || '', codeVersion: MSD_CODE_VERSION, actionedAt: Date.now() };
+  return { ok: true, writeResult: await msdWriteDiscoveryLabFinding(finding) };
+}
+
+async function msdGetCandidateMeasurementActions(candidateId){
+  const all = await msdGetAllDiscoveryLabFindings();
+  return all.filter(f => (f.type === 'candidate_measurement_retirement' || f.type === 'candidate_measurement_supersession' || f.type === 'candidate_measurement_archival') && f.candidateId === candidateId).sort((a, b) => a.actionedAt - b.actionedAt);
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 6.5.4 — Consistent governance enforcement UP the chain
+// ────────────────────────────────────────────────────────────────────
+// The registries already enforced "does a parent EXIST" — now they also
+// enforce "is the parent still SCIENTIFICALLY ACTIVE", closing the exact
+// asymmetry the audit found, applied uniformly at every level rather
+// than only at Promotion (6.5.5) and Measurement Competition (6.5.6).
+
+
+/** Checks whether ANY hypothesis underlying a discoveryKey's recorded evidence lineage has been retired or merged away since that evidence was gathered. Reuses msdGetHypothesisActions (Phase 4) directly — no new governance vocabulary invented. */
+async function msdCheckUpstreamGovernanceForDiscoveryKey(discoveryKey){
+  const allEvidence = await msdGetAllDiscoveryEvidence();
+  const relevant = allEvidence.filter(e => e.discoveryKey === discoveryKey);
+  if (!relevant.length) return { ok: true, blockingHypothesisIds: [] };
+  const hypothesisIds = [...new Set(relevant.flatMap(e => e.hypothesisIds || []))];
+  const blocking = [];
+  for (const hid of hypothesisIds) {
+    const actions = await msdGetHypothesisActions(hid);
+    if (actions.some(a => a.type === 'hypothesis_retirement' || a.type === 'hypothesis_merge')) blocking.push(hid);
+  }
+  return { ok: blocking.length === 0, blockingHypothesisIds: blocking };
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 6.5.6 — Measurement Competition Governance
+// ────────────────────────────────────────────────────────────────────
+// NOTE ON SCOPE: this reuses the EXACT SAME 'single_feature:' +
+// featureKey discoveryKey convention msdRunMeasurementCompetition
+// already assumed before this phase (Debt Register R-021) — that
+// limitation is NOT fixed here, since fixing which analyzer-prefix is
+// checked is a separate, larger, already-logged task, and this phase's
+// job is governance precedence, not evidence-source completeness.
+
+/** Looks up the most recent explicit governance action for one featureKey's evidence, via the exact SAME msdGetLifecycleActions (Phase 2) every other governance check already uses. */
+async function msdCheckLifecycleGovernanceForFeature(featureKey){
+  const discoveryKey = 'single_feature:' + featureKey;
+  const actions = await msdGetLifecycleActions(discoveryKey);
+  if (!actions.length) return { status: null };
+  return { status: actions[actions.length - 1].type };
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 6.5.7 — Scientific Traceability Audit
+// ────────────────────────────────────────────────────────────────────
+// Read-only, whole-system integrity check. Never repairs anything —
+// repair is always a deliberate, separate, human-invoked action, same
+// posture as every other governance function in this lab. Safe to run
+// at any time, including against an entirely empty system.
+
+async function msdRunScientificTraceabilityAudit(){
+  const behaviors = await msdGetAllBehaviors();
+  const hypotheses = await msdGetAllHypotheses();
+  const candidates = await msdGetAllCandidateMeasurements();
+  const ontologyEntries = await msdGetAllFeatureOntologyEntries();
+  const evidence = await msdGetAllDiscoveryEvidence();
+
+  const behaviorIds = new Set(behaviors.map(b => b.behaviorId));
+  const hypothesisIds = new Set(hypotheses.map(h => h.hypothesisId));
+  const candidateIds = new Set(candidates.map(c => c.candidateId));
+  const featureKeysWithOntology = new Set(ontologyEntries.map(e => e.featureKey));
+
+  const brokenHypotheses = hypotheses.filter(h => !behaviorIds.has(h.parentBehaviorId)).map(h => ({ hypothesisId: h.hypothesisId, missingBehaviorId: h.parentBehaviorId }));
+  const brokenCandidates = candidates.filter(c => !hypothesisIds.has(c.parentHypothesisId)).map(c => ({ candidateId: c.candidateId, missingHypothesisId: c.parentHypothesisId }));
+  const brokenOntology = ontologyEntries.filter(e => !candidateIds.has(e.parentCandidateMeasurementId)).map(e => ({ featureKey: e.featureKey, missingCandidateId: e.parentCandidateMeasurementId }));
+
+  const evidenceWithoutOntology = [];
+  evidence.forEach(ev => {
+    const underlying = (ev.underlyingFeatureKeys && ev.underlyingFeatureKeys.length) ? ev.underlyingFeatureKeys : msdExtractFeatureKeysFromDiscoveryKey(ev.discoveryType, ev.discoveryKey);
+    underlying.forEach(fk => {
+      if (!featureKeysWithOntology.has(fk)) evidenceWithoutOntology.push({ discoveryKey: ev.discoveryKey, missingFeatureKey: fk });
+    });
+  });
+
+  const orphanedBehaviors = behaviors.filter(b => !hypotheses.some(h => h.parentBehaviorId === b.behaviorId)).map(b => b.behaviorId);
+  const orphanedCandidates = candidates.filter(c => !ontologyEntries.some(e => e.parentCandidateMeasurementId === c.candidateId)).map(c => c.candidateId);
+
+  const isClean = !brokenHypotheses.length && !brokenCandidates.length && !brokenOntology.length && !evidenceWithoutOntology.length;
+
+  return {
+    isClean,
+    brokenHypotheses, brokenCandidates, brokenOntology, evidenceWithoutOntology,
+    orphanedBehaviors, orphanedCandidates, // orphans are informational, not errors — "not yet extended" isn't a lineage break
+    counts: { behaviors: behaviors.length, hypotheses: hypotheses.length, candidates: candidates.length, ontologyEntries: ontologyEntries.length, evidenceRecords: evidence.length },
+    auditedAt: Date.now(),
+  };
+}
+
+/** Permanent snapshot, same posture as every other calibration/competition report in this lab. */
+async function msdRecordTraceabilityAuditReport(auditResult){
+  const finding = {
+    findingId: msdGenerateFindingId(), type: 'traceability_audit_report',
+    isClean: auditResult.isClean,
+    brokenCount: auditResult.brokenHypotheses.length + auditResult.brokenCandidates.length + auditResult.brokenOntology.length + auditResult.evidenceWithoutOntology.length,
+    counts: auditResult.counts, codeVersion: MSD_CODE_VERSION, recordedAt: auditResult.auditedAt,
+  };
+  return { ok: true, writeResult: await msdWriteFinding(finding) };
+}
+
+async function msdGetTraceabilityAuditReports(){
+  const all = await msdGetAllFindings();
+  return all.filter(f => f.type === 'traceability_audit_report').sort((a, b) => b.recordedAt - a.recordedAt);
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 7 — Behaviour Discovery Metrics & Scientific Memory
+// ══════════════════════════════════════════════════════════════════════
+// Both sections are pure, derived reporting layers over registries and
+// actions that already exist — no new storage, no new statistics.
+// Consistent with Design & Implementation Mode: both are fully buildable
+// and testable now, without real Market State data, exactly like
+// Discovery Competition and Measurement Competition were. What they
+// REPORT ON will be empty until the classical feature set is registered
+// (Debt Register R-022) — that gate is about trusting conclusions, not
+// about whether this infrastructure can be built.
+
+// ────────────────────────────────────────────────────────────────────
+// 7.1 — Behaviour Discovery Metrics
+// ────────────────────────────────────────────────────────────────────
+// Quantifies which Behaviours consistently yield valuable Hypotheses.
+// Reuses msdRunDiscoveryCompetition (Phase 6) for the survival/refinement/
+// retired/merged/untested breakdown, and msdComputeEvidenceLifecycleStage
+// (Phase 4) for the feature-level rollup — nothing is recomputed that
+// either of those already computes authoritatively.
+//
+// DELIBERATELY NOT IMPLEMENTED: "Knowledge gain" and "evidence growth
+// rate" as the original wishlist named them. Both are meaningful only as
+// a trend over accumulated real evidence across time — with zero real
+// experiments run, a growth-rate metric would be reporting the slope of
+// a flat line. Building a metric now that can't mean anything until real
+// data exists would be the same mistake this project has avoided at
+// every other phase (see Debt Register).
+
+async function msdComputeBehaviorDiscoveryMetrics(behaviorId, perFeatureStatusInputs){
+  const behavior = await msdGetBehavior(behaviorId);
+  if (!behavior) return { error: 'Unknown behaviorId: ' + behaviorId };
+
+  const competition = await msdRunDiscoveryCompetition(behaviorId, perFeatureStatusInputs);
+  if (competition.error) return competition;
+
+  const hypothesesTotal = competition.hypotheses.length;
+  const countByStatus = (status) => competition.hypotheses.filter(h => h.competitionStatus === status).length;
+  const surviving = countByStatus('surviving');
+
+  const allCandidates = await msdGetAllCandidateMeasurements();
+  const hypothesisIds = new Set(competition.hypotheses.map(h => h.hypothesisId));
+  const candidatesUnderBehavior = allCandidates.filter(c => hypothesisIds.has(c.parentHypothesisId));
+
+  const allOntology = await msdGetAllFeatureOntologyEntries();
+  const featuresUnderBehavior = allOntology.filter(e => e.parentBehaviorId === behaviorId);
+  const featureStages = featuresUnderBehavior.map(e => {
+    const inputs = (perFeatureStatusInputs || {})[e.featureKey] || {};
+    return msdComputeEvidenceLifecycleStage(Object.assign({ hasHypothesis: true, hasCandidateMeasurement: true, hasEngineeredFeature: true }, inputs));
+  });
+  const verifiedOrBeyond = featureStages.filter(s => s === 'Verified' || s === 'Production').length;
+
+  return {
+    behaviorId, behaviorLabel: behavior.label,
+    hypothesesProposed: hypothesesTotal,
+    hypothesisSurvivalRate: hypothesesTotal ? surviving / hypothesesTotal : null,
+    hypothesesRequiringRefinement: countByStatus('requires_refinement'),
+    hypothesesRetired: countByStatus('retired'),
+    hypothesesMerged: countByStatus('merged'),
+    hypothesesUntested: countByStatus('untested'),
+    candidateMeasurementsProposed: candidatesUnderBehavior.length,
+    featuresEngineered: featuresUnderBehavior.length,
+    measurementSurvivalRate: featuresUnderBehavior.length ? verifiedOrBeyond / featuresUnderBehavior.length : null,
+    // "Discovery efficiency": the most literal, defensible reading of
+    // the term without inventing a new statistic — verified features
+    // yielded per hypothesis proposed. Null, not zero, when nothing has
+    // been proposed yet, so "no hypotheses tried" is never confused with
+    // "hypotheses tried and none worked."
+    discoveryEfficiency: hypothesesTotal ? verifiedOrBeyond / hypothesesTotal : null,
+    computedAt: Date.now(),
+  };
+}
+
+/** Permanent snapshot, same posture as every other calibration/competition report — a scientific artifact in its own right, even though the underlying numbers can still change as more evidence accumulates. */
+async function msdRecordBehaviorMetricsReport(metrics){
+  const finding = {
+    findingId: msdGenerateFindingId(), type: 'behavior_metrics_report',
+    behaviorId: metrics.behaviorId, behaviorLabel: metrics.behaviorLabel,
+    hypothesesProposed: metrics.hypothesesProposed, hypothesisSurvivalRate: metrics.hypothesisSurvivalRate,
+    candidateMeasurementsProposed: metrics.candidateMeasurementsProposed, featuresEngineered: metrics.featuresEngineered,
+    measurementSurvivalRate: metrics.measurementSurvivalRate, discoveryEfficiency: metrics.discoveryEfficiency,
+    codeVersion: MSD_CODE_VERSION, recordedAt: metrics.computedAt,
+  };
+  return { ok: true, writeResult: await msdWriteFinding(finding) };
+}
+
+async function msdGetBehaviorMetricsReports(behaviorId){
+  const all = await msdGetAllFindings();
+  return all.filter(f => f.type === 'behavior_metrics_report' && f.behaviorId === behaviorId).sort((a, b) => a.recordedAt - b.recordedAt);
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 7.2 — Scientific Memory
+// ────────────────────────────────────────────────────────────────────
+// A permanent, searchable, unified record of every failed or superseded
+// idea — reusing every append-only rejection/supersession action already
+// built (Phases 2, 4, 6.5) rather than creating a new store. Pure,
+// derived, read-only, exactly like the Knowledge Graph: nothing new is
+// ever written here, it only composes what already exists.
+
+const MSD_SCIENTIFIC_MEMORY_TYPES = [
+  'hypothesis_retirement', 'hypothesis_merge',
+  'candidate_measurement_retirement', 'candidate_measurement_supersession', 'candidate_measurement_archival',
+  'behavior_retirement', 'behavior_archival',
+  'deprecation', 'archival',
+];
+
+async function msdGetScientificMemory(){
+  const discoveryLabFindings = await msdGetAllDiscoveryLabFindings();
+  const engineeringLabFindings = await msdGetAllEngineeringLabFindings();
+  const sharedFindings = await msdGetAllFindings();
+
+  const all = discoveryLabFindings.concat(engineeringLabFindings, sharedFindings)
+    .filter(f => MSD_SCIENTIFIC_MEMORY_TYPES.includes(f.type));
+
+  const entries = all.map(f => ({
+    memoryId: f.findingId,
+    kind: f.type,
+    subjectId: f.behaviorId || f.hypothesisId || f.candidateId || f.discoveryKey || null,
+    rationale: f.rationale || '',
+    recordedAt: f.actionedAt || f.recordedAt || null,
+  })).sort((a, b) => (a.recordedAt || 0) - (b.recordedAt || 0));
+
+  return { entries, count: entries.length };
+}
+
+/** Simple substring search over rationale and subjectId — deliberately not a new indexing scheme, since Scientific Memory's entire value is being ONE place to look, not a fast one; entries number in the hundreds/thousands at the scale this lab targets, not millions. */
+async function msdSearchScientificMemory(query){
+  const { entries } = await msdGetScientificMemory();
+  const q = (query || '').toLowerCase().trim();
+  if (!q) return entries;
+  return entries.filter(e => (e.rationale || '').toLowerCase().includes(q) || (e.subjectId || '').toLowerCase().includes(q) || (e.kind || '').toLowerCase().includes(q));
+}
+
+/** Every recorded rejection/supersession for one specific subject (a behaviorId, hypothesisId, candidateId, or discoveryKey) — the "has this exact thing been tried and rejected before" lookup Scientific Memory exists to answer. */
+async function msdGetScientificMemoryForSubject(subjectId){
+  const { entries } = await msdGetScientificMemory();
+  return entries.filter(e => e.subjectId === subjectId);
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// GENERATION 1 BOOTSTRAP — Classical Market Measurements
+// ══════════════════════════════════════════════════════════════════════
+// Registers the full Behaviour -> Hypothesis -> Candidate Measurement ->
+// Feature Ontology chain for every feature the v1 dataset already
+// computes (indSnapshot's 21 fields), so the Statistical Discovery
+// Engine can record evidence again (Debt Register R-022). Every
+// Behaviour/Hypothesis groups features by genuine shared mechanism, not
+// by convenience — five behaviours, not twenty-one, because that's how
+// many distinct market phenomena these 21 numbers actually represent.
+// Idempotent: safe to call more than once — every registry already
+// refuses a duplicate, so a second run reports what already existed
+// rather than erroring out or duplicating anything.
+
+const MSD_GEN1_FEATURE_DEFINITIONS = [
+  // ── Behaviour: Trend / Directional Strength Dynamics ──
+  { featureKey: 'adx', behaviourGroup: 'trend_strength', family: 'Regime Measurements', units: 'index (0-100)', lookbackWindow: 14,
+    mathematicalDefinition: 'Average Directional Index: 14-period Wilder-smoothed average of DX, where DX = 100 * |+DI - -DI| / (+DI + -DI).',
+    scientificInterpretation: 'Magnitude of directional trend strength, independent of direction.',
+    knownFailureConditions: 'Undefined/unstable when +DI and -DI are both near zero (no directional movement at all).' },
+  { featureKey: 'pdi', behaviourGroup: 'trend_strength', family: 'Regime Measurements', units: 'index (0-100)', lookbackWindow: 14,
+    mathematicalDefinition: '+DI: 14-period Wilder-smoothed positive directional movement, normalized by smoothed True Range, ×100.',
+    scientificInterpretation: 'Strength of upward directional pressure specifically.',
+    knownFailureConditions: 'Noisy in low-volatility, range-bound conditions where true range itself is small.' },
+  { featureKey: 'ndi', behaviourGroup: 'trend_strength', family: 'Regime Measurements', units: 'index (0-100)', lookbackWindow: 14,
+    mathematicalDefinition: '-DI: 14-period Wilder-smoothed negative directional movement, normalized by smoothed True Range, ×100.',
+    scientificInterpretation: 'Strength of downward directional pressure specifically.',
+    knownFailureConditions: 'Same as +DI — noisy when true range is small.' },
+
+  // ── Behaviour: Momentum Dynamics ──
+  { featureKey: 'rsi', behaviourGroup: 'momentum', family: 'Behavioural Measurements', units: 'index (0-100)', lookbackWindow: 14,
+    mathematicalDefinition: 'Relative Strength Index: 100 - 100/(1+RS), where RS = average gain / average loss over 14 periods.',
+    scientificInterpretation: 'Momentum extremity — how far recent price change has run relative to its own recent history.',
+    knownFailureConditions: 'Can remain in overbought/oversold territory for extended periods during strong trends, producing misleading mean-reversion signals.' },
+  { featureKey: 'macd', behaviourGroup: 'momentum', family: 'Behavioural Measurements', units: 'price units', lookbackWindow: 26,
+    mathematicalDefinition: 'MACD line: 12-period EMA minus 26-period EMA of price.',
+    scientificInterpretation: 'Absolute momentum: divergence between a fast and slow trend estimate.',
+    knownFailureConditions: 'Scale depends on absolute price level, not directly comparable across instruments or regimes without normalization.' },
+  { featureKey: 'macdSig', behaviourGroup: 'momentum', family: 'Behavioural Measurements', units: 'price units', lookbackWindow: 35,
+    mathematicalDefinition: 'MACD signal line: 9-period EMA of the MACD line.',
+    scientificInterpretation: 'Smoothed reference for the MACD line, used to gauge momentum turning points.',
+    knownFailureConditions: 'Lags the MACD line itself by construction — inherently a delayed measurement.' },
+  { featureKey: 'macdHist', behaviourGroup: 'momentum', family: 'Behavioural Measurements', units: 'price units', lookbackWindow: 35,
+    mathematicalDefinition: 'MACD histogram: MACD line minus its signal line.',
+    scientificInterpretation: 'Rate of change of momentum itself — accelerating or decelerating trend.',
+    knownFailureConditions: 'Same scale-dependency issue as the MACD line it is derived from.' },
+  { featureKey: 'cci', behaviourGroup: 'momentum', family: 'Behavioural Measurements', units: 'index (unbounded, typically ±100-200)', lookbackWindow: 20,
+    mathematicalDefinition: 'Commodity Channel Index: (Typical Price - 20-period SMA of Typical Price) / (0.015 * mean absolute deviation).',
+    scientificInterpretation: 'How far current price sits from its recent average, scaled by typical deviation.',
+    knownFailureConditions: 'The 0.015 constant is a historical convention (assumes ~70-80% of values fall in ±100) with no special justification for this instrument.' },
+  { featureKey: 'stochK', behaviourGroup: 'momentum', family: 'Behavioural Measurements', units: 'index (0-100)', lookbackWindow: 14,
+    mathematicalDefinition: 'Stochastic %K: 100 * (Close - 14-period Low) / (14-period High - 14-period Low).',
+    scientificInterpretation: 'Position of the current close within its recent trading range.',
+    knownFailureConditions: 'Ill-defined when the 14-period range collapses to near zero (extremely low volatility).' },
+  { featureKey: 'stochD', behaviourGroup: 'momentum', family: 'Behavioural Measurements', units: 'index (0-100)', lookbackWindow: 16,
+    mathematicalDefinition: 'Stochastic %D: 3-period SMA of %K.',
+    scientificInterpretation: 'Smoothed version of %K, used to reduce noise in range-position readings.',
+    knownFailureConditions: 'Inherits %K\'s ill-defined behavior in near-zero-range conditions, with added lag.' },
+  { featureKey: 'roc', behaviourGroup: 'momentum', family: 'Behavioural Measurements', units: 'percent', lookbackWindow: 10,
+    mathematicalDefinition: 'Rate of Change: 100 * (Close - Close[n periods ago]) / Close[n periods ago], n=10 by convention here.',
+    scientificInterpretation: 'Simple percentage momentum over a fixed recent window.',
+    knownFailureConditions: 'Highly sensitive to the exact choice of n; no principled reason yet to prefer 10 over a nearby value for this instrument.' },
+
+  // ── Behaviour: Volatility / Market Character Dynamics ──
+  { featureKey: 'atr', behaviourGroup: 'volatility', family: 'Stability', units: 'price units', lookbackWindow: 14,
+    mathematicalDefinition: 'Average True Range: 14-period Wilder-smoothed average of True Range (max of high-low, |high-prevClose|, |low-prevClose|).',
+    scientificInterpretation: 'Absolute magnitude of recent price movement, regardless of direction.',
+    knownFailureConditions: 'Scale depends on absolute price level; not directly comparable across different price regimes without normalization.' },
+  { featureKey: 'bbWidth', behaviourGroup: 'volatility', family: 'Stability', units: 'ratio', lookbackWindow: 20,
+    mathematicalDefinition: 'Bollinger Band Width: (Upper Band - Lower Band) / Middle Band, 20-period SMA ± 2 standard deviations.',
+    scientificInterpretation: 'Relative volatility — how wide the recent price distribution is relative to its own average level.',
+    knownFailureConditions: 'The 2-standard-deviation convention is a historical default, not derived from this instrument\'s own distribution.' },
+  { featureKey: 'chop', behaviourGroup: 'volatility', family: 'Stability', units: 'index (0-100)', lookbackWindow: 14,
+    mathematicalDefinition: 'Choppiness Index: 100 * log10(sum of True Range over n periods / (n-period High - n-period Low)) / log10(n), n=14.',
+    scientificInterpretation: 'Whether recent price action has been trending (low values) or range-bound/choppy (high values).',
+    knownFailureConditions: 'A single scalar cannot distinguish a genuine range-bound market from a strong trend that happens to retrace partway within the window.' },
+
+  // ── Behaviour: Price Structure Relative to Recent Range ──
+  { featureKey: 'bbUpper', behaviourGroup: 'price_structure', family: 'Market Geometry', units: 'price units', lookbackWindow: 20,
+    mathematicalDefinition: 'Bollinger upper band: 20-period SMA + 2 standard deviations of price.',
+    scientificInterpretation: 'Statistical upper boundary of "normal" recent price action.',
+    knownFailureConditions: 'Assumes roughly normally-distributed returns over the window, which may not hold for this synthetic instrument — not yet verified.' },
+  { featureKey: 'bbMid', behaviourGroup: 'price_structure', family: 'Market Geometry', units: 'price units', lookbackWindow: 20,
+    mathematicalDefinition: 'Bollinger middle band: 20-period simple moving average of price.',
+    scientificInterpretation: 'Central tendency of recent price.',
+    knownFailureConditions: 'A simple, equally-weighted average — lags during fast directional moves.' },
+  { featureKey: 'bbLower', behaviourGroup: 'price_structure', family: 'Market Geometry', units: 'price units', lookbackWindow: 20,
+    mathematicalDefinition: 'Bollinger lower band: 20-period SMA - 2 standard deviations of price.',
+    scientificInterpretation: 'Statistical lower boundary of "normal" recent price action.',
+    knownFailureConditions: 'Same normality assumption as the upper band.' },
+  { featureKey: 'bbPctB', behaviourGroup: 'price_structure', family: 'Market Geometry', units: 'ratio (typically 0-1, can exceed)', lookbackWindow: 20,
+    mathematicalDefinition: '%B: (Close - Lower Band) / (Upper Band - Lower Band).',
+    scientificInterpretation: 'Where current price sits within the Bollinger channel, as a single normalized number.',
+    knownFailureConditions: 'Ill-defined when the bands collapse to near-equal (extremely low volatility, band width near zero).' },
+
+  // ── Behaviour: Smoothed Trend Direction ──
+  { featureKey: 'ema5', behaviourGroup: 'trend_direction', family: 'Temporal Behaviour', units: 'price units', lookbackWindow: 5,
+    mathematicalDefinition: '5-period Exponential Moving Average of price.',
+    scientificInterpretation: 'Very short-term smoothed trend estimate.',
+    knownFailureConditions: 'Reacts quickly but is itself noisy — closer to raw price than a genuine trend estimate.' },
+  { featureKey: 'ema10', behaviourGroup: 'trend_direction', family: 'Temporal Behaviour', units: 'price units', lookbackWindow: 10,
+    mathematicalDefinition: '10-period Exponential Moving Average of price.',
+    scientificInterpretation: 'Short-to-medium-term smoothed trend estimate.',
+    knownFailureConditions: 'Lags more than ema5; whipsaws in choppy conditions.' },
+  { featureKey: 'ema20', behaviourGroup: 'trend_direction', family: 'Temporal Behaviour', units: 'price units', lookbackWindow: 20,
+    mathematicalDefinition: '20-period Exponential Moving Average of price.',
+    scientificInterpretation: 'Medium-term smoothed trend estimate, the slowest of the three EMAs tracked.',
+    knownFailureConditions: 'Lags real turning points the most of the three; better suited to confirming an established trend than detecting a new one.' },
+];
+
+const MSD_GEN1_BEHAVIOURS = {
+  trend_strength: {
+    label: 'Directional trend strength before a run',
+    description: 'Whether the market shows measurable directional conviction (as opposed to non-directional noise) in the period preceding a five-consecutive-rise event.',
+    theoreticalRationale: 'A genuine directional run plausibly requires some prior build-up of directional pressure, even in a synthetic instrument — this is a candidate behaviour to test, not an assumed truth (per the existing baseline, raw tick-direction alone shows no such structure; this asks whether magnitude-aware directional measures fare differently).',
+    hypothesisLabel: 'Rising ADX/DI directional strength precedes a run',
+    hypothesisStatement: 'ADX and the DI spread are elevated, or measurably rising, in the ticks preceding a five-consecutive-rise event, relative to their own baseline.',
+  },
+  momentum: {
+    label: 'Momentum build-up before a run',
+    description: 'Whether momentum-oscillator behaviour (magnitude and rate-of-change of recent price movement, not just its sign) differs measurably before a five-consecutive-rise event.',
+    theoreticalRationale: 'Raw tick-direction sign discards magnitude and rate-of-change information entirely; momentum oscillators are designed to capture exactly what sign-only analysis cannot, making this a genuinely different bet than the tested-and-rejected raw-tick baseline, not the same one restated.',
+    hypothesisLabel: 'Momentum extremity/acceleration precedes a run',
+    hypothesisStatement: 'RSI, MACD, MACD histogram, CCI, Stochastic, or Rate-of-Change show a measurable extremity or acceleration in the window preceding a five-consecutive-rise event.',
+  },
+  volatility: {
+    label: 'Volatility compression or expansion before a run',
+    description: 'Whether recent price-range/volatility character (contraction or expansion, trending vs. choppy) differs measurably before a five-consecutive-rise event.',
+    theoreticalRationale: 'A classical technical-analysis intuition (volatility compression often precedes a breakout) — explicitly treated here as an untested hypothesis to falsify, not an assumed mechanism, consistent with this project\'s philosophy.',
+    hypothesisLabel: 'Volatility contraction precedes a run',
+    hypothesisStatement: 'ATR, Bollinger Band Width, or the Choppiness Index show measurable contraction (or, alternatively, expansion — both directions are worth testing) in the window preceding a five-consecutive-rise event.',
+  },
+  price_structure: {
+    label: 'Price position within its recent statistical range before a run',
+    description: 'Whether where price currently sits relative to its own recent statistical envelope (Bollinger channel) differs measurably before a five-consecutive-rise event.',
+    theoreticalRationale: 'Distinct from momentum: this is about position within a range, not the rate of change of that position — worth testing as its own behaviour rather than folding into momentum.',
+    hypothesisLabel: 'Extreme %B position precedes a run',
+    hypothesisStatement: 'Price sits at a measurably extreme position within its Bollinger channel (%B near 0 or 1, or bands themselves unusually narrow/wide) in the window preceding a five-consecutive-rise event.',
+  },
+  trend_direction: {
+    label: 'Smoothed short-term trend direction before a run',
+    description: 'Whether simple smoothed-price trend direction and its short/medium-term ordering (EMA stacking) differs measurably before a five-consecutive-rise event.',
+    theoreticalRationale: 'The simplest, most classical possible measurement — worth including precisely because it is the most likely to be redundant with the others; a genuine test should include the baseline case, not just the more sophisticated ones.',
+    hypothesisLabel: 'EMA stacking/slope precedes a run',
+    hypothesisStatement: 'The 5/10/20-period EMAs show a measurable ordering (e.g. ema5 > ema10 > ema20) or slope in the window preceding a five-consecutive-rise event.',
+  },
+};
+
+/**
+ * Registers Generation 1 and the full Behaviour -> Hypothesis ->
+ * Candidate Measurement -> Feature Ontology chain for all 21 v1
+ * features. Idempotent — every underlying registry already refuses a
+ * duplicate, so calling this more than once is safe; it reports what
+ * was newly registered versus what already existed, rather than
+ * treating "already exists" as a failure.
+ */
+async function msdBootstrapGeneration1(){
+  const report = { generation: null, behaviours: {}, hypotheses: {}, candidates: {}, features: {}, errors: [] };
+
+  // 1. Generation
+  const existingGenerations = await msdGetAllGenerations();
+  const gen1 = existingGenerations.find(g => g.generationNumber === 1);
+  if (gen1) {
+    report.generation = { alreadyExisted: true, generationId: gen1.generationId };
+  } else {
+    const genResult = await msdRegisterGeneration({
+      generationNumber: 1, label: 'Classical Market Measurements',
+      rationale: 'The pre-existing v1 technical indicator set (trend, momentum, volatility, and price-structure measurements), registered retroactively so the Statistical Discovery Engine can record traceable evidence for it.',
+      featureKeys: MSD_GEN1_FEATURE_DEFINITIONS.map(d => d.featureKey),
+    });
+    if (!genResult.ok) { report.errors.push('Generation 1: ' + genResult.error); return report; }
+    report.generation = { alreadyExisted: false, generationId: genResult.generationId };
+  }
+
+  // 2. Behaviours + Hypotheses (one of each per group)
+  const behaviorIdByGroup = {};
+  const hypothesisIdByGroup = {};
+  for (const [group, def] of Object.entries(MSD_GEN1_BEHAVIOURS)) {
+    const existingBehaviors = await msdGetAllBehaviors();
+    let behavior = existingBehaviors.find(b => b.label === def.label);
+    if (behavior) {
+      report.behaviours[group] = { alreadyExisted: true, behaviorId: behavior.behaviorId };
+    } else {
+      const bResult = await msdRegisterBehavior({ label: def.label, description: def.description, theoreticalRationale: def.theoreticalRationale });
+      if (!bResult.ok) { report.errors.push('Behaviour ' + group + ': ' + bResult.error); continue; }
+      behavior = { behaviorId: bResult.behaviorId };
+      report.behaviours[group] = { alreadyExisted: false, behaviorId: bResult.behaviorId };
+    }
+    behaviorIdByGroup[group] = behavior.behaviorId;
+
+    const existingHypotheses = await msdGetHypothesesForBehavior(behavior.behaviorId);
+    let hypothesis = existingHypotheses.find(h => h.label === def.hypothesisLabel);
+    if (hypothesis) {
+      report.hypotheses[group] = { alreadyExisted: true, hypothesisId: hypothesis.hypothesisId };
+    } else {
+      const hResult = await msdRegisterHypothesis({ label: def.hypothesisLabel, statement: def.hypothesisStatement, parentBehaviorId: behavior.behaviorId });
+      if (!hResult.ok) { report.errors.push('Hypothesis ' + group + ': ' + hResult.error); continue; }
+      hypothesis = { hypothesisId: hResult.hypothesisId };
+      report.hypotheses[group] = { alreadyExisted: false, hypothesisId: hResult.hypothesisId };
+    }
+    hypothesisIdByGroup[group] = hypothesis.hypothesisId;
+  }
+
+  // 3. Candidate Measurements + Feature Ontology (one pair per feature)
+  for (const def of MSD_GEN1_FEATURE_DEFINITIONS) {
+    const hypothesisId = hypothesisIdByGroup[def.behaviourGroup];
+    if (!hypothesisId) { report.errors.push(def.featureKey + ': parent hypothesis for group "' + def.behaviourGroup + '" was not registered.'); continue; }
+
+    const existingOntology = await msdGetFeatureOntology(def.featureKey);
+    if (existingOntology) {
+      report.features[def.featureKey] = { alreadyExisted: true, featureKey: def.featureKey };
+      continue;
+    }
+
+    const existingCandidates = await msdGetCandidateMeasurementsForHypothesis(hypothesisId);
+    let candidate = existingCandidates.find(c => c.label === def.featureKey);
+    if (!candidate) {
+      const cResult = await msdRegisterCandidateMeasurement({
+        label: def.featureKey, parentHypothesisId: hypothesisId,
+        mathematicalSketch: def.mathematicalDefinition, proposedFamily: def.family,
+        rationale: 'One of several classical measurements proposed for this behaviour; registered as part of the Generation 1 bootstrap.',
+      });
+      if (!cResult.ok) { report.errors.push(def.featureKey + ' (candidate): ' + cResult.error); continue; }
+      candidate = { candidateId: cResult.candidateId };
+      report.candidates[def.featureKey] = { alreadyExisted: false, candidateId: cResult.candidateId };
+    } else {
+      report.candidates[def.featureKey] = { alreadyExisted: true, candidateId: candidate.candidateId };
+    }
+
+    const oResult = await msdRegisterFeatureOntology({
+      featureKey: def.featureKey, parentCandidateMeasurementId: candidate.candidateId,
+      generationNumber: 1, family: def.family,
+      mathematicalDefinition: def.mathematicalDefinition, units: def.units, lookbackWindow: def.lookbackWindow,
+      scientificInterpretation: def.scientificInterpretation, knownFailureConditions: def.knownFailureConditions,
+    });
+    if (!oResult.ok) { report.errors.push(def.featureKey + ' (ontology): ' + oResult.error); continue; }
+    report.features[def.featureKey] = { alreadyExisted: false, featureKey: def.featureKey };
+  }
+
+  return report;
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 8 — Competing Scientific Explanations & Bayesian Evidence
+// Accumulation
+// ══════════════════════════════════════════════════════════════════════
+// Both sections build genuinely new capability rather than reusing an
+// existing statistical layer — flagged in the pre-Phase-5 architecture
+// review as the two most defensible additions this lab was missing
+// (mechanism-level competition, distinct from measurement-level
+// competition; and a Bayesian layer to complement, never replace, the
+// existing frequentist pipeline). Both remain buildable and testable
+// without real Market State data, exactly like every prior phase.
+
+// ────────────────────────────────────────────────────────────────────
+// 8.1 — Competing Scientific Explanations
+// ────────────────────────────────────────────────────────────────────
+// A Hypothesis's `statement` field already records ONE claimed
+// mechanism. This section formalizes MULTIPLE competing mechanistic
+// accounts for the same hypothesis as first-class objects, each with a
+// stated DISTINGUISHING PREDICTION — what this explanation predicts that
+// a rival explanation for the same correlation would not — since a
+// mechanism that makes no distinguishing prediction can't actually be
+// tested against its rivals, only asserted. This is deliberately
+// separate from Candidate Measurement competition (8.1 asks "why would
+// this work", Measurement Competition asks "which number best captures
+// it") — the two questions can have different winners.
+
+async function msdRegisterExplanation(explanation){
+  if (!explanation || !explanation.label) return { ok: false, error: 'An explanation requires at least a label.' };
+  if (!explanation.parentHypothesisId) return { ok: false, error: 'parentHypothesisId is required — an Explanation elaborates on why a registered Hypothesis\'s mechanism would work.' };
+  const hypothesis = await msdGetHypothesis(explanation.parentHypothesisId);
+  if (!hypothesis) return { ok: false, error: 'parentHypothesisId "' + explanation.parentHypothesisId + '" does not reference a registered hypothesis.' };
+  if (!explanation.distinguishingPrediction) {
+    return { ok: false, error: 'distinguishingPrediction is required — an Explanation with no prediction that would distinguish it from a rival account cannot be scientifically evaluated, only asserted.' };
+  }
+  const explanationId = 'expl_' + msdSessionId + '_' + msdRandomSuffix();
+  const finding = {
+    findingId: msdGenerateFindingId(), type: 'explanation_registration', explanationId,
+    label: explanation.label, mechanismDescription: explanation.mechanismDescription || '',
+    parentHypothesisId: explanation.parentHypothesisId,
+    distinguishingPrediction: explanation.distinguishingPrediction,
+    rationale: explanation.rationale || '',
+    codeVersion: MSD_CODE_VERSION, registeredAt: Date.now(),
+  };
+  const writeResult = await msdWriteDiscoveryLabFinding(finding);
+  return { ok: true, explanationId, finding, writeResult };
+}
+
+async function msdGetAllExplanations(){
+  const all = await msdGetAllDiscoveryLabFindings('explanation_registration');
+  return all.sort((a, b) => a.registeredAt - b.registeredAt);
+}
+
+async function msdGetExplanation(explanationId){
+  const all = await msdGetAllExplanations();
+  return all.find(e => e.explanationId === explanationId) || null;
+}
+
+async function msdGetExplanationsForHypothesis(hypothesisId){
+  const all = await msdGetAllExplanations();
+  return all.filter(e => e.parentHypothesisId === hypothesisId);
+}
+
+/** Permanently records whether an explanation's distinguishing prediction held (true), was contradicted (false), or hasn't been checked yet (omit this call entirely — untested is the absence of a record, not a third value here, to keep the append-only history unambiguous). Multiple tests over time are all kept — an explanation's status can be re-assessed as more evidence arrives without erasing the earlier assessment. */
+async function msdRecordExplanationTest(explanationId, predictionHeld, rationale){
+  const explanation = await msdGetExplanation(explanationId);
+  if (!explanation) return { ok: false, error: 'Unknown explanationId: ' + explanationId };
+  if (typeof predictionHeld !== 'boolean') return { ok: false, error: 'predictionHeld must be true or false — there is no third state for a recorded test.' };
+  const finding = {
+    findingId: msdGenerateFindingId(), type: 'explanation_test', explanationId,
+    predictionHeld, rationale: rationale || '', codeVersion: MSD_CODE_VERSION, actionedAt: Date.now(),
+  };
+  return { ok: true, writeResult: await msdWriteDiscoveryLabFinding(finding) };
+}
+
+async function msdGetExplanationTests(explanationId){
+  const all = await msdGetAllDiscoveryLabFindings('explanation_test');
+  return all.filter(f => f.explanationId === explanationId).sort((a, b) => a.actionedAt - b.actionedAt);
+}
+
+/**
+ * Evaluates every Explanation competing for one Hypothesis. Classifies
+ * each as: Untested (no recorded test yet), Supported (every recorded
+ * test's prediction held), Refuted (at least one recorded test's
+ * prediction failed — a single clean disconfirmation outweighs any
+ * number of confirmations, same falsification-first posture as
+ * everything else in this lab), or Contested (would be Refuted, but
+ * flagged separately since "mixed results" itself is diagnostic
+ * information, not just a Refuted verdict).
+ */
+async function msdEvaluateExplanationCompetition(hypothesisId){
+  const hypothesis = await msdGetHypothesis(hypothesisId);
+  if (!hypothesis) return { error: 'Unknown hypothesisId: ' + hypothesisId };
+  const explanations = await msdGetExplanationsForHypothesis(hypothesisId);
+  const results = [];
+  for (const e of explanations) {
+    const tests = await msdGetExplanationTests(e.explanationId);
+    let status;
+    if (!tests.length) status = 'Untested';
+    else if (tests.every(t => t.predictionHeld === true)) status = 'Supported';
+    else if (tests.every(t => t.predictionHeld === false)) status = 'Refuted';
+    else status = 'Contested';
+    results.push({ explanationId: e.explanationId, label: e.label, testCount: tests.length, status });
+  }
+  const supported = results.filter(r => r.status === 'Supported');
+  return {
+    hypothesisId, explanations: results,
+    leadingExplanationId: supported.length === 1 ? supported[0].explanationId : null,
+    tiedSupported: supported.length > 1 ? supported.map(s => s.explanationId) : [],
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 8.2 — Bayesian Evidence Accumulation
+// ────────────────────────────────────────────────────────────────────
+// A COMPLEMENTARY layer, run alongside — never replacing — the existing
+// frequentist pipeline (Maturity Engine, whole-repository
+// Benjamini-Yekutieli correction). Beta-Binomial conjugate update: each
+// experiment supporting a discoveryKey is one Bernoulli trial. The prior
+// is stated explicitly (Beta(1,1) = uniform, by default) rather than
+// hidden, and the credible interval is explicitly labeled as a normal
+// approximation to the true Beta posterior, since this codebase carries
+// no inverse-Beta-CDF and a labeled approximation is more honest than a
+// falsely precise-looking exact figure.
+
+const MSD_BAYESIAN_DEFAULT_ALPHA = 0.05; // matches the significance convention already used throughout this codebase
+
+/**
+ * Whether ONE evidence entry counts as a "success" observation — reused
+ * per discoveryType, not reinvented: single_feature evidence only exists
+ * because it already passed a notability gate at write time (existence
+ * = success); threshold/combo/market_state carry a real permutation
+ * p-value, checked against the same alpha used everywhere else in this
+ * lab. Returns null (not false) when a discoveryType has no way to
+ * determine success/failure, so "unknown" is never silently counted as
+ * "failed."
+ */
+function msdIsEvidenceObservationSuccess(evidenceEntry, alpha){
+  alpha = alpha != null ? alpha : MSD_BAYESIAN_DEFAULT_ALPHA;
+  if (!evidenceEntry) return null;
+  if (evidenceEntry.discoveryType === 'single_feature') return true;
+  const p = evidenceEntry.statisticalEvidence && evidenceEntry.statisticalEvidence.pValue;
+  if (p == null) return null;
+  return p < alpha;
+}
+
+/**
+ * Computes the Beta-Binomial posterior for one discoveryKey from its
+ * recorded evidence trail. Complementary to, never a substitute for, the
+ * existing maturityLevel/FDR classification — a discoveryKey can be
+ * "Candidate" under the frequentist pipeline and still have a reported
+ * Bayesian posterior mean, since the two answer different questions
+ * (has this cleared a fixed evidentiary bar, versus what is the current
+ * best estimate of the underlying probability).
+ */
+async function msdComputeBayesianPosterior(discoveryKey, priorAlpha, priorBeta, alphaThreshold){
+  priorAlpha = priorAlpha != null ? priorAlpha : 1;
+  priorBeta = priorBeta != null ? priorBeta : 1;
+  const allEvidence = await msdGetAllDiscoveryEvidence();
+  const relevant = allEvidence.filter(e => e.discoveryKey === discoveryKey);
+  if (!relevant.length) {
+    return { discoveryKey, observationCount: 0, posteriorMean: null, note: 'No evidence recorded yet for this discoveryKey.' };
+  }
+
+  let successes = 0, unknown = 0;
+  relevant.forEach(e => {
+    const result = msdIsEvidenceObservationSuccess(e, alphaThreshold);
+    if (result === true) successes++;
+    else if (result === null) unknown++;
+  });
+  const determinable = relevant.length - unknown;
+  if (determinable === 0) {
+    return { discoveryKey, observationCount: relevant.length, posteriorMean: null, note: 'No experiment in this evidence trail could be classified success/failure (missing p-values for a discoveryType that needs one).' };
+  }
+
+  const failures = determinable - successes;
+  const postAlpha = priorAlpha + successes;
+  const postBeta = priorBeta + failures;
+  const posteriorMean = postAlpha / (postAlpha + postBeta);
+  const variance = (postAlpha * postBeta) / (Math.pow(postAlpha + postBeta, 2) * (postAlpha + postBeta + 1));
+  const stdDev = Math.sqrt(variance);
+
+  return {
+    discoveryKey,
+    observationCount: relevant.length,
+    determinableObservationCount: determinable,
+    unknownObservationCount: unknown,
+    successes, failures,
+    priorAlpha, priorBeta,
+    posteriorAlpha: postAlpha, posteriorBeta: postBeta,
+    posteriorMean,
+    credibleInterval95: {
+      lower: Math.max(0, posteriorMean - 1.96 * stdDev),
+      upper: Math.min(1, posteriorMean + 1.96 * stdDev),
+      approximation: 'normal approximation to the Beta posterior — adequate away from the 0/1 boundary, stated explicitly rather than presented as an exact credible interval',
+    },
+    computedAt: Date.now(),
+  };
+}
+
+/** Permanent snapshot, same posture as every other report in this lab — a posterior mean today is not a claim it stays there as more evidence accumulates. */
+async function msdRecordBayesianPosteriorReport(posterior){
+  const finding = {
+    findingId: msdGenerateFindingId(), type: 'bayesian_posterior_report',
+    discoveryKey: posterior.discoveryKey, observationCount: posterior.observationCount,
+    posteriorMean: posterior.posteriorMean, posteriorAlpha: posterior.posteriorAlpha, posteriorBeta: posterior.posteriorBeta,
+    credibleInterval95: posterior.credibleInterval95,
+    codeVersion: MSD_CODE_VERSION, recordedAt: posterior.computedAt,
+  };
+  return { ok: true, writeResult: await msdWriteFinding(finding) };
+}
+
+async function msdGetBayesianPosteriorReports(discoveryKey){
+  const all = await msdGetAllFindings();
+  return all.filter(f => f.type === 'bayesian_posterior_report' && f.discoveryKey === discoveryKey).sort((a, b) => a.recordedAt - b.recordedAt);
+}
+
 // Market State Discovery Engine — Machine Learning
 // ══════════════════════════════════════════════════════════════════════
 // Per the locked architecture: Statistical Discovery Engine -> Machine
@@ -11849,6 +13610,41 @@ async function msdTrainModelUi(){
  * relationship stays within tolerance of the nominal false-positive
  * rate.
  */
+/** UI trigger for the Generation 1 Bootstrap. Safe to click more than once — reports what was newly registered vs. what already existed, never duplicates or errors on a repeat run. */
+async function msdRunGen1BootstrapUi(){
+  const statusEl = $("msdGen1BootstrapStatus");
+  const resultsEl = $("msdGen1BootstrapResults");
+  if (statusEl) statusEl.textContent = 'Running…';
+  if (resultsEl) resultsEl.innerHTML = '';
+
+  let report;
+  try {
+    report = await msdBootstrapGeneration1();
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Error: ' + e.message;
+    return;
+  }
+
+  const newBehaviours = Object.values(report.behaviours).filter(b => !b.alreadyExisted).length;
+  const newFeatures = Object.values(report.features).filter(f => !f.alreadyExisted).length;
+  const alreadyExistingFeatures = Object.values(report.features).filter(f => f.alreadyExisted).length;
+
+  if (report.errors.length) {
+    if (statusEl) statusEl.textContent = 'Completed with ' + report.errors.length + ' error(s).';
+    if (resultsEl) resultsEl.innerHTML = '<span class="cell-neg">' + report.errors.join('<br>') + '</span>';
+    return;
+  }
+
+  if (statusEl) statusEl.textContent = 'Complete.';
+  if (resultsEl) {
+    resultsEl.innerHTML = `Generation 1: ${report.generation.alreadyExisted ? 'already registered' : 'newly registered'}<br>
+      Behaviours newly registered: <b>${newBehaviours}</b> (of 5)<br>
+      Features newly registered: <b>${newFeatures}</b> · already existing: <b>${alreadyExistingFeatures}</b> (of 21 total)<br>
+      <span class="gc-sub">Evidence recording is now unblocked for all 21 classical features. Run an experiment to confirm.</span>`;
+  }
+}
+
+
 async function msdRunPipelineNegativeControlUi(){
   const statusEl = $("msdControlStatus");
   const resultsEl = $("msdControlResults");
