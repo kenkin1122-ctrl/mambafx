@@ -15946,6 +15946,22 @@ async function msdRunLeadTimeSweep(baseConfig, leadTimes, options){
     const discovery = msdRunStatisticalDiscovery(experimentResult.dataset, { randomSeed: config.randomSeed, minSampleCount: options.minSampleCount });
     const trainResult = msdTrainModel(experimentResult.dataset, options.trainOptions);
 
+    // FIX, found and applied the moment real data first ran through this
+    // lab: neither this sweep nor msdRunExperimentUi ever called
+    // msdRunResearchSession — meaning the entire modern discovery suite
+    // (all 9 registered analyzers: the original single_feature/threshold/
+    // combo/market_state four, plus Information-Theoretic, ML-Interaction,
+    // Complexity Science, Signal Processing, and Statistical Physics from
+    // Phases 11/12/16/17/18) had never actually been exercised against
+    // real data, even after two real sweeps had already been run. Fixed
+    // here by reusing the discovery and trainResult this function ALREADY
+    // computes — no extra cost, no new computation, just wiring what
+    // already exists into the pipeline that was supposed to consume it.
+    let researchSession = null;
+    if (!trainResult.error) {
+      researchSession = await msdRunResearchSession(experimentResult.record, discovery, trainResult, experimentResult.dataset);
+    }
+
     if (trainResult.error) {
       results.push({ leadTime, experimentId: experimentResult.experimentId, sampleCount: discovery.sampleStats.totalCount, readyForTraining: discovery.readyForTraining, error: trainResult.error });
       continue;
@@ -15960,6 +15976,8 @@ async function msdRunLeadTimeSweep(baseConfig, leadTimes, options){
       bestModelName: trainResult.bestModelName,
       bestModelTestMetrics: best.testMetrics,
       allModelResults: trainResult.modelResults,
+      researchSessionId: researchSession ? researchSession.researchSessionId : null,
+      researchRecordedCount: researchSession ? researchSession.recordedCount : null,
       error: null,
     });
   }
@@ -17368,6 +17386,19 @@ async function msdRunExperimentUi(){
   msdRenderDiscoveryResult(discovery);
   const recordedFindings = await msdRecordNotableFindings(result.experimentId, result.record.leadTime, discovery);
   if (statusEl) statusEl.textContent += ' — ' + recordedFindings.length + ' notable finding(s) recorded to KnowledgeBase.';
+
+  // FIX, found and applied the moment real data first ran through this
+  // lab: this handler never called msdRunResearchSession, meaning a
+  // single "Run Experiment" click — the most basic, most likely-to-be-used
+  // entry point in this entire lab — never exercised any of the 9
+  // registered analyzers (the original four, plus Information-Theoretic,
+  // ML-Interaction, Complexity Science, Signal Processing, and Statistical
+  // Physics from Phases 11/12/16/17/18). trainResult is null here since
+  // this flow does not train a model — every analyzer already handles a
+  // null trainResult gracefully (only the ML-Interaction analyzer needs
+  // real trees to walk, and it correctly returns [] without one).
+  const researchSession = await msdRunResearchSession(result.record, discovery, null, result.dataset);
+  if (statusEl) statusEl.textContent += ' — Research session ' + researchSession.researchSessionId + ' (' + researchSession.recordedCount + ' discovery record(s) from ' + researchSession.analyzerCount + ' analyzers).';
 
   // Dataset Validator — runs automatically on every experiment, surfaced on the Research Validation Suite page.
   const datasetValidation = msdValidateDataset(result.dataset, result.record);
