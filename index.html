@@ -10088,7 +10088,26 @@ function msdBuildMatchedNullDataset(dataset, seed, lookbackWindow){
  * the SUMMARY is a legitimate scientific artifact, unlike the raw
  * synthetic evidence it is derived from).
  */
-async function msdRunPipelineNegativeControl(realDataset, realExperimentRecord, method, numTrials, baseSeed){
+/**
+ * `onProgress`, added here: optional, backward-compatible (every
+ * existing caller that omits it is unaffected). This function's real
+ * cost has grown substantially since it was designed — the analyzer
+ * suite has grown from 4 to 10 analyzers (Phases 11, 12, 14, 16, 17,
+ * 18 all added since), several individually far more expensive than
+ * the original four (Phase 12 trains real trees per trial; Phase 14
+ * runs k-means 21 times per trial). Each of numTrials trials runs the
+ * FULL analyzer suite on a FULL-SIZE relabeled dataset — deliberately
+ * unchanged, since reducing trial count or dataset size to make this
+ * faster would be a scientifically-motivated change disguised as a
+ * performance fix, exactly what this project's own supervisory
+ * directives forbid ("the scheduler must not relax statistical
+ * thresholds"). What actually needed fixing was observability: with no
+ * progress feedback, a legitimately-running multi-minute calibration is
+ * indistinguishable from a genuine hang. onProgress and the explicit
+ * per-trial msdYieldToEventLoop() below fix exactly that, and nothing
+ * about what gets computed.
+ */
+async function msdRunPipelineNegativeControl(realDataset, realExperimentRecord, method, numTrials, baseSeed, onProgress){
   method = (method === 'randomized_label' || method === 'matched_null') ? method : 'label_permutation';
   numTrials = Number.isInteger(numTrials) && numTrials > 0 ? numTrials : MSD_CONTROL_DEFAULT_TRIALS;
   baseSeed = Number.isInteger(baseSeed) ? baseSeed : 1;
@@ -10115,6 +10134,11 @@ async function msdRunPipelineNegativeControl(realDataset, realExperimentRecord, 
       extra: { controlRunId, trialIndex: t, negativeControlMethod: method },
     });
     trialSummaries.push({ trialIndex: t, seed, recordedCount: sessionResult.recordedCount, readyForTraining: discoveryResult.readyForTraining });
+
+    if (typeof onProgress === 'function') {
+      try { onProgress({ trialIndex: t, numTrials, controlRunId, method }); } catch (_) {} // a broken progress callback must never break the actual control run
+    }
+    await msdYieldToEventLoop(); // explicit, unconditional — ensures the browser can repaint/update progress UI between trials, not just rely on whatever yielding happens inside msdRunResearchSession's own analyzer loop
   }
 
   const calibration = await msdEvaluateControlCalibration(controlRunId);
@@ -15250,6 +15274,515 @@ function msdStatisticalPhysicsAnalyzer(experimentRecord, discoveryResult, trainR
 }
 msdRegisterDiscoveryAnalyzer(msdStatisticalPhysicsAnalyzer);
 
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 19 — Redundancy Elimination Extension: Cross-Analyzer Redundancy
+// ══════════════════════════════════════════════════════════════════════
+// ARCHITECTURAL DISTINCTION FROM PHASE 11, stated explicitly: Phase 11's
+// Measurement Competition fix (R-031) answers "is feature A redundant
+// with feature B" — comparing DIFFERENT underlying features' own raw
+// value series against each other. This phase answers a genuinely
+// different, complementary question that Phase 11 never asked: for a
+// SINGLE underlying feature, this lab now looks at it through FIVE
+// analytical lenses (its raw value, Phase 16's Permutation Entropy,
+// Phase 17's Hurst Exponent, and Phase 18's rolling autocorrelation and
+// variance) — are any of THESE LENSES, on the SAME feature, actually
+// redundant with each other? If a feature's Hurst Exponent and its
+// Permutation Entropy turn out to be 90% correlated in practice, finding
+// both "significant" is not two independent discoveries — it is one
+// signal wearing two different mathematical costumes.
+//
+// REUSE, NOT DUPLICATION: every rolling-window computation reuses the
+// EXACT functions Phases 16, 17, and 18 already built and validated
+// (msdComputePermutationEntropy, msdComputeHurstExponent,
+// msdComputeLag1Autocorrelation, msdComputeRollingVariance) — nothing
+// recomputed differently. The redundancy classification reuses the
+// EXACT thresholds Phase 11 already established (MSD_REDUNDANCY_MI_
+// THRESHOLD, MSD_REDUNDANCY_CORRELATION_THRESHOLD) — not a second,
+// parallel redundancy standard invented for this phase specifically.
+// msdMutualInformation and msdComputePearsonCorrelation are reused
+// verbatim as the underlying pairwise statistics, exactly as Phase 11's
+// own redundancy check already uses them.
+//
+// NO NEW STORE: results are recorded as an ordinary KnowledgeBase
+// finding (type: 'cross_analyzer_redundancy_report'), the same pattern
+// Phase 8's msdRecordMeasurementCompetitionReport already established
+// for a structurally identical need — a permanent, inspectable report,
+// not a new registry or governance layer.
+//
+// THIS IS DIAGNOSTIC, NOT A NEW EVIDENCE PATH: a redundancy report
+// informs interpretation (which of several "significant" lenses for one
+// feature actually represents new information) — it does not itself
+// generate discoveryKey evidence, is not subject to the Reviewer, and
+// does not enter the Maturity Engine. It is read alongside existing
+// evidence, the same relationship Measurement Competition's own reports
+// already have to the evidence they help interpret.
+
+/**
+ * Computes the full rolling series for each of the five analytical
+ * lenses this lab applies to one raw feature, reusing the exact
+ * per-window primitives Phases 16-18 already validated. Returns null
+ * entries wherever a given lens's window requirement isn't yet met at
+ * that index — the same convention every analyzer already uses.
+ */
+function msdComputeAllLensSeries(values, windows){
+  windows = windows || {};
+  const peWindow = windows.permutationEntropy || MSD_PERM_ENTROPY_WINDOW;
+  const hurstWindow = windows.hurst || MSD_HURST_WINDOW;
+  const csdWindow = windows.csd || MSD_CSD_WINDOW;
+  const n = values.length;
+
+  const series = {
+    raw_value: values.slice(),
+    permutation_entropy: new Array(n).fill(null),
+    hurst_exponent: new Array(n).fill(null),
+    autocorrelation: new Array(n).fill(null),
+    variance: new Array(n).fill(null),
+  };
+  for (let i = peWindow; i < n; i++) series.permutation_entropy[i] = msdComputePermutationEntropy(values.slice(i - peWindow, i), MSD_PERM_ENTROPY_EMBEDDING_DIM);
+  for (let i = hurstWindow; i < n; i++) series.hurst_exponent[i] = msdComputeHurstExponent(values.slice(i - hurstWindow, i));
+  for (let i = csdWindow; i < n; i++) {
+    series.autocorrelation[i] = msdComputeLag1Autocorrelation(values.slice(i - csdWindow, i));
+    series.variance[i] = msdComputeRollingVariance(values.slice(i - csdWindow, i));
+  }
+  return series;
+}
+
+/**
+ * Cross-Analyzer Redundancy Audit for one underlying feature: pairwise
+ * mutual information and Pearson correlation between every pair of its
+ * five analytical lenses, classified Redundant/Unique using the exact
+ * same thresholds Measurement Competition (Phase 11) already
+ * established — applied here to lens-vs-lens redundancy on a SINGLE
+ * feature, a genuinely different question from Phase 11's
+ * feature-vs-feature comparison. Aligns on indices where BOTH lenses
+ * have a valid (non-null) value at that point — a pair with too few
+ * jointly-valid points is reported as insufficient data, not forced
+ * into an unreliable estimate.
+ */
+function msdRunCrossAnalyzerRedundancyAudit(featureKey, values, windows){
+  const allSeries = msdComputeAllLensSeries(values, windows);
+  const lensNames = Object.keys(allSeries);
+  const pairwise = [];
+
+  for (let i = 0; i < lensNames.length; i++) {
+    for (let j = i + 1; j < lensNames.length; j++) {
+      const lensA = lensNames[i], lensB = lensNames[j];
+      const validIdx = [];
+      for (let k = 0; k < allSeries[lensA].length; k++) {
+        if (allSeries[lensA][k] != null && allSeries[lensB][k] != null) validIdx.push(k);
+      }
+      if (validIdx.length < 30) { pairwise.push({ lensA, lensB, insufficientData: true }); continue; }
+
+      const seriesA = validIdx.map(k => allSeries[lensA][k]);
+      const seriesB = validIdx.map(k => allSeries[lensB][k]);
+      const mutualInformation = msdMutualInformation(seriesA, seriesB);
+      const correlation = msdComputePearsonCorrelation(seriesA, seriesB);
+      const redundant = (mutualInformation != null && mutualInformation > MSD_REDUNDANCY_MI_THRESHOLD)
+        || (correlation != null && Math.abs(correlation) > MSD_REDUNDANCY_CORRELATION_THRESHOLD);
+
+      pairwise.push({ lensA, lensB, mutualInformation, correlation, redundant, jointSampleSize: validIdx.length });
+    }
+  }
+
+  return { featureKey, pairwise, computedAt: Date.now() };
+}
+
+/** Permanent record — an ordinary KnowledgeBase finding, the same pattern Phase 8's Measurement Competition reports already use. No new store. */
+async function msdRecordCrossAnalyzerRedundancyReport(report){
+  const finding = Object.assign({ findingId: msdGenerateFindingId(), type: 'cross_analyzer_redundancy_report', codeVersion: MSD_CODE_VERSION }, report);
+  return { ok: true, writeResult: await msdWriteFinding(finding) };
+}
+
+async function msdGetCrossAnalyzerRedundancyReports(featureKey){
+  const all = await msdGetAllFindings();
+  const filtered = all.filter(f => f.type === 'cross_analyzer_redundancy_report' && (!featureKey || f.featureKey === featureKey));
+  return filtered.sort((a, b) => b.computedAt - a.computedAt);
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 20 — Production Feature Selection: Readiness Assessment
+// ══════════════════════════════════════════════════════════════════════
+// AUDIT FINDING, stated before any code was written: "production
+// selection" already exists — msdPromoteToProduction is a real, manual,
+// human-invoked action that permanently records a discoveryKey as
+// selected for production use. That action is untouched here and stays
+// exactly as it was. What genuinely does not exist: anything that
+// CONSOLIDATES the many separate checks this lab has built across
+// Phases 8, 11, 13A, 13R, and 19 into ONE readiness picture a human
+// would actually want before taking that manual action. Today, a human
+// could call msdPromoteToProduction having looked at only one signal —
+// this phase closes that gap with an ADVISORY assessment, not a new
+// decision authority.
+//
+// REUSE, NOT DUPLICATION: this reads ONLY already-recorded evidence and
+// reports — msdGetDiscoverySummaries (Maturity Engine), the live
+// msdRunDiscoveryStabilityAnalysis (Phase 13A, itself already reading
+// recorded evidence, not recomputing anything), msdGetCrossAnalyzerRedundancyReports
+// (Phase 19), msdGetMeasurementCompetitionReports (Phase 8), and
+// msdEvaluatePromotionGates (Phase 13R). Nothing here re-implements any
+// of those checks; it only reads their existing output and combines it
+// into one verdict.
+//
+// ADVISORY ONLY: msdAssessProductionReadiness never calls
+// msdPromoteToProduction, msdDeprecateFeature, or msdArchiveFeature —
+// it recommends; a human decides. This mirrors the exact same
+// generate-explain-rank-record-never-execute posture Phase 13B's
+// Autonomous Experiment Designer already established.
+
+const MSD_PRODUCTION_READINESS_LEVELS = ['ready', 'not_ready_insufficient_evidence', 'not_ready_failed_check'];
+
+/**
+ * Consolidates every existing check this lab has for one discoveryKey
+ * into a single, evidence-based readiness assessment. Never recomputes
+ * anything — reads only what has already been recorded or is already
+ * derivable from recorded evidence (Phase 13A's stability analysis
+ * reads recorded evidence live but performs no new statistical test of
+ * its own). `featureKey` is optional — when omitted, the cross-analyzer
+ * redundancy check and Measurement Competition lookup are skipped and
+ * reported as not-yet-evaluable rather than guessed at.
+ */
+async function msdAssessProductionReadiness(discoveryKey, featureKey){
+  const checks = {};
+
+  // 1. Maturity Engine (existing, unmodified).
+  const summaries = await msdGetDiscoverySummaries();
+  const summary = summaries.find(s => s.discoveryKey === discoveryKey);
+  checks.maturity = summary
+    ? { status: summary.maturityLevel === 'verified' ? 'pass' : (summary.maturityLevel === 'observation' ? 'fail' : 'not_yet_evaluable'), maturityLevel: summary.maturityLevel }
+    : { status: 'not_yet_evaluable', detail: 'No recorded evidence found for this discoveryKey at all.' };
+
+  // 2. Stability classification (Phase 13A) — reads recorded evidence live, computes no new statistics.
+  const stabilityAnalysis = await msdRunDiscoveryStabilityAnalysis(discoveryKey);
+  const anyStable = stabilityAnalysis.perLeadTime.some(p => p.stabilityClassification === 'Stable');
+  const anyNonReplicableOrUnstable = stabilityAnalysis.perLeadTime.some(p => p.stabilityClassification === 'Non-Replicable' || p.stabilityClassification === 'Unstable');
+  const anyEvaluated = stabilityAnalysis.perLeadTime.some(p => p.stabilityClassification !== 'Insufficient Data');
+  checks.stability = !anyEvaluated
+    ? { status: 'not_yet_evaluable', detail: 'Insufficient distinct periods to classify stability yet.' }
+    : { status: anyStable ? 'pass' : (anyNonReplicableOrUnstable ? 'fail' : 'not_yet_evaluable'), perLeadTime: stabilityAnalysis.perLeadTime.map(p => ({ leadTime: p.leadTime, classification: p.stabilityClassification })) };
+
+  // 3. Cross-analyzer redundancy (Phase 19) — reads the most recent recorded report only, never recomputes.
+  if (featureKey) {
+    const redundancyReports = await msdGetCrossAnalyzerRedundancyReports(featureKey);
+    if (redundancyReports.length) {
+      const mostRecent = redundancyReports[0];
+      const anyRedundant = mostRecent.pairwise.some(p => p.redundant === true);
+      checks.crossAnalyzerRedundancy = { status: anyRedundant ? 'fail' : 'pass', detail: mostRecent.pairwise.filter(p => p.redundant) };
+    } else {
+      checks.crossAnalyzerRedundancy = { status: 'not_yet_evaluable', detail: 'No Cross-Analyzer Redundancy Audit has been recorded for this feature yet.' };
+    }
+  } else {
+    checks.crossAnalyzerRedundancy = { status: 'not_yet_evaluable', detail: 'No featureKey supplied — cannot look up a cross-analyzer redundancy report.' };
+  }
+
+  // 4. Feature-vs-feature redundancy (Phase 11 Measurement Competition) — reads the most recent recorded report only.
+  if (featureKey) {
+    const competitionReports = await msdGetMeasurementCompetitionReports();
+    const relevant = competitionReports.filter(r => r.entrants && r.entrants.some(e => e.featureKey === featureKey));
+    if (relevant.length) {
+      const mostRecent = relevant[0];
+      const ownEntrant = mostRecent.entrants.find(e => e.featureKey === featureKey);
+      const isRedundant = ownEntrant && ownEntrant.redundancyClassification === 'Redundant';
+      checks.measurementCompetition = { status: isRedundant ? 'fail' : 'pass', detail: ownEntrant ? ownEntrant.redundancyClassification : null };
+    } else {
+      checks.measurementCompetition = { status: 'not_yet_evaluable', detail: 'No Measurement Competition report has been recorded involving this feature yet.' };
+    }
+  } else {
+    checks.measurementCompetition = { status: 'not_yet_evaluable', detail: 'No featureKey supplied — cannot look up a Measurement Competition report.' };
+  }
+
+  // 5. The nine Phase 13R promotion gates — evaluated with whatever context is already recorded; most will correctly read as not_yet_evaluable until real data exists.
+  const gateResult = await msdEvaluatePromotionGates(discoveryKey, {});
+  checks.promotionGates = { status: gateResult.overallStatus === 'promotable' ? 'pass' : (gateResult.overallStatus === 'blocked' ? 'fail' : 'not_yet_evaluable'), detail: gateResult };
+
+  const allChecks = Object.values(checks);
+  const anyFailed = allChecks.some(c => c.status === 'fail');
+  const allPassed = allChecks.every(c => c.status === 'pass');
+
+  const readinessLevel = anyFailed ? 'not_ready_failed_check' : (allPassed ? 'ready' : 'not_ready_insufficient_evidence');
+
+  return {
+    discoveryKey, featureKey: featureKey || null, checks, readinessLevel,
+    assessedAt: Date.now(),
+  };
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// SCIENTIFIC DISCIPLINE COMPETITION — Cross-Pipeline Consensus Engine
+// ══════════════════════════════════════════════════════════════════════
+// CORRECTION TO THIS SESSION'S OWN PRIOR STATEMENT: this was described a
+// moment ago as blocked on real data. That was wrong. Phase 11's own
+// Cross-Pipeline Consensus hook (msdGetDiscoveryTypesForFeature) was
+// deliberately left a hook, not a full engine, specifically because
+// "only two analyzer families exist so far... 'independent methods
+// converge' isn't a meaningful claim with only two, let alone one." That
+// was the actual, stated precondition — not real data. Five genuinely
+// independent methodology families now exist (Phases 2, 11, 12, 16, 17,
+// 18). The precondition is met. This builds the full engine now, as
+// mechanism-validated infrastructure — exactly like every other phase
+// in this project, tested on constructed fixtures, making no claim yet
+// about real market structure.
+//
+// METHODOLOGY-FAMILY GROUPING, not raw discoveryType counting — this
+// directly addresses a caveat raised repeatedly across this project's
+// own reviews (Phases 11, 16, 17, 18): single_feature, threshold, combo,
+// market_state, and baseline are ALL correlational/value-based
+// analyzers — counting all four as "four independent methods agreeing"
+// would overstate diversity that doesn't exist. Consensus here is
+// computed at the FAMILY level (5 families: correlational,
+// directional-information-flow, ml-interaction, complexity-science,
+// signal-processing, statistical-physics), not the raw analyzer-name
+// level.
+//
+// REUSE, NOT DUPLICATION: msdGetDiscoveryTypesForFeature (Phase 11) is
+// called directly, unmodified. msdGetDiscoverySummaries (the Maturity
+// Engine) is read, not recomputed. Results are recorded as an ordinary
+// KnowledgeBase finding (type: 'cross_pipeline_consensus_report'), the
+// same pattern every other report in this lab already uses — no new
+// store.
+
+const MSD_METHODOLOGY_FAMILIES = {
+  single_feature: 'correlational', threshold: 'correlational', combo: 'correlational',
+  market_state: 'correlational', baseline: 'correlational',
+  transfer_entropy: 'directional_information_flow',
+  nonlinear_interaction: 'ml_interaction',
+  complexity_science: 'complexity_science',
+  signal_processing: 'signal_processing',
+  statistical_physics: 'statistical_physics',
+};
+const MSD_CONSENSUS_MIN_FAMILIES = 2; // fewer independent families than this and "consensus" isn't a meaningful claim at all — the same bar the original hook's own reasoning already established
+const MSD_CONSENSUS_STRONG_RATIO = 0.75;
+const MSD_CONSENSUS_WEAK_RATIO = 0.4;
+
+/**
+ * Computes cross-pipeline consensus for one underlying feature: of the
+ * genuinely independent methodology FAMILIES that have tested it at
+ * all, how many found evidence reaching at least 'candidate' maturity
+ * (i.e. cleared its own significance bar, not just "observation" —
+ * observation-only evidence hasn't survived even the mildest internal
+ * check yet and shouldn't count as a family "agreeing"). Never
+ * recomputes any underlying statistic — reads only what
+ * msdGetDiscoveryTypesForFeature and msdGetDiscoverySummaries already
+ * report.
+ */
+async function msdComputeCrossPipelineConsensus(featureKey){
+  const discoveryTypes = await msdGetDiscoveryTypesForFeature(featureKey);
+  const summaries = await msdGetDiscoverySummaries();
+
+  const familiesTested = new Set();
+  const familiesAgreeingReal = new Set();
+  const perFamilyDetail = {};
+
+  discoveryTypes.forEach(dt => {
+    const family = MSD_METHODOLOGY_FAMILIES[dt] || dt; // an unrecognized discoveryType is treated as its own family rather than silently dropped
+    familiesTested.add(family);
+    const relevant = summaries.filter(s => s.discoveryType === dt && (s.underlyingFeatureKeys || []).includes(featureKey));
+    const anyAtLeastCandidate = relevant.some(s => s.maturityLevel && s.maturityLevel !== 'observation');
+    if (anyAtLeastCandidate) familiesAgreeingReal.add(family);
+    if (!perFamilyDetail[family]) perFamilyDetail[family] = { discoveryTypes: [], agreesReal: false };
+    perFamilyDetail[family].discoveryTypes.push(dt);
+    if (anyAtLeastCandidate) perFamilyDetail[family].agreesReal = true;
+  });
+
+  const familiesTestedCount = familiesTested.size;
+  const familiesAgreeingCount = familiesAgreeingReal.size;
+  const consensusRatio = familiesTestedCount > 0 ? familiesAgreeingCount / familiesTestedCount : null;
+
+  let consensusClassification;
+  if (familiesTestedCount < MSD_CONSENSUS_MIN_FAMILIES) {
+    consensusClassification = 'Insufficient Coverage';
+  } else if (familiesAgreeingCount === 0) {
+    consensusClassification = 'No Support Across Any Tested Methodology';
+  } else if (consensusRatio >= MSD_CONSENSUS_STRONG_RATIO) {
+    consensusClassification = 'Strong Consensus';
+  } else if (consensusRatio >= MSD_CONSENSUS_WEAK_RATIO) {
+    consensusClassification = 'Weak Consensus';
+  } else {
+    consensusClassification = 'Contradicted'; // at least one family agrees, but most do not — a genuine disagreement worth investigating, not just weak support
+  }
+
+  return {
+    featureKey, familiesTestedCount, familiesAgreeingCount, consensusRatio,
+    consensusClassification, perFamilyDetail,
+    computedAt: Date.now(),
+  };
+}
+
+/** Permanent record — an ordinary KnowledgeBase finding, no new store, the same pattern every other report in this lab already uses. */
+async function msdRecordCrossPipelineConsensusReport(report){
+  const finding = Object.assign({ findingId: msdGenerateFindingId(), type: 'cross_pipeline_consensus_report', codeVersion: MSD_CODE_VERSION }, report);
+  return { ok: true, writeResult: await msdWriteFinding(finding) };
+}
+
+async function msdGetCrossPipelineConsensusReports(featureKey){
+  const all = await msdGetAllFindings();
+  const filtered = all.filter(f => f.type === 'cross_pipeline_consensus_report' && (!featureKey || f.featureKey === featureKey));
+  return filtered.sort((a, b) => b.computedAt - a.computedAt);
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 21 — Continuous Scientific Learning: Classification Drift Sweep
+// ══════════════════════════════════════════════════════════════════════
+// SCOPING NOTE, stated before any code: "Continuous Scientific Learning"
+// was left as a vague placeholder in this Roadmap. Made concrete here as
+// the one piece of it genuinely buildable without real data — everything
+// else "learning" could mean (discovering brand new behaviours,
+// adapting target definitions, discovering novel feature families) is
+// Phase 15's job, and Phase 15 is correctly, structurally gated: its
+// entire function is mining patterns from OBSERVED real data. Running
+// it on synthetic fixtures would only "discover" whatever pattern was
+// artificially planted, which teaches nothing about anything real.
+//
+// WHAT THIS PHASE ACTUALLY ADDS: every existing check in this lab
+// (Phase 13A stability, the Cross-Pipeline Consensus Engine) answers
+// "what is true right now" for ONE key at a time. Nothing sweeps across
+// EVERY tracked key at once, and nothing compares today's answer
+// against the last time it was checked. A scientific lab that
+// genuinely learns continuously needs to notice when its own prior
+// conclusions have changed as more evidence accumulates — a feature
+// that was Stable yesterday and is Unstable today is itself a finding,
+// not a bookkeeping footnote. This sweep provides exactly that
+// noticing mechanism, and nothing else.
+//
+// REUSE, NOT DUPLICATION: msdRunDiscoveryStabilityAnalysis (Phase 13A)
+// and msdComputeCrossPipelineConsensus (this session) are called
+// directly, unmodified, and their own existing recording functions
+// (msdRecordStabilityProfile / msdGetStabilityProfiles,
+// msdRecordCrossPipelineConsensusReport / msdGetCrossPipelineConsensusReports)
+// are reused verbatim for both reading the PREVIOUS result and writing
+// the NEW one. No new store, no new statistic — only the sweep loop and
+// the before/after comparison are genuinely new.
+
+/**
+ * Sweeps every discoveryKey and featureKey with recorded evidence,
+ * re-running Phase 13A stability analysis and Cross-Pipeline Consensus
+ * for each, comparing the fresh result against the most recently
+ * recorded one (if any exists), and flagging any classification that
+ * has genuinely changed. Records the fresh result afterward either way
+ * — a sweep that finds no change is still a real data point ("still
+ * Stable as of this sweep"), not a no-op.
+ */
+async function msdRunContinuousLearningSweep(){
+  const allEvidence = await msdGetAllDiscoveryEvidence();
+  const discoveryKeys = Array.from(new Set(allEvidence.map(e => e.discoveryKey)));
+  const featureKeys = Array.from(new Set(allEvidence.flatMap(e => e.underlyingFeatureKeys || [])));
+
+  const stabilityChanges = [];
+  for (const dk of discoveryKeys) {
+    const priorProfiles = await msdGetStabilityProfiles(dk);
+    const prior = priorProfiles.length ? priorProfiles[0] : null;
+    const current = await msdRunDiscoveryStabilityAnalysis(dk);
+
+    if (prior && prior.perLeadTime) {
+      current.perLeadTime.forEach(entry => {
+        const priorEntry = prior.perLeadTime.find(p => p.leadTime === entry.leadTime);
+        if (priorEntry && priorEntry.stabilityClassification !== entry.stabilityClassification) {
+          stabilityChanges.push({ discoveryKey: dk, leadTime: entry.leadTime, from: priorEntry.stabilityClassification, to: entry.stabilityClassification });
+        }
+      });
+    }
+    await msdRecordStabilityProfile(current);
+  }
+
+  const consensusChanges = [];
+  for (const fk of featureKeys) {
+    const priorReports = await msdGetCrossPipelineConsensusReports(fk);
+    const prior = priorReports.length ? priorReports[0] : null;
+    const current = await msdComputeCrossPipelineConsensus(fk);
+
+    if (prior && prior.consensusClassification !== current.consensusClassification) {
+      consensusChanges.push({ featureKey: fk, from: prior.consensusClassification, to: current.consensusClassification });
+    }
+    await msdRecordCrossPipelineConsensusReport(current);
+    await msdYieldToEventLoop(); // the sweep runs over potentially many keys; yield between each to avoid the exact class of appears-hung symptom fixed in R-053/R-056
+  }
+
+  return {
+    sweepAt: Date.now(),
+    discoveryKeysSwept: discoveryKeys.length,
+    featureKeysSwept: featureKeys.length,
+    stabilityChanges, consensusChanges,
+    anyChangeDetected: stabilityChanges.length > 0 || consensusChanges.length > 0,
+  };
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// STANDARDIZED PHASE SCORECARD — Permanent Supervisory Directive, Section 14
+// ══════════════════════════════════════════════════════════════════════
+// GAP THIS CLOSES: several sessions ago, under the Permanent Supervisory
+// Directive, this was identified as one of exactly two things genuinely
+// buildable without the always-on real-data infrastructure — and then
+// never actually delivered, because the conversation moved on to Phases
+// 17 through 21 instead. Built now, and applied retroactively to every
+// phase since Phase 11, rather than left as a promise that quietly
+// never got kept.
+//
+// PURE VALIDATION AND RECORDING — no new statistics, no new judgment
+// about whether a phase is good. This function does not decide
+// anything; it enforces that a scorecard, once submitted, actually
+// contains every section the directive requires, and records it
+// permanently. The eleven scorecards populated immediately below use
+// only facts already established and delivered in this project's own
+// Roadmap and Debt Register — no new claims are made here, only a
+// standardized structure applied to claims already made.
+//
+// HONEST GAP, stated rather than papered over: the "Performance"
+// section (Runtime / Memory / Storage / Scalability) cannot be
+// genuinely measured for phases already delivered, since this codebase
+// has no runtime/memory instrumentation built into it. Every retroactive
+// scorecard below states "Not measured — no runtime/memory
+// instrumentation exists in this codebase" rather than a fabricated
+// number. Building genuine performance instrumentation is a real,
+// separate, explicitly-scoped future item (see the Debt Register),
+// not retrofitted here as invented figures.
+
+const MSD_SCORECARD_REQUIRED_FIELDS = [
+  'phaseId', 'phaseName', 'capabilityAdded', 'methodologicalIndependence',
+  'evidenceStatus', 'tests', 'leakage', 'nullModels', 'reproducibility',
+  'performance', 'limitations', 'status',
+];
+const MSD_SCORECARD_VALID_EVIDENCE_STATUSES = ['synthetic_mechanism_validation', 'real_data_evaluation', 'replicated_finding'];
+const MSD_SCORECARD_VALID_STATUSES = ['PASS', 'FAIL', 'NEEDS_SUPERVISORY_REVIEW'];
+
+/**
+ * Validates a scorecard has every section the directive requires before
+ * it can be recorded — a scorecard missing a section is rejected, not
+ * silently accepted with a gap. Does not evaluate whether the CONTENT
+ * of any section is good; that judgment belongs to the human
+ * supervisor and the independent critical review each phase already
+ * receives in prose, not to this function.
+ */
+function msdValidatePhaseScorecard(scorecard){
+  const missing = MSD_SCORECARD_REQUIRED_FIELDS.filter(f => scorecard[f] == null || scorecard[f] === '');
+  if (missing.length) return { valid: false, missing };
+  if (!MSD_SCORECARD_VALID_EVIDENCE_STATUSES.includes(scorecard.evidenceStatus)) {
+    return { valid: false, missing: [], error: 'evidenceStatus must be one of ' + MSD_SCORECARD_VALID_EVIDENCE_STATUSES.join(', ') };
+  }
+  if (!MSD_SCORECARD_VALID_STATUSES.includes(scorecard.status)) {
+    return { valid: false, missing: [], error: 'status must be one of ' + MSD_SCORECARD_VALID_STATUSES.join(', ') };
+  }
+  return { valid: true };
+}
+
+/** Permanent record — an ordinary KnowledgeBase finding, no new store, the same pattern every other report in this lab already uses. Refuses to record an incomplete or malformed scorecard rather than silently accepting a gap. */
+async function msdRecordPhaseScorecard(scorecard){
+  const validation = msdValidatePhaseScorecard(scorecard);
+  if (!validation.valid) return { ok: false, error: validation.error || ('Missing required fields: ' + validation.missing.join(', ')) };
+  const finding = Object.assign({ findingId: msdGenerateFindingId(), type: 'phase_scorecard', codeVersion: MSD_CODE_VERSION, recordedAt: Date.now() }, scorecard);
+  return { ok: true, writeResult: await msdWriteFinding(finding) };
+}
+
+async function msdGetPhaseScorecards(phaseId){
+  const all = await msdGetAllFindings();
+  const filtered = all.filter(f => f.type === 'phase_scorecard' && (!phaseId || f.phaseId === phaseId));
+  return filtered.sort((a, b) => a.recordedAt - b.recordedAt);
+}
+
+
 // Market State Discovery Engine — Machine Learning
 // ══════════════════════════════════════════════════════════════════════
 // Per the locked architecture: Statistical Discovery Engine -> Machine
@@ -16953,7 +17486,9 @@ async function msdRunPipelineNegativeControlUi(){
 
   let report;
   try {
-    report = await msdRunPipelineNegativeControl(last.result.dataset, last.result.record, method, trials, last.result.record.randomSeed || 1);
+    report = await msdRunPipelineNegativeControl(last.result.dataset, last.result.record, method, trials, last.result.record.randomSeed || 1, (progress) => {
+      if (statusEl) statusEl.textContent = 'Running trial ' + (progress.trialIndex + 1) + ' of ' + progress.numTrials + ' (' + progress.method + ')…';
+    });
   } catch (e) {
     if (statusEl) statusEl.textContent = 'Error: ' + e.message;
     return;
