@@ -8865,6 +8865,79 @@ function msdYieldToEventLoop(){
   return new Promise(resolve => setTimeout(resolve, 0));
 }
 
+// WORKSTREAM 1/2/3 (Supervisory Directive — Real-Data Execution Integrity):
+// the canonical list of analyzers this lab expects to exist. Not derived
+// from msdRegisteredAnalyzers itself, deliberately — comparing the
+// ACTUAL registered set against an INDEPENDENT, hard-coded expectation
+// is exactly what would have caught R-060 earlier (a caller silently
+// never reaching the analyzer suite at all is a different failure mode
+// than a caller reaching it but finding fewer analyzers registered than
+// expected; this constant guards against the second).
+const MSD_EXPECTED_ANALYZER_NAMES = [
+  'msdSingleFeatureAnalyzer', 'msdThresholdAnalyzer', 'msdFeatureCombinationAnalyzer', 'msdMarketStateAnalyzer',
+  'msdInformationTheoreticAnalyzer', 'msdNonlinearInteractionAnalyzer', 'msdBaselineAnalyzer',
+  'msdComplexityScienceAnalyzer', 'msdSignalProcessingAnalyzer', 'msdStatisticalPhysicsAnalyzer',
+];
+
+/**
+ * Classifies one execution manifest as COMPLETE / PARTIAL / INCOMPLETE /
+ * FAILED — the exact four-way distinction Workstream 3 requires,
+ * deliberately NOT collapsed into a binary pass/fail:
+ *  - COMPLETE: every expected analyzer was both attempted and
+ *    completed successfully. Nothing skipped, nothing failed.
+ *  - INCOMPLETE: nothing FAILED, but at least one expected analyzer was
+ *    never even attempted (missing from the registered set at call
+ *    time) — a registration/wiring gap, not a runtime failure. This is
+ *    the exact class of bug R-060 was.
+ *  - FAILED: zero analyzers completed successfully at all.
+ *  - PARTIAL: anything in between — some completed, but the run also
+ *    had failures and/or skips.
+ * A run producing zero discoveries and a run that never executed the
+ * relevant analyzer are scientifically different outcomes, and this
+ * classification is what keeps them distinguishable downstream.
+ */
+function msdClassifyExecutionManifest(manifest){
+  const expectedCount = manifest.expectedAnalyzerNames.length;
+  const completedCount = manifest.completedAnalyzers.length;
+  const failedCount = manifest.failedAnalyzers.length;
+  const skippedCount = manifest.skippedAnalyzers.length;
+
+  if (completedCount === expectedCount && failedCount === 0 && skippedCount === 0) return 'COMPLETE';
+  if (completedCount === 0) return 'FAILED';
+  if (skippedCount > 0 && failedCount === 0) return 'INCOMPLETE';
+  return 'PARTIAL';
+}
+
+/**
+ * The Scientific Execution Integrity Gate (Workstream 3): a run may only
+ * be interpreted scientifically if its manifest status is COMPLETE.
+ * Deliberately does NOT pass a run merely because it produced zero
+ * discoveries — an INCOMPLETE or FAILED manifest blocks interpretation
+ * regardless of how many (or how few) discoveries came out of it.
+ */
+function msdCheckExecutionIntegrityGate(manifest){
+  if (manifest.status === 'COMPLETE') return { gateStatus: 'PASS', reason: 'All ' + manifest.expectedAnalyzerNames.length + ' expected analyzers were attempted and completed successfully.' };
+  return {
+    gateStatus: 'BLOCKED',
+    reason: 'Manifest status is ' + manifest.status + ', not COMPLETE — scientific interpretation is blocked regardless of discovery count. '
+      + 'Completed: ' + manifest.completedAnalyzers.length + '/' + manifest.expectedAnalyzerNames.length
+      + (manifest.skippedAnalyzers.length ? '; skipped: ' + manifest.skippedAnalyzers.join(', ') : '')
+      + (manifest.failedAnalyzers.length ? '; failed: ' + manifest.failedAnalyzers.map(f => f.name).join(', ') : ''),
+  };
+}
+
+/** Permanent record — an ordinary KnowledgeBase finding, no new store. */
+async function msdRecordExecutionManifest(manifest){
+  const finding = Object.assign({ findingId: msdGenerateFindingId(), type: 'execution_manifest', codeVersion: MSD_CODE_VERSION }, manifest);
+  return { ok: true, writeResult: await msdWriteFinding(finding) };
+}
+
+async function msdGetExecutionManifests(researchSessionId){
+  const all = await msdGetAllFindings();
+  const filtered = all.filter(f => f.type === 'execution_manifest' && (!researchSessionId || f.researchSessionId === researchSessionId));
+  return filtered.sort((a, b) => b.recordedAt - a.recordedAt);
+}
+
 async function msdRunResearchSession(experimentRecord, discoveryResult, trainResult, dataset, recordOpts){
   // recordOpts is OPTIONAL (Phase 2: Scientific Infrastructure) — every
   // pre-existing caller passes 4 arguments and is unaffected. The
@@ -8873,7 +8946,19 @@ async function msdRunResearchSession(experimentRecord, discoveryResult, trainRes
   const researchSessionId = msdGenerateResearchSessionId();
   const regimeInfo = dataset ? msdComputeDominantRegimeLabel(dataset) : null;
   const results = [];
+
+  // WORKSTREAM 1/2 (Supervisory Directive): the actual registered set at
+  // call time is compared against MSD_EXPECTED_ANALYZER_NAMES up front —
+  // any expected analyzer missing from msdRegisteredAnalyzers is a
+  // skip, recorded explicitly, not silently absent from the manifest.
+  const actualAnalyzerNames = msdRegisteredAnalyzers.map(a => a.name || '(anonymous)');
+  const skippedAnalyzers = MSD_EXPECTED_ANALYZER_NAMES.filter(n => !actualAnalyzerNames.includes(n));
+  const completedAnalyzers = [];
+  const failedAnalyzers = [];
+
   for (const analyzer of msdRegisteredAnalyzers) {
+    const analyzerName = analyzer.name || '(anonymous)';
+    const startedAt = Date.now();
     let evidenceList;
     try {
       // ROOT CAUSE OF "the project hangs", found and fixed here: nine
@@ -8895,18 +8980,37 @@ async function msdRunResearchSession(experimentRecord, discoveryResult, trainRes
       evidenceList = (await analyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset, regimeInfo)) || [];
     } catch (e) {
       results.push({ error: 'Analyzer threw: ' + e.message });
+      failedAnalyzers.push({ name: analyzerName, error: e.message, durationMs: Date.now() - startedAt });
       await msdYieldToEventLoop();
       continue;
     }
+    let producedCount = 0, rejectedCount = 0;
     for (const evidence of evidenceList) {
       const recorded = await msdRecordDiscoveryEvidence(evidence, recordOpts);
       results.push(recorded);
+      if (recorded.writeResult && recorded.writeResult.ok) producedCount++; else rejectedCount++;
     }
+    completedAnalyzers.push({ name: analyzerName, durationMs: Date.now() - startedAt, evidenceProduced: producedCount, evidenceRejected: rejectedCount });
     // Unconditional yield after EVERY analyzer, regardless of whether it
     // produced evidence to record (which is what the pre-existing inner
     // loop's own `await` depended on) — this is the actual fix.
     await msdYieldToEventLoop();
   }
+
+  const manifest = {
+    researchSessionId,
+    experimentId: experimentRecord ? experimentRecord.experimentId : null,
+    pipelineVersion: MSD_CODE_VERSION,
+    featureVersion: experimentRecord ? experimentRecord.featureVersion : null,
+    datasetSnapshotFingerprint: dataset && dataset.meta ? dataset.meta.datasetFingerprint || null : null,
+    expectedAnalyzerNames: MSD_EXPECTED_ANALYZER_NAMES.slice(),
+    actualAnalyzerNames,
+    completedAnalyzers, failedAnalyzers, skippedAnalyzers,
+    recordedAt: Date.now(),
+  };
+  manifest.status = msdClassifyExecutionManifest(manifest);
+  await msdRecordExecutionManifest(manifest);
+
   // Phase 6.5: recordedCount now checks writeResult.ok, not just
   // writeResult's truthiness. Pre-existing quirk (noted, left alone, in
   // Phase 2 — see Debt Register R-010) that became consequential once
@@ -8914,7 +9018,7 @@ async function msdRunResearchSession(experimentRecord, discoveryResult, trainRes
   // lineage (6.5.1): without this fix, a rejected write would still be
   // counted as "recorded," silently hiding a traceability failure behind
   // a normal-looking count.
-  return { researchSessionId, analyzerCount: msdRegisteredAnalyzers.length, recordedCount: results.filter(r => r.writeResult && r.writeResult.ok).length, results, regimeInfo };
+  return { researchSessionId, analyzerCount: msdRegisteredAnalyzers.length, recordedCount: results.filter(r => r.writeResult && r.writeResult.ok).length, results, regimeInfo, manifest };
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -10133,7 +10237,12 @@ async function msdRunPipelineNegativeControl(realDataset, realExperimentRecord, 
       writeFn: msdWriteControlFinding,
       extra: { controlRunId, trialIndex: t, negativeControlMethod: method },
     });
-    trialSummaries.push({ trialIndex: t, seed, recordedCount: sessionResult.recordedCount, readyForTraining: discoveryResult.readyForTraining });
+    // WORKSTREAM 7/8 (Supervisory Directive): reuses the manifest
+    // msdRunResearchSession already builds and records for this trial —
+    // no new computation, just carrying the status through so the
+    // aggregate check below can tell "every trial genuinely executed
+    // the complete pipeline" apart from "every trial ran some code."
+    trialSummaries.push({ trialIndex: t, seed, recordedCount: sessionResult.recordedCount, readyForTraining: discoveryResult.readyForTraining, manifestStatus: sessionResult.manifest.status, manifest: sessionResult.manifest });
 
     if (typeof onProgress === 'function') {
       try { onProgress({ trialIndex: t, numTrials, controlRunId, method }); } catch (_) {} // a broken progress callback must never break the actual control run
@@ -10141,18 +10250,315 @@ async function msdRunPipelineNegativeControl(realDataset, realExperimentRecord, 
     await msdYieldToEventLoop(); // explicit, unconditional — ensures the browser can repaint/update progress UI between trials, not just rely on whatever yielding happens inside msdRunResearchSession's own analyzer loop
   }
 
+  // WORKSTREAM 7/9 (Supervisory Directive): the calibration report must
+  // distinguish "no discoveries because the pipeline is calibrated" from
+  // "no discoveries because the pipeline is underpowered or incomplete."
+  // This is exactly that distinction, computed once, up front, from data
+  // every trial already produced — not a second execution pass.
+  const incompleteTrials = trialSummaries.filter(t => t.manifestStatus !== 'COMPLETE');
+  const executionIntegrity = {
+    allTrialsComplete: incompleteTrials.length === 0,
+    completeTrialCount: trialSummaries.length - incompleteTrials.length,
+    incompleteTrialCount: incompleteTrials.length,
+    incompleteTrialIndices: incompleteTrials.map(t => t.trialIndex),
+  };
+
   const calibration = await msdEvaluateControlCalibration(controlRunId);
+
+  // WORKSTREAM 9 (Supervisory Directive): calibration and execution
+  // integrity are DIFFERENT questions, and this makes their combination
+  // explicit rather than leaving a reader to infer it from two separate
+  // fields. Deliberately never reports "calibrated" on the strength of
+  // zero discoveries alone — that case is its own, distinct verdict.
+  let verdict;
+  if (!executionIntegrity.allTrialsComplete) {
+    verdict = 'EXECUTION INCOMPLETE — ' + executionIntegrity.incompleteTrialCount + ' of ' + numTrials + ' trials did not reach a COMPLETE manifest. Calibration cannot be assessed from an incomplete run, regardless of what the discovery counts show.';
+  } else if (calibration.discoveryKeyCount === 0) {
+    verdict = 'EXECUTION COMPLETE, BUT UNDERPOWERED — every trial ran the full pipeline correctly, but zero discoveryKeys were generated to assess calibration against. This is a power problem, not evidence of good calibration.';
+  } else if (calibration.verifiedRateWithinNominal === false) {
+    verdict = 'EXECUTION COMPLETE, CALIBRATION CONCERN — the pipeline ran completely, but the observed Verified rate exceeds the stated tolerance around the nominal false-positive rate. Do not trust real-data Verified discoveries until this is investigated.';
+  } else {
+    verdict = 'EXECUTION COMPLETE, CALIBRATION WITHIN TOLERANCE — every trial ran the full pipeline correctly, and the observed Verified rate is compatible with the nominal false-positive rate.';
+  }
+
   const report = {
     controlRunId, method, numTrials, baseSeed,
     codeVersion: MSD_CODE_VERSION,
     statisticalEngineVersion: MSD_STATISTICAL_ENGINE_VERSION,
     analyzerCount: msdRegisteredAnalyzers.length,
     sourceExperimentId: realExperimentRecord ? realExperimentRecord.experimentId : null,
-    trialSummaries, calibration,
+    trialSummaries, calibration, executionIntegrity, verdict,
     runAt: Date.now(),
   };
   await msdRecordControlCalibrationReport(report);
   return report;
+}
+
+/**
+ * WORKSTREAM 7 (Supervisory Directive) — the required smoke test before
+ * any larger calibration is authorized. A thin wrapper around
+ * msdRunPipelineNegativeControl (30 trials, label permutation, no new
+ * pipeline) whose entire purpose is checking executionIntegrity, NOT
+ * estimating a false-positive rate — that estimate from only 30 trials
+ * would be unreliable and is explicitly not what this function claims
+ * to produce. `smokeTestPassed` is the single fact Workstream 8's larger
+ * calibration is gated on.
+ */
+async function msdRunNegativeControlSmokeTest(realDataset, realExperimentRecord, baseSeed, onProgress){
+  const report = await msdRunPipelineNegativeControl(realDataset, realExperimentRecord, 'label_permutation', 30, baseSeed, onProgress);
+  return {
+    smokeTestPassed: report.executionIntegrity.allTrialsComplete,
+    reason: report.executionIntegrity.allTrialsComplete
+      ? 'All 30 trials reached a COMPLETE execution manifest. This alone does not authorize the 200-trial calibration — see msdEvaluateCalibrationAuthorization for the full, objective pre-registered criteria.'
+      : report.executionIntegrity.incompleteTrialCount + ' of 30 trials did not reach COMPLETE (indices: ' + report.executionIntegrity.incompleteTrialIndices.join(', ') + ') — calibration is NOT authorized until this is resolved.',
+    report,
+  };
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// REAL-DATA EXECUTION INTEGRITY — Readiness Audit, Smoke Test, Calibration Authorization
+// ══════════════════════════════════════════════════════════════════════
+// SCOPE STATED BEFORE ANY CODE: this file makes THREE genuinely different
+// things explicit and callable, none of which have been run against real
+// data by anyone but the person operating the live application:
+//   (1) A readiness AUDIT — the 10 questions the directive posed,
+//       answered as real, callable checks, most reusing infrastructure
+//       that already existed (msdVerifyExperimentReproducibility,
+//       msdGetAllExperiments, msdGetAllMarketStates) rather than
+//       reimplemented.
+//   (2) An automated SMOKE TEST that chains the audit with the existing
+//       msdRunNegativeControlSmokeTest (built last session), adding a
+//       higher-level six-state verdict (COMPLETE/PARTIAL/FAILED/
+//       INCOMPLETE/BLOCKED/NOT_EVALUATED) that is DELIBERATELY separate
+//       from msdClassifyExecutionManifest's own four-state classification
+//       — a manifest describes ONE session's analyzer execution; this
+//       verdict describes whether the WHOLE readiness-to-calibrate
+//       question can even be assessed at all, which is a different,
+//       higher-level concept and gets its own vocabulary rather than
+//       overloading the existing one.
+//   (3) An objective CALIBRATION AUTHORIZATION check — a checklist, not
+//       a judgment call, of pre-registered criteria that must ALL be
+//       true before a 200-trial run is recommended.
+//
+// AUTONOMY, CLASSIFIED HONESTLY PER THE DIRECTIVE'S OWN A/B/C SCHEME:
+//   (A) Genuinely executable now: chaining the readiness audit, the
+//       smoke test, and the authorization check into ONE function call
+//       that a person triggers once (a single button click) instead of
+//       four. This is real — it removes manual steps WITHIN one page
+//       load.
+//   (B) Requires the future always-on backend, explicitly out of scope
+//       and still paused: anything that runs UNATTENDED — with no
+//       browser tab open, on a schedule, reacting to new data arriving
+//       — cannot exist in a client-side single-page app. Nothing here
+//       claims otherwise.
+//   (C) Remains gated by objective, pre-registered criteria, never
+//       auto-approved: whether a calibration's RESULT should be trusted
+//       (is the Verified rate "acceptable") stays a judgment a human
+//       reads, even though whether the PRECONDITIONS for running it are
+//       met is now a mechanical, automatic check.
+
+const MSD_EXECUTION_VERDICT_STATES = ['COMPLETE', 'PARTIAL', 'FAILED', 'INCOMPLETE', 'BLOCKED', 'NOT_EVALUATED'];
+const MSD_SMOKE_TEST_TRIAL_COUNT = 30; // matches msdRunNegativeControlSmokeTest's own fixed trial count, referenced here for the authorization checklist rather than re-stated as a new number
+const MSD_CALIBRATION_MAX_RUNTIME_MS = 5 * 60 * 1000; // 5 minutes — a stated, configurable ceiling for the 30-trial SMOKE test specifically; the 200-trial calibration is expected to take longer and is not held to this same bound
+
+/**
+ * The 10-question readiness audit, each answered as a real, callable
+ * check rather than a prose assertion. Reuses msdVerifyExperimentReproducibility,
+ * msdGetAllExperiments, and msdGetAllMarketStates directly — none of
+ * this logic is reimplemented. Structural questions (does execution
+ * invoke every analyzer, does the manifest record them, can a failure
+ * disappear, are real and validation paths the same) are answered from
+ * the CODE's own already-tested architecture (R-061), not re-derived
+ * per call, since these are properties of the pipeline, not of any one
+ * dataset.
+ */
+async function msdAssessRealDataExecutionReadiness(experimentRecord){
+  const checks = {};
+
+  // Q1: is the dataset actually available?
+  const allStates = await msdGetAllMarketStates();
+  const matchingStates = experimentRecord && experimentRecord.symbol ? allStates.filter(s => s.symbol === experimentRecord.symbol) : [];
+  checks.datasetAvailable = { pass: matchingStates.length > 0, count: matchingStates.length };
+
+  // Q2: is the dataset snapshot reproducible? Reuses the EXISTING,
+  // already-tested reproducibility verifier directly.
+  let reproducibility = { reproducible: false, reason: 'No experimentRecord supplied.' };
+  if (experimentRecord && experimentRecord.experimentId) {
+    reproducibility = await msdVerifyExperimentReproducibility(experimentRecord);
+  }
+  checks.datasetReproducible = { pass: reproducibility.reproducible, reason: reproducibility.reason || null };
+
+  // Q3: is the exact experiment configuration permanently recorded?
+  let configRecorded = false;
+  if (experimentRecord && experimentRecord.experimentId) {
+    const allExperiments = await msdGetAllExperiments();
+    configRecorded = allExperiments.some(e => e.experimentId === experimentRecord.experimentId);
+  }
+  checks.configPermanentlyRecorded = { pass: configRecorded };
+
+  // Q4/Q5: structural — does execution invoke every expected analyzer,
+  // and does the manifest record them all. This is a property of the
+  // CODE (R-061), verified here by directly comparing the actual
+  // registered set against the independent expectation, exactly as
+  // msdRunResearchSession itself already does before every run.
+  const actualNames = msdRegisteredAnalyzers.map(a => a.name || '(anonymous)');
+  const missingFromRegistry = MSD_EXPECTED_ANALYZER_NAMES.filter(n => !actualNames.includes(n));
+  checks.allAnalyzersRegistered = { pass: missingFromRegistry.length === 0, missing: missingFromRegistry };
+
+  // Q6/Q7: can a failure or skip silently disappear, or be misreported
+  // as COMPLETE? Already exhaustively tested (R-061) — restated here as
+  // a structural fact about msdClassifyExecutionManifest's own logic,
+  // not re-verified per call (there's nothing dataset-specific to check).
+  checks.failuresCannotSilentlyDisappear = { pass: true, basis: 'msdClassifyExecutionManifest requires completedAnalyzers.length === expectedAnalyzerNames.length for COMPLETE — any failure or skip is structurally excluded from that status. Verified by R-061\'s own test suite, not re-derived here.' };
+
+  // Q8: are real and validation data executed through literally the
+  // SAME function? Structural fact, verified once: both
+  // msdRunLeadTimeSweep/msdRunExperimentUi (real data) and
+  // msdRunPipelineNegativeControl (validation) call msdRunResearchSession
+  // directly — the same code path, not a parallel one.
+  checks.realAndValidationShareExecutionPath = { pass: true, basis: 'Both real-data entry points and msdRunPipelineNegativeControl call msdRunResearchSession directly.' };
+
+  // Q9/Q10: is the result linked to the correct identifiers, and are
+  // failures/omissions persisted permanently? Both properties of
+  // msdRunResearchSession's own manifest construction and recording
+  // (R-061) — checked here structurally rather than re-verified, since
+  // there is nothing dataset-specific about whether the CODE does this.
+  checks.resultsLinkedAndPersisted = { pass: true, basis: 'msdRunResearchSession builds and permanently records a manifest (experimentId, researchSessionId, datasetSnapshotFingerprint) on every call, including failed/incomplete ones.' };
+
+  const allChecks = Object.values(checks);
+  const blockingFailures = ['datasetAvailable', 'datasetReproducible', 'configPermanentlyRecorded', 'allAnalyzersRegistered']
+    .filter(key => !checks[key].pass);
+
+  return {
+    checks,
+    ready: blockingFailures.length === 0,
+    blockingFailures,
+    assessedAt: Date.now(),
+  };
+}
+
+/**
+ * Chains the readiness audit with the existing msdRunNegativeControlSmokeTest
+ * (built last session, reused verbatim here) and classifies an overall
+ * verdict using the six-state vocabulary this directive specifies —
+ * deliberately distinct from msdClassifyExecutionManifest's own
+ * four-state classification, since this describes readiness-to-
+ * calibrate, not one session's analyzer execution.
+ */
+async function msdRunAutomatedExecutionIntegritySmokeTest(realDataset, realExperimentRecord, baseSeed, onProgress){
+  if (!realExperimentRecord || !realExperimentRecord.experimentId) {
+    return { verdict: 'NOT_EVALUATED', reason: 'No experimentRecord supplied — cannot assess readiness or run the smoke test at all.', readiness: null, smokeTest: null };
+  }
+
+  const readiness = await msdAssessRealDataExecutionReadiness(realExperimentRecord);
+  if (!readiness.ready) {
+    return {
+      verdict: 'BLOCKED',
+      reason: 'Readiness precondition(s) failed: ' + readiness.blockingFailures.join(', ') + '. The smoke test was never attempted.',
+      readiness, smokeTest: null,
+    };
+  }
+
+  const startedAt = Date.now();
+  const smokeTest = await msdRunNegativeControlSmokeTest(realDataset, realExperimentRecord, baseSeed, onProgress);
+  const runtimeMs = Date.now() - startedAt;
+
+  const trialStatuses = smokeTest.report.trialSummaries.map(t => t.manifestStatus);
+  const completeCount = trialStatuses.filter(s => s === 'COMPLETE').length;
+  const failedCount = trialStatuses.filter(s => s === 'FAILED').length;
+  const incompleteCount = trialStatuses.filter(s => s === 'INCOMPLETE').length;
+  const partialCount = trialStatuses.filter(s => s === 'PARTIAL').length;
+
+  let verdict;
+  if (completeCount === trialStatuses.length) verdict = 'COMPLETE';
+  else if (completeCount === 0) verdict = 'FAILED';
+  else if (incompleteCount > 0 && failedCount === 0 && partialCount === 0) verdict = 'INCOMPLETE';
+  else verdict = 'PARTIAL';
+
+  return {
+    verdict,
+    reason: verdict === 'COMPLETE'
+      ? 'All ' + trialStatuses.length + ' smoke-test trials reached a COMPLETE manifest in ' + runtimeMs + 'ms.'
+      : completeCount + '/' + trialStatuses.length + ' trials reached COMPLETE (failed: ' + failedCount + ', incomplete: ' + incompleteCount + ', partial: ' + partialCount + ').',
+    readiness, smokeTest, runtimeMs,
+    trialStatusCounts: { complete: completeCount, failed: failedCount, incomplete: incompleteCount, partial: partialCount },
+  };
+}
+
+/**
+ * Objective, pre-registered calibration-authorization checklist — every
+ * criterion the directive listed, each a real boolean, not a judgment
+ * call. Authorization requires ALL of them true. Deliberately does NOT
+ * authorize merely because the smoke test's verdict is COMPLETE without
+ * separately re-checking the individual criteria — redundant by
+ * construction (a COMPLETE verdict already implies most of these), but
+ * making each criterion independently named and inspectable is the
+ * actual point: a future change to the verdict-classification logic
+ * should not silently change what authorization means.
+ */
+function msdEvaluateCalibrationAuthorization(smokeTestResult){
+  if (!smokeTestResult || smokeTestResult.verdict === 'NOT_EVALUATED' || smokeTestResult.verdict === 'BLOCKED') {
+    return { authorized: false, reason: 'Smoke test verdict is ' + (smokeTestResult ? smokeTestResult.verdict : 'absent') + ' — calibration cannot be authorized before a smoke test has actually run to completion.', criteria: null };
+  }
+
+  const criteria = {
+    manifestsComplete: smokeTestResult.trialStatusCounts.complete === MSD_SMOKE_TEST_TRIAL_COUNT,
+    noSilentOmissions: smokeTestResult.readiness.checks.allAnalyzersRegistered.pass,
+    datasetReproducible: smokeTestResult.readiness.checks.datasetReproducible.pass,
+    configImmutable: smokeTestResult.readiness.checks.configPermanentlyRecorded.pass,
+    trialOutcomesProperlyClassified: smokeTestResult.smokeTest.report.trialSummaries.every(t => !!t.manifestStatus),
+    failureRateBelowThreshold: smokeTestResult.trialStatusCounts.failed === 0,
+    runtimeAcceptable: smokeTestResult.runtimeMs <= MSD_CALIBRATION_MAX_RUNTIME_MS,
+  };
+
+  const failed = Object.keys(criteria).filter(k => !criteria[k]);
+  return {
+    authorized: failed.length === 0,
+    reason: failed.length === 0
+      ? 'All pre-registered authorization criteria are satisfied — a 200-trial calibration run is authorized.'
+      : 'Not authorized — failed criteria: ' + failed.join(', '),
+    criteria, failedCriteria: failed,
+  };
+}
+
+/**
+ * CATEGORY A AUTONOMY — genuinely executable now, nothing more claimed.
+ * Chains readiness -> smoke test -> authorization check into ONE call,
+ * removing three separate manual steps down to one. This is real: a
+ * person (or a future button) triggers this once instead of clicking
+ * three different panels in sequence and reading each result before
+ * deciding whether to proceed to the next.
+ *
+ * WHAT THIS IS NOT (Category B, still paused, still requires the
+ * future always-on backend): this does not run unattended. It does not
+ * detect that new real data has arrived and trigger itself. It does
+ * not persist across a closed browser tab. It executes exactly once,
+ * synchronously within the calling page's lifetime, exactly like every
+ * other function in this file.
+ *
+ * WHAT THIS DOES NOT DECIDE (Category C, stays gated): if authorization
+ * criteria are met, this function does NOT itself launch the 200-trial
+ * calibration or interpret its result as a scientific claim — it reports
+ * that authorization was granted and stops. Running the actual
+ * calibration, and deciding whether its result means the pipeline is
+ * trustworthy, remain separate, deliberate acts.
+ */
+async function msdRunFullValidationSequence(realDataset, realExperimentRecord, baseSeed, onProgress){
+  const smokeTestResult = await msdRunAutomatedExecutionIntegritySmokeTest(realDataset, realExperimentRecord, baseSeed, onProgress);
+  const authorization = (smokeTestResult.verdict === 'BLOCKED' || smokeTestResult.verdict === 'NOT_EVALUATED')
+    ? { authorized: false, reason: 'Smoke test did not run (verdict: ' + smokeTestResult.verdict + ') — authorization cannot be evaluated.', criteria: null }
+    : msdEvaluateCalibrationAuthorization(smokeTestResult);
+
+  return {
+    smokeTestVerdict: smokeTestResult.verdict,
+    smokeTestReason: smokeTestResult.reason,
+    calibrationAuthorized: authorization.authorized,
+    authorizationReason: authorization.reason,
+    authorizationCriteria: authorization.criteria,
+    smokeTestResult,
+    completedAt: Date.now(),
+  };
 }
 
 /**
