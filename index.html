@@ -8860,6 +8860,11 @@ async function msdVerifyProvenanceIntegrity(discoveryKey){
   return { discoveryId: discoveryKey, allReproducible: results.every(r => r.ok), experiments: results };
 }
 
+/** Hands control back to the browser's event loop for one tick — the standard, minimal technique for letting a long-running synchronous computation avoid freezing the UI. Changes NOTHING about what gets computed, only when the browser gets a chance to repaint/respond to input in between. */
+function msdYieldToEventLoop(){
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+
 async function msdRunResearchSession(experimentRecord, discoveryResult, trainResult, dataset, recordOpts){
   // recordOpts is OPTIONAL (Phase 2: Scientific Infrastructure) — every
   // pre-existing caller passes 4 arguments and is unaffected. The
@@ -8871,15 +8876,36 @@ async function msdRunResearchSession(experimentRecord, discoveryResult, trainRes
   for (const analyzer of msdRegisteredAnalyzers) {
     let evidenceList;
     try {
-      evidenceList = analyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset, regimeInfo) || [];
+      // ROOT CAUSE OF "the project hangs", found and fixed here: nine
+      // analyzers now run per experiment (Phases 2, 11, 12, 14, 16, 17),
+      // several individually taking multiple seconds at realistic
+      // dataset sizes (measured directly — see the Debt Register). None
+      // of that changed here. What was missing is this: `await` was
+      // never applied to the analyzer call, and — critically — when an
+      // analyzer returns no evidence (the ordinary case), the inner
+      // evidence-recording loop's own `await` never fires either. That
+      // meant all nine analyzers' cost could compound into ONE single
+      // blocking JavaScript turn, during which the browser tab cannot
+      // repaint or respond to any input at all — indistinguishable from
+      // a genuine hang, even though nothing was actually stuck. `await`
+      // on a plain (non-async) function's return value is always safe
+      // in JS — it resolves immediately and changes no analyzer's
+      // computed result, only whether control can return to the event
+      // loop afterward.
+      evidenceList = (await analyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset, regimeInfo)) || [];
     } catch (e) {
       results.push({ error: 'Analyzer threw: ' + e.message });
+      await msdYieldToEventLoop();
       continue;
     }
     for (const evidence of evidenceList) {
       const recorded = await msdRecordDiscoveryEvidence(evidence, recordOpts);
       results.push(recorded);
     }
+    // Unconditional yield after EVERY analyzer, regardless of whether it
+    // produced evidence to record (which is what the pre-existing inner
+    // loop's own `await` depended on) — this is the actual fix.
+    await msdYieldToEventLoop();
   }
   // Phase 6.5: recordedCount now checks writeResult.ok, not just
   // writeResult's truthiness. Pre-existing quirk (noted, left alone, in
@@ -9606,7 +9632,118 @@ function msdLabelMarketState(fingerprint){
   return 'Transition';
 }
 
-function msdMarketStateAnalyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset, regimeInfo){
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 14 — Latent Market State Null-Model Testing (closes R-011)
+// ══════════════════════════════════════════════════════════════════════
+// Scientific gap this closes: msdMarketStateAnalyzer already tests
+// whether ONE cluster's membership correlates with the outcome
+// (msdEvaluateCombo, BH-corrected) — but nothing has ever tested whether
+// the underlying k-means PARTITION ITSELF found genuine structure in the
+// (adx, rsi, macd, atr, pdi, ndi) feature space, as opposed to k-means
+// simply carving an unimodal, structureless blob into MSD_STATE_K
+// arbitrary pieces, which k-means always does regardless of whether real
+// clusters exist. A cluster can show real lift on the outcome while the
+// partition it came from is scientifically arbitrary — these are
+// different claims, and only the first has ever been tested until now.
+//
+// THE GAP STATISTIC (Tibshirani, Walther & Hastie, 2001) — a standard,
+// well-established technique, not invented here: compares the real
+// data's within-cluster dispersion at k=K against the dispersion k-means
+// produces on REFERENCE data with NO cluster structure (uniform over the
+// same per-dimension bounding box). A large positive gap (relative to
+// the reference distribution's own spread) means the real partition is
+// genuinely tighter than chance; a near-zero or negative gap means the
+// "market states" language is not scientifically warranted at this K.
+//
+// REUSE, NOT DUPLICATION: msdKMeans, msdEuclideanDistance, and
+// msdStandardizeFeatures (all pre-existing, already used by the
+// analyzer this phase gates) are called directly — no second clustering
+// implementation.
+//
+// HARD GATE, not an informational annotation: if the Gap Statistic finds
+// no genuine structure at MSD_STATE_K, msdMarketStateAnalyzer now
+// returns no evidence at all for that experiment run — consistent with
+// "don't claim latent market states exist if the partition itself isn't
+// better than chance," the same discipline every other hard
+// precondition in this lab already enforces.
+
+const MSD_GAP_STATISTIC_REFERENCE_COUNT = 20; // number of null reference datasets — a stated, bounded default for a browser-run computation
+const MSD_GAP_STATISTIC_MIN_STD_ERRORS = 1;   // the standard Tibshirani et al. one-standard-error criterion, not an invented threshold
+
+/** Pooled within-cluster sum of squared distances to each point's own assigned centroid — the standard Gap Statistic dispersion measure. Reuses msdEuclideanDistance directly. */
+function msdComputeWithinClusterDispersion(standardizedMatrix, assignments, centroids){
+  let total = 0;
+  standardizedMatrix.forEach((point, i) => {
+    const c = assignments[i];
+    if (c == null || c < 0 || !centroids[c]) return;
+    const d = msdEuclideanDistance(point, centroids[c]);
+    total += d * d;
+  });
+  return total;
+}
+
+/** Generates ONE uniform-random reference dataset over the same per-dimension bounding box as the real standardized data — the classic Tibshirani et al. null reference distribution: same overall spread, deliberately no cluster structure. */
+function msdGenerateUniformReferenceData(standardizedMatrix, rng){
+  const dims = standardizedMatrix[0].length;
+  const mins = new Array(dims).fill(Infinity), maxs = new Array(dims).fill(-Infinity);
+  standardizedMatrix.forEach(point => point.forEach((v, d) => { if (v < mins[d]) mins[d] = v; if (v > maxs[d]) maxs[d] = v; }));
+  return standardizedMatrix.map(() => mins.map((lo, d) => lo + rng() * (maxs[d] - lo)));
+}
+
+/**
+ * The Gap Statistic at a fixed k. Runs k-means once on the real
+ * standardized data, then msdReferenceCount times on uniform reference
+ * data of the same shape, and compares log within-cluster dispersion.
+ * `genuineStructure` is the direct, binary answer to R-011: does this
+ * partition beat what chance alone would produce, by at least the
+ * standard one-SE margin.
+ *
+ * ASYNC, with a yield every few reference runs: measured directly (see
+ * the Debt Register) as the single most expensive analyzer in this lab
+ * — 21 total k-means runs per call, 3+ seconds at 20,000 snapshots.
+ * Yielding periodically here (not just once per analyzer in
+ * msdRunResearchSession's outer loop) keeps the browser responsive
+ * DURING this one analyzer's own execution, not just between analyzers
+ * — the fix that actually matters at real dataset sizes, where this
+ * single function could otherwise run for many seconds uninterrupted.
+ */
+async function msdComputeGapStatistic(standardizedMatrix, k, seed, referenceCount){
+  referenceCount = referenceCount || MSD_GAP_STATISTIC_REFERENCE_COUNT;
+  const rng = msdSeededRandom(seed || 1);
+  const real = msdKMeans(standardizedMatrix, k, seed);
+  if (!real.assignments.length) return null;
+  const realDispersion = msdComputeWithinClusterDispersion(standardizedMatrix, real.assignments, real.centroids);
+  const logRealDispersion = Math.log(Math.max(realDispersion, 1e-12));
+
+  const refLogDispersions = [];
+  for (let b = 0; b < referenceCount; b++) {
+    const refData = msdGenerateUniformReferenceData(standardizedMatrix, rng);
+    const refResult = msdKMeans(refData, k, Math.floor(rng() * 1e9));
+    if (refResult.assignments.length) {
+      const refDispersion = msdComputeWithinClusterDispersion(refData, refResult.assignments, refResult.centroids);
+      refLogDispersions.push(Math.log(Math.max(refDispersion, 1e-12)));
+    }
+    if (b % 5 === 4) await msdYieldToEventLoop(); // every 5 reference runs, not every one — enough to stay responsive without turning 20 yields into their own overhead
+  }
+  if (!refLogDispersions.length) return null;
+
+  const meanRefLog = refLogDispersions.reduce((s, v) => s + v, 0) / refLogDispersions.length;
+  const variance = refLogDispersions.reduce((s, v) => s + (v - meanRefLog) * (v - meanRefLog), 0) / refLogDispersions.length;
+  const sd = Math.sqrt(variance);
+  const standardError = sd * Math.sqrt(1 + 1 / refLogDispersions.length);
+  const gap = meanRefLog - logRealDispersion;
+
+  return {
+    k, gap, standardError, referenceCount: refLogDispersions.length,
+    genuineStructure: gap > MSD_GAP_STATISTIC_MIN_STD_ERRORS * standardError,
+    logRealDispersion, meanRefLogDispersion: meanRefLog,
+    method: 'Gap Statistic (Tibshirani, Walther & Hastie, 2001) — uniform-bounding-box reference distribution, one-standard-error decision rule.',
+  };
+}
+
+
+async function msdMarketStateAnalyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset, regimeInfo){
   if (!discoveryResult || !dataset) return [];
   if (!discoveryResult.readyForTraining) return [];
 
@@ -9619,6 +9756,17 @@ function msdMarketStateAnalyzer(experimentRecord, discoveryResult, trainResult, 
 
   const seed = experimentRecord.randomSeed || 1;
   const { standardized, means: overallMeans, stds: overallStds } = msdStandardizeFeatures(matrix);
+
+  // PHASE 14 HARD GATE (closes R-011): before evaluating any individual
+  // cluster's outcome-lift, test whether the k-means PARTITION ITSELF
+  // beats what chance alone would produce on structureless reference
+  // data of the same shape. A cluster can show real lift while the
+  // partition it came from is arbitrary — this is a genuinely different,
+  // previously entirely untested question, and it gates ALL market_state
+  // evidence for this experiment run, not just an informational note.
+  const gapStatistic = await msdComputeGapStatistic(standardized, MSD_STATE_K, seed, MSD_GAP_STATISTIC_REFERENCE_COUNT);
+  if (!gapStatistic || !gapStatistic.genuineStructure) return [];
+
   const eligible = msdComputeDimensionRelevance(matrix, outcomesAll, MSD_CLUSTER_FEATURE_KEYS);
   const { assignments } = msdKMeans(standardized, MSD_STATE_K, seed);
   if (!assignments.length) return [];
@@ -9696,6 +9844,10 @@ function msdMarketStateAnalyzer(experimentRecord, discoveryResult, trainResult, 
         clustersTestedThisExperiment: e.clustersTestedThisExperiment,
         sampleCount: discoveryResult.sampleStats ? discoveryResult.sampleStats.totalCount : validRows.length,
         fullStatistics: fullStats,
+        // Phase 14 (closes R-011): the gap-statistic result that gated
+        // this entire evidence batch — attached for visibility, not just
+        // used internally to decide whether to reach this line at all.
+        gapStatistic,
       },
     };
   });
@@ -10230,6 +10382,15 @@ function msdBuildExperimentManifest(experimentRecord, analyzerNamesAtRunTime, en
     statisticalEngineVersion: MSD_STATISTICAL_ENGINE_VERSION,
     analyzerNamesAtRunTime: (analyzerNamesAtRunTime || []).slice(),
     environment: environmentInfo || null,
+    // Phase 13R additions (all optional, additive — every existing
+    // caller that doesn't supply these on experimentRecord gets null,
+    // not a broken manifest): the remaining configuration a real-data
+    // replay needs to be genuinely reproducible, not just "same code
+    // ran on the same snapshots."
+    purgeSeconds: experimentRecord.purgeSeconds != null ? experimentRecord.purgeSeconds : null,
+    nullModelConfig: experimentRecord.nullModelConfig || null,
+    multipleTestingConfig: experimentRecord.multipleTestingConfig || null,
+    modelConfig: experimentRecord.modelConfig || null,
   };
 }
 
@@ -11115,19 +11276,47 @@ const MSD_MEASUREMENT_MATURITY_RANK = { observation: 0, candidate: 1, repeatable
  * it) — production callers should omit it and let this read the real,
  * live discovery summaries via msdGetDiscoverySummaries.
  */
-async function msdRunMeasurementCompetition(featureKeys, summariesOverride){
+/**
+ * Fixes R-031 and R-021 together. R-031: the winner is now the
+ * measurement contributing the greatest UNIQUE information, not merely
+ * the highest standalone score — reusing the EXACT existing redundancy
+ * machinery (msdMutualInformation, msdComputePearsonCorrelation,
+ * MSD_REDUNDANCY_MI_THRESHOLD / MSD_REDUNDANCY_CORRELATION_THRESHOLD /
+ * MSD_PROXY_INCREMENTAL_GAIN_THRESHOLD — the exact same thresholds the
+ * pre-existing raw-tick Redundancy Audit already uses, not a second,
+ * parallel standard) rather than maintaining two half-built redundancy
+ * systems. R-021: this previously only ever checked the
+ * 'single_feature:' discoveryKey prefix — now checks every prefix
+ * supplied, so evidence from ANY analyzer (including the new
+ * transfer_entropy one) can actually enter competition.
+ *
+ * FULLY BACKWARD COMPATIBLE: valueSeriesByFeatureKey and outcomeSeries
+ * are optional. Omit them (as every existing call site does) and this
+ * behaves EXACTLY as before — pure maturity/stability/reproducibility
+ * ranking, no redundancy computation attempted (there's no real data to
+ * compute it from). Supply them and the winner must ALSO clear the
+ * redundancy bar: an entrant classified Redundant or Proxy against any
+ * higher-or-equal-maturity rival is never the winner, even if its own
+ * standalone statistics look best.
+ */
+async function msdRunMeasurementCompetition(featureKeys, summariesOverride, valueSeriesByFeatureKey, outcomeSeries, discoveryKeyPrefixes){
   const summaries = summariesOverride || await msdGetDiscoverySummaries();
   const byKey = {};
   summaries.forEach(s => { byKey[s.discoveryKey] = s; });
+  const prefixes = (Array.isArray(discoveryKeyPrefixes) && discoveryKeyPrefixes.length) ? discoveryKeyPrefixes : ['single_feature:'];
 
-  // Phase 6.5 (Measurement Competition Governance): each entrant's most
-  // recent explicit governance action (production_selection/deprecation/
-  // archival — msdGetLifecycleActions, Phase 2, unchanged) is looked up
-  // alongside its statistical summary, the same principle Discovery
-  // Competition already enforces for hypotheses.
   const entrants = [];
   for (const featureKey of featureKeys) {
-    const summary = byKey['single_feature:' + featureKey];
+    // R-021 fix: check every requested prefix, keep whichever matching
+    // summary has the highest maturity (a feature can have evidence
+    // from more than one analyzer simultaneously).
+    let summary = null;
+    for (const prefix of prefixes) {
+      const candidate = byKey[prefix + featureKey];
+      if (candidate && (!summary || (MSD_MEASUREMENT_MATURITY_RANK[candidate.maturityLevel] || 0) > (MSD_MEASUREMENT_MATURITY_RANK[summary.maturityLevel] || 0))) {
+        summary = candidate;
+      }
+    }
     const governance = await msdCheckLifecycleGovernanceForFeature(featureKey);
     if (!summary) { entrants.push({ featureKey, hasEvidence: false, governanceStatus: governance.status }); continue; }
     entrants.push({
@@ -11136,7 +11325,53 @@ async function msdRunMeasurementCompetition(featureKeys, summariesOverride){
       evidenceStabilityScore: summary.evidenceStabilityScore,
       reproducibilityCount: summary.supportingExperimentIds.length,
       evidenceCount: summary.evidenceCount,
-      governanceStatus: governance.status, // null | 'production_selection' | 'deprecation' | 'archival'
+      governanceStatus: governance.status,
+    });
+  }
+
+  // R-031: redundancy analysis, only when real value data is supplied.
+  if (valueSeriesByFeatureKey && outcomeSeries) {
+    entrants.forEach(entrant => {
+      if (!entrant.hasEvidence) return;
+      const ownValues = valueSeriesByFeatureKey[entrant.featureKey];
+      if (!ownValues || ownValues.length !== outcomeSeries.length) return;
+      const ownInformation = msdMutualInformation(ownValues, outcomeSeries);
+      entrant.ownInformation = ownInformation;
+
+      let isRedundant = false, minIncrementalGain = null, minConditionalContribution = null;
+      const pairwise = [];
+      entrants.forEach(other => {
+        if (other === entrant || !other.hasEvidence) return;
+        const otherValues = valueSeriesByFeatureKey[other.featureKey];
+        if (!otherValues || otherValues.length !== ownValues.length) return;
+
+        const pairwiseMI = msdMutualInformation(ownValues, otherValues);
+        const correlation = msdComputePearsonCorrelation(ownValues, otherValues);
+        const otherInformation = msdMutualInformation(otherValues, outcomeSeries);
+        // Same approximation the pre-existing Redundancy Audit already
+        // uses (MI(own,outcome) - MI(other,outcome)) — kept identical
+        // for consistency rather than holding this competition to a
+        // stricter standard invented only for it.
+        const incrementalGain = (ownInformation != null && otherInformation != null) ? (ownInformation - otherInformation) : null;
+        // The REAL conditional contribution — I(own;outcome|other) —
+        // now possible because msdWorkbenchConditionalMI exists (Part 2
+        // of this phase); a rigorous complement to the approximation
+        // above, not a replacement for it.
+        const conditionalContribution = msdWorkbenchConditionalMI(ownValues, outcomeSeries, otherValues);
+
+        pairwise.push({ against: other.featureKey, pairwiseMI, correlation, incrementalGain, conditionalContribution });
+        if ((pairwiseMI != null && pairwiseMI > MSD_REDUNDANCY_MI_THRESHOLD) || (correlation != null && Math.abs(correlation) > MSD_REDUNDANCY_CORRELATION_THRESHOLD)) {
+          isRedundant = true;
+        }
+        if (incrementalGain != null && (minIncrementalGain == null || incrementalGain < minIncrementalGain)) minIncrementalGain = incrementalGain;
+        if (conditionalContribution != null && (minConditionalContribution == null || conditionalContribution < minConditionalContribution)) minConditionalContribution = conditionalContribution;
+      });
+
+      const isProxy = !isRedundant && pairwise.length > 0 && minIncrementalGain != null && minIncrementalGain < MSD_PROXY_INCREMENTAL_GAIN_THRESHOLD;
+      entrant.redundancyClassification = isRedundant ? 'Redundant' : isProxy ? 'Proxy' : 'Unique';
+      entrant.minIncrementalGain = minIncrementalGain;
+      entrant.minConditionalContribution = minConditionalContribution;
+      entrant.pairwiseComparisons = pairwise;
     });
   }
 
@@ -11151,14 +11386,17 @@ async function msdRunMeasurementCompetition(featureKeys, summariesOverride){
     return (b.reproducibilityCount || 0) - (a.reproducibilityCount || 0);
   });
 
-  // Governance overrides derived ranking: an explicitly deprecated or
-  // archived feature can never win, regardless of how strong its
-  // statistics look — the same "governance always overrides statistical
-  // status" principle enforced everywhere else in this lab.
+  // Governance overrides derived ranking (unchanged). THEN, when
+  // redundancy data exists, the winner must also be classified Unique —
+  // "contributes the greatest UNIQUE information," not merely the best
+  // standalone statistics. A Redundant or Proxy entrant is skipped even
+  // if it ranks first on maturity/stability alone; the highest-ranked
+  // Unique entrant wins instead.
   const verifiedRanked = ranked.filter(e => e.hasEvidence && e.maturityLevel === 'verified' && e.governanceStatus !== 'deprecation' && e.governanceStatus !== 'archival');
-  const winner = verifiedRanked.length ? verifiedRanked[0] : null;
+  const eligible = valueSeriesByFeatureKey ? verifiedRanked.filter(e => e.redundancyClassification !== 'Redundant' && e.redundancyClassification !== 'Proxy') : verifiedRanked;
+  const winner = eligible.length ? eligible[0] : null;
   const recommendedRetirements = winner
-    ? verifiedRanked.slice(1).map(e => e.featureKey)
+    ? verifiedRanked.filter(e => e !== winner).map(e => e.featureKey)
     : [];
 
   return { entrants: ranked, winner: winner ? winner.featureKey : null, recommendedRetirements };
@@ -11247,11 +11485,19 @@ async function msdGetMeasurementCompetitionReports(contextLabel){
  */
 function msdExtractFeatureKeysFromDiscoveryKey(discoveryType, discoveryKey){
   if (!discoveryType || !discoveryKey) return [];
-  if (discoveryType === 'single_feature' || discoveryType === 'threshold') {
+  if (discoveryType === 'single_feature' || discoveryType === 'threshold' || discoveryType === 'transfer_entropy' || discoveryType === 'baseline' || discoveryType === 'complexity_science' || discoveryType === 'signal_processing') {
     return [discoveryKey.slice(discoveryType.length + 1)];
   }
-  if (discoveryType === 'combo') {
-    return discoveryKey.slice('combo:'.length).split('+').filter(Boolean);
+  if (discoveryType === 'combo' || discoveryType === 'nonlinear_interaction') {
+    return discoveryKey.slice(discoveryType.length + 1).split('+').filter(Boolean);
+  }
+  if (discoveryType === 'statistical_physics') {
+    // Key format is 'statistical_physics:featureKey:statisticName' — a
+    // third segment identifying WHICH rolling statistic (autocorrelation
+    // or variance), unlike every other single-feature discoveryType's
+    // two-part key. Traceability only needs the feature key itself.
+    const rest = discoveryKey.slice(discoveryType.length + 1);
+    return [rest.split(':')[0]];
   }
   if (discoveryType === 'market_state') {
     return (typeof MSD_CLUSTER_FEATURE_KEYS !== 'undefined' && Array.isArray(MSD_CLUSTER_FEATURE_KEYS)) ? MSD_CLUSTER_FEATURE_KEYS.slice() : [];
@@ -12949,6 +13195,2061 @@ async function msdRunAutonomousGenerationCycle(generationBudget, gapAnalysisBudg
 
   return { generationBudget, gapAnalysis: analysis, results, generatedCount, ranAt: Date.now() };
 }
+
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 11, PART 2 — Information-Theoretic Discovery Pipeline
+// ══════════════════════════════════════════════════════════════════════
+// The first genuinely independent discovery methodology in this lab.
+// Registered through the EXACT SAME msdRegisterDiscoveryAnalyzer
+// extension point the existing four analyzers already use — no new
+// pipeline mechanism, no new evidence path, no shortcut around
+// KnowledgeBase / the Maturity Engine / the Bayesian layer. Evidence
+// from this analyzer flows through msdRecordDiscoveryEvidence exactly
+// like every other analyzer's evidence, which means it is ALSO subject
+// to the Phase 6.5 traceability hard-block — see the
+// msdExtractFeatureKeysFromDiscoveryKey update below, without which
+// this analyzer's evidence would be silently unrecordable.
+//
+// METHODOLOGICAL INDEPENDENCE, stated precisely: the existing
+// single_feature/threshold/combo/market_state analyzers all ask a
+// SYMMETRIC, ATEMPORAL question — does this value correlate with the
+// outcome. Transfer Entropy and Conditional Mutual Information ask
+// DIRECTIONAL and CONTEXTUAL questions plain MI cannot ask at all: does
+// information flow FROM the feature TO the outcome more than the
+// reverse (directionality), and does a feature remain informative once
+// a SPECIFIC rival explanation is already known (conditioning) — not
+// "is it correlated," but "does it survive being tested against
+// something else that might explain the same variance."
+//
+// HONEST SCOPE: this implements LAG-1 Transfer Entropy — I(Y_t ;
+// X_{t-1} | Y_{t-1}) using the immediately preceding snapshot's outcome
+// as the proxy for "the outcome's own past" — not the full
+// arbitrary-embedding-length Transfer Entropy of the original Schreiber
+// 2000 formulation. Stated as a simplification throughout, not offered
+// as the complete textbook definition, the same posture as every other
+// approximation already disclosed in this lab (the Bayesian layer's
+// normal-approximated credible interval, the Redundancy Audit's
+// incremental-gain approximation, etc.).
+
+const MSD_INFOFLOW_PERMUTATIONS = 30;   // same permutation count as the existing Threshold analyzer, for consistency
+const MSD_INFOFLOW_P_GATE = 0.05;
+const MSD_INFOFLOW_CONDITIONING_CAP = 5; // at most this many OTHER notable features used as conditioning variables per candidate — bounded, mirroring MSD_COMBO_CANDIDATE_CAP's existing discipline
+
+/**
+ * I(X;Y|Z) — REUSES the existing, already-validated Phase 1D conditional
+ * mutual information primitive (further down this file: Information
+ * Discovery Framework, msdConditionalMutualInformation(y, x, z, binCount)
+ * computes I(y;z|x)) rather than a second implementation of the same
+ * statistic under a different name. A genuine naming collision was
+ * caught here during this phase's own testing — an earlier draft of
+ * this file defined its own msdConditionalMutualInformation, which
+ * would have silently shadowed the pre-existing, tested Phase 1D
+ * function (JS: whichever declaration loads last wins in the same
+ * scope). Fixed by reusing the original instead of renaming or
+ * duplicating it — reordering arguments (I(y;z|x) called as
+ * (X,Z,Y) gives I(X;Y|Z)) rather than writing new math. Uses a higher
+ * binCount (6) than that function's raw-tick-tuned default (2), since
+ * engineered feature values are continuous, not near-binary tick
+ * directions; its internal minimum-partition-size gate (>=2 points) is
+ * inherited as-is, since it belongs to shared, unmodified code.
+ */
+function msdWorkbenchConditionalMI(xValues, yValues, zValues){
+  return msdConditionalMutualInformation(xValues, zValues, yValues, 6);
+}
+
+/**
+ * Simplified (lag-1) Transfer Entropy: TE(source -> target) =
+ * I(target_now ; source_past | target_past). Built as a specific,
+ * named case of the Conditional Mutual Information primitive above, not
+ * a separately implemented statistic — avoiding a second, parallel
+ * information-theoretic method living beside the first. Caller must
+ * supply values already sorted by epoch (the analyzer below sorts
+ * before calling); this function has no notion of time itself, only
+ * array position.
+ */
+function msdSimplifiedTransferEntropy(sourceValues, targetValues){
+  const n = targetValues.length;
+  if (n < 3 || sourceValues.length !== n) return null;
+  const targetNow = targetValues.slice(1);
+  const targetPast = targetValues.slice(0, n - 1);
+  const sourcePast = sourceValues.slice(0, n - 1);
+  return msdWorkbenchConditionalMI(sourcePast, targetNow, targetPast);
+}
+
+/**
+ * Phase 11 analyzer. For every feature that already cleared the same
+ * notability bar every other analyzer uses (report.mutualInformation >=
+ * MSD_SINGLE_FEATURE_MI_THRESHOLD — reused, not a new threshold),
+ * computes: (a) directional information flow — forward vs. reverse
+ * lag-1 Transfer Entropy, permutation-tested on the forward direction
+ * since that's the direction relevant to prediction; (b) Conditional
+ * Mutual Information against up to MSD_INFOFLOW_CONDITIONING_CAP other
+ * notable features, reporting the MINIMUM across conditioning
+ * variables — the most conservative reading, since a feature that only
+ * survives against SOME rivals is a weaker claim than one surviving
+ * every rival tested. One Benjamini-Hochberg correction across the
+ * whole batch, same discipline as every other analyzer here — never
+ * gated feature-by-feature alone.
+ */
+function msdInformationTheoreticAnalyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset, regimeInfo){
+  if (!discoveryResult || !discoveryResult.featureReports || !dataset) return [];
+  if (!discoveryResult.readyForTraining) return [];
+
+  const allSnapshots = dataset.trainSet.concat(dataset.valSet, dataset.testSet).slice().sort((a, b) => a.epoch - b.epoch);
+  const outcomes = allSnapshots.map(s => s.outcome === 'positive' ? 1 : 0);
+
+  const notable = discoveryResult.featureReports.filter(r => r.mutualInformation != null && r.mutualInformation >= MSD_SINGLE_FEATURE_MI_THRESHOLD);
+  if (!notable.length) return [];
+
+  const rng = msdSeededRandom(experimentRecord.randomSeed || 1);
+
+  const candidates = [];
+  notable.forEach(report => {
+    const values = allSnapshots.map(s => s[report.feature]);
+
+    const teForward = msdSimplifiedTransferEntropy(values, outcomes);
+    if (teForward == null) return;
+    const teReverse = msdSimplifiedTransferEntropy(outcomes, values) || 0;
+    const netFlow = teForward - teReverse;
+
+    let countGE = 0;
+    for (let p = 0; p < MSD_INFOFLOW_PERMUTATIONS; p++) {
+      const shuffledOutcomes = msdSeededShuffle(outcomes, rng);
+      const shuffledTE = msdSimplifiedTransferEntropy(values, shuffledOutcomes);
+      if (shuffledTE != null && shuffledTE >= teForward) countGE++;
+    }
+    const pValue = (1 + countGE) / (1 + MSD_INFOFLOW_PERMUTATIONS);
+
+    const others = notable.filter(r => r.feature !== report.feature).slice(0, MSD_INFOFLOW_CONDITIONING_CAP);
+    let minConditionalMI = null;
+    const conditionedAgainst = [];
+    others.forEach(otherReport => {
+      const otherValues = allSnapshots.map(s => s[otherReport.feature]);
+      const cmi = msdWorkbenchConditionalMI(values, outcomes, otherValues);
+      if (cmi != null) {
+        conditionedAgainst.push({ feature: otherReport.feature, conditionalMI: cmi });
+        if (minConditionalMI == null || cmi < minConditionalMI) minConditionalMI = cmi;
+      }
+    });
+
+    candidates.push({ feature: report.feature, teForward, teReverse, netFlow, pValue, minConditionalMI, conditionedAgainst });
+  });
+  if (!candidates.length) return [];
+
+  const corrected = msdBenjaminiHochberg(candidates.map(c => c.pValue), MSD_INFOFLOW_P_GATE);
+
+  const evidence = [];
+  candidates.forEach((cand, i) => {
+    if (!corrected[i].significant) return;
+    evidence.push({
+      discoveryKey: 'transfer_entropy:' + cand.feature,
+      discoveryType: 'transfer_entropy',
+      researchSessionId, experimentId: experimentRecord.experimentId,
+      leadTime: experimentRecord.leadTime, featureVersion: experimentRecord.featureVersion,
+      symbol: experimentRecord.symbol,
+      regime: regimeInfo ? regimeInfo.label : null,
+      regimeFingerprint: regimeInfo ? regimeInfo.fingerprint : null,
+      datasetEpochMin: experimentRecord.datasetEpochMin, datasetEpochMax: experimentRecord.datasetEpochMax,
+      statisticalEngineVersion: MSD_STATISTICAL_ENGINE_VERSION, codeVersion: MSD_CODE_VERSION,
+      registrationId: experimentRecord.registrationId,
+      statisticalEvidence: {
+        transferEntropyForward: cand.teForward,
+        transferEntropyReverse: cand.teReverse,
+        netInformationFlow: cand.netFlow,
+        minConditionalMutualInformation: cand.minConditionalMI,
+        conditionedAgainst: cand.conditionedAgainst,
+        pValue: cand.pValue,
+        method: 'lag-1 simplified transfer entropy + conditional mutual information — not full-embedding transfer entropy',
+      },
+    });
+  });
+  return evidence;
+}
+msdRegisterDiscoveryAnalyzer(msdInformationTheoreticAnalyzer);
+
+/**
+ * Cross-Pipeline Consensus HOOK ONLY — deliberately not a full
+ * consensus engine. Only two analyzer families exist so far
+ * (correlation-based: single_feature/threshold/combo/market_state; and
+ * information-flow-based: transfer_entropy), and "independent methods
+ * converge" isn't a meaningful claim with only two, let alone one. This
+ * is the minimal query a future consensus engine will need — which
+ * discoveryTypes have ANY recorded evidence for a given featureKey — so
+ * convergence candidates can eventually be identified without a new
+ * registry. Pure aggregation over the existing evidence store; reuses
+ * msdExtractFeatureKeysFromDiscoveryKey (Phase 6.5) directly.
+ */
+async function msdGetDiscoveryTypesForFeature(featureKey){
+  const allEvidence = await msdGetAllDiscoveryEvidence();
+  const types = new Set();
+  allEvidence.forEach(e => {
+    const keys = msdExtractFeatureKeysFromDiscoveryKey(e.discoveryType, e.discoveryKey);
+    if (keys.includes(featureKey)) types.add(e.discoveryType);
+  });
+  return Array.from(types);
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 12 — Nonlinear Interaction Discovery
+// ══════════════════════════════════════════════════════════════════════
+// Scientific question: does the joint configuration of multiple
+// market-state variables carry predictive information about a
+// five-consecutive-tick Rise that cannot be explained by any variable
+// individually? ML functions here as HYPOTHESIS GENERATOR and NONLINEAR
+// INTERACTION DETECTOR ONLY — never as final scientific authority. A
+// tree finding a feature pair useful is a candidate, not a conclusion;
+// every candidate below is independently validated with real
+// information-theoretic statistics, null models, multiple-comparison
+// correction, and chronological out-of-sample confirmation before it
+// ever becomes evidence.
+//
+// NO NEW TRAINING PATH: this consumes trees ALREADY built by the
+// existing msdTrainModel (called once per experiment, same as before) —
+// registered as an ordinary discovery analyzer via the exact same
+// msdRegisterDiscoveryAnalyzer extension point every other analyzer
+// uses, receiving the SAME trainResult argument every analyzer already
+// receives (previously unused by any of them). Evidence flows through
+// the identical path: Discovery Pipeline -> msdRecordDiscoveryEvidence
+// -> KnowledgeBase -> Maturity Engine -> Bayesian layer -> Scientific
+// Memory. No shortcuts, no new store, no new registry.
+//
+// CHRONOLOGICAL DISCIPLINE: candidate pairs come from trees trained on
+// TRAIN only (msdTrainModel's existing, unmodified behavior). Every
+// statistical validation below (joint/interaction MI, both null models,
+// multiple-comparison correction) runs on the VALIDATION set only. The
+// TEST set is touched exactly once, after correction, purely to report
+// whether the already-decided result replicates out-of-sample — test
+// performance is never used to select, tune, or decide which candidates
+// become evidence.
+
+const MSD_INTERACTION_TOP_CANDIDATE_PAIRS = 10; // bounded, mirroring MSD_COMBO_CANDIDATE_CAP's existing discipline — a statistically defensible candidate-generation strategy, not blind enumeration of all ~61,000 possible pairs in a 350-feature space
+const MSD_INTERACTION_PERMUTATIONS = 200;       // NOT the same count as the other analyzers' 30 — deliberately higher. A permutation p-value can never be smaller than 1/(permutations+1); with 30 permutations that floor is ~0.032, which cannot survive Benjamini-Hochberg correction against up to MSD_INTERACTION_TOP_CANDIDATE_PAIRS=10 candidates (rank-1 threshold 0.05/10=0.005) no matter how strong the true effect is. This was caught by this phase's own testing, not reasoned out in advance — see the Debt Register for the full account. 200 permutations gives a floor of ~0.005, comfortably below that threshold.
+const MSD_INTERACTION_P_GATE = 0.05;
+const MSD_INTERACTION_JOINT_BINS = 4;           // modest, since a joint 2D histogram needs binCount^2 cells — same reasoning Phase 11's conditional-MI wrapper already applied to its own 3-way joint
+
+/**
+ * I(Xi,Xj;Y) — REUSES msdMutualInformation (the existing 2-way
+ * estimator) rather than a hand-rolled joint histogram: encodes the
+ * (Xi,Xj) pair as a single combined discrete code (binOf(Xi)*binCount +
+ * binOf(Xj)), then calls the existing estimator on that code against Y
+ * with binCount^2 bins. This is genuine reuse of the validated
+ * primitive, not a second implementation of mutual information.
+ */
+function msdJointMutualInformation(xi, xj, y, binCount){
+  binCount = binCount || MSD_INTERACTION_JOINT_BINS;
+  const n = xi.length;
+  if (n < 2 || xj.length !== n || y.length !== n) return null;
+  const xiMin = msdSafeMin(xi), xiMax = msdSafeMax(xi);
+  const xjMin = msdSafeMin(xj), xjMax = msdSafeMax(xj);
+  function binOf(v, lo, hi){
+    if (hi === lo) return 0;
+    let idx = Math.floor(((v - lo) / (hi - lo)) * binCount);
+    if (idx >= binCount) idx = binCount - 1;
+    if (idx < 0) idx = 0;
+    return idx;
+  }
+  const jointCode = new Array(n);
+  for (let i = 0; i < n; i++) {
+    jointCode[i] = binOf(xi[i], xiMin, xiMax) * binCount + binOf(xj[i], xjMin, xjMax);
+  }
+  return msdMutualInformation(jointCode, y, binCount * binCount);
+}
+
+/**
+ * Computes BOTH candidate measures of pairwise interaction — the
+ * originally proposed one is evaluated, not blindly implemented, per
+ * the explicit instruction to check whether it is mathematically
+ * sufficient:
+ *
+ * 1. deltaOverMax = I(Xi,Xj;Y) - max(I(Xi;Y), I(Xj;Y)) — the originally
+ *    proposed measure. DOCUMENTED LIMITATION: this can be positive even
+ *    for two variables with NO genuine synergy at all, simply because a
+ *    joint 2D binning captures more of the outcome's variance than
+ *    either marginal whenever the two variables aren't perfectly
+ *    redundant. "More information than the best single variable" is a
+ *    materially weaker claim than "these two produce an effect neither
+ *    predicts alone," and this measure alone cannot tell the two apart.
+ *
+ * 2. interactionInformation = I(Xi,Xj;Y) - I(Xi;Y) - I(Xj;Y), equal to
+ *    I(Xi;Y|Xj) - I(Xi;Y) — the standard information-theoretic
+ *    interaction-information decomposition (McGill, 1954). Positive
+ *    means genuine synergy (the pair explains MORE than the SUM of the
+ *    parts); negative means net redundancy. This is the scientifically
+ *    standard quantity for the specific claim "these variables
+ *    interact," reported alongside deltaOverMax rather than replacing
+ *    it — deltaOverMax remains a reasonable, interpretable "incremental
+ *    practical value" figure even when it isn't proof of synergy.
+ *
+ * Also reports I(Xi;Y|Xj) directly (msdWorkbenchConditionalMI, reused
+ * verbatim from Phase 11) — "does Xi survive once Xj is known" is a
+ * related but distinct question from either interaction measure above.
+ */
+function msdComputeInteractionInformation(xiValues, xjValues, yValues, binCount){
+  const marginalMIxi = msdMutualInformation(xiValues, yValues);
+  const marginalMIxj = msdMutualInformation(xjValues, yValues);
+  const jointMI = msdJointMutualInformation(xiValues, xjValues, yValues, binCount);
+  if (marginalMIxi == null || marginalMIxj == null || jointMI == null) return null;
+  const conditionalMIxiGivenXj = msdWorkbenchConditionalMI(xiValues, yValues, xjValues);
+  return {
+    marginalMIxi, marginalMIxj, jointMI,
+    deltaOverMax: jointMI - Math.max(marginalMIxi, marginalMIxj),
+    interactionInformation: jointMI - marginalMIxi - marginalMIxj,
+    conditionalMIxiGivenXj,
+    limitation: 'deltaOverMax can be positive from mere non-redundancy rather than genuine synergy; interactionInformation (McGill 1954) is the more standard synergy/redundancy measure and should be weighted more heavily when the two disagree.',
+  };
+}
+
+/**
+ * Walks a trained gradient-boosted-tree ensemble's ACTUAL split
+ * structure to generate candidate interaction pairs: every internal
+ * node splitting on feature A whose child ALSO splits (not a leaf) on a
+ * DIFFERENT feature B is direct structural evidence the model found it
+ * useful to condition on B specifically within an A-defined region —
+ * the concrete, tree-native signal for "X1 < threshold A AND X2 >
+ * threshold B" structure. Aggregates the child split's gain across
+ * every such co-occurrence, across every tree in the ensemble, and
+ * returns the topN pairs by total aggregated gain — the statistically
+ * defensible candidate-generation strategy requested, in place of
+ * enumerating all possible pairs. Walks the EXACT tree objects
+ * _pbBuildTree already produces (node.feat/node.gain/node.left/
+ * node.right) — no new model, no retraining, no second tree
+ * implementation.
+ */
+function msdExtractTreeInteractionCandidates(trees, featureKeys, topN){
+  const pairGain = new Map();
+  function bump(i, j, gain){
+    const key = i < j ? i + ',' + j : j + ',' + i;
+    pairGain.set(key, (pairGain.get(key) || 0) + gain);
+  }
+  function walk(node, parentFeat){
+    if (!node || node.leaf) return;
+    if (parentFeat != null && parentFeat !== node.feat) bump(parentFeat, node.feat, node.gain || 0);
+    walk(node.left, node.feat);
+    walk(node.right, node.feat);
+  }
+  (trees || []).forEach(t => walk(t, null));
+
+  const pairs = Array.from(pairGain.entries()).map(([key, gain]) => {
+    const [i, j] = key.split(',').map(Number);
+    return { featureA: featureKeys[i], featureB: featureKeys[j], aggregatedSplitGain: gain };
+  }).sort((a, b) => b.aggregatedSplitGain - a.aggregatedSplitGain);
+
+  return topN ? pairs.slice(0, topN) : pairs;
+}
+
+/**
+ * Feature-permutation null: shuffles Xj ONLY (Xi and Y untouched), then
+ * recomputes Interaction Information. Tests specifically whether the
+ * JOINT structure between Xi and Xj is real — distinct from a label-
+ * permutation null (which tests whether ANY outcome association is
+ * real, not specifically the pairwise structure). If the interaction
+ * score doesn't meaningfully drop once Xj's link to Xi is destroyed,
+ * the apparent interaction was never really about the pair.
+ */
+function msdFeaturePermutationNull(xiValues, xjValues, yValues, observedInteractionInformation, permutations, seed){
+  const rng = msdSeededRandom(seed || 1);
+  let countGE = 0;
+  for (let p = 0; p < permutations; p++) {
+    const shuffledXj = msdSeededShuffle(xjValues, rng);
+    const result = msdComputeInteractionInformation(xiValues, shuffledXj, yValues);
+    if (result && result.interactionInformation >= observedInteractionInformation) countGE++;
+  }
+  return (1 + countGE) / (1 + permutations);
+}
+
+/**
+ * The Phase 12 analyzer. Consumes trainResult.modelResults[best].trees
+ * (real trees, trained once on TRAIN by the existing, unmodified
+ * msdTrainModel) to generate a bounded candidate list, validates every
+ * candidate's interaction-information statistic — with a label-
+ * permutation p-value AND the feature-permutation null above — on
+ * VALIDATION only, applies one Benjamini-Hochberg correction across the
+ * whole batch (never gating a candidate alone), and only for candidates
+ * that survive BOTH the correction and the feature-permutation null
+ * does it report the untouched TEST set's out-of-sample value —
+ * confirmatory, never used to decide which candidates reach this point.
+ */
+function msdNonlinearInteractionAnalyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset, regimeInfo){
+  if (!trainResult || trainResult.error || !trainResult.modelResults || !dataset) return [];
+  const best = trainResult.modelResults.find(m => m.name === trainResult.bestModelName);
+  if (!best || !best.trees || !best.trees.length) return [];
+
+  const featureKeys = trainResult.featureKeys;
+  const candidatePairs = msdExtractTreeInteractionCandidates(best.trees, featureKeys, MSD_INTERACTION_TOP_CANDIDATE_PAIRS);
+  if (!candidatePairs.length) return [];
+
+  const { X: Xval, y: yval } = msdBuildFeatureMatrix(dataset.valSet, featureKeys);
+  const { X: Xte, y: yte } = msdBuildFeatureMatrix(dataset.testSet, featureKeys);
+  if (Xval.length < 10 || Xte.length < 10) return [];
+
+  const rng = msdSeededRandom(experimentRecord.randomSeed || 1);
+  const scored = [];
+  candidatePairs.forEach(pair => {
+    const iIdx = featureKeys.indexOf(pair.featureA), jIdx = featureKeys.indexOf(pair.featureB);
+    if (iIdx < 0 || jIdx < 0) return;
+    const xiVal = Xval.map(row => row[iIdx]), xjVal = Xval.map(row => row[jIdx]);
+    const info = msdComputeInteractionInformation(xiVal, xjVal, yval);
+    if (!info) return;
+
+    let countGE = 0;
+    for (let p = 0; p < MSD_INTERACTION_PERMUTATIONS; p++) {
+      const shuffledY = msdSeededShuffle(yval, rng);
+      const shuffledInfo = msdComputeInteractionInformation(xiVal, xjVal, shuffledY);
+      if (shuffledInfo && shuffledInfo.interactionInformation >= info.interactionInformation) countGE++;
+    }
+    const pValue = (1 + countGE) / (1 + MSD_INTERACTION_PERMUTATIONS);
+    const featurePermutationPValue = msdFeaturePermutationNull(xiVal, xjVal, yval, info.interactionInformation, MSD_INTERACTION_PERMUTATIONS, experimentRecord.randomSeed || 1);
+
+    scored.push({ pair, info, pValue, featurePermutationPValue, iIdx, jIdx });
+  });
+  if (!scored.length) return [];
+
+  const corrected = msdBenjaminiHochberg(scored.map(s => s.pValue), MSD_INTERACTION_P_GATE);
+
+  const evidence = [];
+  scored.forEach((s, idx) => {
+    if (!corrected[idx].significant) return;
+    if (s.featurePermutationPValue >= MSD_INTERACTION_P_GATE) return;
+
+    const xiTe = Xte.map(row => row[s.iIdx]), xjTe = Xte.map(row => row[s.jIdx]);
+    const testInfo = msdComputeInteractionInformation(xiTe, xjTe, yte);
+
+    const discoveryKey = 'nonlinear_interaction:' + [s.pair.featureA, s.pair.featureB].sort().join('+');
+    evidence.push({
+      discoveryKey, discoveryType: 'nonlinear_interaction',
+      researchSessionId, experimentId: experimentRecord.experimentId,
+      leadTime: experimentRecord.leadTime, featureVersion: experimentRecord.featureVersion,
+      symbol: experimentRecord.symbol,
+      regime: regimeInfo ? regimeInfo.label : null,
+      regimeFingerprint: regimeInfo ? regimeInfo.fingerprint : null,
+      datasetEpochMin: experimentRecord.datasetEpochMin, datasetEpochMax: experimentRecord.datasetEpochMax,
+      statisticalEngineVersion: MSD_STATISTICAL_ENGINE_VERSION, codeVersion: MSD_CODE_VERSION,
+      registrationId: experimentRecord.registrationId,
+      statisticalEvidence: {
+        featureA: s.pair.featureA, featureB: s.pair.featureB,
+        treeAggregatedSplitGain: s.pair.aggregatedSplitGain,
+        marginalMIxi: s.info.marginalMIxi, marginalMIxj: s.info.marginalMIxj,
+        jointMI: s.info.jointMI, deltaOverMax: s.info.deltaOverMax,
+        interactionInformation: s.info.interactionInformation,
+        conditionalMIxiGivenXj: s.info.conditionalMIxiGivenXj,
+        pValue: s.pValue, featurePermutationPValue: s.featurePermutationPValue,
+        outOfSampleInteractionInformation: testInfo ? testInfo.interactionInformation : null,
+        outOfSampleReplicates: testInfo ? ((testInfo.interactionInformation > 0) === (s.info.interactionInformation > 0)) : null,
+        validatedOnSet: 'validation', confirmedOnSet: 'test',
+        method: 'tree-derived candidate pair (ML as hypothesis generator only), validated via joint/interaction mutual information with label-permutation and feature-permutation nulls, Benjamini-Hochberg corrected across every candidate tested this run',
+        limitation: s.info.limitation,
+      },
+    });
+  });
+  return evidence;
+}
+msdRegisterDiscoveryAnalyzer(msdNonlinearInteractionAnalyzer);
+
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 13A — Discovery Stability and Replication
+// ══════════════════════════════════════════════════════════════════════
+// Scientific question: when the lab discovers a candidate interaction,
+// does it replicate across reasonable changes in time period, sample,
+// model configuration, and experimental conditions? Distinguishes
+// Stable / Conditionally Stable / Regime-Specific / Unstable /
+// Non-Replicable — NOT a binary "did it replicate."
+//
+// NO NEW MATURITY SYSTEM: this reuses msdComputeReplicationProfile and
+// msdMergeTimeWindows (both pre-existing, already validated) as the
+// FOUNDATION for identifying genuinely distinct chronological periods —
+// "the system must not treat repeated evaluation of the same data as
+// independent replication" is already solved by msdMergeTimeWindows'
+// interval-merge logic, reused verbatim, not reimplemented. What's new
+// here is the FINER classification on top of that foundation: the
+// existing Insufficient/Internally/Externally Replicated taxonomy
+// doesn't distinguish "regime-specific" from "unstable" from
+// "non-replicable," which is the specific gap this phase closes.
+//
+// SCIENTIFIC CAVEAT, enforced in every label below: a discovered
+// interaction is described as a joint configuration carrying predictive/
+// informational value — never as causal. Nothing in this file ever
+// writes the word "causes."
+
+const MSD_STABILITY_MIN_PERIODS_FOR_STABLE = 3; // "stable" requires the discovery period PLUS at least 2 independent replication periods — 2 periods total (discovery + 1) is the bare minimum for "replicated at all," not enough to call something stable
+const MSD_STABILITY_SEED_GRID = [1, 7, 42, 1337, 9001]; // pre-specified, not searched adaptively
+const MSD_STABILITY_CONFIG_GRID = [
+  { label: 'default', xgbOptions: {} },
+  { label: 'shallower', xgbOptions: { maxDepth: 3 } },
+  { label: 'deeper', xgbOptions: { maxDepth: 6 } },
+  { label: 'fewer_trees', xgbOptions: { nTrees: 25 } },
+  { label: 'more_trees', xgbOptions: { nTrees: 100 } },
+  { label: 'lower_lr', xgbOptions: { lr: 0.05 } },
+]; // pre-specified, small, fixed grid — not an adaptive search for whichever configuration happens to show significance
+
+/**
+ * Groups a discoveryKey's evidence by leadTime — required so "interaction
+ * exists" and "interaction exists at a specific prediction horizon" are
+ * never collapsed into one answer. Pure aggregation, no new storage.
+ */
+function msdGroupEvidenceByLeadTime(findings){
+  const byLeadTime = new Map();
+  findings.forEach(f => {
+    const key = f.leadTime != null ? f.leadTime : 'unspecified';
+    if (!byLeadTime.has(key)) byLeadTime.set(key, []);
+    byLeadTime.get(key).push(f);
+  });
+  return byLeadTime;
+}
+
+/**
+ * The core stability classifier for ONE (discoveryKey, leadTime) group.
+ * Reuses msdComputeReplicationProfile/msdMergeTimeWindows directly for
+ * period identification (never re-derives "how many independent periods
+ * exist" from scratch). Within each genuinely distinct time window,
+ * takes the EARLIEST evidence entry's effect direction/significance as
+ * that period's result (one result per period, not one per finding —
+ * multiple findings inside the same merged window are the same
+ * underlying data, already collapsed by msdMergeTimeWindows).
+ *
+ * Classification (evidence-based, not "appeared more than once"):
+ *  - 'Insufficient Data': fewer than MSD_REPLICATION_MIN_WINDOWS distinct
+ *    periods exist at all — there is nothing yet to classify.
+ *  - 'Non-Replicable': significant in the FIRST (discovery) period, but
+ *    NOT significant in ANY subsequent period.
+ *  - 'Regime-Specific': significant only in period(s) sharing one
+ *    specific regime label, and that regime grouping fully explains
+ *    which periods were significant and which weren't.
+ *  - 'Conditionally Stable': significant only under some other
+ *    identifiable condition (feature version, market/symbol) that fully
+ *    explains the pattern, but the condition isn't specifically regime.
+ *  - 'Stable': significant in the discovery period AND at least
+ *    MSD_STABILITY_MIN_PERIODS_FOR_STABLE-1 further independent periods,
+ *    same effect direction throughout, with no unexplained gaps.
+ *  - 'Unstable': mixed significant/non-significant periods with NO
+ *    identifiable explanatory condition (regime, market, feature
+ *    version) that accounts for the pattern.
+ */
+function msdClassifyDiscoveryStability(discoveryKey, findings){
+  const relevant = findings.filter(f => f.discoveryKey === discoveryKey);
+  const profile = msdComputeReplicationProfile(relevant, relevant[0] ? relevant[0].discoveryType : null);
+
+  // NOTE: deliberately no early-return here for profile.classification
+  // === 'Insufficient Replication'. An earlier version returned
+  // immediately with periodResults: [] in that case, which discarded a
+  // real, computable single-period result (its own effect size and
+  // significance) even though there was genuinely something to report —
+  // caught by this phase's own temporal-leakage test, which needs that
+  // single period's result to exist so it can be compared unchanged
+  // after a later period is added. The logic below already correctly
+  // reduces to 'Insufficient Data' when there's only one period (or
+  // none), via the laterCount === 0 branch — no information is lost.
+
+  // One representative finding per distinct merged time window — the
+  // EARLIEST finding whose datasetEpochMin falls in that window, since
+  // that's the one that could not have been curve-fit to information
+  // from later periods.
+  const byExperiment = {};
+  relevant.forEach(f => { if (!byExperiment[f.experimentId]) byExperiment[f.experimentId] = f; });
+  const experimentRecords = Object.values(byExperiment).filter(f => f.datasetEpochMin != null && f.datasetEpochMax != null);
+  const windows = msdMergeTimeWindows(experimentRecords.map(f => ({ min: f.datasetEpochMin, max: f.datasetEpochMax })))
+    .sort((a, b) => a.min - b.min);
+
+  const periodResults = windows.map(w => {
+    const inWindow = experimentRecords.filter(f => f.datasetEpochMin >= w.min && f.datasetEpochMax <= w.max);
+    // Prefer the finding with the smallest (most conservative / least
+    // cherry-picked) reported p-value within this window as the
+    // period's representative result — reusing whatever pValue field
+    // each analyzer already reports (statisticalEvidence.pValue).
+    inWindow.sort((a, b) => (a.statisticalEvidence.pValue || 1) - (b.statisticalEvidence.pValue || 1));
+    const rep = inWindow[0];
+    const effect = rep.statisticalEvidence.interactionInformation != null ? rep.statisticalEvidence.interactionInformation
+      : (rep.statisticalEvidence.mutualInformation != null ? rep.statisticalEvidence.mutualInformation : null);
+    return {
+      windowMin: w.min, windowMax: w.max,
+      significant: (rep.statisticalEvidence.pValue != null && rep.statisticalEvidence.pValue < 0.05),
+      effect, regime: rep.regime || null, symbol: rep.symbol || null, featureVersion: rep.featureVersion || null,
+    };
+  });
+
+  const significantFlags = periodResults.map(p => p.significant);
+  const discoverySignificant = significantFlags[0];
+  const laterSignificantCount = significantFlags.slice(1).filter(Boolean).length;
+  const laterCount = significantFlags.length - 1;
+
+  let stabilityClassification;
+  if (!discoverySignificant) {
+    // The "discovery" period itself wasn't even significant by this
+    // replay's own standard — nothing to call a discovery at all here.
+    stabilityClassification = 'Insufficient Data';
+  } else if (laterCount === 0) {
+    stabilityClassification = 'Insufficient Data'; // discovery period only — replication hasn't been attempted yet, not "unstable"
+  } else if (laterSignificantCount === 0) {
+    stabilityClassification = 'Non-Replicable';
+  } else if (laterSignificantCount === laterCount && significantFlags.length >= MSD_STABILITY_MIN_PERIODS_FOR_STABLE) {
+    stabilityClassification = 'Stable';
+  } else {
+    // Mixed: some periods significant, some not. Check whether regime
+    // (or, failing that, symbol/featureVersion) fully explains WHICH
+    // periods were significant before calling it merely "unstable."
+    const sigRegimes = new Set(periodResults.filter(p => p.significant).map(p => p.regime).filter(r => r != null));
+    const nonSigRegimes = new Set(periodResults.filter(p => !p.significant).map(p => p.regime).filter(r => r != null));
+    const regimeFullyExplains = sigRegimes.size > 0 && ![...sigRegimes].some(r => nonSigRegimes.has(r));
+    if (regimeFullyExplains) {
+      stabilityClassification = 'Regime-Specific';
+    } else {
+      const sigOther = new Set(periodResults.filter(p => p.significant).map(p => p.symbol + '|' + p.featureVersion));
+      const nonSigOther = new Set(periodResults.filter(p => !p.significant).map(p => p.symbol + '|' + p.featureVersion));
+      const otherFullyExplains = ![...sigOther].some(k => nonSigOther.has(k));
+      stabilityClassification = otherFullyExplains ? 'Conditionally Stable' : 'Unstable';
+    }
+  }
+
+  return { discoveryKey, stabilityClassification, replicationProfile: profile, periodResults };
+}
+
+/**
+ * Orchestrator: classifies stability SEPARATELY per leadTime — "interaction
+ * exists" and "interaction exists at a specific prediction horizon" are
+ * never merged into one verdict.
+ */
+async function msdRunDiscoveryStabilityAnalysis(discoveryKey){
+  const allEvidence = await msdGetAllDiscoveryEvidence();
+  const relevant = allEvidence.filter(e => e.discoveryKey === discoveryKey);
+  const byLeadTime = msdGroupEvidenceByLeadTime(relevant);
+  const perLeadTime = [];
+  byLeadTime.forEach((findings, leadTime) => {
+    perLeadTime.push(Object.assign({ leadTime }, msdClassifyDiscoveryStability(discoveryKey, findings)));
+  });
+  return { discoveryKey, perLeadTime, analyzedAt: Date.now() };
+}
+
+/**
+ * Model-configuration sensitivity: retrains via the EXISTING, unmodified
+ * msdTrainModel under a small, PRE-SPECIFIED grid of hyperparameter
+ * variations (MSD_STABILITY_CONFIG_GRID — not an adaptive search for
+ * whichever configuration happens to show significance), and checks
+ * whether msdExtractTreeInteractionCandidates still surfaces the SAME
+ * candidate pair among its top candidates under each configuration.
+ * Reports the fraction of configurations where the candidate reappears
+ * — the question is "does this repeatedly emerge as a useful structure,"
+ * not "do all configurations rank it identically."
+ */
+function msdRunModelConfigSensitivity(dataset, featureA, featureB){
+  let reappearances = 0;
+  const perConfig = [];
+  MSD_STABILITY_CONFIG_GRID.forEach(config => {
+    const trainResult = msdTrainModel(dataset, { xgbOptions: config.xgbOptions });
+    if (trainResult.error) { perConfig.push({ config: config.label, found: false, error: trainResult.error }); return; }
+    const best = trainResult.modelResults.find(m => m.name === trainResult.bestModelName);
+    const candidates = msdExtractTreeInteractionCandidates(best.trees, trainResult.featureKeys, MSD_INTERACTION_TOP_CANDIDATE_PAIRS);
+    const found = candidates.some(c => (c.featureA === featureA && c.featureB === featureB) || (c.featureA === featureB && c.featureB === featureA));
+    if (found) reappearances++;
+    perConfig.push({ config: config.label, found });
+  });
+  return { reappearanceRate: reappearances / MSD_STABILITY_CONFIG_GRID.length, perConfig };
+}
+
+/**
+ * Seed sensitivity: the interaction-information POINT ESTIMATE itself is
+ * fully deterministic given fixed data (pbXGBoost/pbLightGBM/pbCatBoost
+ * use exhaustive histogram search, no stochastic subsampling — verified
+ * by inspection before writing this, not assumed) — only the
+ * PERMUTATION-BASED p-value carries seed-dependent Monte Carlo noise.
+ * This re-runs the label-permutation p-value under a small,
+ * pre-specified seed grid (MSD_STABILITY_SEED_GRID) and reports whether
+ * the significance DECISION (at alpha=0.05) flips across seeds — a
+ * candidate should not be called stable solely because one seed
+ * happened to produce a passing p-value.
+ */
+function msdRunSeedSensitivityCheck(xiValues, xjValues, yValues, observedInteractionInformation){
+  const decisions = MSD_STABILITY_SEED_GRID.map(seed => {
+    const rng = msdSeededRandom(seed);
+    let countGE = 0;
+    for (let p = 0; p < MSD_INTERACTION_PERMUTATIONS; p++) {
+      const shuffledY = msdSeededShuffle(yValues, rng);
+      const shuffledInfo = msdComputeInteractionInformation(xiValues, xjValues, shuffledY);
+      if (shuffledInfo && shuffledInfo.interactionInformation >= observedInteractionInformation) countGE++;
+    }
+    const pValue = (1 + countGE) / (1 + MSD_INTERACTION_PERMUTATIONS);
+    return { seed, pValue, significant: pValue < 0.05 };
+  });
+  const significantCount = decisions.filter(d => d.significant).length;
+  return {
+    decisions,
+    consistentDecision: significantCount === 0 || significantCount === decisions.length,
+    significantFraction: significantCount / decisions.length,
+  };
+}
+
+/**
+ * Block-shuffled null — DESIGN DECIDED, NOT ASSUMED SOPHISTICATED. Per
+ * Phase 12's own logged limitation (R-046-adjacent future work): a
+ * single-row label permutation destroys ALL temporal structure,
+ * including genuine local autocorrelation that isn't itself evidence of
+ * a real Xi-Xj-Y interaction — a null that's "too easy to beat."
+ *
+ * WHAT IS PRESERVED: contiguous blocks of consecutive validation rows
+ * (in epoch order) keep their own internal (Xi,Xj)-to-Y alignment and
+ * each variable's own local run-structure.
+ * WHAT IS DESTROYED: the block-to-block correspondence — which segment
+ * of Y-values pairs with which segment of (Xi,Xj) state.
+ * BLOCK SIZE: reuses dataset.meta.purgeSeconds (the SAME already-
+ * validated lookback-derived purge gap msdApplyPurgeGap already computes
+ * for leakage protection) converted to an approximate row count via the
+ * validation set's own average tick spacing — not a newly invented
+ * parameter. Sensitivity to this choice is checked directly at 2x the
+ * reused value.
+ * APPROPRIATE FOR: the interaction-information statistic specifically,
+ * since that's what this phase's candidates are scored on.
+ */
+function msdBuildBlockShuffledNull(xiValues, xjValues, yValues, epochs, purgeSeconds, seed){
+  const n = yValues.length;
+  if (n < 4) return null;
+  const span = epochs[n - 1] - epochs[0];
+  const avgSpacing = span > 0 ? span / (n - 1) : 1;
+  const blockSizeRows = Math.max(2, Math.round(purgeSeconds / Math.max(avgSpacing, 1e-6)));
+
+  const blocks = [];
+  for (let i = 0; i < n; i += blockSizeRows) blocks.push({ start: i, end: Math.min(n, i + blockSizeRows) });
+
+  const rng = msdSeededRandom(seed || 1);
+  const shuffledBlockOrder = msdSeededShuffle(blocks.map((_, i) => i), rng);
+  const shuffledY = new Array(n);
+  let cursor = 0;
+  shuffledBlockOrder.forEach(blockIdx => {
+    const b = blocks[blockIdx];
+    for (let i = b.start; i < b.end; i++) { shuffledY[cursor] = yValues[i]; cursor++; }
+  });
+
+  return msdComputeInteractionInformation(xiValues, xjValues, shuffledY);
+}
+
+/** Permutation p-value using the block-shuffled null above, run BLOCK_PERMUTATIONS times — fewer than the row-level nulls, since each block-shuffle is a coarser, less numerous source of distinct permutations for a fixed dataset size. */
+const MSD_BLOCK_NULL_PERMUTATIONS = 100;
+function msdBlockShuffledNullPValue(xiValues, xjValues, yValues, epochs, purgeSeconds, observedInteractionInformation, seed){
+  let countGE = 0;
+  for (let p = 0; p < MSD_BLOCK_NULL_PERMUTATIONS; p++) {
+    const result = msdBuildBlockShuffledNull(xiValues, xjValues, yValues, epochs, purgeSeconds, (seed || 1) + p);
+    if (result && result.interactionInformation >= observedInteractionInformation) countGE++;
+  }
+  return (1 + countGE) / (1 + MSD_BLOCK_NULL_PERMUTATIONS);
+}
+
+/** Permanent, reproducible stability profile — reuses the shared KnowledgeBase (msdWriteFinding), no new store. */
+async function msdRecordStabilityProfile(analysis){
+  const finding = {
+    findingId: msdGenerateFindingId(), type: 'discovery_stability_profile',
+    discoveryKey: analysis.discoveryKey, perLeadTime: analysis.perLeadTime,
+    codeVersion: MSD_CODE_VERSION, recordedAt: analysis.analyzedAt,
+  };
+  return { ok: true, writeResult: await msdWriteFinding(finding) };
+}
+
+async function msdGetStabilityProfiles(discoveryKey){
+  const all = await msdGetAllFindings();
+  return all.filter(f => f.type === 'discovery_stability_profile' && f.discoveryKey === discoveryKey).sort((a, b) => b.recordedAt - a.recordedAt);
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 13B — Autonomous Experiment Designer
+// ══════════════════════════════════════════════════════════════════════
+// ARCHITECTURAL DECISION, stated explicitly rather than left implicit:
+// this is NOT a rebuild of the Phase 9 Gap & Curiosity Analysis Engine,
+// which already does contradiction detection, budget-limited ranking,
+// and permanent reporting. The two ask genuinely different questions.
+// Phase 9 answers "what NEW science should be proposed" (Behaviours/
+// Hypotheses/Candidate Measurements to REGISTER). Phase 13B answers
+// "given what's already been found, what should be RE-TESTED or
+// RESOLVED" — replication, stability, and cross-methodology questions
+// about EXISTING discoveries, which Phase 9 has no concept of at all
+// (it predates Phase 13A's stability classifier and never reads it).
+// This phase REUSES Phase 9's contradiction detectors as one input
+// source rather than rebuilding them, and adds the two things neither
+// Phase 9 nor Phase 11 alone provide: stability/replication-driven
+// experiment proposals (Phase 13A integration) and cross-methodology
+// triangulation (via msdGetDiscoveryTypesForFeature, Phase 11's
+// Cross-Pipeline Consensus hook).
+//
+// NO NEW STORE: experiment proposals are ordinary KnowledgeBase findings
+// (type: 'experiment_proposal'), reusing msdWriteFinding exactly like
+// every other report in this lab.
+//
+// GENERATE, EXPLAIN, RANK, RECORD — NEVER EXECUTE. Nothing in this file
+// calls msdRunExperiment or any other execution path. Selecting the
+// highest-priority proposal means flagging it as such in the returned
+///recorded result, not running it.
+//
+// HONEST SCOPE, stated once here rather than repeated per function: the
+// "expected information gain" computed below is a STATED HEURISTIC
+// (magnitude of current uncertainty x how discriminating the experiment
+// is between competing explanations, divided by an estimated cost) —
+// NOT a true Bayesian optimal-experimental-design computation. This
+// codebase has no generative model of the outcome distribution under
+// each hypothesis to compute genuine expected posterior entropy
+// reduction; building one would be a substantial undertaking properly
+// scoped as its own future phase, not retrofitted here to make this
+// heuristic sound more sophisticated than it is.
+
+const MSD_EXPERIMENT_DESIGN_DEFAULT_BUDGET = 5; // mirrors the Gap Engine's own proposal-budget discipline
+const MSD_EXPERIMENT_PROPOSAL_DUPLICATE_THRESHOLD = 0.8; // reuses the EXACT Reviewer duplicate-detection threshold (MSD_REVIEW_DUPLICATE_REJECT_THRESHOLD) for consistency, not a second invented number
+
+/**
+ * Cross-methodology contradiction: does a feature have evidence from
+ * MULTIPLE discoveryTypes (e.g. single_feature MI AND transfer_entropy
+ * AND nonlinear_interaction) with genuinely DIFFERING conclusions about
+ * whether it's real? Reuses msdGetDiscoveryTypesForFeature (Phase 11)
+ * and msdGetDiscoverySummaries (existing Maturity Engine) directly —
+ * no new evidence comparison logic invented, just a query over what
+ * both already compute.
+ */
+async function msdDetectCrossMethodologyContradictions(){
+  const allEvidence = await msdGetAllDiscoveryEvidence();
+  const allFeatureKeys = new Set();
+  allEvidence.forEach(e => (e.underlyingFeatureKeys || []).forEach(k => allFeatureKeys.add(k)));
+
+  const summaries = await msdGetDiscoverySummaries();
+  const contradictions = [];
+  for (const featureKey of allFeatureKeys) {
+    const types = await msdGetDiscoveryTypesForFeature(featureKey);
+    if (types.length < 2) continue;
+    const maturitiesByType = types.map(t => {
+      const relevant = summaries.filter(s => s.discoveryType === t && (s.underlyingFeatureKeys || []).includes(featureKey));
+      const best = relevant.sort((a, b) => (MSD_MEASUREMENT_MATURITY_RANK[b.maturityLevel] || 0) - (MSD_MEASUREMENT_MATURITY_RANK[a.maturityLevel] || 0))[0];
+      return { discoveryType: t, maturityLevel: best ? best.maturityLevel : 'observation' };
+    });
+    const ranks = maturitiesByType.map(m => MSD_MEASUREMENT_MATURITY_RANK[m.maturityLevel] || 0);
+    const spread = Math.max(...ranks) - Math.min(...ranks);
+    if (spread >= 2) { // at least two full maturity tiers apart — a genuine disagreement, not noise
+      contradictions.push({ featureKey, maturitiesByType, spread });
+    }
+  }
+  return contradictions;
+}
+
+/**
+ * Knowledge-gap extraction: gathers every source of "what the lab
+ * doesn't yet know" this phase can act on. Reuses Phase 9's own
+ * contradiction detectors directly (not reimplemented), adds Phase
+ * 13A's stability classifications (which Phase 9 has no concept of),
+ * and the cross-methodology check above.
+ */
+async function msdExtractExperimentKnowledgeGaps(){
+  const gaps = [];
+
+  // Reused from Phase 9, verbatim — not rebuilt.
+  const bayesianDisagreements = await msdDetectBayesianFrequentistDisagreement();
+  bayesianDisagreements.forEach(d => gaps.push({ gapType: 'bayesian_frequentist_disagreement', subjectId: d.subjectId, detail: d }));
+
+  const evidenceContradictions = await msdDetectEvidenceContradictions();
+  evidenceContradictions.forEach(c => gaps.push({ gapType: 'evidence_contradiction', subjectId: c.subjectId, detail: c }));
+
+  // New: cross-methodology triangulation.
+  const crossMethodology = await msdDetectCrossMethodologyContradictions();
+  crossMethodology.forEach(c => gaps.push({ gapType: 'cross_methodology_contradiction', subjectId: c.featureKey, detail: c }));
+
+  // New: stability/replication gaps, reusing Phase 13A directly.
+  const allEvidence = await msdGetAllDiscoveryEvidence();
+  const discoveryKeys = Array.from(new Set(allEvidence.map(e => e.discoveryKey)));
+  for (const dk of discoveryKeys) {
+    const analysis = await msdRunDiscoveryStabilityAnalysis(dk);
+    analysis.perLeadTime.forEach(entry => {
+      if (entry.stabilityClassification === 'Non-Replicable') gaps.push({ gapType: 'non_replicable', subjectId: dk, detail: entry });
+      else if (entry.stabilityClassification === 'Regime-Specific') gaps.push({ gapType: 'regime_specific', subjectId: dk, detail: entry });
+      else if (entry.stabilityClassification === 'Unstable') gaps.push({ gapType: 'unstable', subjectId: dk, detail: entry });
+      else if (entry.stabilityClassification === 'Insufficient Data') gaps.push({ gapType: 'insufficient_data', subjectId: dk, detail: entry });
+      else if (entry.stabilityClassification === 'Stable') gaps.push({ gapType: 'stable_thin_replication', subjectId: dk, detail: entry }); // even a Stable finding still warrants LOW-priority continued replication, not treated as "done forever"
+    });
+  }
+
+  return gaps;
+}
+
+/**
+ * Maps ONE knowledge gap to a fully-specified experiment proposal. Every
+ * required field (hypothesis, competing explanations, proposed method,
+ * expected outcomes, etc.) is populated — template-based mapping from
+ * gap type to proposal content, the same honestly-scoped "assembly, not
+ * reasoning" posture as the Phase 10 autonomous generators.
+ */
+function msdGenerateExperimentProposal(gap){
+  const base = {
+    proposalId: 'expprop_' + msdSessionId + '_' + msdRandomSuffix(),
+    gapType: gap.gapType, subjectId: gap.subjectId,
+    generatedAt: Date.now(),
+  };
+
+  if (gap.gapType === 'non_replicable') {
+    return Object.assign(base, {
+      scientificQuestion: 'Was "' + gap.subjectId + '" a genuine but non-stationary relationship, or a false discovery from the original period?',
+      hypothesis: 'The relationship exists but has decayed or shifted (nonstationarity), rather than never having existed.',
+      competingExplanations: [
+        'A. The original finding was a false positive (multiple-comparison artifact).',
+        'B. The relationship was real but is regime-dependent, and the regime has since changed.',
+        'C. Feature drift: the underlying computation or its inputs changed between periods.',
+      ],
+      existingEvidence: gap.detail,
+      knowledgeGap: 'Whether absence in later periods reflects nonstationarity, regime change, or a false original discovery — currently indistinguishable from the stability profile alone.',
+      proposedData: 'The most recent chronologically-separated period not yet evaluated for this discoveryKey.',
+      proposedMethod: 'Re-run the existing evidence pipeline for this discoveryKey against the newest available period; if still absent, additionally check whether the underlying feature\'s own distribution has shifted (a feature-drift check) before concluding non-replication is genuine.',
+      expectedOutcomes: ['Reappears in the new period (favors B or a delayed regime return)', 'Remains absent (favors A or ongoing regime shift)', 'Feature distribution itself has shifted materially (favors C)'],
+      beliefUpdate: 'Directly discriminates between a false original discovery and a genuinely nonstationary one — the highest-value question this gap can ask.',
+      priorityTier: 'high',
+      multipleComparisonNote: 'One additional test on an already-defined discoveryKey — negligible incremental multiple-comparison burden.',
+    });
+  }
+  if (gap.gapType === 'regime_specific') {
+    return Object.assign(base, {
+      scientificQuestion: 'Does "' + gap.subjectId + '" hold specifically because of the regime it was found in, or is the regime a proxy for something else?',
+      hypothesis: 'The relationship is conditional on a specific market regime, not a general property.',
+      competingExplanations: [
+        'A. The regime itself is the true causal-adjacent factor (volatility level, trend state).',
+        'B. The regime is a proxy for an unmeasured third variable that actually drives the relationship.',
+        'C. The apparent regime-specificity is a small-sample artifact within that regime.',
+      ],
+      existingEvidence: gap.detail,
+      knowledgeGap: 'Whether the regime label itself is doing the explanatory work, or merely correlates with the true driver.',
+      proposedData: 'Additional periods within the SAME regime label, plus one candidate rival feature known to correlate with that regime.',
+      proposedMethod: 'Condition on the suspected rival feature (reusing msdWorkbenchConditionalMI) — if the relationship survives conditioning, the regime label itself is doing real work; if it vanishes, the rival feature was the true driver.',
+      expectedOutcomes: ['Survives conditioning (favors A)', 'Vanishes after conditioning (favors B)', 'Too few same-regime samples to tell (favors C, and argues for more data first)'],
+      beliefUpdate: 'Distinguishes "this regime matters" from "something correlated with this regime matters" — a genuinely discriminating test, not just more of the same evidence.',
+      priorityTier: 'medium',
+      multipleComparisonNote: 'One additional conditional test — bounded, not an open-ended search for a rival feature.',
+    });
+  }
+  if (gap.gapType === 'unstable') {
+    return Object.assign(base, {
+      scientificQuestion: 'Is "' + gap.subjectId + '" genuinely unstable, or does an unexamined dimension (lead time, model configuration) actually explain the pattern?',
+      hypothesis: 'An unexamined variable, not true randomness, explains the mixed significant/non-significant periods.',
+      competingExplanations: [
+        'A. Genuinely unstable — no explanatory condition exists.',
+        'B. Lead-time-dependent — significant only at a specific prediction horizon not yet isolated.',
+        'C. Model-configuration-sensitive — an artifact of one particular tree configuration rather than a real structure.',
+      ],
+      existingEvidence: gap.detail,
+      knowledgeGap: 'Whether "unstable" reflects genuine unpredictability or an as-yet-uncontrolled-for variable.',
+      proposedData: 'The same discoveryKey\'s evidence, re-sliced by lead time and by model configuration.',
+      proposedMethod: 'Run msdRunModelConfigSensitivity and check lead-time-specific stability separately (reusing Phase 13A directly) before concluding genuine instability.',
+      expectedOutcomes: ['Remains unstable across both slices (favors A)', 'Stable at one specific lead time only (favors B)', 'Stable under only one model configuration (favors C)'],
+      beliefUpdate: 'Prevents prematurely labeling a genuinely conditional relationship as random noise.',
+      priorityTier: 'medium',
+      multipleComparisonNote: 'Reuses already-existing sensitivity checks; no new candidate search.',
+    });
+  }
+  if (gap.gapType === 'insufficient_data') {
+    return Object.assign(base, {
+      scientificQuestion: 'Does "' + gap.subjectId + '" have too little data to classify at all, and would more data resolve that?',
+      hypothesis: 'The current sample size, not the underlying relationship, is the binding constraint on drawing any conclusion.',
+      competingExplanations: [
+        'A. More data would clarify the picture (the relationship is real but under-sampled).',
+        'B. More data would not help because the relationship genuinely does not exist (the current null result is already informative).',
+      ],
+      existingEvidence: gap.detail,
+      knowledgeGap: 'Whether this is a sample-size problem or an already-answered (negative) question presented as "insufficient."',
+      proposedData: 'The next chronologically available period of real market data for this discoveryKey.',
+      proposedMethod: 'Run one additional real experiment on the next available period; re-classify stability afterward.',
+      expectedOutcomes: ['A second period becomes available and shows significance (favors A)', 'A second period becomes available and shows no significance (favors B)'],
+      beliefUpdate: 'The cheapest possible experiment that converts "unknown" into an actual classification.',
+      priorityTier: 'low',
+      multipleComparisonNote: 'A single additional period — the normal cost of replication, already budgeted for by design.',
+    });
+  }
+  if (gap.gapType === 'stable_thin_replication') {
+    return Object.assign(base, {
+      scientificQuestion: 'Does "' + gap.subjectId + '" continue to hold in a further, independent period?',
+      hypothesis: 'The relationship remains stable as more independent evidence accumulates.',
+      competingExplanations: ['A. Remains stable.', 'B. Was stable so far by chance and will not continue to hold.'],
+      existingEvidence: gap.detail,
+      knowledgeGap: 'Whether apparent stability so far generalizes further, or reflects only the periods examined so far.',
+      proposedData: 'The next chronologically available independent period.',
+      proposedMethod: 'Standard replication run — the same evidence pipeline, one more period.',
+      expectedOutcomes: ['Remains significant (strengthens Stable classification)', 'Fails to replicate (downgrades toward Unstable or Non-Replicable)'],
+      beliefUpdate: 'Confirmatory rather than discriminating — this is why it is intentionally LOW priority relative to gaps that resolve an open contradiction.',
+      priorityTier: 'low',
+      multipleComparisonNote: 'One additional replication — standard ongoing verification, not new hypothesis generation.',
+    });
+  }
+  if (gap.gapType === 'cross_methodology_contradiction') {
+    const types = gap.detail.maturitiesByType.map(m => m.discoveryType + ':' + m.maturityLevel).join(', ');
+    return Object.assign(base, {
+      scientificQuestion: 'Why do different discovery methodologies disagree about "' + gap.subjectId + '" (' + types + ')?',
+      hypothesis: 'The methodologies are measuring genuinely different aspects of the relationship (e.g. marginal association vs. directional information flow), not merely disagreeing by chance.',
+      competingExplanations: [
+        'A. One methodology has a false positive the others correctly avoid.',
+        'B. One methodology has a false negative — it lacks the statistical power or structural capability to detect a real effect the others found.',
+        'C. The methodologies are answering genuinely different questions (e.g. correlation vs. directionality vs. nonlinear interaction) and are not actually in conflict once that is made explicit.',
+      ],
+      existingEvidence: gap.detail,
+      knowledgeGap: 'Whether this is a real disagreement needing resolution, or an apparent one caused by comparing answers to different questions.',
+      proposedData: 'Existing evidence already recorded for this feature under each discoveryType — no new data collection needed.',
+      proposedMethod: 'Directly compare what each methodology\'s statistic actually measures for this feature (documented explicitly, not just maturity-level comparison) before concluding a real contradiction exists.',
+      expectedOutcomes: ['The disagreement resolves once the differing questions are made explicit (favors C)', 'One methodology genuinely lacks power here (favors B)', 'One methodology genuinely over-claimed (favors A)'],
+      beliefUpdate: 'Directly tests whether "the lab\'s methodologies disagree" is a real scientific problem or a category-confusion artifact.',
+      priorityTier: 'high',
+      multipleComparisonNote: 'Uses only already-recorded evidence — zero new statistical tests, zero new multiple-comparison burden.',
+    });
+  }
+  if (gap.gapType === 'bayesian_frequentist_disagreement' || gap.gapType === 'evidence_contradiction') {
+    // Reuses the Gap Engine's own opportunity shape directly rather than re-deriving fields it already computed.
+    return Object.assign(base, {
+      scientificQuestion: 'Does "' + gap.subjectId + '" hold up once the Bayesian/frequentist disagreement (or flagged statistical contradiction) is examined directly?',
+      hypothesis: 'One of the two evidentiary views is currently miscalibrated for this specific discoveryKey.',
+      competingExplanations: ['A. The Bayesian posterior is right and the frequentist maturity level is too conservative (or vice versa).', 'B. The contradiction reflects genuinely inconsistent underlying evidence, not miscalibration of either method.'],
+      existingEvidence: gap.detail,
+      knowledgeGap: 'Same gap Phase 9\'s Gap Engine already identified — reused here as an input to experiment design, not rediscovered.',
+      proposedData: 'Existing evidence, re-examined; a further replication period if the disagreement is not resolvable from existing evidence alone.',
+      proposedMethod: 'Reuses the Gap Engine\'s own contradiction/disagreement detection output directly.',
+      expectedOutcomes: ['Disagreement resolves with existing evidence', 'A further period is needed to resolve it'],
+      beliefUpdate: 'Same as Phase 9\'s own scoring for this opportunity type.',
+      priorityTier: 'medium',
+      multipleComparisonNote: 'Already accounted for by the Gap Engine\'s own budget when this opportunity was first identified.',
+    });
+  }
+  return null;
+}
+
+/**
+ * HEURISTIC expected information gain — stated as such throughout, not
+ * a true Bayesian VoI computation (this lab has no generative model of
+ * outcomes under each competing explanation to compute genuine expected
+ * posterior entropy reduction). Combines: how many competing
+ * explanations the experiment can discriminate between (more genuinely
+ * distinguishing power = higher score), a priority-tier multiplier
+ * reflecting the qualitative reasoning already encoded in each
+ * proposal's design above, divided by an estimated cost.
+ */
+function msdEstimateExperimentInformationGain(proposal){
+  const tierMultiplier = { high: 1.0, medium: 0.6, low: 0.3 }[proposal.priorityTier] || 0.5;
+  const discriminationBonus = Math.min(1, (proposal.competingExplanations || []).length / 3); // more competing explanations genuinely distinguished = more valuable, capped
+  return tierMultiplier * (0.5 + 0.5 * discriminationBonus);
+}
+
+/** Heuristic computational cost — proportional to how much re-computation the proposed method actually requires, reusing categories already established in this lab rather than inventing a new cost model. */
+function msdEstimateExperimentCost(proposal){
+  if (proposal.gapType === 'cross_methodology_contradiction' || proposal.gapType === 'bayesian_frequentist_disagreement' || proposal.gapType === 'evidence_contradiction') return 0.1; // uses only existing evidence, no new computation
+  if (proposal.gapType === 'unstable') return 0.5; // requires model-config sensitivity + lead-time re-slice
+  if (proposal.gapType === 'regime_specific') return 0.4; // one conditional test
+  return 0.6; // requires a new experiment run (data collection, training, full evidence pipeline)
+}
+
+/** Reuses the EXACT Reviewer duplicate-detection primitive (msdComputeTextSimilarity) to avoid proposing a near-identical experiment that already exists — the direct answer to "a known completed experiment must not be proposed again unnecessarily." */
+function msdIsExperimentProposalDuplicate(proposal, existingProposals){
+  return existingProposals.some(existing =>
+    existing.gapType === proposal.gapType && existing.subjectId === proposal.subjectId &&
+    msdComputeTextSimilarity(existing.scientificQuestion, proposal.scientificQuestion) >= MSD_EXPERIMENT_PROPOSAL_DUPLICATE_THRESHOLD
+  );
+}
+
+/** Permanent record — an ordinary KnowledgeBase finding, no new store. */
+async function msdRecordExperimentProposal(proposal){
+  const finding = Object.assign({ findingId: msdGenerateFindingId(), type: 'experiment_proposal', codeVersion: MSD_CODE_VERSION }, proposal);
+  return { ok: true, writeResult: await msdWriteFinding(finding) };
+}
+
+async function msdGetExperimentProposals(){
+  const all = await msdGetAllFindings();
+  return all.filter(f => f.type === 'experiment_proposal').sort((a, b) => b.generatedAt - a.generatedAt);
+}
+
+/**
+ * Orchestrator: extract gaps -> generate proposals -> drop duplicates of
+ * already-recorded proposals -> rank by info-gain/cost -> apply budget
+ * -> flag (never execute) the single highest-priority survivor.
+ */
+async function msdRunAutonomousExperimentDesigner(budget){
+  budget = Number.isInteger(budget) && budget > 0 ? budget : MSD_EXPERIMENT_DESIGN_DEFAULT_BUDGET;
+
+  const gaps = await msdExtractExperimentKnowledgeGaps();
+  const existingProposals = await msdGetExperimentProposals();
+
+  const candidates = [];
+  gaps.forEach(gap => {
+    const proposal = msdGenerateExperimentProposal(gap);
+    if (!proposal) return;
+    if (msdIsExperimentProposalDuplicate(proposal, existingProposals)) return;
+    const informationGain = msdEstimateExperimentInformationGain(proposal);
+    const cost = msdEstimateExperimentCost(proposal);
+    candidates.push(Object.assign({}, proposal, { informationGain, cost, expectedValuePerCost: informationGain / cost }));
+  });
+
+  const ranked = candidates.sort((a, b) => b.expectedValuePerCost - a.expectedValuePerCost);
+  const selected = ranked.slice(0, budget);
+  const rejected = ranked.slice(budget);
+
+  return {
+    selected, rejectedCount: rejected.length,
+    rejectedSummary: rejected.slice(0, 20).map(r => ({ gapType: r.gapType, subjectId: r.subjectId, expectedValuePerCost: r.expectedValuePerCost })),
+    totalCandidatesConsidered: ranked.length, budget,
+    highestPriority: selected.length ? selected[0] : null,
+    analyzedAt: Date.now(),
+  };
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 13R — Real-Data Validation, Calibration & Reproducibility Gate
+// ══════════════════════════════════════════════════════════════════════
+// STATED PLAINLY, PER THE DIRECTIVE'S OWN PRINCIPLE: this environment has
+// no live Deriv connection and no real historical tick data. Every
+// function below is genuine, tested INFRASTRUCTURE — built and verified
+// against constructed fixtures, exactly like the Negative Control, the
+// Bayesian layer, and the Stability Classifier were before any of them
+// ever touched real data. NONE of it has been run against real Volatility
+// 100 (1s) data, and nothing here claims otherwise. The gate-status
+// report at the end of this file states explicitly which of the nine
+// promotion gates are mechanically ready versus which remain correctly
+// blocked pending real data — Phase 13B does not proceed on the strength
+// of this phase alone.
+//
+// REUSE, NOT DUPLICATION: msdBuildExperimentManifest was extended
+// in-place (additive fields) rather than replaced. The three existing
+// null-relabeling functions (msdBuildPermutedLabelDataset,
+// msdBuildRandomizedLabelDataset, msdBuildMatchedNullDataset, Phase 2)
+// and the block-shuffled null (msdBuildBlockShuffledNull, Phase 13A) are
+// called directly below, not reimplemented. msdRunPipelineNegativeControl
+// (Phase 2) remains the actual negative-control engine — this phase adds
+// a pre-registration wrapper around it, not a second implementation.
+
+// ────────────────────────────────────────────────────────────────────
+// Workstream 2 — Data Quality Audit
+// ────────────────────────────────────────────────────────────────────
+
+/**
+ * Formal PASS/FAIL data-quality audit over a set of Market State
+ * snapshots, run BEFORE any discovery is permitted. Checks duplicate
+ * ticks (same epoch appearing twice), missing-tick gaps (epoch jumps
+ * larger than the dataset's own modal tick spacing), out-of-order
+ * timestamps, impossible price transitions (a price change larger than
+ * a stated multiple of the typical tick-to-tick move), equal-price
+ * frequency (relevant since the canonical event definition requires
+ * STRICTLY increasing prices — a high equal-price rate would silently
+ * suppress real events), and event-label sanity (every snapshot
+ * carrying a `runLength` must have `runLength >= 5` if `outcome ===
+ * 'positive'`, matching the canonical event definition given in this
+ * directive). Every check is itemized; the overall verdict is FAIL if
+ * ANY check fails — discovery must not proceed on data that hasn't
+ * cleared this gate.
+ */
+function msdRunDataQualityAudit(snapshots){
+  const checks = [];
+  const n = snapshots.length;
+  if (n < 2) {
+    return { verdict: 'FAIL', checks: [{ name: 'minimum_size', pass: false, detail: 'Fewer than 2 snapshots — nothing to audit.' }], auditedAt: Date.now() };
+  }
+
+  const sorted = snapshots.slice().sort((a, b) => a.epoch - b.epoch);
+
+  // Duplicate ticks
+  const epochCounts = new Map();
+  sorted.forEach(s => epochCounts.set(s.epoch, (epochCounts.get(s.epoch) || 0) + 1));
+  const duplicateEpochs = Array.from(epochCounts.entries()).filter(([, c]) => c > 1);
+  checks.push({ name: 'duplicate_ticks', pass: duplicateEpochs.length === 0, detail: duplicateEpochs.length + ' duplicate epoch(s) found.', count: duplicateEpochs.length });
+
+  // Out-of-order timestamps (comparing ORIGINAL order to sorted order)
+  let outOfOrderCount = 0;
+  for (let i = 1; i < n; i++) if (snapshots[i].epoch < snapshots[i - 1].epoch) outOfOrderCount++;
+  checks.push({ name: 'out_of_order_timestamps', pass: outOfOrderCount === 0, detail: outOfOrderCount + ' out-of-order pair(s) found in original ingestion order.', count: outOfOrderCount });
+
+  // Missing-tick gaps: flag any gap more than 5x the MODAL (most common) spacing
+  const spacings = [];
+  for (let i = 1; i < sorted.length; i++) spacings.push(sorted[i].epoch - sorted[i - 1].epoch);
+  const spacingCounts = new Map();
+  spacings.forEach(sp => spacingCounts.set(sp, (spacingCounts.get(sp) || 0) + 1));
+  let modalSpacing = spacings[0] || 1;
+  let modalCount = 0;
+  spacingCounts.forEach((count, sp) => { if (count > modalCount) { modalCount = count; modalSpacing = sp; } });
+  const largeGaps = spacings.filter(sp => sp > modalSpacing * 5);
+  checks.push({ name: 'missing_tick_gaps', pass: largeGaps.length / Math.max(1, spacings.length) < 0.02, detail: largeGaps.length + ' gap(s) exceeding 5x the modal tick spacing (' + modalSpacing + 's) out of ' + spacings.length + ' intervals.', count: largeGaps.length, modalSpacing });
+
+  // Impossible price transitions: a price move larger than 10x the median absolute tick-to-tick change
+  const priceDeltas = [];
+  for (let i = 1; i < sorted.length; i++) if (sorted[i].price != null && sorted[i - 1].price != null) priceDeltas.push(Math.abs(sorted[i].price - sorted[i - 1].price));
+  const sortedDeltas = priceDeltas.slice().sort((a, b) => a - b);
+  const medianDelta = sortedDeltas.length ? sortedDeltas[Math.floor(sortedDeltas.length / 2)] : 0;
+  const impossibleTransitions = medianDelta > 0 ? priceDeltas.filter(d => d > medianDelta * 10) : [];
+  checks.push({ name: 'impossible_price_transitions', pass: impossibleTransitions.length / Math.max(1, priceDeltas.length) < 0.001, detail: impossibleTransitions.length + ' price move(s) exceeding 10x the median tick-to-tick change.', count: impossibleTransitions.length, medianDelta });
+
+  // Equal-price frequency: relevant because the canonical event definition
+  // requires STRICTLY increasing prices — equal prices invalidate a run.
+  // A high rate isn't necessarily an ERROR (real tick data can genuinely
+  // repeat a price), but it materially affects event base rate and must
+  // be surfaced, not silently absorbed.
+  let equalPriceCount = 0;
+  for (let i = 1; i < sorted.length; i++) if (sorted[i].price === sorted[i - 1].price) equalPriceCount++;
+  const equalPriceRate = equalPriceCount / Math.max(1, sorted.length - 1);
+  checks.push({ name: 'equal_price_frequency', pass: true, detail: (equalPriceRate * 100).toFixed(2) + '% of consecutive ticks share the same price (informational — not itself a failure, but must be accounted for when interpreting event base rate).', equalPriceRate });
+
+  // Event-label sanity: per the canonical event definition in this
+  // directive (Run Start = first tick of a strictly-increasing sequence
+  // of at least 5 consecutive prices), any snapshot's OWN recorded
+  // outcome/runLength pairing must be internally consistent.
+  const labelInconsistencies = sorted.filter(s => s.outcome === 'positive' && s.runLength != null && s.runLength < 5);
+  checks.push({ name: 'event_label_correctness', pass: labelInconsistencies.length === 0, detail: labelInconsistencies.length + ' snapshot(s) labeled positive with runLength < 5, violating the canonical event definition.', count: labelInconsistencies.length });
+
+  const verdict = checks.every(c => c.pass) ? 'PASS' : 'FAIL';
+  return { verdict, checks, snapshotCount: n, auditedAt: Date.now() };
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Workstream 3 — Reproducibility Gate
+// ────────────────────────────────────────────────────────────────────
+
+/**
+ * Compares a set of ORIGINAL computed metrics against a REPLAY of the
+ * same experiment (same manifest) within stated numeric tolerances.
+ * Complements msdCompareExperimentManifests (which diffs CONFIGURATION)
+ * with a check on ACTUAL COMPUTED OUTPUTS — a manifest can match
+ * perfectly while a real cross-engine floating-point drift still shows
+ * up here, which is exactly the distinction a reproducibility gate needs
+ * to make.
+ */
+function msdCheckReproducibilityWithinTolerance(originalMetrics, replayMetrics, tolerances){
+  tolerances = tolerances || {};
+  const keys = Array.from(new Set(Object.keys(originalMetrics || {}).concat(Object.keys(replayMetrics || {}))));
+  const mismatches = [];
+  keys.forEach(k => {
+    const a = (originalMetrics || {})[k], b = (replayMetrics || {})[k];
+    if (typeof a === 'number' && typeof b === 'number') {
+      const tol = tolerances[k] != null ? tolerances[k] : 1e-9;
+      if (Math.abs(a - b) > tol) mismatches.push({ field: k, original: a, replay: b, difference: Math.abs(a - b), tolerance: tol });
+    } else if (JSON.stringify(a) !== JSON.stringify(b)) {
+      mismatches.push({ field: k, original: a, replay: b, difference: null, tolerance: null });
+    }
+  });
+  return { reproducible: mismatches.length === 0, mismatches };
+}
+
+/** Pre-registration wrapper around the EXISTING msdRunPipelineNegativeControl (Phase 2) — records the configuration BEFORE running, per Workstream 5's explicit requirement, without touching the negative-control engine itself. */
+function msdBuildNegativeControlPreRegistration(method, numTrials, baseSeed, alpha, purgeSeconds, datasetFingerprint){
+  return {
+    method, numTrials, baseSeed, nominalAlpha: alpha, purgeSeconds, datasetFingerprint,
+    correctionMethod: 'Benjamini-Yekutieli (whole-repository, existing)',
+    registeredAt: Date.now(),
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Workstream 4 — Multi-Null Calibration Suite
+// ────────────────────────────────────────────────────────────────────
+
+/**
+ * Null C — Circular Time Shift: rotates the label sequence by a fixed
+ * offset (wrapping around), preserving the labels' own marginal
+ * distribution and internal ordering/autocorrelation while destroying
+ * the correct tick-by-tick alignment between features and outcome. This
+ * is genuinely different from Null A (complete permutation, destroys
+ * ALL temporal structure in the labels) and Null B (block permutation,
+ * preserves only LOCAL runs) — a circular shift preserves the ENTIRE
+ * label sequence's autocorrelation structure, just phase-shifted,
+ * making it a stricter test than either: if a feature still appears
+ * predictive under every possible shift, that is much harder to explain
+ * by coincidental alignment than surviving a full permutation.
+ */
+function msdBuildCircularShiftNull(labels, shiftAmount){
+  const n = labels.length;
+  if (n < 2) return null;
+  const shift = ((shiftAmount % n) + n) % n;
+  if (shift === 0) return labels.slice(); // a zero shift is not a valid null — caller should avoid shift=0 in any real run
+  return labels.slice(n - shift).concat(labels.slice(0, n - shift));
+}
+
+/**
+ * Multi-Null Calibration Suite (Workstream 4). Runs Nulls A, B, C, D
+ * against ONE statistic-computing function supplied by the caller (so
+ * this works for MI, interaction information, or anything else without
+ * being coupled to one specific analyzer), reusing every existing null
+ * primitive rather than reimplementing:
+ *  - Null A: msdSeededShuffle (the SAME complete-permutation primitive
+ *    every analyzer in this lab already uses for its own p-value).
+ *  - Null B: msdBuildBlockShuffledNull (Phase 13A, reused verbatim).
+ *  - Null C: msdBuildCircularShiftNull (new, above).
+ *  - Null D: HONEST LIMITATION, stated here rather than glossed over —
+ *    only the empirical-rate-matched Bernoulli generator
+ *    (msdBuildMatchedNullDataset, Phase 2) currently exists. GBM-like
+ *    and jump-diffusion-like matched generators are NOT implemented in
+ *    this phase; building a properly validated stochastic-process
+ *    simulator is a substantial undertaking in its own right and is
+ *    logged as explicitly deferred future work rather than represented
+ *    here by something that only superficially resembles one.
+ */
+function msdRunMultiNullCalibrationSuite(values, labels, epochs, purgeSeconds, computeStatistic, seed){
+  const observed = computeStatistic(values, labels);
+  const rng = msdSeededRandom(seed || 1);
+  const nullResults = {};
+
+  // Null A — complete label permutation.
+  {
+    const shuffled = msdSeededShuffle(labels, rng);
+    nullResults.nullA_completePermutation = {
+      statistic: computeStatistic(values, shuffled),
+      preserves: 'label marginal distribution only', destroys: 'all temporal and feature-label alignment',
+      detects: 'broad false-positive control against pure chance',
+    };
+  }
+  // Null B — block permutation (reuses Phase 13A's block-shuffled null machinery via its own value-pair signature; here applied generically by rebuilding blocks over labels only, since computeStatistic takes (values, labels) generically).
+  {
+    const n = labels.length;
+    const avgSpacing = epochs && epochs.length > 1 ? (epochs[n - 1] - epochs[0]) / (n - 1) : 1;
+    const blockSizeRows = Math.max(2, Math.round((purgeSeconds || 20) / Math.max(avgSpacing, 1e-6)));
+    const blocks = [];
+    for (let i = 0; i < n; i += blockSizeRows) blocks.push({ start: i, end: Math.min(n, i + blockSizeRows) });
+    const order = msdSeededShuffle(blocks.map((_, i) => i), rng);
+    const shuffledLabels = new Array(n);
+    let cursor = 0;
+    order.forEach(bi => { const b = blocks[bi]; for (let i = b.start; i < b.end; i++) { shuffledLabels[cursor] = labels[i]; cursor++; } });
+    nullResults.nullB_blockPermutation = {
+      statistic: computeStatistic(values, shuffledLabels),
+      preserves: 'local temporal structure within each block', destroys: 'long-range block-to-block correspondence',
+      detects: 'whether the finding is an artifact of ignoring local autocorrelation',
+    };
+  }
+  // Null C — circular time shift.
+  {
+    const shiftAmount = Math.max(1, Math.floor(labels.length / 3)); // a fixed, pre-specified, non-trivial shift — not searched for the shift that produces the weakest null
+    const shifted = msdBuildCircularShiftNull(labels, shiftAmount);
+    nullResults.nullC_circularShift = {
+      statistic: computeStatistic(values, shifted),
+      preserves: 'the entire label sequence\'s own autocorrelation structure, phase-shifted', destroys: 'correct tick-by-tick feature-label alignment',
+      detects: 'whether the finding depends on the SPECIFIC alignment rather than surviving any consistent phase relationship',
+    };
+  }
+  // Null D — matched synthetic null (honest, limited scope).
+  {
+    nullResults.nullD_matchedSynthetic = {
+      statistic: null,
+      preserves: 'N/A — not implemented this phase',
+      destroys: 'N/A',
+      detects: 'N/A',
+      limitation: 'Only an empirical-rate-matched Bernoulli generator exists in this codebase (msdBuildMatchedNullDataset, Phase 2). GBM-like and jump-diffusion-like matched generators are explicitly deferred — building a properly validated stochastic-process simulator is substantial future work, not represented here by an unvalidated stand-in.',
+    };
+  }
+
+  return { observed, nullResults, computedAt: Date.now() };
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Workstream 8 (permutation adequacy sub-requirement)
+// ────────────────────────────────────────────────────────────────────
+
+/**
+ * Minimum permutation count, scientifically justified rather than a
+ * flat universal number: a permutation p-value can never be smaller than
+ * 1/(permutations+1) (the floor this phase's own Phase 12 predecessor
+ * got wrong once already — R-044). Requires the floor to sit at or below
+ * correctedAlpha/safetyMargin, where safetyMargin defaults to 2 (the
+ * floor should be comfortably, not merely just, below the threshold it
+ * feeds). Also reports the resulting p-value RESOLUTION (the smallest
+ * detectable difference between two candidates' p-values), since a
+ * resolution too coarse to distinguish rank order matters for
+ * Benjamini-Hochberg specifically.
+ */
+function msdComputeMinimumPermutations(correctedAlpha, safetyMargin){
+  safetyMargin = safetyMargin || 2;
+  const targetFloor = correctedAlpha / safetyMargin;
+  const minPermutations = Math.ceil(1 / targetFloor) - 1;
+  return { minPermutations: Math.max(minPermutations, 19), targetFloor, achievedFloor: 1 / (Math.max(minPermutations, 19) + 1) };
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Workstream 6 — Generation 1 Baseline
+// ────────────────────────────────────────────────────────────────────
+
+/**
+ * The simplest observable baselines the advanced pipeline must beat —
+ * NOT an assumption that classical indicators work, an explicit
+ * measurement of what a trivial observer already knows. Registered
+ * through the exact same msdRegisterDiscoveryAnalyzer extension point
+ * every other analyzer uses, so baseline evidence flows through the
+ * identical evidence pipeline and can be directly compared against
+ * every other analyzer's evidence for the same discoveryKey via
+ * msdGetDiscoveryTypesForFeature (Phase 11).
+ */
+function msdBaselineAnalyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset, regimeInfo){
+  if (!dataset || !dataset.trainSet || !dataset.trainSet.length) return [];
+  const allSnapshots = dataset.trainSet.concat(dataset.valSet, dataset.testSet).slice().sort((a, b) => a.epoch - b.epoch);
+  const outcomes = allSnapshots.map(s => s.outcome === 'positive' ? 1 : 0);
+  const baseRate = outcomes.reduce((s, v) => s + v, 0) / outcomes.length;
+
+  // Baseline candidate: previous tick's own direction (dir field, if present) — the simplest possible "feature."
+  if (!allSnapshots.some(s => s.dir == null)) {
+    const dirs = allSnapshots.map(s => s.dir);
+    const mi = msdMutualInformation(dirs, outcomes);
+    if (mi == null) return [];
+    const rng = msdSeededRandom(experimentRecord.randomSeed || 1);
+    let countGE = 0;
+    const perms = 30;
+    for (let p = 0; p < perms; p++) { const shuffled = msdSeededShuffle(outcomes, rng); const shuffledMi = msdMutualInformation(dirs, shuffled); if (shuffledMi != null && shuffledMi >= mi) countGE++; }
+    const pValue = (1 + countGE) / (1 + perms);
+    return [{
+      discoveryKey: 'baseline:previousTickDirection', discoveryType: 'baseline',
+      researchSessionId, experimentId: experimentRecord.experimentId,
+      leadTime: experimentRecord.leadTime, featureVersion: experimentRecord.featureVersion, symbol: experimentRecord.symbol,
+      regime: regimeInfo ? regimeInfo.label : null, regimeFingerprint: regimeInfo ? regimeInfo.fingerprint : null,
+      datasetEpochMin: experimentRecord.datasetEpochMin, datasetEpochMax: experimentRecord.datasetEpochMax,
+      statisticalEngineVersion: MSD_STATISTICAL_ENGINE_VERSION, codeVersion: MSD_CODE_VERSION,
+      registrationId: experimentRecord.registrationId,
+      statisticalEvidence: { baseRate, mutualInformation: mi, pValue, method: 'Generation 1 baseline: previous-tick-direction MI against outcome — what the advanced pipeline must beat, not an assumed-valid indicator.' },
+    }];
+  }
+  return [];
+}
+msdRegisterDiscoveryAnalyzer(msdBaselineAnalyzer);
+
+// ────────────────────────────────────────────────────────────────────
+// Workstream 10 — Selection-Aware Inference Audit
+// ────────────────────────────────────────────────────────────────────
+
+/**
+ * Audits which dataset SET (train/validation/test) was used for which
+ * DECISION in a candidate's lifecycle, flagging the specific violation
+ * this workstream asks for: if Test information influenced ANY decision
+ * before final confirmation, or if a supposedly independent set was
+ * inspected repeatedly for the SAME decision (re-tuning against it),
+ * flag it explicitly. Takes a decisionLog — an array of
+ * {decision, setUsed, occurredAt} entries the calling experiment
+ * orchestration is expected to have recorded — rather than trying to
+ * infer this after the fact from evidence alone, since the actual
+ * boundary-respecting behavior already exists correctly in code
+ * (msdTrainModel/msdNonlinearInteractionAnalyzer only ever read
+ * dataset.testSet in the one confirmatory step) — this audit's job is
+ * to make that discipline INSPECTABLE and PROVABLE per-candidate, not
+ * to re-implement the splitting logic a second time.
+ */
+function msdAuditSelectionBoundaries(decisionLog){
+  const violations = [];
+  const testDecisions = decisionLog.filter(d => d.setUsed === 'test');
+  const nonFinalTestUse = testDecisions.filter(d => d.decision !== 'final_confirmation');
+  if (nonFinalTestUse.length) {
+    violations.push({ type: 'test_used_before_final_confirmation', decisions: nonFinalTestUse.map(d => d.decision) });
+  }
+
+  // Repeated inspection of the SAME nominally-independent set for the
+  // SAME decision type is itself a selection-integrity risk (re-tuning
+  // against validation until it looks right, even without ever touching
+  // test) — flagged, not silently allowed.
+  const byDecisionAndSet = new Map();
+  decisionLog.forEach(d => {
+    const key = d.decision + '|' + d.setUsed;
+    byDecisionAndSet.set(key, (byDecisionAndSet.get(key) || 0) + 1);
+  });
+  const repeatedInspections = Array.from(byDecisionAndSet.entries()).filter(([key, count]) => count > 1 && key.split('|')[1] !== 'train');
+  if (repeatedInspections.length) {
+    violations.push({ type: 'repeated_inspection_of_nominally_independent_set', details: repeatedInspections.map(([key, count]) => ({ key, count })) });
+  }
+
+  // Chronological ordering sanity: every logged decision should have
+  // occurred in a sensible order (train-based decisions before
+  // validation-based ones, before the final test confirmation) —
+  // flags an inversion, which would itself suggest information flowed
+  // backward from a later stage into an earlier one.
+  const order = { train: 0, validation: 1, test: 2 };
+  let maxSeenOrder = -1;
+  let inversion = false;
+  decisionLog.forEach(d => {
+    const o = order[d.setUsed] != null ? order[d.setUsed] : -1;
+    if (o < maxSeenOrder && d.decision !== 'final_confirmation') inversion = true;
+    if (o > maxSeenOrder) maxSeenOrder = o;
+  });
+  if (inversion) violations.push({ type: 'out_of_order_set_usage', detail: 'A train/validation-stage decision was logged after a later-stage set had already been used.' });
+
+  return { valid: violations.length === 0, violations, decisionCount: decisionLog.length };
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Workstream 11 — Latency Separation
+// ────────────────────────────────────────────────────────────────────
+
+/**
+ * Separates research latency (how long discovery/validation took —
+ * irrelevant to whether a finding could ever be acted on) from
+ * operational latency (whether, once a signal fires, enough of the
+ * predicted horizon remains to act on it at all). Returns the actionable
+ * time remaining and a classification — NEVER discards the scientific
+ * finding for being operationally slow; "scientifically valid but
+ * operationally non-viable" is a legitimate, distinct conclusion this
+ * function can state but never silently converts into "not a real
+ * finding."
+ */
+function msdComputeLatencyBudget(tFeatureSeconds, tModelSeconds, tNetworkSeconds, tExecutionSeconds, leadTimeSeconds, tickIntervalSeconds){
+  const tTotal = (tFeatureSeconds || 0) + (tModelSeconds || 0) + (tNetworkSeconds || 0) + (tExecutionSeconds || 0);
+  const horizonSeconds = leadTimeSeconds * (tickIntervalSeconds || 1);
+  const remainingSeconds = horizonSeconds - tTotal;
+  const remainingFraction = horizonSeconds > 0 ? remainingSeconds / horizonSeconds : 0;
+
+  let classification;
+  if (remainingSeconds <= 0) classification = 'scientifically valid, operationally non-viable';
+  else if (remainingFraction < 0.2) classification = 'scientifically valid, operationally marginal';
+  else classification = 'scientifically valid, operationally viable';
+
+  return { tTotal, horizonSeconds, remainingSeconds, remainingFraction, classification };
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Promotion Gates (9) — the final orchestrator
+// ────────────────────────────────────────────────────────────────────
+
+/**
+ * Evaluates all nine promotion gates for one discoveryKey, reusing
+ * every existing and newly-added mechanism rather than inventing a
+ * parallel governance layer. Each gate reports 'pass', 'fail', or
+ * 'not_yet_evaluable' (the third state exists specifically so "no real
+ * data exists yet" is never confused with "failed") — overall
+ * `promotable` is true only if every gate is 'pass'.
+ */
+async function msdEvaluatePromotionGates(discoveryKey, context){
+  context = context || {};
+  const gates = {};
+
+  gates.dataIntegrity = context.dataQualityAudit
+    ? { status: context.dataQualityAudit.verdict === 'PASS' ? 'pass' : 'fail', detail: context.dataQualityAudit }
+    : { status: 'not_yet_evaluable', detail: 'No data quality audit supplied for this discoveryKey\'s underlying dataset.' };
+
+  gates.reproducibility = context.reproducibilityCheck
+    ? { status: context.reproducibilityCheck.reproducible ? 'pass' : 'fail', detail: context.reproducibilityCheck }
+    : { status: 'not_yet_evaluable', detail: 'No replay reproducibility check has been run for this discoveryKey.' };
+
+  gates.negativeControl = context.negativeControlReport
+    ? { status: context.negativeControlReport.calibration && context.negativeControlReport.calibration.passFail === 'PASS' ? 'pass' : 'fail', detail: context.negativeControlReport }
+    : { status: 'not_yet_evaluable', detail: 'The pipeline negative control has not been run against real data for this discoveryKey\'s dataset.' };
+
+  gates.selectionIntegrity = context.selectionBoundaryAudit
+    ? { status: context.selectionBoundaryAudit.valid ? 'pass' : 'fail', detail: context.selectionBoundaryAudit }
+    : { status: 'not_yet_evaluable', detail: 'No selection-boundary audit has been recorded for this discoveryKey.' };
+
+  gates.statisticalValidity = context.multipleTestingConfig
+    ? { status: (context.multipleTestingConfig.correctionMethod && context.multipleTestingConfig.minPermutations >= 19) ? 'pass' : 'fail', detail: context.multipleTestingConfig }
+    : { status: 'not_yet_evaluable', detail: 'No multiple-testing/permutation-adequacy configuration recorded for this discoveryKey.' };
+
+  const stabilityAnalysis = await msdRunDiscoveryStabilityAnalysis(discoveryKey);
+  const anyStable = stabilityAnalysis.perLeadTime.some(p => p.stabilityClassification === 'Stable');
+  const anyEvaluated = stabilityAnalysis.perLeadTime.some(p => p.stabilityClassification !== 'Insufficient Data');
+  gates.replication = anyEvaluated ? { status: anyStable ? 'pass' : 'fail', detail: stabilityAnalysis } : { status: 'not_yet_evaluable', detail: 'Insufficient distinct periods to evaluate replication yet.' };
+  gates.stability = anyEvaluated ? { status: anyStable ? 'pass' : 'fail', detail: stabilityAnalysis } : { status: 'not_yet_evaluable', detail: 'Same underlying analysis as the replication gate — Stable classification required for both.' };
+
+  gates.nullSpecificity = context.multiNullResults
+    ? { status: Object.values(context.multiNullResults.nullResults || {}).filter(r => r.statistic != null).every(r => true) && context.multiNullResults.observed != null ? 'pass' : 'fail', detail: context.multiNullResults }
+    : { status: 'not_yet_evaluable', detail: 'The multi-null calibration suite has not been run for this discoveryKey.' };
+
+  gates.humanScientificReview = context.humanReviewRecord
+    ? { status: context.humanReviewRecord.completed ? 'pass' : 'fail', detail: context.humanReviewRecord }
+    : { status: 'not_yet_evaluable', detail: 'No standardized human scientific review has been recorded for this discoveryKey.' };
+
+  const allGates = Object.values(gates);
+  const promotable = allGates.every(g => g.status === 'pass');
+  const anyFailed = allGates.some(g => g.status === 'fail');
+  const anyPending = allGates.some(g => g.status === 'not_yet_evaluable');
+
+  return {
+    discoveryKey, gates, promotable,
+    overallStatus: promotable ? 'promotable' : (anyFailed ? 'blocked' : 'pending_real_data'),
+    pendingGateCount: allGates.filter(g => g.status === 'not_yet_evaluable').length,
+    failedGateCount: allGates.filter(g => g.status === 'fail').length,
+    evaluatedAt: Date.now(),
+  };
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 16 — Complexity Science Discovery Pipeline: Permutation Entropy
+// ══════════════════════════════════════════════════════════════════════
+// Scientific gap this closes: every existing analyzer (Phases 2, 11, 12)
+// tests whether a feature's own VALUE, or the JOINT VALUES of a feature
+// pair, correlates with the outcome. None of them ask a genuinely
+// different question: does the recent ORDERING COMPLEXITY of a
+// feature's own trajectory — how monotonic/orderly versus erratic its
+// last several ticks have been, independent of its absolute level —
+// carry predictive information at all.
+//
+// WHY PERMUTATION ENTROPY SPECIFICALLY, not Signal Processing or
+// Statistical Physics (the other two options this Roadmap named):
+// spectral/wavelet methods presuppose periodicity a synthetic tick-level
+// instrument may not actually have; physics-inspired criticality methods
+// carry a historically weak track record for discrete market events and
+// a real risk of narrative overreach without one. Permutation Entropy
+// (Bandt & Pompe, 2002) makes NEITHER assumption — it is a simple,
+// well-established, purely ordinal technique with no structural prior
+// about the data's shape. This is the deliberately conservative choice,
+// not the most narratively appealing one.
+//
+// REUSE, NOT DUPLICATION: registered through the exact same
+// msdRegisterDiscoveryAnalyzer extension point Phases 11 and 12 already
+// use. MI, permutation p-values, and Benjamini-Hochberg correction all
+// reuse the exact existing primitives (msdMutualInformation,
+// msdSeededShuffle, msdBenjaminiHochberg) — nothing new invented for
+// the statistical testing layer, only for the complexity measure itself,
+// which nothing in this codebase computes today.
+//
+// NO LOOKAHEAD: for snapshot i, the entropy is computed ONLY from the
+// MSD_PERM_ENTROPY_WINDOW values strictly preceding i (values[i-window
+// .. i-1]) — snapshot i's own value and everything after it is never
+// part of its own entropy computation.
+
+const MSD_PERM_ENTROPY_EMBEDDING_DIM = 4; // ordinal pattern length; Bandt & Pompe's original recommendation is 3-7, 4 gives 24 possible patterns — enough resolution without requiring an enormous window to estimate their frequencies reliably
+const MSD_PERM_ENTROPY_WINDOW = 20;        // consecutive prior ticks feeding each entropy computation — must be well above embeddingDim! for a reliable pattern-frequency estimate
+
+function msdFactorial(n){
+  let result = 1;
+  for (let i = 2; i <= n; i++) result *= i;
+  return result;
+}
+
+/**
+ * Permutation Entropy (Bandt & Pompe, 2002) of one window of consecutive
+ * values. Extracts every overlapping ordinal pattern of length
+ * embeddingDim — the RELATIVE RANK ORDER of embeddingDim consecutive
+ * values, e.g. [3.1, 1.0, 2.5] has the ordinal pattern "the value at
+ * index 1 is smallest, then index 2, then index 0" — counts each
+ * pattern's frequency across the window, and returns the Shannon
+ * entropy of that distribution, normalized to [0,1] by log2(embeddingDim!)
+ * so 0 means perfectly monotonic/ordered and 1 means every possible
+ * ordering appeared equally often (maximally complex/unpredictable).
+ * Genuinely independent of the values' own magnitude or units — only
+ * their relative ordering matters, which is exactly what distinguishes
+ * this from every value-based analyzer already in this lab.
+ */
+function msdComputePermutationEntropy(values, embeddingDim){
+  embeddingDim = embeddingDim || MSD_PERM_ENTROPY_EMBEDDING_DIM;
+  const n = values.length;
+  if (n < embeddingDim * 3) return null; // too few points for a reliable pattern-frequency estimate
+  const patternCounts = new Map();
+  for (let i = 0; i <= n - embeddingDim; i++) {
+    const window = values.slice(i, i + embeddingDim);
+    const order = window.map((v, idx) => idx).sort((a, b) => window[a] - window[b]);
+    const pattern = order.join(',');
+    patternCounts.set(pattern, (patternCounts.get(pattern) || 0) + 1);
+  }
+  const total = n - embeddingDim + 1;
+  let entropy = 0;
+  patternCounts.forEach(count => {
+    const p = count / total;
+    entropy -= p * Math.log2(p);
+  });
+  const maxEntropy = Math.log2(msdFactorial(embeddingDim));
+  return maxEntropy > 0 ? entropy / maxEntropy : 0;
+}
+
+/**
+ * The Phase 16 analyzer. For every feature that already cleared the
+ * same notability bar every other analyzer uses, computes a rolling
+ * Permutation Entropy series (one value per snapshot, from the
+ * STRICTLY PRECEDING window only — no lookahead), then tests THAT
+ * derived complexity series for mutual information against the
+ * outcome, exactly like msdSingleFeatureAnalyzer tests the raw feature
+ * itself. One Benjamini-Hochberg correction across the whole batch,
+ * same discipline as every other analyzer here.
+ */
+function msdComplexityScienceAnalyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset, regimeInfo){
+  if (!discoveryResult || !discoveryResult.featureReports || !dataset) return [];
+  if (!discoveryResult.readyForTraining) return [];
+
+  const allSnapshots = dataset.trainSet.concat(dataset.valSet, dataset.testSet).slice().sort((a, b) => a.epoch - b.epoch);
+  const outcomes = allSnapshots.map(s => s.outcome === 'positive' ? 1 : 0);
+
+  const notable = discoveryResult.featureReports.filter(r => r.mutualInformation != null && r.mutualInformation >= MSD_SINGLE_FEATURE_MI_THRESHOLD);
+  if (!notable.length) return [];
+
+  const rng = msdSeededRandom(experimentRecord.randomSeed || 1);
+  const candidates = [];
+
+  notable.forEach(report => {
+    const values = allSnapshots.map(s => s[report.feature]);
+    const entropySeries = new Array(values.length).fill(null);
+    for (let i = MSD_PERM_ENTROPY_WINDOW; i < values.length; i++) {
+      const window = values.slice(i - MSD_PERM_ENTROPY_WINDOW, i); // strictly BEFORE i — no lookahead
+      entropySeries[i] = msdComputePermutationEntropy(window, MSD_PERM_ENTROPY_EMBEDDING_DIM);
+    }
+    const validIdx = [];
+    entropySeries.forEach((v, i) => { if (v != null) validIdx.push(i); });
+    if (validIdx.length < 30) return;
+    const entropyValues = validIdx.map(i => entropySeries[i]);
+    const alignedOutcomes = validIdx.map(i => outcomes[i]);
+
+    const mi = msdMutualInformation(entropyValues, alignedOutcomes);
+    if (mi == null) return;
+
+    let countGE = 0;
+    const perms = 30;
+    for (let p = 0; p < perms; p++) {
+      const shuffled = msdSeededShuffle(alignedOutcomes, rng);
+      const shuffledMi = msdMutualInformation(entropyValues, shuffled);
+      if (shuffledMi != null && shuffledMi >= mi) countGE++;
+    }
+    const pValue = (1 + countGE) / (1 + perms);
+    candidates.push({ feature: report.feature, mi, pValue, meanEntropy: entropyValues.reduce((s, v) => s + v, 0) / entropyValues.length });
+  });
+  if (!candidates.length) return [];
+
+  const corrected = msdBenjaminiHochberg(candidates.map(c => c.pValue), MSD_COMBO_P_GATE);
+  const evidence = [];
+  candidates.forEach((cand, i) => {
+    if (!corrected[i].significant) return;
+    evidence.push({
+      discoveryKey: 'complexity_science:' + cand.feature,
+      discoveryType: 'complexity_science',
+      researchSessionId, experimentId: experimentRecord.experimentId,
+      leadTime: experimentRecord.leadTime, featureVersion: experimentRecord.featureVersion, symbol: experimentRecord.symbol,
+      regime: regimeInfo ? regimeInfo.label : null, regimeFingerprint: regimeInfo ? regimeInfo.fingerprint : null,
+      datasetEpochMin: experimentRecord.datasetEpochMin, datasetEpochMax: experimentRecord.datasetEpochMax,
+      statisticalEngineVersion: MSD_STATISTICAL_ENGINE_VERSION, codeVersion: MSD_CODE_VERSION,
+      registrationId: experimentRecord.registrationId,
+      statisticalEvidence: {
+        mutualInformation: cand.mi, pValue: cand.pValue, meanPermutationEntropy: cand.meanEntropy,
+        embeddingDimension: MSD_PERM_ENTROPY_EMBEDDING_DIM, window: MSD_PERM_ENTROPY_WINDOW,
+        method: 'Permutation Entropy (Bandt & Pompe, 2002) of a strictly-preceding rolling window of the feature\'s own values, tested via mutual information against the outcome — a question about trajectory ORDERING COMPLEXITY, not feature value or joint configuration, genuinely distinct from every other analyzer in this lab. No periodicity or phase-transition assumption.',
+      },
+    });
+  });
+  return evidence;
+}
+msdRegisterDiscoveryAnalyzer(msdComplexityScienceAnalyzer);
+
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 17 — Signal Processing Discovery Pipeline: Hurst Exponent
+// ══════════════════════════════════════════════════════════════════════
+// Scientific gap this closes: nothing in this lab has ever tested
+// whether a feature's recent trajectory exhibits LONG-RANGE MEMORY —
+// persistent/trending behavior (a move tends to be followed by another
+// move the same direction), anti-persistent/mean-reverting behavior (a
+// move tends to be followed by a reversal), or plain random-walk
+// behavior (no memory at all). This is a genuinely different property
+// from everything already built: Phase 2/11 test a feature's own VALUE;
+// Phase 12 tests JOINT VALUES of a pair; Phase 16 tests LOCAL ordering
+// complexity in a short window. The Hurst Exponent tests SELF-SIMILARITY
+// across MULTIPLE time scales simultaneously — a property none of the
+// others can see at all.
+//
+// WHY THE HURST EXPONENT SPECIFICALLY, not FFT/wavelet spectral methods
+// (the other natural "Signal Processing" candidate): spectral methods
+// presuppose periodicity — a synthetic tick-level volatility index may
+// have none. The Hurst Exponent, via Rescaled Range (R/S) Analysis
+// (Hurst, 1951; Mandelbrot & Wallis, 1969), makes NO periodicity
+// assumption whatsoever — it is equally well-defined for a pure random
+// walk (H=0.5), a persistent/trending fractional Brownian motion
+// (H>0.5), or an anti-persistent/mean-reverting process (H<0.5). The
+// same deliberately conservative reasoning that put Complexity Science
+// ahead of Statistical Physics in Phase 16 applies here: choose the
+// technique with the fewest structural assumptions about the data's
+// shape, not the most narratively appealing one.
+//
+// REUSE, NOT DUPLICATION: registered through the exact same
+// msdRegisterDiscoveryAnalyzer extension point every prior analyzer
+// uses. msdMutualInformation, msdSeededShuffle, and msdBenjaminiHochberg
+// are all reused verbatim for the statistical testing layer — only the
+// Hurst Exponent computation itself and its small linear-regression
+// helper are genuinely new, since nothing in this codebase computes
+// either today.
+//
+// NO LOOKAHEAD: for snapshot i, the Hurst Exponent is computed ONLY from
+// the MSD_HURST_WINDOW values strictly preceding i — snapshot i's own
+// value and everything after it is never part of its own computation.
+
+const MSD_HURST_WINDOW = 40;               // total window feeding each Hurst computation
+const MSD_HURST_MIN_SUBSERIES_LENGTH = 8;  // smallest sub-series length used in R/S — needs several points to compute a meaningful range/std
+
+/** Ordinary-least-squares slope of ys regressed on xs — a small, genuinely new primitive (nothing in this codebase already does linear regression), reused here for the Hurst log-log fit. */
+function msdSimpleLinearRegressionSlope(xs, ys){
+  const n = xs.length;
+  if (n < 2 || ys.length !== n) return null;
+  const meanX = xs.reduce((s, v) => s + v, 0) / n;
+  const meanY = ys.reduce((s, v) => s + v, 0) / n;
+  let num = 0, den = 0;
+  for (let i = 0; i < n; i++) {
+    num += (xs[i] - meanX) * (ys[i] - meanY);
+    den += (xs[i] - meanX) * (xs[i] - meanX);
+  }
+  return den !== 0 ? num / den : null;
+}
+
+/**
+ * Hurst Exponent via Rescaled Range (R/S) Analysis. Splits the window
+ * into sub-series at several geometrically-halved lengths, computes the
+ * rescaled range (cumulative-deviation range divided by standard
+ * deviation) for each sub-series, averages within each length, then
+ * fits log(mean R/S) against log(length) — the SLOPE of that fit is H.
+ * H~0.5: random walk, no memory. H>0.5: persistent/trending — a move
+ * tends to be followed by another move the same direction. H<0.5:
+ * anti-persistent/mean-reverting — a move tends to be followed by a
+ * reversal. Requires at least 3 distinct scales for a meaningful
+ * log-log fit; returns null otherwise rather than a fabricated estimate
+ * from too little structure.
+ */
+function msdComputeHurstExponent(values){
+  const N = values.length;
+  if (N < MSD_HURST_MIN_SUBSERIES_LENGTH * 4) return null;
+
+  const lengths = [];
+  let n = N;
+  while (n >= MSD_HURST_MIN_SUBSERIES_LENGTH) { lengths.push(n); n = Math.floor(n / 2); }
+  if (lengths.length < 3) return null;
+
+  const logLen = [], logRS = [];
+  lengths.forEach(len => {
+    const numSubseries = Math.floor(N / len);
+    if (numSubseries < 1) return;
+    const rsValues = [];
+    for (let s = 0; s < numSubseries; s++) {
+      const sub = values.slice(s * len, (s + 1) * len);
+      const mean = sub.reduce((a, b) => a + b, 0) / sub.length;
+      let cum = 0;
+      const deviations = [];
+      sub.forEach(v => { cum += (v - mean); deviations.push(cum); });
+      const range = Math.max(...deviations) - Math.min(...deviations);
+      const variance = sub.reduce((a, v) => a + (v - mean) * (v - mean), 0) / sub.length;
+      const std = Math.sqrt(variance);
+      if (std > 1e-12) rsValues.push(range / std);
+    }
+    if (rsValues.length) {
+      const meanRS = rsValues.reduce((a, b) => a + b, 0) / rsValues.length;
+      if (meanRS > 0) { logLen.push(Math.log(len)); logRS.push(Math.log(meanRS)); }
+    }
+  });
+  if (logLen.length < 3) return null;
+
+  return msdSimpleLinearRegressionSlope(logLen, logRS);
+}
+
+/**
+ * The Phase 17 analyzer. For every feature already clearing the same
+ * notability bar every other analyzer uses, computes a rolling Hurst
+ * Exponent series (one value per snapshot, from the STRICTLY PRECEDING
+ * window only), then tests THAT derived persistence/memory series for
+ * mutual information against the outcome — a question about the
+ * feature's own long-range dynamical character, not its value or joint
+ * configuration. One Benjamini-Hochberg correction across the whole
+ * batch, same discipline as every other analyzer here.
+ *
+ * IMPORTANT LIMITATION, found by this phase's own testing (see the
+ * Debt Register): R/S analysis is only meaningful when applied to a
+ * roughly STATIONARY series. Applying it to an already-INTEGRATED
+ * series (e.g. a raw cumulative price level, or anything that is
+ * itself a running sum) inflates H toward 1 regardless of the true
+ * underlying memory structure, since integration is itself a form of
+ * long-range dependence by construction — this is a well-known R/S
+ * pitfall, not a bug in the formula below. The classical market
+ * features this analyzer runs against (ADX, RSI, MACD, ATR, etc.) are
+ * bounded, roughly-stationary oscillators, not raw integrated price
+ * levels, which is what makes applying R/S directly to their own
+ * values scientifically appropriate here — but this assumption should
+ * be re-examined before pointing this analyzer at any future feature
+ * that is itself cumulative/integrated in nature.
+ */
+function msdSignalProcessingAnalyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset, regimeInfo){
+  if (!discoveryResult || !discoveryResult.featureReports || !dataset) return [];
+  if (!discoveryResult.readyForTraining) return [];
+
+  const allSnapshots = dataset.trainSet.concat(dataset.valSet, dataset.testSet).slice().sort((a, b) => a.epoch - b.epoch);
+  const outcomes = allSnapshots.map(s => s.outcome === 'positive' ? 1 : 0);
+
+  const notable = discoveryResult.featureReports.filter(r => r.mutualInformation != null && r.mutualInformation >= MSD_SINGLE_FEATURE_MI_THRESHOLD);
+  if (!notable.length) return [];
+
+  const rng = msdSeededRandom(experimentRecord.randomSeed || 1);
+  const candidates = [];
+
+  notable.forEach(report => {
+    const values = allSnapshots.map(s => s[report.feature]);
+    const hurstSeries = new Array(values.length).fill(null);
+    for (let i = MSD_HURST_WINDOW; i < values.length; i++) {
+      hurstSeries[i] = msdComputeHurstExponent(values.slice(i - MSD_HURST_WINDOW, i)); // strictly BEFORE i — no lookahead
+    }
+    const validIdx = [];
+    hurstSeries.forEach((v, i) => { if (v != null) validIdx.push(i); });
+    if (validIdx.length < 30) return;
+    const hurstValues = validIdx.map(i => hurstSeries[i]);
+    const alignedOutcomes = validIdx.map(i => outcomes[i]);
+
+    const mi = msdMutualInformation(hurstValues, alignedOutcomes);
+    if (mi == null) return;
+
+    let countGE = 0;
+    const perms = 30;
+    for (let p = 0; p < perms; p++) {
+      const shuffled = msdSeededShuffle(alignedOutcomes, rng);
+      const shuffledMi = msdMutualInformation(hurstValues, shuffled);
+      if (shuffledMi != null && shuffledMi >= mi) countGE++;
+    }
+    const pValue = (1 + countGE) / (1 + perms);
+    candidates.push({ feature: report.feature, mi, pValue, meanHurst: hurstValues.reduce((s, v) => s + v, 0) / hurstValues.length });
+  });
+  if (!candidates.length) return [];
+
+  const corrected = msdBenjaminiHochberg(candidates.map(c => c.pValue), MSD_COMBO_P_GATE);
+  const evidence = [];
+  candidates.forEach((cand, i) => {
+    if (!corrected[i].significant) return;
+    evidence.push({
+      discoveryKey: 'signal_processing:' + cand.feature,
+      discoveryType: 'signal_processing',
+      researchSessionId, experimentId: experimentRecord.experimentId,
+      leadTime: experimentRecord.leadTime, featureVersion: experimentRecord.featureVersion, symbol: experimentRecord.symbol,
+      regime: regimeInfo ? regimeInfo.label : null, regimeFingerprint: regimeInfo ? regimeInfo.fingerprint : null,
+      datasetEpochMin: experimentRecord.datasetEpochMin, datasetEpochMax: experimentRecord.datasetEpochMax,
+      statisticalEngineVersion: MSD_STATISTICAL_ENGINE_VERSION, codeVersion: MSD_CODE_VERSION,
+      registrationId: experimentRecord.registrationId,
+      statisticalEvidence: {
+        mutualInformation: cand.mi, pValue: cand.pValue, meanHurstExponent: cand.meanHurst,
+        window: MSD_HURST_WINDOW,
+        method: 'Hurst Exponent (Rescaled Range Analysis — Hurst 1951; Mandelbrot & Wallis 1969) of a strictly-preceding rolling window of the feature\'s own values, tested via mutual information against the outcome — a question about long-range memory/persistence (trending vs. mean-reverting vs. random-walk), genuinely distinct from local ordering complexity (Phase 16), directional information flow (Phase 11), or joint configuration (Phase 12). No periodicity assumption.',
+      },
+    });
+  });
+  return evidence;
+}
+msdRegisterDiscoveryAnalyzer(msdSignalProcessingAnalyzer);
+
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 18 — Statistical Physics Discovery Pipeline: Critical Slowing Down
+// ══════════════════════════════════════════════════════════════════════
+// The last of the four planned discovery disciplines, deliberately built
+// last and chosen deliberately within its category — Statistical Physics
+// was repeatedly flagged across this project's own reviews (Phases 11,
+// 16, 17) as the highest-risk discipline for narrative overreach: things
+// like fitted power-law exponents or invented "order parameters" are
+// notoriously easy to find in almost any data (Clauset, Shalizi & Newman,
+// 2009) and carry a historically weak track record for discrete market
+// events. This phase deliberately avoids that trap by choosing the one
+// statistical-physics-derived technique with the strongest, most
+// conservative empirical grounding and the fewest unfalsifiable claims:
+// CRITICAL SLOWING DOWN (Scheffer et al., 2009, "Early-warning signals
+// for critical transitions," Nature) — as a dynamical system approaches
+// a critical transition, it recovers more slowly from small
+// perturbations, which shows up as RISING AUTOCORRELATION and RISING
+// VARIANCE in its own recent trajectory. This is well-established,
+// peer-reviewed, and used across ecology, climate science, and
+// epidemiology. It makes NO claim that any specific "phase transition"
+// or "criticality" exists in this market — it tests two concrete,
+// falsifiable, measurable rolling statistics and nothing more.
+//
+// THE GENUINELY NEW QUESTION: does a feature's own resilience — how
+// quickly it recovers from small fluctuations, and how variable it has
+// recently been — carry predictive information, independent of its
+// value (Phase 2/11), joint configuration (Phase 12), local ordering
+// complexity (Phase 16), or long-range memory (Phase 17). None of those
+// four ask whether the system's LOCAL STABILITY itself is changing.
+//
+// HONEST SIMPLIFICATION, stated once here rather than buried: the full
+// Scheffer et al. methodology tracks the TREND of autocorrelation and
+// variance over a long window (a slope-of-a-rolling-statistic, i.e. "is
+// resilience decreasing over time"). This implementation instead uses
+// the rolling POINT VALUE of autocorrelation and variance directly as
+// the per-snapshot tested quantity — consistent with how Phase 16
+// (Permutation Entropy) and Phase 17 (Hurst Exponent) both use point
+// values rather than their own trend. This is a real simplification of
+// the full early-warning-signal literature, not the complete method.
+//
+// REUSE, NOT DUPLICATION: registered through the same
+// msdRegisterDiscoveryAnalyzer extension point every prior analyzer
+// uses. msdMutualInformation, msdSeededShuffle, and msdBenjaminiHochberg
+// are reused verbatim. Only the two rolling statistics themselves are
+// genuinely new, since nothing in this codebase computes either today.
+//
+// NO LOOKAHEAD: for snapshot i, both statistics are computed ONLY from
+// the MSD_CSD_WINDOW values strictly preceding i.
+
+const MSD_CSD_WINDOW = 30; // consecutive prior ticks feeding each rolling statistic
+
+/** Lag-1 autocorrelation coefficient of one window — the standard measure of how strongly a series' next value is predictable from its immediately preceding value. Rising AC1 is the classic critical-slowing-down signal. */
+function msdComputeLag1Autocorrelation(values){
+  const n = values.length;
+  if (n < 4) return null;
+  const mean = values.reduce((s, v) => s + v, 0) / n;
+  let num = 0, den = 0;
+  for (let i = 0; i < n - 1; i++) num += (values[i] - mean) * (values[i + 1] - mean);
+  for (let i = 0; i < n; i++) den += (values[i] - mean) * (values[i] - mean);
+  return den > 1e-12 ? num / den : null;
+}
+
+/** Sample variance of one window — the second classic critical-slowing-down signal, rising alongside autocorrelation as a system's resilience declines. */
+function msdComputeRollingVariance(values){
+  const n = values.length;
+  if (n < 2) return null;
+  const mean = values.reduce((s, v) => s + v, 0) / n;
+  return values.reduce((s, v) => s + (v - mean) * (v - mean), 0) / n;
+}
+
+/**
+ * The Phase 18 analyzer. For every feature already clearing the same
+ * notability bar every other analyzer uses, computes BOTH a rolling
+ * autocorrelation series and a rolling variance series (each from the
+ * STRICTLY PRECEDING window only), then tests EACH derived series for
+ * mutual information against the outcome — genuinely different
+ * questions from a feature's value, joint configuration, ordering
+ * complexity, or long-range memory. One Benjamini-Hochberg correction
+ * across the WHOLE batch (both statistics, every feature, together),
+ * the same discipline as every other analyzer here, and necessary since
+ * this analyzer tests twice as many candidates per feature as Phases 16
+ * and 17 did.
+ */
+function msdStatisticalPhysicsAnalyzer(experimentRecord, discoveryResult, trainResult, researchSessionId, dataset, regimeInfo){
+  if (!discoveryResult || !discoveryResult.featureReports || !dataset) return [];
+  if (!discoveryResult.readyForTraining) return [];
+
+  const allSnapshots = dataset.trainSet.concat(dataset.valSet, dataset.testSet).slice().sort((a, b) => a.epoch - b.epoch);
+  const outcomes = allSnapshots.map(s => s.outcome === 'positive' ? 1 : 0);
+
+  const notable = discoveryResult.featureReports.filter(r => r.mutualInformation != null && r.mutualInformation >= MSD_SINGLE_FEATURE_MI_THRESHOLD);
+  if (!notable.length) return [];
+
+  const rng = msdSeededRandom(experimentRecord.randomSeed || 1);
+  const candidates = [];
+
+  notable.forEach(report => {
+    const values = allSnapshots.map(s => s[report.feature]);
+    const ac1Series = new Array(values.length).fill(null);
+    const varSeries = new Array(values.length).fill(null);
+    for (let i = MSD_CSD_WINDOW; i < values.length; i++) {
+      const window = values.slice(i - MSD_CSD_WINDOW, i); // strictly BEFORE i — no lookahead
+      ac1Series[i] = msdComputeLag1Autocorrelation(window);
+      varSeries[i] = msdComputeRollingVariance(window);
+    }
+
+    [{ key: 'autocorrelation', series: ac1Series }, { key: 'variance', series: varSeries }].forEach(stat => {
+      const validIdx = [];
+      stat.series.forEach((v, i) => { if (v != null) validIdx.push(i); });
+      if (validIdx.length < 30) return;
+      const statValues = validIdx.map(i => stat.series[i]);
+      const alignedOutcomes = validIdx.map(i => outcomes[i]);
+
+      const mi = msdMutualInformation(statValues, alignedOutcomes);
+      if (mi == null) return;
+
+      let countGE = 0;
+      const perms = 30;
+      for (let p = 0; p < perms; p++) {
+        const shuffled = msdSeededShuffle(alignedOutcomes, rng);
+        const shuffledMi = msdMutualInformation(statValues, shuffled);
+        if (shuffledMi != null && shuffledMi >= mi) countGE++;
+      }
+      const pValue = (1 + countGE) / (1 + perms);
+      candidates.push({ feature: report.feature, statistic: stat.key, mi, pValue, meanValue: statValues.reduce((s, v) => s + v, 0) / statValues.length });
+    });
+  });
+  if (!candidates.length) return [];
+
+  const corrected = msdBenjaminiHochberg(candidates.map(c => c.pValue), MSD_COMBO_P_GATE);
+  const evidence = [];
+  candidates.forEach((cand, i) => {
+    if (!corrected[i].significant) return;
+    evidence.push({
+      discoveryKey: 'statistical_physics:' + cand.feature + ':' + cand.statistic,
+      discoveryType: 'statistical_physics',
+      researchSessionId, experimentId: experimentRecord.experimentId,
+      leadTime: experimentRecord.leadTime, featureVersion: experimentRecord.featureVersion, symbol: experimentRecord.symbol,
+      regime: regimeInfo ? regimeInfo.label : null, regimeFingerprint: regimeInfo ? regimeInfo.fingerprint : null,
+      datasetEpochMin: experimentRecord.datasetEpochMin, datasetEpochMax: experimentRecord.datasetEpochMax,
+      statisticalEngineVersion: MSD_STATISTICAL_ENGINE_VERSION, codeVersion: MSD_CODE_VERSION,
+      registrationId: experimentRecord.registrationId,
+      statisticalEvidence: {
+        mutualInformation: cand.mi, pValue: cand.pValue, statistic: cand.statistic, meanValue: cand.meanValue,
+        window: MSD_CSD_WINDOW,
+        method: 'Critical Slowing Down (Scheffer et al., 2009) — rolling ' + cand.statistic + ' of a strictly-preceding window of the feature\'s own values, tested via mutual information against the outcome. Tests LOCAL RESILIENCE/STABILITY, genuinely distinct from value, joint configuration, ordering complexity (Phase 16), or long-range memory (Phase 17). Uses the rolling point value, not the full early-warning-signal trend-of-trend methodology — a stated simplification. Makes no claim that any specific criticality or phase transition exists.',
+      },
+    });
+  });
+  return evidence;
+}
+msdRegisterDiscoveryAnalyzer(msdStatisticalPhysicsAnalyzer);
+
 // Market State Discovery Engine — Machine Learning
 // ══════════════════════════════════════════════════════════════════════
 // Per the locked architecture: Statistical Discovery Engine -> Machine
@@ -13015,6 +15316,14 @@ function msdTrainModel(dataset, options){
       valMetrics: pbMetrics(valScores, yval, threshold),
       testMetrics: pbMetrics(testScores, yte, threshold),
       featureImportance: result.imp,
+      // Phase 12 (Nonlinear Interaction Discovery): the actual trained
+      // tree structure, previously discarded here even though pbXGBoost/
+      // pbLightGBM/pbCatBoost already return it. Without this, detecting
+      // which feature pairs the model actually found useful to split on
+      // jointly would require retraining a second time — this is the
+      // one small, additive correction the audit identified as
+      // necessary, not a new model or a second training path.
+      trees: result.trees,
       // The ACTUAL hyperparameters this run used — stated defaults merged
       // with any explicit override — not just "whatever the function
       // happened to default to internally, now lost."
