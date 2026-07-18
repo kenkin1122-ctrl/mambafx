@@ -5887,6 +5887,114 @@ function msdCheckDeduplicationOrderInvariance(snapshots, seed){
 
 
 // ══════════════════════════════════════════════════════════════════════
+// CALIBRATION DIAGNOSTIC GATE — WORKSTREAM 6 EXTENSION: Alternative
+// Deduplication Policy Comparison
+// ══════════════════════════════════════════════════════════════════════
+// GAP THIS CLOSES: msdAuditConflictingDuplicateBias and
+// msdCheckDeduplicationOrderInvariance (built earlier under this same
+// directive) audited the CURRENT discard-all-conflicts policy for
+// determinism and label association — but the directive's own
+// Workstream 6 also explicitly asked for a comparison against
+// ALTERNATIVE deterministic policies ("earliest observation," "latest
+// observation," or another explicitly defined one), to check whether
+// the CHOICE of policy would materially change scientific conclusions.
+// That comparison was never built. This closes it.
+//
+// REUSE: msdGroupSnapshotsByEpoch (already built) is reused directly for
+// all three policies — nothing here re-derives epoch grouping a second
+// way. The current production policy (discard all conflicts) is called
+// via msdDeduplicateTicks itself, unmodified, not reimplemented.
+//
+// WHAT "EARLIEST"/"LATEST" MEANS HERE: `timestamp` (ingestion/arrival
+// time) is a real, distinct field from `epoch` (market time) — already
+// confirmed by msdDeduplicateTicks's own canonicalize function, which
+// excludes `timestamp` from its content comparison specifically because
+// multiple genuinely-conflicting observations of the same market epoch
+// can arrive at different real-world times. "Earliest observation wins"
+// keeps whichever member of a conflicting group has the smallest
+// timestamp; "latest observation wins" keeps the largest.
+
+/** Earliest-observation-wins alternative policy: reuses msdGroupSnapshotsByEpoch directly. */
+function msdResolveDuplicatesEarliestWins(snapshots){
+  const { byEpoch, noEpoch } = msdGroupSnapshotsByEpoch(snapshots);
+  const resolved = [];
+  Object.values(byEpoch).forEach(group => {
+    if (group.length === 1) { resolved.push(group[0]); return; }
+    const withTimestamp = group.filter(s => s.timestamp != null && Number.isFinite(s.timestamp));
+    if (withTimestamp.length === 0) { resolved.push(group[0]); return; } // no timestamp to order by — fall back to first-seen, same as current policy's tie-break
+    const earliest = withTimestamp.slice().sort((a, b) => a.timestamp - b.timestamp)[0];
+    resolved.push(earliest);
+  });
+  return resolved.concat(noEpoch);
+}
+
+/** Latest-observation-wins alternative policy: reuses msdGroupSnapshotsByEpoch directly. */
+function msdResolveDuplicatesLatestWins(snapshots){
+  const { byEpoch, noEpoch } = msdGroupSnapshotsByEpoch(snapshots);
+  const resolved = [];
+  Object.values(byEpoch).forEach(group => {
+    if (group.length === 1) { resolved.push(group[0]); return; }
+    const withTimestamp = group.filter(s => s.timestamp != null && Number.isFinite(s.timestamp));
+    if (withTimestamp.length === 0) { resolved.push(group[0]); return; }
+    const latest = withTimestamp.slice().sort((a, b) => b.timestamp - a.timestamp)[0];
+    resolved.push(latest);
+  });
+  return resolved.concat(noEpoch);
+}
+
+const MSD_DEDUP_POLICY_MATERIAL_DIFFERENCE_THRESHOLD = 0.02; // a 2-percentage-point difference in resulting positive rate, or row count differing by more than 2%, is treated as material — a stated, defensible tolerance, not an arbitrary one
+
+/**
+ * Runs all three deterministic policies (the current production policy —
+ * discard every conflicting epoch entirely, via the real, unmodified
+ * msdDeduplicateTicks — plus the two alternatives) against the same raw
+ * snapshots, and reports whether the choice of policy would materially
+ * change the resulting dataset's composition. This is exactly the
+ * Workstream 6 check: "if plausible resolution policies materially
+ * change scientific conclusions, DATA-INTEGRITY GATE = BLOCKED."
+ */
+function msdCompareDeduplicationPolicies(snapshots){
+  const currentPolicyResult = msdDeduplicateTicks(snapshots);
+  const earliestWinsResult = msdResolveDuplicatesEarliestWins(snapshots);
+  const latestWinsResult = msdResolveDuplicatesLatestWins(snapshots);
+
+  const summarize = (rows) => {
+    const positiveCount = rows.filter(s => s.outcome === 'positive').length;
+    const negativeCount = rows.filter(s => s.outcome === 'negative').length;
+    const total = rows.length;
+    return { total, positiveCount, negativeCount, positiveRate: total > 0 ? positiveCount / total : null };
+  };
+
+  const current = summarize(currentPolicyResult.deduped);
+  const earliestWins = summarize(earliestWinsResult);
+  const latestWins = summarize(latestWinsResult);
+
+  const rowCountRelativeDiff = (a, b) => a.total === 0 && b.total === 0 ? 0 : Math.abs(a.total - b.total) / Math.max(a.total, b.total, 1);
+  const positiveRateDiff = (a, b) => (a.positiveRate == null || b.positiveRate == null) ? 0 : Math.abs(a.positiveRate - b.positiveRate);
+
+  const comparisons = {
+    currentVsEarliest: { rowCountRelativeDiff: rowCountRelativeDiff(current, earliestWins), positiveRateDiff: positiveRateDiff(current, earliestWins) },
+    currentVsLatest: { rowCountRelativeDiff: rowCountRelativeDiff(current, latestWins), positiveRateDiff: positiveRateDiff(current, latestWins) },
+    earliestVsLatest: { rowCountRelativeDiff: rowCountRelativeDiff(earliestWins, latestWins), positiveRateDiff: positiveRateDiff(earliestWins, latestWins) },
+  };
+
+  const anyMaterialDifference = Object.values(comparisons).some(c =>
+    c.rowCountRelativeDiff > MSD_DEDUP_POLICY_MATERIAL_DIFFERENCE_THRESHOLD || c.positiveRateDiff > MSD_DEDUP_POLICY_MATERIAL_DIFFERENCE_THRESHOLD
+  );
+
+  return {
+    policies: { current, earliestWins, latestWins },
+    comparisons,
+    materialDifferenceThreshold: MSD_DEDUP_POLICY_MATERIAL_DIFFERENCE_THRESHOLD,
+    anyMaterialDifference,
+    dataIntegrityGate: anyMaterialDifference ? 'BLOCKED' : 'PASS',
+    detail: anyMaterialDifference
+      ? 'At least one pair of deterministic resolution policies produces a materially different dataset (row count or positive rate differs by more than ' + (MSD_DEDUP_POLICY_MATERIAL_DIFFERENCE_THRESHOLD * 100) + ' percentage points) — the choice of policy could change scientific conclusions and must be investigated before trusting either.'
+      : 'All three deterministic policies produce datasets within the stated tolerance of each other — the choice of policy does not materially affect composition.',
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════════
 // CALIBRATION DIAGNOSTIC GATE — Positive-Control Generator & Sensitivity Test
 // ══════════════════════════════════════════════════════════════════════
 // PRIORITY STATED EXPLICITLY: per this directive's own Rule 4, this is
@@ -6491,10 +6599,11 @@ async function msdRunPreregisteredNullCalibration(spec, dataset, experimentRecor
   if (!Object.isFrozen(spec)) {
     throw new Error('Refusing to run: the calibration specification is not frozen. Use msdPreregisterNullCalibrationSpecification to create an immutable spec before calling this function.');
   }
-  const report = await msdRunPipelineNegativeControl(dataset, experimentRecord, spec.method, spec.trialCount, spec.baseSeed, onProgress);
+  const report = await msdRunPipelineNegativeControl(dataset, experimentRecord, spec.method, spec.trialCount, spec.baseSeed, onProgress, spec.calibrationId);
   const classification = msdClassifyNullCalibrationOutcome(report, spec);
   const result = { spec, report, classification, completedAt: Date.now() };
   await msdRecordCalibrationMatrixEntry({
+    calibrationId: spec.calibrationId,
     condition: 'known_null', knownSignal: false, pipelineExecuted: report.executionIntegrity.allTrialsComplete,
     expectedResult: 'controlled false-discovery rate', observedResult: classification.outcome,
     interpretation: classification.detail, specVersion: spec.specVersion, trialCount: spec.trialCount,
@@ -10935,10 +11044,21 @@ function msdBuildMatchedNullDataset(dataset, seed, lookbackWindow){
  * per-trial msdYieldToEventLoop() below fix exactly that, and nothing
  * about what gets computed.
  */
-async function msdRunPipelineNegativeControl(realDataset, realExperimentRecord, method, numTrials, baseSeed, onProgress){
+/**
+ * calibrationId (added after the Pre-Stage-3 audit found it missing):
+ * OPTIONAL, backward-compatible — every pre-existing caller that omits
+ * it is completely unaffected (findings simply carry no calibrationId
+ * field, exactly as before). When a preregistered calibration supplies
+ * it (via msdRunPreregisteredNullCalibration), every trial's control
+ * findings, the aggregate report, and the calibration matrix entry all
+ * carry it — closing the exact gap that made "zero prior trial records
+ * for THIS calibration" unverifiable in the pre-Stage-3 audit.
+ */
+async function msdRunPipelineNegativeControl(realDataset, realExperimentRecord, method, numTrials, baseSeed, onProgress, calibrationId){
   method = (method === 'randomized_label' || method === 'matched_null') ? method : 'label_permutation';
   numTrials = Number.isInteger(numTrials) && numTrials > 0 ? numTrials : MSD_CONTROL_DEFAULT_TRIALS;
   baseSeed = Number.isInteger(baseSeed) ? baseSeed : 1;
+  calibrationId = calibrationId || null;
   const controlRunId = msdGenerateControlRunId();
   const derivedLookbackWindow = (realExperimentRecord && realExperimentRecord.lookbackWindow != null) ? realExperimentRecord.lookbackWindow : 20;
 
@@ -10959,7 +11079,7 @@ async function msdRunPipelineNegativeControl(realDataset, realExperimentRecord, 
     const sessionResult = await msdRunResearchSession(fakeExperimentRecord, discoveryResult, null, trialDataset, {
       type: 'control_discovery',
       writeFn: msdWriteControlFinding,
-      extra: { controlRunId, trialIndex: t, negativeControlMethod: method },
+      extra: { controlRunId, trialIndex: t, negativeControlMethod: method, calibrationId },
     });
     // WORKSTREAM 7/8 (Supervisory Directive): reuses the manifest
     // msdRunResearchSession already builds and records for this trial —
@@ -11006,7 +11126,7 @@ async function msdRunPipelineNegativeControl(realDataset, realExperimentRecord, 
   }
 
   const report = {
-    controlRunId, method, numTrials, baseSeed,
+    controlRunId, method, numTrials, baseSeed, calibrationId,
     codeVersion: MSD_CODE_VERSION,
     statisticalEngineVersion: MSD_STATISTICAL_ENGINE_VERSION,
     analyzerCount: msdRegisteredAnalyzers.length,
