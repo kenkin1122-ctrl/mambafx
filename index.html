@@ -6695,24 +6695,41 @@ function msdClassifyNullCalibrationOutcome(report, spec){
     return { outcome: 'candidate_generation_failure', detail: 'Fewer than half of all trials even reached readyForTraining — candidates were never meaningfully generated, so a zero-discovery reading says nothing about calibration.' };
   }
 
-  const totalDiscoveries = report.trialSummaries.reduce((s, t) => s + t.recordedCount, 0);
+  // R-075 FIX: the binomial success count for one null trial is whether
+  // that trial produced AT LEAST ONE discovery (a 0/1 outcome), not the
+  // raw number of discoveries it produced. A single trial can legitimately
+  // produce more than one discovery across the 10 analyzers (any subset
+  // of them can independently fire in the same trial) — summing those
+  // raw counts and feeding the sum into msdWilsonScoreInterval as if it
+  // were a binomial numerator was a real defect: Wilson's formula assumes
+  // a proportion bounded to [0,1], and a sum of per-trial counts that can
+  // individually exceed 1 is not that. msdComputeRequiredNullTrialCount's
+  // own design math (k = n * nominalAlpha, structurally bounded by n) is
+  // what actually determined this specification's 480 trials and 0.0197
+  // precision — confirming the PREREGISTERED estimand was always
+  // "proportion of trials with >=1 discovery," not "mean discoveries per
+  // trial." This corrects the implementation to match what was already
+  // preregistered; it does not change the preregistered numbers at all.
+  const totalDiscoveries = report.trialSummaries.reduce((s, t) => s + t.recordedCount, 0); // retained as an informational diagnostic ONLY — never the binomial numerator
+  const trialDiscoverySuccesses = report.trialSummaries.filter(t => t.recordedCount >= 1).length;
   const n = report.trialSummaries.length;
-  const empiricalRate = totalDiscoveries / n;
-  const ci = msdWilsonScoreInterval(totalDiscoveries, n, spec.confidenceLevel === 0.99 ? 2.576 : spec.confidenceLevel === 0.90 ? 1.645 : 1.96);
+  const trialDiscoveryRate = trialDiscoverySuccesses / n;
+  const empiricalRate = trialDiscoveryRate; // empiricalRate now means what every downstream consumer already assumed it meant: a trial-level proportion
+  const ci = msdWilsonScoreInterval(trialDiscoverySuccesses, n, spec.confidenceLevel === 0.99 ? 2.576 : spec.confidenceLevel === 0.90 ? 1.645 : 1.96);
 
   const achievedPrecision = (ci.upper - ci.lower) / 2;
   const targetPrecision = spec.desiredPrecisionHalfWidth;
   if (n < spec.trialCount) {
-    return { outcome: 'underpowered', empiricalRate, confidenceInterval: ci, achievedPrecision, detail: 'Only ' + n + ' of the preregistered ' + spec.trialCount + ' trials were run — the achieved precision (±' + achievedPrecision.toFixed(3) + ') does not meet the preregistered target (±' + targetPrecision.toFixed(3) + ').' };
+    return { outcome: 'underpowered', empiricalRate, trialDiscoverySuccesses, trialDiscoveryRate, totalDiscoveries, confidenceInterval: ci, achievedPrecision, detail: 'Only ' + n + ' of the preregistered ' + spec.trialCount + ' trials were run — the achieved precision (±' + achievedPrecision.toFixed(3) + ') does not meet the preregistered target (±' + targetPrecision.toFixed(3) + ').' };
   }
 
   if (ci.lower > spec.acceptableIntervalUpper) {
-    return { outcome: 'false_discovery_inflation', empiricalRate, confidenceInterval: ci, detail: 'The empirical discovery rate\u2019s confidence interval lies entirely ABOVE the preregistered acceptable interval — the pipeline is producing more false discoveries under the null than intended.' };
+    return { outcome: 'false_discovery_inflation', empiricalRate, trialDiscoverySuccesses, trialDiscoveryRate, totalDiscoveries, confidenceInterval: ci, detail: 'The empirical discovery rate\u2019s confidence interval lies entirely ABOVE the preregistered acceptable interval — the pipeline is producing more false discoveries under the null than intended.' };
   }
   if (ci.upper < spec.acceptableIntervalLower) {
-    return { outcome: 'overly_conservative', empiricalRate, confidenceInterval: ci, detail: 'The empirical discovery rate\u2019s confidence interval lies entirely BELOW the preregistered acceptable interval — the pipeline may be too conservative to detect real signal, a power concern distinct from good calibration.' };
+    return { outcome: 'overly_conservative', empiricalRate, trialDiscoverySuccesses, trialDiscoveryRate, totalDiscoveries, confidenceInterval: ci, detail: 'The empirical discovery rate\u2019s confidence interval lies entirely BELOW the preregistered acceptable interval — the pipeline may be too conservative to detect real signal, a power concern distinct from good calibration.' };
   }
-  return { outcome: 'correctly_controlled', empiricalRate, confidenceInterval: ci, detail: 'The empirical discovery rate\u2019s confidence interval overlaps the preregistered acceptable interval, with the preregistered precision achieved.' };
+  return { outcome: 'correctly_controlled', empiricalRate, trialDiscoverySuccesses, trialDiscoveryRate, totalDiscoveries, confidenceInterval: ci, detail: 'The empirical discovery rate\u2019s confidence interval overlaps the preregistered acceptable interval, with the preregistered precision achieved.' };
 }
 
 /**
