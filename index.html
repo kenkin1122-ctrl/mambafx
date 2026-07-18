@@ -6263,11 +6263,34 @@ const MSD_POSITIVE_CONTROL_VALID_STATUSES = ['PASS', 'PARTIAL', 'FAIL', 'NOT_EVA
  * one specific seed is not a demonstrated sensitivity — this is the
  * directive's own explicit requirement, not an optional extra.
  */
+const MSD_POSITIVE_CONTROL_ALL_VALID_STATUSES = ['PASS', 'PARTIAL', 'FAIL', 'NOT_EVALUATED', 'ALREADY_EXECUTED'];
+
+/** Deterministic identity for one exact positive-control condition — same pattern as the existing experimentId convention, just scoped to the whole (main+holdout) run rather than one trial. */
+function msdGeneratePositiveControlRunId(signalType, strength, mainSeed, holdoutSeed){
+  return 'pcrun_' + signalType + '_' + strength + '_' + mainSeed + '_' + holdoutSeed;
+}
+
 async function msdRunPositiveControlSensitivityTest(signalType, strength, mainSeed, holdoutSeed, registerFn){
   const generator = signalType === 'A' ? msdGeneratePositiveControlSignalA : msdGeneratePositiveControlSignalB;
   const n = 2000;
 
-  async function runOneTrial(seed){
+  // DEFECT 2 FIX (duplicate-execution protection): this exact condition's
+  // identity is deterministic — before running anything, check whether
+  // it has already been executed and persisted. Preserves the historical
+  // record untouched; never re-runs, never overwrites, never merges.
+  const pcRunId = msdGeneratePositiveControlRunId(signalType, strength, mainSeed, holdoutSeed);
+  const priorMatrixEntries = await msdGetCalibrationMatrix();
+  const alreadyExecuted = priorMatrixEntries.find(e => e.condition === 'positive_control' && e.pcRunId === pcRunId);
+  if (alreadyExecuted) {
+    return {
+      status: 'ALREADY_EXECUTED',
+      reason: 'This exact positive-control condition (signalType=' + signalType + ', strength=' + strength + ', mainSeed=' + mainSeed + ', holdoutSeed=' + holdoutSeed + ') was already executed and persisted (pcRunId=' + pcRunId + ') — returning the historical result rather than re-running and duplicating evidence.',
+      pcRunId, priorResult: alreadyExecuted,
+      signalType, strength, mainSeed, holdoutSeed, specVersion: MSD_POSITIVE_CONTROL_SPEC_VERSION,
+    };
+  }
+
+  async function runOneTrial(seed, trialRole){
     const { rows, groundTruth } = generator(n, seed, strength);
     const verification = msdVerifyGroundTruthProperties(rows, groundTruth);
     if (!verification.verified) {
@@ -6288,9 +6311,19 @@ async function msdRunPositiveControlSensitivityTest(signalType, strength, mainSe
 
     const discovery = msdRunStatisticalDiscovery(dataset, { randomSeed: seed });
     const trainResult = msdTrainModel(dataset);
-    const sessionResult = await msdRunResearchSession(experimentRecord, discovery, trainResult.error ? null : trainResult, dataset);
+    // DEFECT 1 FIX (evidence isolation): recordOpts now explicitly routes
+    // every discovery this run produces into PositiveControlLedger — a
+    // physically separate database from the real KnowledgeBase — instead
+    // of the previous default (msdWriteFinding, the real Discovery
+    // Repository). Nothing about signal generation, effect sizes, n, the
+    // estimand, or the acceptance rule changed; only where evidence lands.
+    const sessionResult = await msdRunResearchSession(experimentRecord, discovery, trainResult.error ? null : trainResult, dataset, {
+      type: 'positive_control_discovery',
+      writeFn: msdWritePositiveControlFinding,
+      extra: { pcRunId, trialRole, signalType, strength, seed },
+    });
 
-    const allEvidence = await msdGetAllDiscoveryEvidence();
+    const allEvidence = await msdGetAllPositiveControlFindings();
     const thisSessionEvidence = allEvidence.filter(e => e.researchSessionId === sessionResult.researchSessionId);
 
     let recovered = false, recoveredKeys = [];
@@ -6309,14 +6342,14 @@ async function msdRunPositiveControlSensitivityTest(signalType, strength, mainSe
     return { recovered, groundTruthVerified: true, verification, groundTruth, recoveredKeys, decoyKeysFlagged, manifest: sessionResult.manifest, researchSessionId: sessionResult.researchSessionId };
   }
 
-  const mainResult = await runOneTrial(mainSeed);
+  const mainResult = await runOneTrial(mainSeed, 'main');
   if (!mainResult.groundTruthVerified) {
-    return { status: 'NOT_EVALUATED', reason: 'Ground-truth verification failed on the main run — the generator did not produce the intended properties: ' + mainResult.verification.detail, mainResult, holdoutResult: null };
+    return { status: 'NOT_EVALUATED', reason: 'Ground-truth verification failed on the main run — the generator did not produce the intended properties: ' + mainResult.verification.detail, mainResult, holdoutResult: null, pcRunId };
   }
 
-  const holdoutResult = await runOneTrial(holdoutSeed);
+  const holdoutResult = await runOneTrial(holdoutSeed, 'holdout');
   if (!holdoutResult.groundTruthVerified) {
-    return { status: 'NOT_EVALUATED', reason: 'Ground-truth verification failed on the independent holdout run.', mainResult, holdoutResult };
+    return { status: 'NOT_EVALUATED', reason: 'Ground-truth verification failed on the independent holdout run.', mainResult, holdoutResult, pcRunId };
   }
 
   let status;
@@ -6324,11 +6357,24 @@ async function msdRunPositiveControlSensitivityTest(signalType, strength, mainSe
   else if (mainResult.recovered || holdoutResult.recovered) status = 'PARTIAL';
   else status = 'FAIL';
 
+  const reason = status === 'PASS' ? 'The planted signal was recovered on both the main run and the independent holdout.'
+    : status === 'PARTIAL' ? 'The planted signal was recovered on only one of the two runs (main: ' + mainResult.recovered + ', holdout: ' + holdoutResult.recovered + ') — not a full sensitivity PASS.'
+    : 'The planted signal was not recovered on either run.';
+
+  // DEFECT 3 FIX (verdict persistence): reuses the EXISTING calibration
+  // matrix mechanism (msdRecordCalibrationMatrixEntry — the same one
+  // the null calibration already uses with condition: 'known_null')
+  // rather than inventing a new store. condition: 'positive_control'
+  // keeps it clearly distinct from null-calibration entries, and this
+  // finding type has never been, and is not, mixed into the real
+  // Discovery Repository or either control ledger's own evidence.
+  await msdRecordCalibrationMatrixEntry({
+    condition: 'positive_control', pcRunId, signalType, strength, mainSeed, holdoutSeed,
+    knownSignal: true, observedResult: status, interpretation: reason, specVersion: MSD_POSITIVE_CONTROL_SPEC_VERSION,
+  });
+
   return {
-    status,
-    reason: status === 'PASS' ? 'The planted signal was recovered on both the main run and the independent holdout.'
-      : status === 'PARTIAL' ? 'The planted signal was recovered on only one of the two runs (main: ' + mainResult.recovered + ', holdout: ' + holdoutResult.recovered + ') — not a full sensitivity PASS.'
-      : 'The planted signal was not recovered on either run.',
+    status, reason, pcRunId,
     signalType, strength, mainSeed, holdoutSeed, specVersion: MSD_POSITIVE_CONTROL_SPEC_VERSION,
     mainResult, holdoutResult,
   };
@@ -11010,6 +11056,81 @@ async function msdGetAllControlFindings(){
     const req = db.transaction(MSD_CONTROL_STORE, 'readonly').objectStore(MSD_CONTROL_STORE).getAll();
     req.onsuccess = () => resolve(req.result || []);
     req.onerror   = () => resolve([]);
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// POSITIVE-CONTROL EVIDENCE ISOLATION (Phase 1 investigation, Defect 1)
+// ══════════════════════════════════════════════════════════════════════
+// A physically separate database, mirroring NegativeControlLedger's own
+// structure exactly (same keyPath, same index pattern, same add()-only
+// append guarantee) — closing the exact gap the investigation found:
+// msdRunPositiveControlSensitivityTest previously called
+// msdRunResearchSession with no recordOpts at all, which defaults to
+// { type: 'research_discovery', writeFn: msdWriteFinding } — writing
+// synthetic Signal A/B evidence directly into the real KnowledgeBase,
+// indistinguishable from genuine market discoveries sharing the same
+// feature keys (rsi/pdi/ndi). This store gives positive-control evidence
+// its own physical home, exactly as negative-control evidence already has.
+const MSD_POSITIVE_CONTROL_DB_NAME    = 'mfx_msd_positive_control';
+const MSD_POSITIVE_CONTROL_DB_VERSION = 1;
+const MSD_POSITIVE_CONTROL_STORE      = 'PositiveControlLedger';
+
+let _msdPositiveControlDbPromise = null;
+
+function msdOpenPositiveControlDatabase(){
+  if (_msdPositiveControlDbPromise) return _msdPositiveControlDbPromise;
+  _msdPositiveControlDbPromise = new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') { reject(new Error('IndexedDB is not available in this environment')); return; }
+    const req = indexedDB.open(MSD_POSITIVE_CONTROL_DB_NAME, MSD_POSITIVE_CONTROL_DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(MSD_POSITIVE_CONTROL_STORE)) {
+        const store = db.createObjectStore(MSD_POSITIVE_CONTROL_STORE, { keyPath: 'findingId' });
+        store.createIndex('pcRunId', 'pcRunId', { unique: false });
+        store.createIndex('discoveryKey', 'discoveryKey', { unique: false });
+      }
+    };
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror   = (e) => reject(e.target.error);
+  });
+  return _msdPositiveControlDbPromise;
+}
+
+/** Appends ONE positive-control finding. Uses add(), never put() — same append-only guarantee as msdWriteControlFinding, in a physically separate database from both the real KnowledgeBase and NegativeControlLedger. */
+async function msdWritePositiveControlFinding(finding){
+  if (!finding || !finding.findingId) return { ok: false, error: 'finding is missing findingId' };
+  try {
+    const db = await msdOpenPositiveControlDatabase();
+    return await new Promise((resolve) => {
+      const req = db.transaction(MSD_POSITIVE_CONTROL_STORE, 'readwrite').objectStore(MSD_POSITIVE_CONTROL_STORE).add(finding);
+      req.onsuccess = () => resolve({ ok: true });
+      req.onerror   = (e) => { e.preventDefault(); resolve({ ok: false, error: 'duplicate or invalid findingId — write rejected (append-only store)' }); };
+    });
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function msdGetAllPositiveControlFindings(){
+  const db = await msdOpenPositiveControlDatabase();
+  return new Promise((resolve) => {
+    const req = db.transaction(MSD_POSITIVE_CONTROL_STORE, 'readonly').objectStore(MSD_POSITIVE_CONTROL_STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror   = () => resolve([]);
+  });
+}
+
+/** Test/debug only — never called from production code paths. */
+function msdResetPositiveControlDatabase(){
+  if (_msdPositiveControlDbPromise) _msdPositiveControlDbPromise.then(db => db.close()).catch(() => {});
+  _msdPositiveControlDbPromise = null;
+  return new Promise((resolve) => {
+    if (typeof indexedDB === 'undefined') { resolve(); return; }
+    const req = indexedDB.deleteDatabase(MSD_POSITIVE_CONTROL_DB_NAME);
+    req.onsuccess = () => resolve();
+    req.onerror = () => resolve();
+    req.onblocked = () => resolve();
   });
 }
 
