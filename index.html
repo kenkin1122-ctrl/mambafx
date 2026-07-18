@@ -5994,6 +5994,135 @@ function msdCompareDeduplicationPolicies(snapshots){
   };
 }
 
+
+// ══════════════════════════════════════════════════════════════════════
+// CALIBRATION DIAGNOSTIC GATE — PHASE 7: Chronological Block Replication
+// ══════════════════════════════════════════════════════════════════════
+// GAP THIS CLOSES: msdComputeLeadTimeSelectionBias (built earlier this
+// session) answers "is the best observed AUC distinguishable from
+// chance." It does NOT answer the separate, equally important question
+// this directive's Phase 7 audit explicitly named: does the winning
+// lead time hold up across DIFFERENT time periods, or did it only look
+// best in the aggregate because of one historical stretch? Repeatedly
+// confirming the same horizon on the same data is exactly the
+// selection-bias pattern the directive warns against — this builds the
+// one remaining piece that actually tests replication across time,
+// not just against a chance benchmark.
+//
+// REUSE: msdBuildExperimentDataset (the real, unmodified chronological-
+// split machinery) is called once per block, on that block's own
+// epoch-filtered slice of allStates — no new dataset-building logic.
+// msdTrainModel is reused directly for each block's AUC.
+//
+// HONEST SCOPE: this requires a real dataset spanning enough
+// chronological history to split into multiple genuine blocks. It
+// cannot be run meaningfully on the real V100 (1s) data from this
+// sandbox, since no such data exists here. Built and tested against
+// constructed fixtures, exactly like everything else — ready to run on
+// real data the moment it's available.
+
+const MSD_BLOCK_REPLICATION_MIN_BLOCKS = 3; // fewer than 3 genuinely independent time periods and "replication across time" isn't a meaningful claim at all
+
+/** Splits an already epoch-sorted array of snapshots into numBlocks contiguous, roughly equal-sized chronological blocks — never randomized, since shuffling would defeat the entire purpose of testing across genuinely different time periods. */
+function msdSplitIntoChronologicalBlocks(sortedSnapshots, numBlocks){
+  if (numBlocks < 1) throw new Error('numBlocks must be at least 1');
+  const blockSize = Math.floor(sortedSnapshots.length / numBlocks);
+  const blocks = [];
+  for (let b = 0; b < numBlocks; b++) {
+    const start = b * blockSize;
+    const end = (b === numBlocks - 1) ? sortedSnapshots.length : start + blockSize; // the last block absorbs any remainder
+    blocks.push(sortedSnapshots.slice(start, end));
+  }
+  return blocks;
+}
+
+/**
+ * For one chronological block and one lead time, builds a dataset
+ * scoped to just that block (reusing msdBuildExperimentDataset
+ * unmodified) and trains a model, returning its test AUC. Returns null
+ * (not zero, not a fabricated number) if the block is too small or the
+ * resulting dataset isn't ready for training — an honestly missing data
+ * point, not a forced value.
+ */
+function msdEvaluateLeadTimeWithinBlock(blockSnapshots, leadTime, baseConfig){
+  const config = Object.assign({}, baseConfig, { leadTime });
+  let dataset;
+  try {
+    dataset = msdBuildExperimentDataset(blockSnapshots, config);
+  } catch (e) {
+    return { auc: null, reason: 'dataset construction failed: ' + e.message };
+  }
+  if (dataset.trainSet.length < MSD_MIN_SAMPLE_COUNT_FOR_TRAINING || dataset.testSet.length < 10) {
+    return { auc: null, reason: 'block too small for this lead time (train=' + dataset.trainSet.length + ', test=' + dataset.testSet.length + ')' };
+  }
+  const trainResult = msdTrainModel(dataset);
+  if (trainResult.error) return { auc: null, reason: trainResult.error };
+  const best = trainResult.modelResults.find(m => m.name === trainResult.bestModelName);
+  return { auc: best.testMetrics.auc, reason: null, sampleCount: dataset.testSet.length };
+}
+
+/**
+ * The actual replication check: given the full chronological history and
+ * the set of lead times a sweep already tested, splits history into
+ * numBlocks contiguous periods, re-evaluates every lead time within
+ * every block independently, and checks whether the AGGREGATE "winning"
+ * lead time (the one the full-history sweep called optimal) is ALSO
+ * among the better-performing lead times WITHIN MOST individual blocks
+ * — not just in the aggregate. A lead time that wins overall but loses
+ * within most individual blocks is exactly the selection-bias pattern
+ * this phase exists to catch.
+ */
+function msdRunChronologicalBlockReplication(allStatesSortedByEpoch, leadTimeCandidates, aggregateWinnerLeadTime, numBlocks, baseConfig){
+  if (numBlocks < MSD_BLOCK_REPLICATION_MIN_BLOCKS) {
+    return { status: 'INSUFFICIENT_BLOCKS', reason: 'Fewer than ' + MSD_BLOCK_REPLICATION_MIN_BLOCKS + ' chronological blocks requested — replication across time is not a meaningful claim with so few genuinely independent periods.' };
+  }
+  const blocks = msdSplitIntoChronologicalBlocks(allStatesSortedByEpoch, numBlocks);
+
+  const perBlockResults = blocks.map((blockSnapshots, blockIndex) => {
+    const leadTimeAucs = {};
+    leadTimeCandidates.forEach(lt => {
+      leadTimeAucs[lt] = msdEvaluateLeadTimeWithinBlock(blockSnapshots, lt, baseConfig);
+    });
+    const validEntries = Object.entries(leadTimeAucs).filter(([, v]) => v.auc != null);
+    if (validEntries.length === 0) {
+      return { blockIndex, leadTimeAucs, blockWinner: null, aggregateWinnerRank: null };
+    }
+    const sortedByAuc = validEntries.slice().sort((a, b) => b[1].auc - a[1].auc);
+    const blockWinner = sortedByAuc[0][0];
+    const aggregateWinnerRank = sortedByAuc.findIndex(([lt]) => Number(lt) === Number(aggregateWinnerLeadTime)) + 1; // 1-indexed; 0 means not evaluable in this block
+    return { blockIndex, leadTimeAucs, blockWinner, aggregateWinnerRank: aggregateWinnerRank || null };
+  });
+
+  const evaluableBlocks = perBlockResults.filter(b => b.aggregateWinnerRank != null);
+  if (evaluableBlocks.length === 0) {
+    return { status: 'INSUFFICIENT_BLOCKS', reason: 'No block produced enough data to evaluate the aggregate winner at all.', perBlockResults };
+  }
+
+  // "Replicates" here means: the aggregate winner ranks in the top half
+  // of tested lead times within a clear majority of evaluable blocks —
+  // not necessarily #1 in every single block (real data is noisy), but
+  // consistently competitive, not just a fluke of the full-history
+  // aggregate.
+  const topHalfCutoff = Math.ceil(leadTimeCandidates.length / 2);
+  const blocksWhereWinnerIsTopHalf = evaluableBlocks.filter(b => b.aggregateWinnerRank <= topHalfCutoff).length;
+  const replicationRate = blocksWhereWinnerIsTopHalf / evaluableBlocks.length;
+
+  let status;
+  if (replicationRate >= 0.75) status = 'REPLICATES_CONSISTENTLY';
+  else if (replicationRate >= 0.5) status = 'PARTIALLY_REPLICATES';
+  else status = 'DOES_NOT_REPLICATE';
+
+  return {
+    status, replicationRate, evaluableBlockCount: evaluableBlocks.length, totalBlockCount: numBlocks,
+    aggregateWinnerLeadTime, perBlockResults,
+    detail: status === 'REPLICATES_CONSISTENTLY'
+      ? 'The aggregate-best lead time (' + aggregateWinnerLeadTime + ') ranked in the top half of tested lead times in ' + blocksWhereWinnerIsTopHalf + '/' + evaluableBlocks.length + ' evaluable chronological blocks — this is a VALIDATED PREDICTIVE HORIZON, not just a best observed one.'
+      : status === 'PARTIALLY_REPLICATES'
+      ? 'The aggregate-best lead time held up in only ' + blocksWhereWinnerIsTopHalf + '/' + evaluableBlocks.length + ' blocks — partial, not full, replication. Treat with caution.'
+      : 'The aggregate-best lead time ranked in the top half in only ' + blocksWhereWinnerIsTopHalf + '/' + evaluableBlocks.length + ' blocks — it does NOT replicate across time and should be treated as a BEST OBSERVED HORIZON only, not a validated one, regardless of how it looked in the full-history aggregate.',
+  };
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // CALIBRATION DIAGNOSTIC GATE — Positive-Control Generator & Sensitivity Test
 // ══════════════════════════════════════════════════════════════════════
