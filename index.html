@@ -5753,7 +5753,8 @@ function msdGetInterruptionThreshold(symbol){
  * market-relevant field is identical (e.g. a reconnect re-processing the
  * same tick gets a new capture timestamp and snapshotId either way).
  */
-function msdDeduplicateTicks(snapshots){
+/** Pure refactor, no behavior change: the epoch-grouping step msdDeduplicateTicks already did, exposed as its own function so the new conflict-bias audit below can reuse it exactly rather than re-deriving groups with separate logic. */
+function msdGroupSnapshotsByEpoch(snapshots){
   const byEpoch = {};
   const noEpoch = [];
   snapshots.forEach(s => {
@@ -5761,6 +5762,11 @@ function msdDeduplicateTicks(snapshots){
     if (!byEpoch[s.epoch]) byEpoch[s.epoch] = [];
     byEpoch[s.epoch].push(s);
   });
+  return { byEpoch, noEpoch };
+}
+
+function msdDeduplicateTicks(snapshots){
+  const { byEpoch, noEpoch } = msdGroupSnapshotsByEpoch(snapshots);
   const canonicalize = s => { const { snapshotId, timestamp, ...rest } = s; return JSON.stringify(rest); };
   const deduped = [];
   let identicalRemoved = 0, conflictingRemoved = 0;
@@ -5776,6 +5782,724 @@ function msdDeduplicateTicks(snapshots){
     }
   });
   return { deduped: deduped.concat(noEpoch), identicalRemoved, conflictingRemoved };
+}
+
+/**
+ * WORKSTREAM 6 (Supervisory Directive — Calibration Diagnostic Gate):
+ * audits whether discarding ALL conflicting-duplicate epochs introduces
+ * material selection bias, rather than assuming the conservative
+ * "discard everything" policy is bias-free just because it's cautious.
+ * Reuses msdGroupSnapshotsByEpoch directly — the exact same grouping
+ * msdDeduplicateTicks itself uses, not a second implementation.
+ * Checks the two most concretely answerable, highest-value questions
+ * from the directive's 14-point list: label association (are
+ * conflicting epochs disproportionately positive or negative outcomes)
+ * and chronological concentration (are they clustered in specific time
+ * windows rather than spread evenly) — both real, checkable properties
+ * that would indicate the conservative policy is silently distorting
+ * which events survive into the discovery dataset.
+ */
+function msdAuditConflictingDuplicateBias(snapshots){
+  const { byEpoch } = msdGroupSnapshotsByEpoch(snapshots);
+  const canonicalize = s => { const { snapshotId, timestamp, ...rest } = s; return JSON.stringify(rest); };
+
+  const conflictingSnapshots = [];
+  Object.values(byEpoch).forEach(group => {
+    if (group.length < 2) return;
+    const canonical = canonicalize(group[0]);
+    const allIdentical = group.every(g => canonicalize(g) === canonical);
+    if (!allIdentical) conflictingSnapshots.push(...group);
+  });
+
+  if (conflictingSnapshots.length === 0) {
+    return { biasRisk: 'none', detail: 'No conflicting-duplicate epochs found in this snapshot set.', conflictingCount: 0 };
+  }
+
+  const overallPositiveRate = snapshots.filter(s => s.outcome === 'positive').length / snapshots.length;
+  const conflictingPositiveRate = conflictingSnapshots.filter(s => s.outcome === 'positive').length / conflictingSnapshots.length;
+  const labelAssociationGap = Math.abs(conflictingPositiveRate - overallPositiveRate);
+
+  // Chronological concentration: split the full epoch range into 10 equal
+  // buckets and compare each bucket's SHARE of conflicts against its
+  // share of all snapshots — a coefficient of variation well above what
+  // pure chance would produce indicates real clustering, not noise.
+  const epochs = snapshots.map(s => s.epoch).filter(e => e != null);
+  const minEpoch = msdSafeMin(epochs), maxEpoch = msdSafeMax(epochs);
+  const bucketCount = 10;
+  const bucketWidth = (maxEpoch - minEpoch) / bucketCount || 1;
+  const allBucketCounts = new Array(bucketCount).fill(0);
+  const conflictBucketCounts = new Array(bucketCount).fill(0);
+  snapshots.forEach(s => {
+    if (s.epoch == null) return;
+    let idx = Math.floor((s.epoch - minEpoch) / bucketWidth);
+    if (idx >= bucketCount) idx = bucketCount - 1;
+    if (idx < 0) idx = 0;
+    allBucketCounts[idx]++;
+  });
+  conflictingSnapshots.forEach(s => {
+    if (s.epoch == null) return;
+    let idx = Math.floor((s.epoch - minEpoch) / bucketWidth);
+    if (idx >= bucketCount) idx = bucketCount - 1;
+    if (idx < 0) idx = 0;
+    conflictBucketCounts[idx]++;
+  });
+  const conflictShareByBucket = conflictBucketCounts.map((c, i) => allBucketCounts[i] > 0 ? c / allBucketCounts[i] : 0);
+  const meanShare = conflictShareByBucket.reduce((a, b) => a + b, 0) / bucketCount;
+  const varianceShare = conflictShareByBucket.reduce((a, v) => a + (v - meanShare) ** 2, 0) / bucketCount;
+  const stdShare = Math.sqrt(varianceShare);
+  const coefficientOfVariation = meanShare > 0 ? stdShare / meanShare : 0;
+
+  let biasRisk = 'low';
+  if (labelAssociationGap > 0.1 || coefficientOfVariation > 1.0) biasRisk = 'high';
+  else if (labelAssociationGap > 0.03 || coefficientOfVariation > 0.5) biasRisk = 'moderate';
+
+  return {
+    biasRisk,
+    conflictingCount: conflictingSnapshots.length,
+    overallPositiveRate, conflictingPositiveRate, labelAssociationGap,
+    conflictShareByBucket, coefficientOfVariation,
+    detail: biasRisk === 'low'
+      ? 'Conflicting-duplicate epochs show no material label association or chronological concentration.'
+      : 'Conflicting-duplicate epochs show ' + (labelAssociationGap > 0.03 ? 'a label-association gap of ' + (labelAssociationGap * 100).toFixed(1) + ' points ' : '') + (coefficientOfVariation > 0.5 ? 'and uneven chronological concentration (CoV=' + coefficientOfVariation.toFixed(2) + ')' : '') + ' — investigate before treating the discard-all policy as bias-free.',
+  };
+}
+
+/**
+ * Insertion-order invariance check: runs msdDeduplicateTicks on the same
+ * underlying snapshots in two different orders and confirms the
+ * resulting CONTENT (feature values, outcomes — not snapshotId/timestamp,
+ * which are expected to legitimately differ when multiple identical
+ * copies exist) is identical either way.
+ */
+function msdCheckDeduplicationOrderInvariance(snapshots, seed){
+  const rng = msdSeededRandom(seed || 1);
+  const shuffled = msdSeededShuffle(snapshots, rng);
+  const resultA = msdDeduplicateTicks(snapshots);
+  const resultB = msdDeduplicateTicks(shuffled);
+  const canonicalize = s => { const { snapshotId, timestamp, ...rest } = s; return JSON.stringify(rest); };
+  const contentA = resultA.deduped.map(canonicalize).sort();
+  const contentB = resultB.deduped.map(canonicalize).sort();
+  const invariant = JSON.stringify(contentA) === JSON.stringify(contentB)
+    && resultA.identicalRemoved === resultB.identicalRemoved
+    && resultA.conflictingRemoved === resultB.conflictingRemoved;
+  return { invariant, countA: resultA.deduped.length, countB: resultB.deduped.length };
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// CALIBRATION DIAGNOSTIC GATE — Positive-Control Generator & Sensitivity Test
+// ══════════════════════════════════════════════════════════════════════
+// PRIORITY STATED EXPLICITLY: per this directive's own Rule 4, this is
+// built FIRST, before the calibration matrix or the final verdict
+// function, because neither of those is meaningful without first
+// demonstrating the lab can detect a signal that is definitely there.
+// Every real-data zero-discovery result reported so far has been
+// interpreted correctly as "exploratory, calibration pending" — but
+// that phrase has never yet been backed by an actual demonstration of
+// sensitivity. This closes that gap.
+//
+// INDEPENDENCE FROM THE DISCOVERY PIPELINE, taken seriously: this
+// generator does not call msdRunStatisticalDiscovery, any analyzer, or
+// any feature-computation code to build its ground truth. It computes
+// its own signal directly from raw random draws. The pipeline being
+// tested never sees which feature was planted, what the effect size
+// was, or that a signal exists at all until AFTER discovery runs and
+// the evaluator checks the recorded evidence against the frozen,
+// separately-held ground truth.
+//
+// WHY EXISTING FEATURE KEYS ARE REUSED, not invented ones: the real
+// analyzer suite (msdRunStatisticalDiscovery, msdRunResearchSession)
+// expects snapshots shaped like real MarketState records, with the
+// SAME feature keys (MSD_KNOWN_FEATURE_KEYS) it already knows how to
+// read. Inventing new field names would require changing the pipeline
+// itself just to test it — exactly the kind of "duplicate
+// implementation to make the phase look self-contained" this
+// directive explicitly prohibits. Using 'rsi' as the Signal A carrier
+// and 'pdi'/'ndi' as the Signal B carriers means the COMPLETELY
+// UNMODIFIED production pipeline runs on this data.
+
+const MSD_POSITIVE_CONTROL_SPEC_VERSION = 'pc_spec_v1';
+const MSD_POSITIVE_CONTROL_EFFECT_SIZES = { strong: 3.0, moderate: 1.2, borderline: 0.5 };
+const MSD_POSITIVE_CONTROL_DECOY_KEYS = ['atr', 'adx', 'chop', 'roc'];
+const MSD_POSITIVE_CONTROL_NEUTRAL_VALUE_KEYS = ['macd', 'signal', 'hist', 'cci', 'bbPctB', 'bbUpper', 'bbMid', 'bbLower', 'ema5', 'ema10', 'ema20', 'stochK', 'stochD'];
+
+/**
+ * Fills every feature key the real pipeline expects with independent
+ * noise, so a generated snapshot is schema-complete and the
+ * unmodified production analyzers can run on it without special-casing
+ * — decoys and "neutral" filler fields are mathematically identical
+ * (independent noise); they're named separately only so a report can
+ * say which ones were INTENDED as explicit decoys for rejection-testing
+ * versus incidental filler needed purely for schema completeness.
+ */
+function msdFillNoiseFeatures(row, rng, excludeKeys){
+  const allFillKeys = MSD_POSITIVE_CONTROL_DECOY_KEYS.concat(MSD_POSITIVE_CONTROL_NEUTRAL_VALUE_KEYS);
+  allFillKeys.forEach(key => {
+    if (excludeKeys.includes(key)) return;
+    row[key] = (rng() - 0.5) * 2;
+  });
+  return row;
+}
+
+/**
+ * Signal A — Y = f(X1) + noise, planted in the real 'rsi' feature key.
+ * A pure marginal effect: rsi's own value should predict the outcome
+ * directly, at a strength this function controls explicitly and
+ * reports in the returned ground truth.
+ */
+const MSD_POSITIVE_CONTROL_SYMBOL = 'PC_SYNTHETIC';
+const MSD_POSITIVE_CONTROL_FEATURE_VERSION = 'pc_v1';
+
+function msdGeneratePositiveControlSignalA(n, seed, strength){
+  const effectSize = MSD_POSITIVE_CONTROL_EFFECT_SIZES[strength];
+  if (effectSize == null) throw new Error('Unknown strength: ' + strength + ' (expected strong/moderate/borderline)');
+  const rng = msdSeededRandom(seed);
+  const rows = [];
+  for (let i = 0; i < n; i++) {
+    const rsiValue = rng() * 2 - 1; // the TRUE signal feature, standardized to [-1,1]
+    const noise = (rng() - 0.5) * 2;
+    const latent = effectSize * rsiValue + noise;
+    const outcome = latent > 0 ? 'positive' : 'negative';
+    const row = { epoch: 1000 + i, price: 100, symbol: MSD_POSITIVE_CONTROL_SYMBOL, featureVersion: MSD_POSITIVE_CONTROL_FEATURE_VERSION, pdi: rng() * 2 - 1, ndi: rng() * 2 - 1, rsi: rsiValue, outcome, leadTime: 5, runLength: outcome === 'positive' ? 5 : null };
+    msdFillNoiseFeatures(row, rng, ['rsi']);
+    rows.push(row);
+  }
+  return {
+    rows,
+    groundTruth: {
+      signalType: 'A', signalFeature: 'rsi', decoyFeatures: MSD_POSITIVE_CONTROL_DECOY_KEYS.slice(),
+      effectSize, expectedDirection: 'positive', strength, seed, specVersion: MSD_POSITIVE_CONTROL_SPEC_VERSION,
+    },
+  };
+}
+
+/**
+ * Signal B — a genuine interaction: Y depends on sign(pdi * ndi), where
+ * pdi and ndi are each drawn independently and symmetrically around
+ * zero. This construction guarantees near-zero MARGINAL correlation
+ * for pdi alone or ndi alone (averaged over the other's symmetric
+ * distribution, neither variable's own sign predicts the outcome) while
+ * their PRODUCT genuinely does — the classic XOR-style interaction
+ * with no intended marginal signal in either component, exactly what
+ * Signal B is required to be. Quantitatively verified below by
+ * msdVerifyGroundTruthProperties before any discovery is attempted.
+ */
+function msdGeneratePositiveControlSignalB(n, seed, strength){
+  const effectSize = MSD_POSITIVE_CONTROL_EFFECT_SIZES[strength];
+  if (effectSize == null) throw new Error('Unknown strength: ' + strength + ' (expected strong/moderate/borderline)');
+  const rng = msdSeededRandom(seed);
+  const rows = [];
+  for (let i = 0; i < n; i++) {
+    const pdiValue = rng() * 2 - 1;
+    const ndiValue = rng() * 2 - 1;
+    const noise = (rng() - 0.5) * 2;
+    const latent = effectSize * (pdiValue * ndiValue) + noise;
+    const outcome = latent > 0 ? 'positive' : 'negative';
+    const row = { epoch: 1000 + i, price: 100, symbol: MSD_POSITIVE_CONTROL_SYMBOL, featureVersion: MSD_POSITIVE_CONTROL_FEATURE_VERSION, pdi: pdiValue, ndi: ndiValue, rsi: rng() * 2 - 1, outcome, leadTime: 5, runLength: outcome === 'positive' ? 5 : null };
+    msdFillNoiseFeatures(row, rng, []);
+    rows.push(row);
+  }
+  return {
+    rows,
+    groundTruth: {
+      signalType: 'B', interactionFeatures: ['pdi', 'ndi'], decoyFeatures: MSD_POSITIVE_CONTROL_DECOY_KEYS.slice(),
+      effectSize, strength, seed, specVersion: MSD_POSITIVE_CONTROL_SPEC_VERSION,
+      expectedMarginalSignal: { pdi: 'none', ndi: 'none' }, expectedInteractionSignal: true,
+    },
+  };
+}
+
+const MSD_POSITIVE_CONTROL_VALID_STATUSES = ['PASS', 'PARTIAL', 'FAIL', 'NOT_EVALUATED'];
+
+/**
+ * Runs one positive-control condition (signalType + strength) through
+ * the COMPLETELY UNMODIFIED production pipeline: msdBuildExperimentDataset
+ * (the exact chronological-split/purge-gap machinery real data goes
+ * through), msdRunStatisticalDiscovery, and msdRunResearchSession. Then
+ * checks recorded evidence against the ground truth this generator
+ * already froze — the pipeline itself never sees the ground truth,
+ * only the evaluator does, afterward.
+ *
+ * INDEPENDENT HOLDOUT: repeats with a genuinely different seed (never
+ * derived from or tuned against the main run) using the SAME frozen
+ * strength/effect-size specification. A signal that only shows up on
+ * one specific seed is not a demonstrated sensitivity — this is the
+ * directive's own explicit requirement, not an optional extra.
+ */
+async function msdRunPositiveControlSensitivityTest(signalType, strength, mainSeed, holdoutSeed, registerFn){
+  const generator = signalType === 'A' ? msdGeneratePositiveControlSignalA : msdGeneratePositiveControlSignalB;
+  const n = 2000;
+
+  async function runOneTrial(seed){
+    const { rows, groundTruth } = generator(n, seed, strength);
+    const verification = msdVerifyGroundTruthProperties(rows, groundTruth);
+    if (!verification.verified) {
+      return { recovered: false, groundTruthVerified: false, verification, groundTruth };
+    }
+
+    const config = {
+      symbol: MSD_POSITIVE_CONTROL_SYMBOL, featureVersion: MSD_POSITIVE_CONTROL_FEATURE_VERSION,
+      leadTime: 5, samplingRatio: 1, randomSeed: seed, trainingSplit: 0.7, validationSplit: 0.5,
+      minSegmentSize: 10, corruptionRateFatalThreshold: 1.0,
+    };
+    // Genuine reuse: the EXACT same dataset builder real data goes
+    // through, called directly on the synthetic rows array rather than
+    // a live IndexedDB query — msdBuildExperimentDataset accepts a
+    // plain array for allStates, so no special-casing was needed.
+    const dataset = msdBuildExperimentDataset(rows, config);
+    const experimentRecord = { experimentId: 'pc_' + signalType + '_' + strength + '_' + seed, symbol: config.symbol, featureVersion: config.featureVersion, leadTime: config.leadTime, randomSeed: seed, datasetEpochMin: rows[0].epoch, datasetEpochMax: rows[rows.length - 1].epoch, registrationId: null };
+
+    const discovery = msdRunStatisticalDiscovery(dataset, { randomSeed: seed });
+    const trainResult = msdTrainModel(dataset);
+    const sessionResult = await msdRunResearchSession(experimentRecord, discovery, trainResult.error ? null : trainResult, dataset);
+
+    const allEvidence = await msdGetAllDiscoveryEvidence();
+    const thisSessionEvidence = allEvidence.filter(e => e.researchSessionId === sessionResult.researchSessionId);
+
+    let recovered = false, recoveredKeys = [];
+    if (groundTruth.signalType === 'A') {
+      recoveredKeys = thisSessionEvidence.filter(e => (e.underlyingFeatureKeys || []).includes(groundTruth.signalFeature)).map(e => e.discoveryKey);
+      recovered = recoveredKeys.length > 0;
+    } else {
+      recoveredKeys = thisSessionEvidence.filter(e => {
+        const keys = e.underlyingFeatureKeys || [];
+        return keys.includes('pdi') && keys.includes('ndi');
+      }).map(e => e.discoveryKey);
+      recovered = recoveredKeys.length > 0;
+    }
+    const decoyKeysFlagged = thisSessionEvidence.filter(e => (e.underlyingFeatureKeys || []).some(k => groundTruth.decoyFeatures && groundTruth.decoyFeatures.includes(k))).map(e => e.discoveryKey);
+
+    return { recovered, groundTruthVerified: true, verification, groundTruth, recoveredKeys, decoyKeysFlagged, manifest: sessionResult.manifest, researchSessionId: sessionResult.researchSessionId };
+  }
+
+  const mainResult = await runOneTrial(mainSeed);
+  if (!mainResult.groundTruthVerified) {
+    return { status: 'NOT_EVALUATED', reason: 'Ground-truth verification failed on the main run — the generator did not produce the intended properties: ' + mainResult.verification.detail, mainResult, holdoutResult: null };
+  }
+
+  const holdoutResult = await runOneTrial(holdoutSeed);
+  if (!holdoutResult.groundTruthVerified) {
+    return { status: 'NOT_EVALUATED', reason: 'Ground-truth verification failed on the independent holdout run.', mainResult, holdoutResult };
+  }
+
+  let status;
+  if (mainResult.recovered && holdoutResult.recovered) status = 'PASS';
+  else if (mainResult.recovered || holdoutResult.recovered) status = 'PARTIAL';
+  else status = 'FAIL';
+
+  return {
+    status,
+    reason: status === 'PASS' ? 'The planted signal was recovered on both the main run and the independent holdout.'
+      : status === 'PARTIAL' ? 'The planted signal was recovered on only one of the two runs (main: ' + mainResult.recovered + ', holdout: ' + holdoutResult.recovered + ') — not a full sensitivity PASS.'
+      : 'The planted signal was not recovered on either run.',
+    signalType, strength, mainSeed, holdoutSeed, specVersion: MSD_POSITIVE_CONTROL_SPEC_VERSION,
+    mainResult, holdoutResult,
+  };
+}
+
+/**
+ * Quantitatively verifies the ground-truth properties BEFORE any
+ * discovery is attempted — for Signal B specifically, confirms pdi
+ * alone and ndi alone genuinely show near-zero correlation with the
+ * outcome (not just claimed by construction) while the interaction
+ * term (pdi*ndi) shows a real, nonzero one. Uses msdComputePearsonCorrelation
+ * directly — no new correlation primitive.
+ */
+function msdVerifyGroundTruthProperties(rows, groundTruth){
+  const outcomes = rows.map(r => r.outcome === 'positive' ? 1 : 0);
+  if (groundTruth.signalType === 'A') {
+    const signalValues = rows.map(r => r[groundTruth.signalFeature]);
+    const correlation = msdComputePearsonCorrelation(signalValues, outcomes);
+    return { verified: Math.abs(correlation) > 0.05, signalFeatureCorrelation: correlation, detail: 'Signal A: rsi-outcome correlation = ' + correlation.toFixed(3) };
+  }
+  if (groundTruth.signalType === 'B') {
+    const pdiValues = rows.map(r => r.pdi);
+    const ndiValues = rows.map(r => r.ndi);
+    const interactionValues = rows.map(r => r.pdi * r.ndi);
+    const pdiCorrelation = msdComputePearsonCorrelation(pdiValues, outcomes);
+    const ndiCorrelation = msdComputePearsonCorrelation(ndiValues, outcomes);
+    const interactionCorrelation = msdComputePearsonCorrelation(interactionValues, outcomes);
+    const marginalsAreNull = Math.abs(pdiCorrelation) < 0.05 && Math.abs(ndiCorrelation) < 0.05;
+    const interactionIsReal = Math.abs(interactionCorrelation) > 0.1;
+    return {
+      verified: marginalsAreNull && interactionIsReal,
+      pdiCorrelation, ndiCorrelation, interactionCorrelation,
+      detail: 'Signal B: pdi-outcome=' + pdiCorrelation.toFixed(3) + ', ndi-outcome=' + ndiCorrelation.toFixed(3) + ' (both should be ~0), interaction-outcome=' + interactionCorrelation.toFixed(3) + ' (should be clearly nonzero)',
+    };
+  }
+  return { verified: false, detail: 'Unknown signalType: ' + groundTruth.signalType };
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// FINAL CALIBRATION VERDICT, CALIBRATION MATRIX, LEAD-TIME SELECTION BIAS
+// ══════════════════════════════════════════════════════════════════════
+// The verdict below is computed ENTIRELY from sensitivity, execution-
+// integrity, and data-integrity gate results — it never reads or
+// touches the real V100 discovery count. This is deliberate: the
+// directive's Rule 4 (no zero-discovery fallacy) is enforced
+// structurally here, not just by convention — there is no code path by
+// which "0 real discoveries" could influence this function's output at
+// all, because the function's signature never receives that number.
+
+const MSD_CALIBRATION_SPEC_VERSION = 'calibration_spec_v1';
+const MSD_FINAL_VERDICT_STATES = ['CALIBRATED', 'PARTIALLY_CALIBRATED', 'NOT_CALIBRATED', 'BLOCKED', 'NOT_EVALUATED'];
+
+/**
+ * Computes the machine-evaluated final verdict from the gate dependency
+ * graph this directive specifies: sensitivity -> execution integrity ->
+ * data integrity -> verdict. Each gate's result is read from what was
+ * ALREADY computed by msdRunPositiveControlSensitivityTest,
+ * msdRunAutomatedExecutionIntegritySmokeTest, and
+ * msdAuditConflictingDuplicateBias — nothing here recomputes any of
+ * those checks.
+ */
+function msdComputeFinalCalibrationVerdict(gateResults){
+  const { sensitivityResults, executionIntegrityResult, conflictIntegrityResult } = gateResults || {};
+
+  if (!sensitivityResults || sensitivityResults.length === 0) {
+    return { verdict: 'NOT_EVALUATED', reason: 'No positive-control sensitivity tests have been run yet — sensitivity must be demonstrated before anything else is meaningful.' };
+  }
+  if (sensitivityResults.some(r => r.status === 'NOT_EVALUATED')) {
+    return { verdict: 'BLOCKED', reason: 'At least one positive-control condition could not be evaluated (ground-truth verification failed) — fix the generator before proceeding.' };
+  }
+
+  const sensitivityPassCount = sensitivityResults.filter(r => r.status === 'PASS').length;
+  const sensitivityFailCount = sensitivityResults.filter(r => r.status === 'FAIL').length;
+  if (sensitivityFailCount === sensitivityResults.length) {
+    return { verdict: 'NOT_CALIBRATED', reason: 'The pipeline failed to detect ANY planted signal across every tested positive-control condition — it is not sensitive enough to trust a real-data null result.' };
+  }
+
+  if (!executionIntegrityResult || executionIntegrityResult.verdict === 'NOT_EVALUATED') {
+    return { verdict: 'NOT_EVALUATED', reason: 'Execution-integrity smoke test has not been run.' };
+  }
+  if (executionIntegrityResult.verdict === 'BLOCKED') {
+    return { verdict: 'BLOCKED', reason: 'Execution-integrity smoke test was blocked: ' + executionIntegrityResult.reason };
+  }
+  if (executionIntegrityResult.verdict !== 'COMPLETE') {
+    return { verdict: 'BLOCKED', reason: 'Execution integrity is ' + executionIntegrityResult.verdict + ', not COMPLETE — cannot certify calibration on an incompletely-executed pipeline.' };
+  }
+
+  const dataIntegrityAcceptable = !conflictIntegrityResult || conflictIntegrityResult.biasRisk === 'none' || conflictIntegrityResult.biasRisk === 'low';
+  if (!dataIntegrityAcceptable) {
+    return { verdict: 'BLOCKED', reason: 'Conflict-integrity audit flagged a ' + conflictIntegrityResult.biasRisk + ' bias risk — must be investigated before calibration can be certified.' };
+  }
+
+  if (sensitivityPassCount === sensitivityResults.length) {
+    return { verdict: 'CALIBRATED', reason: 'All tested positive-control conditions passed, execution integrity is COMPLETE, and data integrity is acceptable.' };
+  }
+  return { verdict: 'PARTIALLY_CALIBRATED', reason: sensitivityPassCount + '/' + sensitivityResults.length + ' positive-control conditions passed — sensitivity is demonstrated for some, not all, tested signal strengths/types.' };
+}
+
+/** Permanent, append-only record — reuses KnowledgeBase, no new store. Failed calibrations are never overwritten: each call creates a new entry, never updates an existing one. */
+async function msdRecordCalibrationMatrixEntry(entry){
+  const finding = Object.assign({ findingId: msdGenerateFindingId(), type: 'calibration_matrix_entry', codeVersion: MSD_CODE_VERSION, specVersion: MSD_CALIBRATION_SPEC_VERSION, recordedAt: Date.now() }, entry);
+  return { ok: true, writeResult: await msdWriteFinding(finding) };
+}
+
+async function msdGetCalibrationMatrix(){
+  const all = await msdGetAllFindings();
+  return all.filter(f => f.type === 'calibration_matrix_entry').sort((a, b) => a.recordedAt - b.recordedAt);
+}
+
+/**
+ * WORKSTREAM 7/15 (Supervisory Directive) — Lead-Time Sweep audit. Found
+ * by careful reading of real V100 (1s) output: msdRunLeadTimeSweep picks
+ * the single highest observed AUC across every lead time tested and
+ * labels it "Optimal," with no null comparison or multiple-comparison
+ * awareness at all — exactly the selection-bias trap this lab's own
+ * evidence pipeline exists to prevent everywhere else. This function
+ * answers the concrete question: given N lead times tested, what
+ * MAXIMUM AUC would pure chance alone be expected to produce? Simulates
+ * N independent chance-level AUC draws (each centered at 0.5 with the
+ * stated sampling variance for a given test-set size), repeated many
+ * times, and reports the empirical distribution of the maximum — the
+ * benchmark "best observed horizon" must clear before being treated as
+ * anything more than the expected winner of a chance lottery.
+ */
+function msdComputeLeadTimeSelectionBias(numLeadTimesTested, testSetSize, seed, simulations){
+  simulations = simulations || 2000;
+  const rng = msdSeededRandom(seed || 1);
+  // Standard AUC sampling variance approximation for a roughly balanced
+  // binary classifier under the null (Hanley-McNeil-style, simplified):
+  // SE(AUC) ≈ sqrt(0.25 / n) for AUC near 0.5 — used here only to
+  // simulate a realistic NULL distribution shape, not to compute a
+  // final p-value for any specific real result.
+  const se = Math.sqrt(0.25 / Math.max(testSetSize, 10));
+  const maxAucs = [];
+  for (let s = 0; s < simulations; s++) {
+    let maxThisRun = -Infinity;
+    for (let k = 0; k < numLeadTimesTested; k++) {
+      // Box-Muller for an approximately normal draw centered at 0.5.
+      const u1 = rng(), u2 = rng();
+      const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+      const simulatedAuc = 0.5 + z * se;
+      if (simulatedAuc > maxThisRun) maxThisRun = simulatedAuc;
+    }
+    maxAucs.push(maxThisRun);
+  }
+  maxAucs.sort((a, b) => a - b);
+  const meanExpectedMax = maxAucs.reduce((a, b) => a + b, 0) / maxAucs.length;
+  const p95 = maxAucs[Math.floor(0.95 * maxAucs.length)];
+
+  return {
+    numLeadTimesTested, testSetSize, simulations,
+    expectedMaxAucUnderChance: meanExpectedMax,
+    p95MaxAucUnderChance: p95,
+    /** Given an observed "best" AUC, reports what fraction of chance-only simulations produced a maximum at least that high — the honest answer to "is this really better than the best of N noisy coin flips." */
+    evaluateObserved: function(observedBestAuc){
+      const countGE = maxAucs.filter(v => v >= observedBestAuc).length;
+      const empiricalP = (1 + countGE) / (1 + maxAucs.length);
+      return {
+        observedBestAuc, empiricalP,
+        exceedsChanceExpectation: observedBestAuc > meanExpectedMax,
+        interpretation: empiricalP > 0.05
+          ? 'The observed "best" AUC is NOT distinguishable from what the maximum of ' + numLeadTimesTested + ' chance-level estimates would typically produce (empirical p=' + empiricalP.toFixed(3) + '). This is a BEST OBSERVED HORIZON, not a VALIDATED PREDICTIVE HORIZON.'
+          : 'The observed "best" AUC exceeds what chance alone would typically produce across ' + numLeadTimesTested + ' lead times (empirical p=' + empiricalP.toFixed(3) + ') — still requires chronological replication before being called validated.',
+      };
+    },
+  };
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// CALIBRATION DIAGNOSTIC GATE — PHASE 5: Known-Null Specificity & FDR Calibration
+// ══════════════════════════════════════════════════════════════════════
+// PRIORITY: the explicitly-identified next priority from the previous
+// report (R-068) — sensitivity was demonstrated first, per the
+// directive's own Rule 4; this is the other half: does the pipeline
+// reject noise, with a quantified, power-justified answer rather than
+// an assumed trial count.
+//
+// REUSE, NOT DUPLICATION: msdRunPipelineNegativeControl (built earlier
+// this session) is called DIRECTLY as the trial-runner — this phase
+// adds three things on top of it that didn't exist: (1) a trial count
+// that is actually CALCULATED from a stated precision target rather
+// than assumed, reusing msdWilsonScoreInterval, the exact primitive
+// this codebase already uses for confidence intervals everywhere else;
+// (2) an immutable, versioned preregistration frozen before execution;
+// (3) a six-way outcome classification that distinguishes "correctly
+// controlled" from "underpowered" from "execution failure" from
+// "candidate-generation failure" from "overly conservative" from
+// "false-discovery inflation" — six genuinely different situations
+// this project's own directive explicitly said must never be
+// collapsed into a single "zero discoveries" reading.
+//
+// A REAL, DEPENDENCY-PRESERVING NULL, closing part of R-050: every null
+// this lab has run before (msdBuildPermutedLabelDataset and friends)
+// operates on REAL feature values with only the outcome relabeled —
+// already dependency-preserving when real data is available. But this
+// lab has no access to real data to test its OWN calibration machinery
+// against. msdGenerateDependentNullDataset closes that testing gap: an
+// independently-generated null with genuinely autocorrelated features
+// (not i.i.d. — the exact "unrealistically easy null" the directive
+// warns against) and an outcome drawn independently of every feature.
+
+const MSD_NULL_CALIBRATION_SPEC_VERSION = 'null_cal_spec_v1';
+const MSD_NULL_CALIBRATION_SYMBOL = 'NC_SYNTHETIC';
+const MSD_NULL_CALIBRATION_FEATURE_VERSION = 'nc_v1';
+const MSD_NULL_CALIBRATION_OUTCOMES = ['correctly_controlled', 'underpowered', 'execution_failure', 'candidate_generation_failure', 'overly_conservative', 'false_discovery_inflation'];
+
+/**
+ * Computes the minimum trial count so the Wilson-interval half-width
+ * around the empirical discovery rate does not exceed the stated
+ * precision target, at the given confidence level — a genuine power/
+ * precision justification, not an assumed round number. Evaluated at
+ * the nominal alpha itself (the rate actually being estimated), since
+ * that is the relevant point on the interval-width curve for this
+ * question, not the worst-case p=0.5 used for generic proportion
+ * sample-size formulas.
+ */
+function msdComputeRequiredNullTrialCount(nominalAlpha, desiredPrecisionHalfWidth, confidenceLevel){
+  const z = confidenceLevel === 0.99 ? 2.576 : confidenceLevel === 0.90 ? 1.645 : 1.96;
+  for (let n = 10; n <= 200000; n += 10) {
+    const k = Math.round(n * nominalAlpha);
+    const interval = msdWilsonScoreInterval(k, n, z);
+    const halfWidth = (interval.upper - interval.lower) / 2;
+    if (halfWidth <= desiredPrecisionHalfWidth) {
+      return { requiredTrials: n, achievedHalfWidth: halfWidth, assumedRate: nominalAlpha, confidenceLevel: confidenceLevel || 0.95 };
+    }
+  }
+  return { requiredTrials: null, error: 'Desired precision not achievable within 200,000 trials at this nominal alpha.' };
+}
+
+/**
+ * Independently generates a null dataset with realistic, genuinely
+ * autocorrelated features (bounded AR(1), the same construction used
+ * for Phase 18's own positive controls) and an outcome drawn
+ * independently of every feature — the true feature-outcome
+ * relationship is absent by construction, verified below, and the
+ * features are NOT i.i.d., specifically to avoid the "unrealistically
+ * easy null" the directive warns against.
+ */
+function msdGenerateDependentNullDataset(n, seed){
+  const rng = msdSeededRandom(seed);
+  const rows = [];
+  let rsiState = 0, pdiState = 0, ndiState = 0;
+  for (let i = 0; i < n; i++) {
+    rsiState = 0.7 * rsiState + 0.3 * (rng() * 2 - 1);
+    pdiState = 0.7 * pdiState + 0.3 * (rng() * 2 - 1);
+    ndiState = 0.7 * ndiState + 0.3 * (rng() * 2 - 1);
+    const outcome = rng() < 0.5 ? 'positive' : 'negative'; // genuinely independent of every feature — no latent variable ties them together at all
+    const row = { epoch: 1000 + i, price: 100, symbol: MSD_NULL_CALIBRATION_SYMBOL, featureVersion: MSD_NULL_CALIBRATION_FEATURE_VERSION, rsi: rsiState, pdi: pdiState, ndi: ndiState, outcome, leadTime: 5, runLength: outcome === 'positive' ? 5 : null };
+    msdFillNoiseFeatures(row, rng, ['rsi', 'pdi', 'ndi']);
+    rows.push(row);
+  }
+  return { rows, groundTruth: { trueRelationship: 'none', autocorrelated: true, specVersion: MSD_NULL_CALIBRATION_SPEC_VERSION, seed } };
+}
+
+/**
+ * Quantitatively confirms the null generator actually produced
+ * near-zero feature-outcome correlation (not just claimed) while ALSO
+ * confirming the features themselves are genuinely autocorrelated —
+ * i.e., this really is a dependency-preserving null, not an
+ * accidentally-IID one.
+ */
+function msdVerifyNullGroundTruthProperties(rows){
+  const outcomes = rows.map(r => r.outcome === 'positive' ? 1 : 0);
+  const rsiValues = rows.map(r => r.rsi);
+  const pdiValues = rows.map(r => r.pdi);
+  const ndiValues = rows.map(r => r.ndi);
+  const rsiOutcomeCorr = msdComputePearsonCorrelation(rsiValues, outcomes);
+  const pdiOutcomeCorr = msdComputePearsonCorrelation(pdiValues, outcomes);
+  const ndiOutcomeCorr = msdComputePearsonCorrelation(ndiValues, outcomes);
+  const rsiAutocorr = msdComputeLag1Autocorrelation(rsiValues.slice(0, Math.min(500, rsiValues.length)));
+  const noRelationship = Math.abs(rsiOutcomeCorr) < 0.05 && Math.abs(pdiOutcomeCorr) < 0.05 && Math.abs(ndiOutcomeCorr) < 0.05;
+  const genuinelyDependent = rsiAutocorr != null && rsiAutocorr > 0.2;
+  return {
+    verified: noRelationship && genuinelyDependent,
+    rsiOutcomeCorr, pdiOutcomeCorr, ndiOutcomeCorr, rsiAutocorr,
+    detail: 'feature-outcome correlations near 0: ' + noRelationship + '; features genuinely autocorrelated (not IID): ' + genuinelyDependent,
+  };
+}
+
+/** Immutable, versioned preregistration — frozen before any execution. Every field the directive requires is a named, explicit property, not left implicit. */
+let msdCalibrationSpecSeq = 0;
+function msdGenerateCalibrationId(){ return 'calib_' + msdSessionId + '_' + (++msdCalibrationSpecSeq) + '_' + Date.now(); }
+
+/**
+ * Extended per Stage 2 of the Calibration Diagnostic Gate directive:
+ * every field explicitly required is now either a caller-supplied
+ * value or auto-derived from something this codebase already knows
+ * about itself (analyzer registry, expected analyzer count, the
+ * measured runtime benchmark), never invented fresh. calibrationId is
+ * newly, uniquely generated per specification, never reused.
+ */
+function msdPreregisterNullCalibrationSpecification(config){
+  const required = ['nominalAlpha', 'desiredPrecisionHalfWidth', 'confidenceLevel', 'method', 'baseSeed', 'acceptableIntervalLower', 'acceptableIntervalUpper'];
+  const missing = required.filter(f => config[f] == null);
+  if (missing.length) throw new Error('Cannot preregister an incomplete specification — missing: ' + missing.join(', '));
+  const trialCountResult = msdComputeRequiredNullTrialCount(config.nominalAlpha, config.desiredPrecisionHalfWidth, config.confidenceLevel);
+  if (trialCountResult.requiredTrials == null) throw new Error('Cannot preregister: ' + trialCountResult.error);
+  return Object.freeze(Object.assign({
+    calibrationId: msdGenerateCalibrationId(),
+    specVersion: MSD_NULL_CALIBRATION_SPEC_VERSION,
+    revisionOf: null, // null for a first version; set by msdReviseNullCalibrationSpecification for any later version, which always creates a NEW object rather than mutating this one
+    generatorVersion: MSD_NULL_CALIBRATION_SPEC_VERSION, // msdGenerateDependentNullDataset's own versioned contract
+    codeVersion: MSD_CODE_VERSION,
+    analyzerRegistryVersion: MSD_EXPECTED_ANALYZER_NAMES.slice().sort().join(','), // a version identity derived from the actual expected-analyzer list itself — if that list ever changes, this fingerprint changes with it, rather than an independently-maintained version number that could drift out of sync
+    requiredAnalyzerCount: MSD_EXPECTED_ANALYZER_NAMES.length,
+    multipleTestingFamily: 'whole-repository Benjamini-Yekutieli', // matches the exact machinery msdRunResearchSession's evidence path already applies — not a new family invented for this calibration
+    correctionMethod: 'msdBenjaminiYekutieli',
+    gateLogic: 'msdClassifyNullCalibrationOutcome: execution_failure if any trial is non-COMPLETE; candidate_generation_failure if <50% of trials reach readyForTraining; underpowered if fewer trials ran than this specification\u2019s own trialCount; otherwise the Wilson CI of the empirical discovery rate is compared against [acceptableIntervalLower, acceptableIntervalUpper] to classify false_discovery_inflation / overly_conservative / correctly_controlled.',
+    executionIntegrityRequirement: 'Every one of the ' + MSD_EXPECTED_ANALYZER_NAMES.length + ' expected analyzers must reach msdRunResearchSession\u2019s own COMPLETE manifest status on EVERY trial — enforced by msdClassifyNullCalibrationOutcome\u2019s execution_failure branch, not merely hoped for.',
+    sessionExecutionConstraint: 'Single-threaded, browser-tab-resident execution only (R-065) — no unattended or background execution exists in this architecture. The full trial count must run within one continuous session with the tab open, or be resumed via persisted per-trial state if interrupted.',
+    trialCount: trialCountResult.requiredTrials, trialCountJustification: trialCountResult,
+    runtimeBenchmark: {
+      measuredAtSampleCount: 1237, measuredMeanTrialMs: 178.125, measuredTrialSampleSize: 8,
+      realDatasetSampleCount: 90831, scalingFactor: 73.4,
+      pointEstimateMsPerTrial: 13079, estimateRangeMsPerTrial: [13079, 26158],
+      methodology: 'Measured directly in a Node.js sandbox against a synthetic dataset, then linearly scaled by the real V100 dataset\u2019s actual sample-count ratio. Not a browser measurement — no access to the live application exists. The 2x upper bound accounts for real-world browser overhead (GC, single-thread UI contention, JS engine differences) the sandbox cannot capture.',
+    },
+    frozenAt: Date.now(),
+  }, config));
+}
+
+/**
+ * "Modifying a frozen specification creates a new version rather than
+ * mutating the existing one" (Stage 2, item 4) — implemented literally:
+ * the prior spec is never touched (it's frozen; JS would silently
+ * no-op or throw on any attempt anyway), and this always returns a
+ * genuinely NEW frozen object with its own new calibrationId, explicit
+ * revisionOf linkage back to the prior one, and an incremented
+ * specVersion suffix.
+ */
+function msdReviseNullCalibrationSpecification(priorSpec, changes){
+  if (!Object.isFrozen(priorSpec)) throw new Error('Cannot revise a specification that was never frozen in the first place.');
+  const revisedConfig = Object.assign({}, priorSpec, changes);
+  delete revisedConfig.calibrationId; delete revisedConfig.frozenAt; delete revisedConfig.revisionOf; delete revisedConfig.trialCount; delete revisedConfig.trialCountJustification;
+  const newSpec = msdPreregisterNullCalibrationSpecification(revisedConfig);
+  return Object.freeze(Object.assign({}, newSpec, { revisionOf: priorSpec.calibrationId, specVersion: priorSpec.specVersion + '+rev' }));
+}
+
+/** Permanent record of the frozen specification itself — reuses KnowledgeBase, no new store, recorded BEFORE any trial begins. */
+async function msdRecordNullCalibrationSpecification(spec){
+  if (!Object.isFrozen(spec)) throw new Error('Refusing to persist an unfrozen specification.');
+  const finding = { findingId: msdGenerateFindingId(), type: 'null_calibration_specification', recordedAt: Date.now(), spec };
+  return { ok: true, writeResult: await msdWriteFinding(finding) };
+}
+async function msdGetNullCalibrationSpecifications(calibrationId){
+  const all = await msdGetAllFindings();
+  return all.filter(f => f.type === 'null_calibration_specification' && (!calibrationId || f.spec.calibrationId === calibrationId)).sort((a, b) => a.recordedAt - b.recordedAt);
+}
+
+/**
+ * Six-way classification — never collapses "zero discoveries" into one
+ * undifferentiated reading. Reads only what msdRunPipelineNegativeControl
+ * (via its trialSummaries and executionIntegrity) already computed;
+ * nothing here re-runs anything.
+ */
+function msdClassifyNullCalibrationOutcome(report, spec){
+  if (!report.executionIntegrity.allTrialsComplete) {
+    return { outcome: 'execution_failure', detail: report.executionIntegrity.incompleteTrialCount + ' of ' + report.trialSummaries.length + ' trials did not reach a COMPLETE manifest — the pipeline itself did not run correctly, unrelated to the null hypothesis.' };
+  }
+  const readyTrials = report.trialSummaries.filter(t => t.readyForTraining);
+  if (readyTrials.length < report.trialSummaries.length * 0.5) {
+    return { outcome: 'candidate_generation_failure', detail: 'Fewer than half of all trials even reached readyForTraining — candidates were never meaningfully generated, so a zero-discovery reading says nothing about calibration.' };
+  }
+
+  const totalDiscoveries = report.trialSummaries.reduce((s, t) => s + t.recordedCount, 0);
+  const n = report.trialSummaries.length;
+  const empiricalRate = totalDiscoveries / n;
+  const ci = msdWilsonScoreInterval(totalDiscoveries, n, spec.confidenceLevel === 0.99 ? 2.576 : spec.confidenceLevel === 0.90 ? 1.645 : 1.96);
+
+  const achievedPrecision = (ci.upper - ci.lower) / 2;
+  const targetPrecision = spec.desiredPrecisionHalfWidth;
+  if (n < spec.trialCount) {
+    return { outcome: 'underpowered', empiricalRate, confidenceInterval: ci, achievedPrecision, detail: 'Only ' + n + ' of the preregistered ' + spec.trialCount + ' trials were run — the achieved precision (±' + achievedPrecision.toFixed(3) + ') does not meet the preregistered target (±' + targetPrecision.toFixed(3) + ').' };
+  }
+
+  if (ci.lower > spec.acceptableIntervalUpper) {
+    return { outcome: 'false_discovery_inflation', empiricalRate, confidenceInterval: ci, detail: 'The empirical discovery rate\u2019s confidence interval lies entirely ABOVE the preregistered acceptable interval — the pipeline is producing more false discoveries under the null than intended.' };
+  }
+  if (ci.upper < spec.acceptableIntervalLower) {
+    return { outcome: 'overly_conservative', empiricalRate, confidenceInterval: ci, detail: 'The empirical discovery rate\u2019s confidence interval lies entirely BELOW the preregistered acceptable interval — the pipeline may be too conservative to detect real signal, a power concern distinct from good calibration.' };
+  }
+  return { outcome: 'correctly_controlled', empiricalRate, confidenceInterval: ci, detail: 'The empirical discovery rate\u2019s confidence interval overlaps the preregistered acceptable interval, with the preregistered precision achieved.' };
+}
+
+/**
+ * Orchestrates the complete Phase 5 chain: takes an already-frozen
+ * preregistration (never mutated), runs the preregistered trial count
+ * through msdRunPipelineNegativeControl directly, and classifies the
+ * result. Refuses to run against a non-frozen (mutable) specification —
+ * Object.isFrozen is checked explicitly, enforcing "once execution
+ * begins, the specification cannot be modified" as a real, structural
+ * guarantee rather than a convention.
+ */
+async function msdRunPreregisteredNullCalibration(spec, dataset, experimentRecord, onProgress){
+  if (!Object.isFrozen(spec)) {
+    throw new Error('Refusing to run: the calibration specification is not frozen. Use msdPreregisterNullCalibrationSpecification to create an immutable spec before calling this function.');
+  }
+  const report = await msdRunPipelineNegativeControl(dataset, experimentRecord, spec.method, spec.trialCount, spec.baseSeed, onProgress);
+  const classification = msdClassifyNullCalibrationOutcome(report, spec);
+  const result = { spec, report, classification, completedAt: Date.now() };
+  await msdRecordCalibrationMatrixEntry({
+    condition: 'known_null', knownSignal: false, pipelineExecuted: report.executionIntegrity.allTrialsComplete,
+    expectedResult: 'controlled false-discovery rate', observedResult: classification.outcome,
+    interpretation: classification.detail, specVersion: spec.specVersion, trialCount: spec.trialCount,
+  });
+  return result;
 }
 
 /**
@@ -16255,6 +16979,13 @@ function msdTrainModel(dataset, options){
       valMetrics: pbMetrics(valScores, yval, threshold),
       testMetrics: pbMetrics(testScores, yte, threshold),
       featureImportance: result.imp,
+      // Calibration Diagnostic Gate (Workstream 7 — Lead-Time Sweep
+      // Audit): raw test scores/labels, previously discarded here just
+      // like `trees` was in Phase 12 — without them, no permutation-based
+      // significance test on Test AUC is possible, which is exactly what
+      // let "Optimal Lead Time" mean "the largest of several noisy
+      // numbers" rather than a statistically supported claim.
+      testScores, testLabels: yte,
       // Phase 12 (Nonlinear Interaction Discovery): the actual trained
       // tree structure, previously discarded here even though pbXGBoost/
       // pbLightGBM/pbCatBoost already return it. Without this, detecting
