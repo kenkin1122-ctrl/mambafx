@@ -7713,6 +7713,1070 @@ function msdBenjaminiHochberg(pValues, alpha){
   return adjusted.map((adjP, i) => ({ pValue: pValues[i], adjustedPValue: adjP, significant: adjP <= alpha }));
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// PART 4 — GOVERNANCE FOUNDATION (Phase 2E schema, search-space freezing,
+// Discovery Ledger, hypothesis lifecycle, Level 5 gate, search-space-wide
+// multiple-testing correction). Nothing here executes autonomous discovery,
+// generates a candidate, or trains a model. Pure infrastructure.
+// ══════════════════════════════════════════════════════════════════════
+
+// ── STEP 2: Uncertain-category schema (derived, never stored on raw MarketState) ──
+const MSD_UNCERTAIN_CATEGORY_SCHEMA_VERSION = 'uncertain_schema_v1';
+// event_outcome/label_confidence/conflict_status are DERIVED at dataset-
+// construction time from existing, untouched raw records — never written
+// back onto the permanent MarketState store. The existing `outcome` field
+// is RETAINED, unchanged: it is each individual record's own claim.
+// `event_outcome` is the resolved, epoch-level research label. These are
+// not competing sources of truth — outcome is the input, event_outcome
+// is the output of msdDeriveEpochLabel.
+const MSD_VALID_CONFLICT_STATUSES = ['none', 'same_session_replication', 'cross_session_replication', 'same_session_disagreement', 'cross_session_disagreement'];
+
+function msdParseSessionIdFromSnapshotId(snapshotId){
+  if (!snapshotId || typeof snapshotId !== 'string') return null;
+  const parts = snapshotId.split('_');
+  return parts.length >= 5 ? parts[1] : null;
+}
+
+/**
+ * Pure, read-only. Takes every raw record sharing ONE epoch (from
+ * msdGroupSnapshotsByEpoch) and derives the three Phase 2E fields.
+ * NEVER assigns event_outcome by majority/tiebreak — that is a
+ * separately-authorized resolution policy (Phase 2D, Policy B), not this
+ * function's job. Disagreement always yields event_outcome: null.
+ */
+function msdDeriveEpochLabel(records){
+  if (!records || records.length === 0) return null;
+  if (records.length === 1) {
+    return { event_outcome: records[0].outcome, label_confidence: 'certain', conflict_status: 'none', schemaVersion: MSD_UNCERTAIN_CATEGORY_SCHEMA_VERSION };
+  }
+  const outcomes = new Set(records.map(r => r.outcome));
+  const sessions = new Set(records.map(r => msdParseSessionIdFromSnapshotId(r.snapshotId)).filter(Boolean));
+  const crossSession = sessions.size > 1;
+  if (outcomes.size === 1) {
+    return { event_outcome: records[0].outcome, label_confidence: 'certain', conflict_status: crossSession ? 'cross_session_replication' : 'same_session_replication', schemaVersion: MSD_UNCERTAIN_CATEGORY_SCHEMA_VERSION };
+  }
+  return { event_outcome: null, label_confidence: 'uncertain', conflict_status: crossSession ? 'cross_session_disagreement' : 'same_session_disagreement', schemaVersion: MSD_UNCERTAIN_CATEGORY_SCHEMA_VERSION };
+}
+
+/** Derives the epoch-level label for every epoch in a raw record set. Pure, read-only. */
+function msdBuildResearchLabelSet(allStates){
+  const { byEpoch } = msdGroupSnapshotsByEpoch(allStates);
+  const epochLabels = new Map();
+  Object.entries(byEpoch).forEach(([epochStr, records]) => {
+    epochLabels.set(Number(epochStr), msdDeriveEpochLabel(records));
+  });
+  return epochLabels;
+}
+
+// ── STEP 3: Silent-collapse safeguards ──
+/**
+ * Structural guard: any training entry point MUST call this and receive
+ * an explicit policy back before proceeding. Throws rather than allowing
+ * a caller to silently fall through with no uncertainty handling at all.
+ * This is what prevents Number(null)===0 / null-as-falsy collapse: nothing
+ * downstream ever sees a raw null outcome without this gate having first
+ * forced an explicit choice.
+ */
+function msdRequireExplicitUncertaintyHandling(options){
+  options = options || {};
+  if (options.filterCertainOnly === true) {
+    return { mode: 'filter_certain_only', resolutionPolicyId: null, logged: true };
+  }
+  if (options.resolutionPolicyId) {
+    return { mode: 'resolution_policy', resolutionPolicyId: options.resolutionPolicyId, logged: true };
+  }
+  throw new Error('Refusing to proceed: no explicit uncertainty-handling choice was supplied. Pass either { filterCertainOnly: true } or { resolutionPolicyId: <versioned policy id> } — silent default behavior is not permitted.');
+}
+
+/** Applies an explicit, already-validated uncertainty-handling choice to an epoch-label map. Returns a logged, auditable result — never silent. */
+function msdApplyUncertaintyHandling(epochLabelsMap, handlingChoice){
+  const included = new Map();
+  let certainCount = 0, uncertainCount = 0, uncertainIncludedCount = 0;
+  epochLabelsMap.forEach((label, epoch) => {
+    if (label.label_confidence === 'certain') { certainCount++; included.set(epoch, label.event_outcome); return; }
+    uncertainCount++;
+    if (handlingChoice.mode === 'resolution_policy') {
+      // A real resolution policy would resolve here; this governance-only
+      // implementation does not itself define one (Phase 2D left the
+      // choice deferred) -- it only proves the accounting is structurally
+      // logged, never silent, whichever policy is eventually plugged in.
+      uncertainIncludedCount++;
+    }
+  });
+  return {
+    includedEpochs: included, certainCount, uncertainCount, uncertainIncludedCount,
+    handlingMode: handlingChoice.mode, resolutionPolicyId: handlingChoice.resolutionPolicyId,
+    droppedUncertainCount: handlingChoice.mode === 'filter_certain_only' ? uncertainCount : 0,
+  };
+}
+
+// ── STEP 4: Frozen search-space governance (mirrors the exact null-calibration freeze pattern) ──
+const MSD_SEARCH_SPACE_SPEC_VERSION = 'search_space_spec_v1';
+// PART 6, PART A: search_space_spec_v2 closes the Part 5 completeness
+// audit's gap (items 5,7,8,15,19,20,21 of the 21-item checklist) by
+// requiring 7 additional fields. v1 is left completely unmodified —
+// every existing Part 4 test constructs a v1 space and continues to
+// work exactly as before. v2 is opt-in via options.schemaVersion,
+// exactly mirroring the pc_spec_v1 -> pc_spec_v2 pattern already
+// established elsewhere in this project (a backward-compatible
+// default, explicit opt-in for the new version, never a breaking change).
+const MSD_SEARCH_SPACE_SPEC_VERSION_V2 = 'search_space_spec_v2';
+const MSD_SEARCH_SPACE_V2_ADDITIONAL_REQUIRED_FIELDS = [
+  'individualFeatures',   // item 5 — actual feature names, not just family labels; required for real cardinality
+  'lagOperators',         // item 7 — separated out from the coarser temporalOperators
+  'rollingOperators',     // item 8 — separated out from the coarser temporalOperators
+  'maxCandidateCount',    // item 15 — the ceiling msdComputeSearchSpaceCardinality enforces
+  'exclusionRules',       // item 19 — array of {dimension, value} exclusions, reduces cardinality deterministically
+  'missingDataRules',     // item 20 — dataset-construction-time rule; does not affect cardinality itself
+  'uncertaintyLabelPolicy', // item 21 — must reference an explicit, named policy (Part 4, Step 3) — never a silent default
+];
+let msdSearchSpaceSeq = 0;
+function msdGenerateSearchSpaceId(){ return 'searchspace_' + msdSessionId + '_' + (++msdSearchSpaceSeq) + '_' + Date.now(); }
+
+function msdComputeSearchSpaceHash(spaceDefinition){
+  return msdSimpleHash(JSON.stringify(spaceDefinition));
+}
+
+/**
+ * Freezes a search space exactly like msdPreregisterNullCalibrationSpecification
+ * freezes a calibration spec. No parallel versioning mechanism invented.
+ * schemaVersion defaults to v1 (unchanged, backward compatible with every
+ * existing Part 4 test); pass { schemaVersion: MSD_SEARCH_SPACE_SPEC_VERSION_V2 }
+ * to require the 7 additional Part 6 fields.
+ */
+function msdFreezeSearchSpace(spaceDefinition, owner, options){
+  options = options || {};
+  const schemaVersion = options.schemaVersion || MSD_SEARCH_SPACE_SPEC_VERSION;
+  const required = ['symbols', 'observationWindows', 'leadTimes', 'featureFamilies', 'featureTransformations', 'interactionDepth', 'temporalOperators', 'aggregationOperators', 'candidateModelFamilies', 'statisticalTests', 'multipleTestingControls'];
+  if (schemaVersion === MSD_SEARCH_SPACE_SPEC_VERSION_V2) required.push(...MSD_SEARCH_SPACE_V2_ADDITIONAL_REQUIRED_FIELDS);
+  const missing = required.filter(f => spaceDefinition[f] == null);
+  if (missing.length) throw new Error('Cannot freeze an incomplete search space (schema ' + schemaVersion + ') — missing: ' + missing.join(', '));
+  const hash = msdComputeSearchSpaceHash(spaceDefinition);
+  return Object.freeze(Object.assign({
+    searchSpaceId: msdGenerateSearchSpaceId(),
+    searchSpaceVersion: schemaVersion,
+    searchSpaceHash: hash,
+    searchSpaceOwner: owner || null,
+    searchSpaceCreatedAt: Date.now(),
+    searchSpaceApprovalStatus: 'draft', // must be explicitly moved to 'approved' by a separate, human-authorized step -- never defaults to approved
+    revisionOf: null,
+    codeVersion: MSD_CODE_VERSION,
+  }, spaceDefinition));
+}
+
+function msdReviseSearchSpace(priorSpace, changes, owner){
+  if (!Object.isFrozen(priorSpace)) throw new Error('Cannot revise a search space that was never frozen.');
+  const revisedDefinition = Object.assign({}, priorSpace, changes);
+  ['searchSpaceId', 'searchSpaceHash', 'searchSpaceCreatedAt', 'searchSpaceApprovalStatus', 'revisionOf', 'codeVersion', 'searchSpaceVersion', 'searchSpaceOwner'].forEach(k => delete revisedDefinition[k]);
+  const newSpace = msdFreezeSearchSpace(revisedDefinition, owner, { schemaVersion: priorSpace.searchSpaceVersion });
+  return Object.freeze(Object.assign({}, newSpace, { revisionOf: priorSpace.searchSpaceId }));
+}
+
+// ── PART 6, PART B: EXACT SEARCH-SPACE CARDINALITY ──
+function msdBinomialCoefficient(n, k){
+  if (k < 0 || k > n) return 0;
+  if (k === 0 || k === n) return 1;
+  k = Math.min(k, n - k);
+  let result = 1;
+  for (let i = 0; i < k; i++) result = result * (n - i) / (i + 1);
+  return Math.round(result);
+}
+
+/** Applies exclusionRules ({dimension, value} pairs) to a search space's own dimension arrays, returning effective (post-exclusion) arrays -- never mutates the frozen input. */
+function msdApplyExclusionRules(searchSpace){
+  const dims = ['symbols', 'observationWindows', 'leadTimes', 'individualFeatures', 'featureTransformations',
+    'lagOperators', 'rollingOperators', 'temporalOperators', 'aggregationOperators', 'candidateModelFamilies', 'statisticalTests'];
+  const effective = {};
+  dims.forEach(d => { effective[d] = Array.isArray(searchSpace[d]) ? searchSpace[d].slice() : searchSpace[d]; });
+  (searchSpace.exclusionRules || []).forEach(rule => {
+    if (rule && rule.dimension && Array.isArray(effective[rule.dimension])) {
+      effective[rule.dimension] = effective[rule.dimension].filter(v => v !== rule.value);
+    }
+  });
+  return effective;
+}
+
+/**
+ * Pure, deterministic. Requires a frozen, v2-schema search space (v1
+ * lacks individualFeatures/maxCandidateCount/exclusionRules, without
+ * which real cardinality cannot be computed -- per the Part 5 finding
+ * that family-level, not individual-feature, enumeration is
+ * insufficient). Never silently truncates: if the raw combinatorial
+ * count exceeds maxCandidateCount, returns an explicit overflow status
+ * rather than a capped number.
+ *
+ * Structure, reasoned from the actual candidate definition (Part 6,
+ * Section: "do not assume the naive multiplication structure is
+ * correct"): a candidate is (symbol, window, leadTime, a SET of 1..
+ * interactionDepth distinct individual features, transformation, lag
+ * operator, rolling operator, temporal operator, aggregation operator,
+ * statistical test, model family). The feature-set dimension is
+ * genuinely combinatorial -- sum_{k=1}^{interactionDepth} C(n, k), a
+ * binomial sum, not a naive n^interactionDepth or n*interactionDepth --
+ * every other dimension multiplies linearly since each candidate picks
+ * exactly one value from each.
+ */
+function msdComputeSearchSpaceCardinality(searchSpace){
+  if (!Object.isFrozen(searchSpace)) throw new Error('Cannot compute cardinality for an unfrozen search space.');
+  if (searchSpace.searchSpaceVersion !== MSD_SEARCH_SPACE_SPEC_VERSION_V2) {
+    throw new Error('Cardinality requires a ' + MSD_SEARCH_SPACE_SPEC_VERSION_V2 + ' search space (individual features + maxCandidateCount + exclusionRules are required for real cardinality) — got "' + searchSpace.searchSpaceVersion + '".');
+  }
+  const eff = msdApplyExclusionRules(searchSpace);
+  const n = eff.individualFeatures.length;
+  const depth = searchSpace.interactionDepth;
+  if (!Number.isInteger(depth) || depth < 1) throw new Error('interactionDepth must be a positive integer.');
+  if (depth > n) throw new Error('interactionDepth (' + depth + ') cannot exceed the number of available individual features (' + n + ') after exclusions.');
+
+  let featureSetCombinations = 0;
+  const perDepthBreakdown = {};
+  for (let k = 1; k <= depth; k++) {
+    const c = msdBinomialCoefficient(n, k);
+    perDepthBreakdown[k] = c;
+    featureSetCombinations += c;
+  }
+
+  const linearDimensions = {
+    symbols: eff.symbols.length, observationWindows: eff.observationWindows.length, leadTimes: eff.leadTimes.length,
+    featureTransformations: eff.featureTransformations.length, lagOperators: eff.lagOperators.length,
+    rollingOperators: eff.rollingOperators.length, temporalOperators: eff.temporalOperators.length,
+    aggregationOperators: eff.aggregationOperators.length, candidateModelFamilies: eff.candidateModelFamilies.length,
+    statisticalTests: eff.statisticalTests.length,
+  };
+  const linearProduct = Object.values(linearDimensions).reduce((a, b) => a * b, 1);
+  const totalCardinality = featureSetCombinations * linearProduct;
+
+  const maxCandidateCount = searchSpace.maxCandidateCount;
+  const overflow = totalCardinality > maxCandidateCount;
+
+  return {
+    status: overflow ? 'overflow' : 'valid',
+    totalCardinality,
+    maxCandidateCount,
+    overflowAmount: overflow ? totalCardinality - maxCandidateCount : 0,
+    featureSetCombinations,
+    perDepthFeatureCombinationBreakdown: perDepthBreakdown,
+    linearDimensionCounts: linearDimensions,
+    linearProduct,
+    exclusionsApplied: (searchSpace.exclusionRules || []).length,
+    explanation: 'sum_{k=1}^{' + depth + '} C(' + n + ',k) [=' + featureSetCombinations + ' feature-set combinations] × ' +
+      Object.entries(linearDimensions).map(([k, v]) => k + '(' + v + ')').join(' × ') + ' = ' + totalCardinality,
+    searchSpaceId: searchSpace.searchSpaceId, searchSpaceVersion: searchSpace.searchSpaceVersion, searchSpaceHash: searchSpace.searchSpaceHash,
+  };
+}
+
+/** Permanent record of a frozen search space — reuses KnowledgeBase's existing finding mechanism, exactly like the null-calibration specification does. No new store for the SPEC itself (the Discovery Ledger, Step 6, is a separate, genuinely new store for run/candidate/decision history). */
+async function msdRecordSearchSpaceSpecification(space){
+  if (!Object.isFrozen(space)) throw new Error('Refusing to persist an unfrozen search space.');
+  const finding = { findingId: msdGenerateFindingId(), type: 'search_space_specification', recordedAt: Date.now(), space };
+  return { ok: true, writeResult: await msdWriteFinding(finding) };
+}
+async function msdGetSearchSpaceSpecifications(searchSpaceId){
+  const all = await msdGetAllFindings();
+  return all.filter(f => f.type === 'search_space_specification' && (!searchSpaceId || f.space.searchSpaceId === searchSpaceId)).sort((a, b) => a.recordedAt - b.recordedAt);
+}
+
+// ── STEP 5: Immutable dataset snapshot and lineage governance ──
+// Reuses msdComputeDatasetFingerprint directly (unmodified) rather than
+// inventing a parallel fingerprinting mechanism. A snapshot record is a
+// thin, frozen wrapper around that existing fingerprint plus the
+// additional lineage fields Part 3's hypothesis schema needs
+// (search-space version, label-confidence policy, event-definition
+// version) that the existing experiment record doesn't carry today.
+let msdDatasetSnapshotSeq = 0;
+function msdGenerateDatasetSnapshotId(){ return 'snapshot_' + msdSessionId + '_' + (++msdDatasetSnapshotSeq) + '_' + Date.now(); }
+
+/**
+ * Freezes a dataset snapshot record. Requires an already-computed
+ * datasetFingerprint (via the existing msdComputeDatasetFingerprint) and
+ * an already-frozen search space -- refuses to proceed with either
+ * missing, since an untraceable snapshot is exactly what this exists to
+ * prevent.
+ */
+function msdFreezeDatasetSnapshot(params){
+  const required = ['sourceScope', 'symbolScope', 'timeRangeStart', 'timeRangeEnd', 'eventDefinitionVersion',
+    'schemaVersion', 'searchSpaceId', 'featureSchemaVersion', 'labelConfidencePolicy', 'datasetFingerprint'];
+  const missing = required.filter(k => params[k] == null);
+  if (missing.length) throw new Error('Cannot freeze an incomplete dataset snapshot — missing: ' + missing.join(', '));
+  return Object.freeze(Object.assign({
+    datasetSnapshotId: msdGenerateDatasetSnapshotId(),
+    parentSnapshotId: params.parentSnapshotId || null,
+    creationTimestamp: Date.now(),
+    codeVersion: MSD_CODE_VERSION,
+  }, params));
+}
+
+/** Persists a frozen dataset snapshot to the Discovery Ledger. Refuses anything not already frozen. */
+async function msdRecordDatasetSnapshot(frozenSnapshot){
+  if (!Object.isFrozen(frozenSnapshot)) throw new Error('Refusing to persist an unfrozen dataset snapshot.');
+  const entry = {
+    entryId: msdGenerateDiscoveryLedgerEntryId(),
+    entryType: 'dataset_snapshot',
+    datasetSnapshotId: frozenSnapshot.datasetSnapshotId,
+    parentSnapshotId: frozenSnapshot.parentSnapshotId,
+    searchSpaceId: frozenSnapshot.searchSpaceId,
+    recordedAt: Date.now(),
+    snapshot: frozenSnapshot,
+  };
+  const writeResult = await msdWriteDiscoveryLedgerEntry(entry);
+  return { ok: writeResult.ok, entryId: entry.entryId, writeResult };
+}
+
+async function msdGetDatasetSnapshots(datasetSnapshotId){
+  const all = await msdGetAllDiscoveryLedgerEntries();
+  return all.filter(e => e.entryType === 'dataset_snapshot' && (!datasetSnapshotId || e.datasetSnapshotId === datasetSnapshotId));
+}
+
+/** A snapshot never changes after creation -- any change to underlying data, schema, or processing logic must produce a NEW snapshot with parentSnapshotId pointing at this one, never an in-place edit of this record. */
+function msdReviseDatasetSnapshot(priorSnapshot, changes){
+  if (!Object.isFrozen(priorSnapshot)) throw new Error('Cannot revise a dataset snapshot that was never frozen.');
+  const revised = Object.assign({}, priorSnapshot, changes);
+  ['datasetSnapshotId', 'parentSnapshotId', 'creationTimestamp', 'codeVersion'].forEach(k => delete revised[k]);
+  return msdFreezeDatasetSnapshot(Object.assign(revised, { parentSnapshotId: priorSnapshot.datasetSnapshotId }));
+}
+
+// ── STEP 6: Dedicated, genuinely new, append-only Discovery Ledger ──
+// Deliberately NOT KnowledgeBase/DiscoveryLab/EngineeringLab/PositiveControlLedger/
+// NegativeControlLedger -- a sixth, purpose-specific store, mirroring the
+// exact same proven append-only (.add(), never .put()) pattern as all five.
+const MSD_DISCOVERY_LEDGER_DB_NAME = 'mfx_msd_discovery_ledger';
+const MSD_DISCOVERY_LEDGER_DB_VERSION = 1;
+const MSD_DISCOVERY_LEDGER_STORE = 'DiscoveryLedger';
+let _msdDiscoveryLedgerDbPromise = null;
+
+function msdOpenDiscoveryLedgerDatabase(){
+  if (_msdDiscoveryLedgerDbPromise) return _msdDiscoveryLedgerDbPromise;
+  _msdDiscoveryLedgerDbPromise = new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') { reject(new Error('IndexedDB is not available in this environment')); return; }
+    const req = indexedDB.open(MSD_DISCOVERY_LEDGER_DB_NAME, MSD_DISCOVERY_LEDGER_DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(MSD_DISCOVERY_LEDGER_STORE)) {
+        const store = db.createObjectStore(MSD_DISCOVERY_LEDGER_STORE, { keyPath: 'entryId' });
+        store.createIndex('hypothesisId', 'hypothesisId', { unique: false });
+        store.createIndex('entryType', 'entryType', { unique: false });
+        store.createIndex('searchSpaceId', 'searchSpaceId', { unique: false });
+      }
+    };
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror = (e) => reject(e.target.error);
+  });
+  return _msdDiscoveryLedgerDbPromise;
+}
+
+let msdDiscoveryLedgerSeq = 0;
+function msdGenerateDiscoveryLedgerEntryId(){ return 'ledger_' + msdSessionId + '_' + (++msdDiscoveryLedgerSeq) + '_' + Date.now(); }
+
+/** Appends ONE ledger entry. Uses add(), never put() -- rejected/inconclusive/superseded entries can never disappear or be overwritten. */
+async function msdWriteDiscoveryLedgerEntry(entry){
+  if (!entry || !entry.entryId) return { ok: false, error: 'entry is missing entryId' };
+  try {
+    const db = await msdOpenDiscoveryLedgerDatabase();
+    return await new Promise((resolve) => {
+      const req = db.transaction(MSD_DISCOVERY_LEDGER_STORE, 'readwrite').objectStore(MSD_DISCOVERY_LEDGER_STORE).add(entry);
+      req.onsuccess = () => resolve({ ok: true });
+      req.onerror = (e) => { e.preventDefault(); resolve({ ok: false, error: 'duplicate or invalid entryId — write rejected (append-only store)' }); };
+    });
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+async function msdGetAllDiscoveryLedgerEntries(){
+  const db = await msdOpenDiscoveryLedgerDatabase();
+  return new Promise((resolve) => {
+    const req = db.transaction(MSD_DISCOVERY_LEDGER_STORE, 'readonly').objectStore(MSD_DISCOVERY_LEDGER_STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => resolve([]);
+  });
+}
+/** Test/debug only — never called from production code paths. */
+function msdResetDiscoveryLedgerDatabase(){
+  if (_msdDiscoveryLedgerDbPromise) _msdDiscoveryLedgerDbPromise.then(db => db.close()).catch(() => {});
+  _msdDiscoveryLedgerDbPromise = null;
+  return new Promise((resolve) => {
+    if (typeof indexedDB === 'undefined') { resolve(); return; }
+    const req = indexedDB.deleteDatabase(MSD_DISCOVERY_LEDGER_DB_NAME);
+    req.onsuccess = () => resolve(); req.onerror = () => resolve(); req.onblocked = () => resolve();
+  });
+}
+
+// ── STEP 7: Hypothesis lifecycle state machine ──
+const MSD_HYPOTHESIS_STATES = ['GENERATED', 'SCREENED', 'DISCOVERY_SUPPORTED', 'VALIDATION_PENDING', 'VALIDATED', 'OUT_OF_SAMPLE_SUPPORTED', 'ROBUSTNESS_TESTED', 'INCONCLUSIVE', 'REJECTED', 'ACCEPTED_AS_RESEARCH_KNOWLEDGE'];
+const MSD_HYPOTHESIS_LEGAL_TRANSITIONS = {
+  GENERATED: ['SCREENED', 'REJECTED'],
+  SCREENED: ['DISCOVERY_SUPPORTED', 'REJECTED'],
+  DISCOVERY_SUPPORTED: ['VALIDATION_PENDING', 'REJECTED'],
+  VALIDATION_PENDING: ['VALIDATED', 'INCONCLUSIVE', 'REJECTED'],
+  VALIDATED: ['OUT_OF_SAMPLE_SUPPORTED', 'INCONCLUSIVE', 'REJECTED'],
+  OUT_OF_SAMPLE_SUPPORTED: ['ROBUSTNESS_TESTED', 'INCONCLUSIVE', 'REJECTED'],
+  ROBUSTNESS_TESTED: ['ACCEPTED_AS_RESEARCH_KNOWLEDGE', 'INCONCLUSIVE', 'REJECTED'],
+  INCONCLUSIVE: [], REJECTED: [], ACCEPTED_AS_RESEARCH_KNOWLEDGE: [],
+};
+
+/**
+ * Validates a proposed state transition. Deliberately, structurally
+ * refuses ACCEPTED_AS_RESEARCH_KNOWLEDGE even though it is nominally a
+ * legal target from ROBUSTNESS_TESTED — that specific transition may
+ * ONLY happen through msdAcceptHypothesisAsResearchKnowledge (Step 8),
+ * never through this generic function, regardless of caller intent.
+ */
+function msdValidateHypothesisTransition(fromState, toState){
+  if (!MSD_HYPOTHESIS_STATES.includes(fromState)) return { valid: false, reason: 'Unknown fromState: ' + fromState };
+  if (!MSD_HYPOTHESIS_STATES.includes(toState)) return { valid: false, reason: 'Unknown toState: ' + toState };
+  if (toState === 'ACCEPTED_AS_RESEARCH_KNOWLEDGE') {
+    return { valid: false, reason: 'ACCEPTED_AS_RESEARCH_KNOWLEDGE can only be reached via msdAcceptHypothesisAsResearchKnowledge with a valid human decision record — refused here structurally, not merely by convention.' };
+  }
+  const legal = MSD_HYPOTHESIS_LEGAL_TRANSITIONS[fromState] || [];
+  if (!legal.includes(toState)) return { valid: false, reason: 'Illegal transition ' + fromState + ' -> ' + toState + ' (legal targets from ' + fromState + ': ' + (legal.length ? legal.join(', ') : 'none — terminal state') + ')' };
+  return { valid: true, reason: null };
+}
+
+/** Records a validated, non-accepting state transition as an append-only Discovery Ledger entry. Never mutates a hypothesis in place. */
+async function msdRecordHypothesisTransition(hypothesisId, fromState, toState, evidence){
+  const validation = msdValidateHypothesisTransition(fromState, toState);
+  if (!validation.valid) return { ok: false, error: validation.reason };
+  const entry = {
+    entryId: msdGenerateDiscoveryLedgerEntryId(), entryType: 'hypothesis_transition',
+    hypothesisId, fromState, toState, evidence: evidence || null, recordedAt: Date.now(),
+  };
+  const writeResult = await msdWriteDiscoveryLedgerEntry(entry);
+  return { ok: writeResult.ok, entry, writeResult };
+}
+
+// ── PART 6, PART D: CONCRETE HYPOTHESIS RECORD SCHEMA ──
+// Distinct from the lifecycle state machine above: msdValidateHypothesisTransition/
+// msdRecordHypothesisTransition control STATE CHANGES; this is the
+// scientific OBJECT itself. current_state/transition_history are
+// reference fields only -- actual transitions still go exclusively
+// through the existing lifecycle functions, never duplicated here.
+const MSD_HYPOTHESIS_RECORD_SCHEMA_VERSION = 'hypothesis_record_schema_v1';
+const MSD_HYPOTHESIS_RECORD_REQUIRED_FIELDS = [
+  'hypothesis_id', 'parent_run_id', 'candidate_id',
+  'search_space_id', 'search_space_version', 'search_space_hash',
+  'dataset_snapshot_id', 'dataset_fingerprint',
+  'event_definition_version', 'feature_schema_version',
+  'symbol', 'observation_window', 'lead_time', 'feature_definition', 'transformation_definition',
+  'lag_definition', 'rolling_definition', 'temporal_definition', 'aggregation_definition', 'interaction_definition',
+  'model_family', 'statistical_test', 'correction_method', 'verified_family_size', 'alpha',
+  'label_confidence_policy', 'uncertainty_policy', 'conflict_status_policy',
+];
+// Results and validation/robustness/rejection/human-governance fields are
+// intentionally OPTIONAL at freeze time (a hypothesis is frozen once its
+// DEFINITION is fixed, before results exist) but must be present as
+// explicit null placeholders, never simply absent, so a reader can always
+// tell "not yet computed" from "field doesn't exist in this schema version".
+const MSD_HYPOTHESIS_RECORD_OPTIONAL_FIELDS = [
+  'effect_size', 'p_value', 'adjusted_p_value', 'confidence_interval', 'sample_size', 'missing_data_count',
+  'current_state', 'transition_history', 'validation_results', 'out_of_sample_results', 'robustness_results',
+  'rejection_reason', 'human_decision_record',
+];
+
+function msdGenerateHypothesisId(){ return 'hyp_' + msdSessionId + '_' + (++msdSnapshotSeq) + '_' + Date.now(); }
+function msdGenerateCandidateId(){ return 'cand_' + msdSessionId + '_' + (++msdSnapshotSeq) + '_' + Date.now(); }
+
+/**
+ * Freezes a hypothesis record. Requires every field in the required
+ * list; optional fields default to null (present, not absent) if
+ * omitted. Computes a content hash so identical scientific objects
+ * produce identical identity, and different ones provably differ.
+ */
+function msdFreezeHypothesisRecord(fields){
+  const missing = MSD_HYPOTHESIS_RECORD_REQUIRED_FIELDS.filter(f => fields[f] === undefined);
+  if (missing.length) throw new Error('Cannot freeze an incomplete hypothesis record — missing: ' + missing.join(', '));
+  const complete = Object.assign({}, fields);
+  MSD_HYPOTHESIS_RECORD_OPTIONAL_FIELDS.forEach(f => { if (complete[f] === undefined) complete[f] = null; });
+  // Hash over the SCIENTIFIC DEFINITION only (excludes hypothesis_id/parent_run_id/candidate_id,
+  // which are identity, not content) -- so two independently-generated
+  // records describing the identical candidate produce the identical hash.
+  const { hypothesis_id, parent_run_id, candidate_id, ...definitionOnly } = complete;
+  const contentHash = msdSimpleHash(JSON.stringify(definitionOnly));
+  return Object.freeze(Object.assign({}, complete, {
+    schemaVersion: MSD_HYPOTHESIS_RECORD_SCHEMA_VERSION,
+    contentHash,
+    frozenAt: Date.now(),
+  }));
+}
+
+/**
+ * Persists a frozen hypothesis record to the Discovery Ledger.
+ * Verifies -- does not merely trust -- that the referenced search space
+ * and dataset snapshot actually exist as persisted records, so
+ * provenance can never be claimed without being genuinely tied to a
+ * real, frozen specification.
+ */
+async function msdRecordHypothesisRecord(frozenRecord){
+  if (!Object.isFrozen(frozenRecord)) throw new Error('Refusing to persist an unfrozen hypothesis record.');
+  const spaces = await msdGetSearchSpaceSpecifications(frozenRecord.search_space_id);
+  const matchingSpace = spaces.find(s => s.space.searchSpaceHash === frozenRecord.search_space_hash);
+  if (!matchingSpace) throw new Error('GOVERNANCE FAILURE: hypothesis references search_space_id/hash that does not match any actually-persisted, frozen search space.');
+  const snapshots = await msdGetDatasetSnapshots(frozenRecord.dataset_snapshot_id);
+  const matchingSnapshot = snapshots.find(s => s.snapshot.datasetFingerprint === frozenRecord.dataset_fingerprint);
+  if (!matchingSnapshot) throw new Error('GOVERNANCE FAILURE: hypothesis references dataset_snapshot_id/fingerprint that does not match any actually-persisted, frozen dataset snapshot.');
+
+  const entry = {
+    entryId: msdGenerateDiscoveryLedgerEntryId(), entryType: 'hypothesis_record',
+    hypothesisId: frozenRecord.hypothesis_id, contentHash: frozenRecord.contentHash,
+    recordedAt: Date.now(), record: frozenRecord,
+  };
+  const writeResult = await msdWriteDiscoveryLedgerEntry(entry);
+  return { ok: writeResult.ok, entryId: entry.entryId, writeResult };
+}
+
+async function msdGetHypothesisRecords(hypothesisId){
+  const all = await msdGetAllDiscoveryLedgerEntries();
+  return all.filter(e => e.entryType === 'hypothesis_record' && (!hypothesisId || e.hypothesisId === hypothesisId));
+}
+
+// ── PART 6, PART E: DETERMINISTIC CANDIDATE ENUMERATOR — DRY-RUN ONLY ──
+// GOVERNANCE BOUNDARY, enforced structurally, not just by convention:
+// this function NEVER touches msdGetAllMarketStates, msdOpenStateDatabase,
+// msdWriteFinding, msdOpenKnowledgeDatabase, or msdAcceptHypothesisAsResearchKnowledge
+// -- it has no reference to any of them anywhere in its body. It returns
+// a plain array of candidate DEFINITIONS (not hypothesis records, not
+// ledger entries) for a caller to inspect. It performs no statistical
+// test, no real discovery, no persistence.
+function msdEnumerateFeatureSets(features, maxDepth){
+  const results = [];
+  function combinations(start, chosen, depth){
+    if (depth > 0) results.push(chosen.slice());
+    if (depth === maxDepth) return;
+    for (let i = start; i < features.length; i++) {
+      chosen.push(features[i]);
+      combinations(i + 1, chosen, depth + 1);
+      chosen.pop();
+    }
+  }
+  combinations(0, [], 0);
+  return results; // deterministic: fixed recursive order, same input always yields same output
+}
+
+/**
+ * Dry-run enumeration over a frozen search space. Requires cardinality
+ * verification FIRST (refuses on overflow, exactly like Part C's
+ * verified correction) and refuses if the enumerated count would exceed
+ * maxCandidateCount -- the enumeration cannot silently exceed its own
+ * declared ceiling. Returns candidate DEFINITIONS with a deterministic
+ * identity hash each; does not create hypothesis records, does not
+ * persist anything, does not touch any other store.
+ */
+function msdDryRunEnumerateCandidates(searchSpace){
+  if (!Object.isFrozen(searchSpace)) throw new Error('Cannot enumerate over an unfrozen search space.');
+  const cardinality = msdComputeSearchSpaceCardinality(searchSpace);
+  if (cardinality.status === 'overflow') {
+    throw new Error('Refusing to enumerate: search space cardinality (' + cardinality.totalCardinality + ') exceeds maxCandidateCount (' + cardinality.maxCandidateCount + ').');
+  }
+  const eff = msdApplyExclusionRules(searchSpace);
+  const featureSets = msdEnumerateFeatureSets(eff.individualFeatures, searchSpace.interactionDepth);
+
+  const candidates = [];
+  eff.symbols.forEach(symbol => eff.observationWindows.forEach(window => eff.leadTimes.forEach(leadTime => {
+    featureSets.forEach(featureSet => eff.featureTransformations.forEach(transformation => {
+      eff.lagOperators.forEach(lag => eff.rollingOperators.forEach(rolling => {
+        eff.temporalOperators.forEach(temporal => eff.aggregationOperators.forEach(aggregation => {
+          eff.statisticalTests.forEach(test => eff.candidateModelFamilies.forEach(modelFamily => {
+            const definition = { symbol, observationWindow: window, leadTime, features: featureSet, transformation, lag, rolling, temporal, aggregation, statisticalTest: test, modelFamily };
+            const candidateHash = msdSimpleHash(JSON.stringify(definition));
+            candidates.push(Object.assign({ candidateHash }, definition));
+          }));
+        }));
+      }));
+    }));
+    if (candidates.length > cardinality.maxCandidateCount) throw new Error('Enumeration exceeded maxCandidateCount mid-run — this should be structurally impossible if cardinality verification is correct; treat as a governance bug, not a warning.');
+  })));
+
+  return { candidates, count: candidates.length, verifiedCardinality: cardinality.totalCardinality, searchSpaceId: searchSpace.searchSpaceId, searchSpaceHash: searchSpace.searchSpaceHash };
+}
+
+// ── STEP 8: Structural Level 5 human-only acceptance gate ──
+/**
+ * The ONLY code path capable of producing an ACCEPTED_AS_RESEARCH_KNOWLEDGE
+ * transition. Requires a complete, explicit human decision record. Refuses
+ * structurally — not merely by documented policy — if any required field
+ * is missing or if the decision is not explicitly 'accept'.
+ */
+async function msdAcceptHypothesisAsResearchKnowledge(hypothesisId, currentState, humanDecisionRecord){
+  if (currentState !== 'ROBUSTNESS_TESTED') {
+    return { ok: false, error: 'Can only accept a hypothesis from ROBUSTNESS_TESTED — was: ' + currentState };
+  }
+  const required = ['decision_maker', 'decision_timestamp', 'decision', 'decision_reason', 'evidence_package_hash'];
+  const missing = !humanDecisionRecord ? required : required.filter(f => humanDecisionRecord[f] == null);
+  if (missing.length) return { ok: false, error: 'Missing required human decision fields: ' + missing.join(', ') };
+  if (humanDecisionRecord.decision !== 'accept') return { ok: false, error: 'decision field must be exactly "accept" — refusing any other value for this transition' };
+
+  const entry = {
+    entryId: msdGenerateDiscoveryLedgerEntryId(), entryType: 'human_decision',
+    hypothesisId, fromState: 'ROBUSTNESS_TESTED', toState: 'ACCEPTED_AS_RESEARCH_KNOWLEDGE',
+    humanDecisionId: msdGenerateDiscoveryLedgerEntryId(),
+    decisionMaker: humanDecisionRecord.decision_maker, decisionTimestamp: humanDecisionRecord.decision_timestamp,
+    decision: humanDecisionRecord.decision, decisionReason: humanDecisionRecord.decision_reason,
+    evidencePackageHash: humanDecisionRecord.evidence_package_hash, recordedAt: Date.now(),
+  };
+  const writeResult = await msdWriteDiscoveryLedgerEntry(entry);
+  return { ok: writeResult.ok, entry, writeResult };
+}
+
+// ── PART 4, POST-AUDIT ADDITION: GOVERNANCE ORCHESTRATION LAYER ──
+// Wires Steps 2-9 together into an actual sequence for the first time.
+// This is PLUMBING VERIFICATION ONLY — it performs no real candidate
+// generation, no real statistical search, no real market-state hypothesis.
+// Every hypothesis object it walks through the lifecycle is synthetic,
+// supplied by the caller with already-decided statistics (as if a
+// human had specified "pretend this candidate scored p=0.01" purely to
+// prove the STATE MACHINE and LEDGER correctly handle a hypothesis
+// moving through every required stage, including a genuine REJECTED
+// path and a genuine ACCEPTED path, with nothing lost or silently
+// skipped along the way.
+//
+// This function does NOT implement Level 2 (autonomous candidate
+// generation) in any way — it requires the caller to supply the
+// hypothesis's synthetic "result" at each stage; it only orchestrates
+// the GOVERNANCE steps (ledger writes, transition validation, gating),
+// which is exactly the gap the Part 4 audit found untested.
+async function msdRunGovernanceOrchestrationDemo(syntheticHypothesis, options){
+  options = options || {};
+  const log = [];
+
+  // 1. Freeze and record a search space.
+  const frozenSpace = msdFreezeSearchSpace(options.searchSpaceDefinition, options.owner || 'demo_owner');
+  const spaceRecord = await msdRecordSearchSpaceSpecification(frozenSpace);
+  log.push({ step: 'search_space_frozen_and_recorded', searchSpaceId: frozenSpace.searchSpaceId, ok: spaceRecord.ok });
+
+  // 2. Freeze and record a dataset snapshot referencing that search space.
+  const frozenSnapshot = msdFreezeDatasetSnapshot(Object.assign({
+    sourceScope: 'MarketStates', symbolScope: frozenSpace.symbols[0], timeRangeStart: 0, timeRangeEnd: 1,
+    eventDefinitionVersion: 'event_def_v1', schemaVersion: 'v1', searchSpaceId: frozenSpace.searchSpaceId,
+    featureSchemaVersion: 'v1', labelConfidencePolicy: 'filter_certain_only',
+    datasetFingerprint: msdComputeDatasetFingerprint({ trainSet: [], valSet: [], testSet: [] }),
+  }, options.snapshotOverrides || {}));
+  const snapshotRecord = await msdRecordDatasetSnapshot(frozenSnapshot);
+  log.push({ step: 'dataset_snapshot_frozen_and_recorded', datasetSnapshotId: frozenSnapshot.datasetSnapshotId, ok: snapshotRecord.ok });
+
+  // 3. Walk the synthetic hypothesis through the lifecycle, stage by stage,
+  //    stopping at whichever terminal state the caller's synthetic result implies.
+  const hypothesisId = syntheticHypothesis.hypothesis_id;
+  let currentState = 'GENERATED';
+  const stageSequence = ['SCREENED', 'DISCOVERY_SUPPORTED', 'VALIDATION_PENDING', 'VALIDATED', 'OUT_OF_SAMPLE_SUPPORTED', 'ROBUSTNESS_TESTED'];
+
+  for (const nextState of stageSequence) {
+    if (syntheticHypothesis.failAt === currentState) {
+      const rejection = await msdRecordHypothesisTransition(hypothesisId, currentState, 'REJECTED', { reason: 'synthetic failure at ' + currentState });
+      log.push({ step: 'transition', from: currentState, to: 'REJECTED', ok: rejection.ok });
+      return { log, finalState: 'REJECTED', searchSpaceId: frozenSpace.searchSpaceId, datasetSnapshotId: frozenSnapshot.datasetSnapshotId };
+    }
+    const transition = await msdRecordHypothesisTransition(hypothesisId, currentState, nextState, { synthetic: true });
+    log.push({ step: 'transition', from: currentState, to: nextState, ok: transition.ok });
+    if (!transition.ok) return { log, finalState: currentState, error: 'orchestration halted: illegal transition', searchSpaceId: frozenSpace.searchSpaceId, datasetSnapshotId: frozenSnapshot.datasetSnapshotId };
+    currentState = nextState;
+  }
+
+  // 4. At ROBUSTNESS_TESTED, only a real, structurally-valid human decision can accept.
+  if (syntheticHypothesis.humanDecision) {
+    const acceptance = await msdAcceptHypothesisAsResearchKnowledge(hypothesisId, currentState, syntheticHypothesis.humanDecision);
+    log.push({ step: 'acceptance_attempt', ok: acceptance.ok, error: acceptance.error || null });
+    if (acceptance.ok) currentState = 'ACCEPTED_AS_RESEARCH_KNOWLEDGE';
+  }
+
+  return { log, finalState: currentState, searchSpaceId: frozenSpace.searchSpaceId, datasetSnapshotId: frozenSnapshot.datasetSnapshotId };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// PART 7 — LEVEL 2 GOVERNANCE INTEGRATION (SYNTHETIC ONLY)
+// ══════════════════════════════════════════════════════════════════════
+// Connects every Part 6 component (cardinality, verified correction,
+// hypothesis records, enumerator) into one governed pipeline, extending
+// Part 4's own demo rather than duplicating it. GOVERNANCE INTEGRATION
+// TEST ONLY -- this is not, and must never be confused with, real Level 2
+// candidate generation. It operates exclusively on a tiny synthetic toy
+// search space; it never touches msdGetAllMarketStates, never writes a
+// real finding, and cannot reach ACCEPTED_AS_RESEARCH_KNOWLEDGE without a
+// genuine, structurally-validated human decision record (Part 4, Step 8,
+// completely unmodified).
+//
+// LIFECYCLE NOTE: the frozen, tested MSD_HYPOTHESIS_STATES/
+// MSD_HYPOTHESIS_LEGAL_TRANSITIONS machine is reused EXACTLY as-is --
+// GENERATED -> SCREENED -> DISCOVERY_SUPPORTED -> VALIDATION_PENDING ->
+// VALIDATED -> OUT_OF_SAMPLE_SUPPORTED -> ROBUSTNESS_TESTED. The
+// statistical-test and multiplicity-correction results are attached as
+// EVIDENCE on the DISCOVERY_SUPPORTED transition (the stage that
+// represents "a candidate cleared its statistical test, corrected"),
+// rather than inventing new lifecycle states that don't exist in the
+// tested state machine.
+async function msdRunPart6GovernanceOrchestrationDemo(options){
+  options = options || {};
+  const log = [];
+
+  // ── STEP 1/2: tiny synthetic v2 search space, frozen and recorded ──
+  const toySearchSpaceDefinition = Object.assign({
+    symbols: ['SYNTH_A'], observationWindows: [10], leadTimes: [1, 2],
+    featureFamilies: ['synthetic'], individualFeatures: ['synth_feat_1', 'synth_feat_2'],
+    featureTransformations: ['raw'], interactionDepth: 1,
+    lagOperators: ['none'], rollingOperators: ['none'], temporalOperators: ['none'], aggregationOperators: ['mean'],
+    candidateModelFamilies: ['pbXGBoost'], statisticalTests: ['mutual_information'], multipleTestingControls: ['benjamini_hochberg'],
+    maxCandidateCount: 100, exclusionRules: [], missingDataRules: { maxMissingRate: 0.1 }, uncertaintyLabelPolicy: 'filter_certain_only',
+  }, options.searchSpaceOverrides || {});
+  const frozenSpace = msdFreezeSearchSpace(toySearchSpaceDefinition, options.owner || 'part7_demo_owner', { schemaVersion: MSD_SEARCH_SPACE_SPEC_VERSION_V2 });
+  const spaceRecord = await msdRecordSearchSpaceSpecification(frozenSpace);
+  log.push({ step: 'search_space_frozen_and_recorded', searchSpaceId: frozenSpace.searchSpaceId, ok: spaceRecord.ok });
+
+  // ── STEP 3: independent cardinality, BEFORE any enumeration ──
+  const cardinality = msdComputeSearchSpaceCardinality(frozenSpace);
+  log.push({ step: 'cardinality_computed', totalCardinality: cardinality.totalCardinality, status: cardinality.status });
+  if (cardinality.status === 'overflow') {
+    return { ok: false, log, error: 'search space overflow — halted before enumeration', cardinality };
+  }
+
+  // ── STEP 4: deterministic enumeration, then the CRITICAL invariant check ──
+  const enumeration = msdDryRunEnumerateCandidates(frozenSpace);
+  log.push({ step: 'enumeration_complete', count: enumeration.count });
+  if (enumeration.count !== cardinality.totalCardinality) {
+    // Governance invariant violation -- halt loudly, never proceed silently.
+    throw new Error('GOVERNANCE INVARIANT VIOLATION: enumeratedCandidateCount (' + enumeration.count + ') !== independently computed cardinality (' + cardinality.totalCardinality + ').');
+  }
+  log.push({ step: 'cardinality_enumeration_equality_verified', equal: true });
+
+  // ── STEP 5: synthetic dataset snapshot, referencing the frozen search space ──
+  const frozenSnapshot = msdFreezeDatasetSnapshot({
+    sourceScope: 'synthetic_part7_demo', symbolScope: frozenSpace.symbols[0], timeRangeStart: 0, timeRangeEnd: 1,
+    eventDefinitionVersion: 'event_def_v1', schemaVersion: 'v1', searchSpaceId: frozenSpace.searchSpaceId,
+    featureSchemaVersion: 'v1', labelConfidencePolicy: frozenSpace.uncertaintyLabelPolicy,
+    datasetFingerprint: msdComputeDatasetFingerprint({ trainSet: [], valSet: [], testSet: [] }),
+  });
+  const snapshotRecord = await msdRecordDatasetSnapshot(frozenSnapshot);
+  log.push({ step: 'dataset_snapshot_frozen_and_recorded', datasetSnapshotId: frozenSnapshot.datasetSnapshotId, ok: snapshotRecord.ok });
+
+  // ── STEP 6: hypothesis record for ONE enumerated synthetic candidate, full provenance ──
+  const candidate = enumeration.candidates[0];
+  const hypothesisId = msdGenerateHypothesisId();
+  const hypothesisFields = {
+    hypothesis_id: hypothesisId, parent_run_id: options.parentRunId || 'part7_demo_run', candidate_id: msdGenerateCandidateId(),
+    search_space_id: frozenSpace.searchSpaceId, search_space_version: frozenSpace.searchSpaceVersion, search_space_hash: frozenSpace.searchSpaceHash,
+    dataset_snapshot_id: frozenSnapshot.datasetSnapshotId, dataset_fingerprint: frozenSnapshot.datasetFingerprint,
+    event_definition_version: 'event_def_v1', feature_schema_version: 'v1',
+    symbol: candidate.symbol, observation_window: candidate.observationWindow, lead_time: candidate.leadTime,
+    feature_definition: candidate.features, transformation_definition: candidate.transformation,
+    lag_definition: candidate.lag, rolling_definition: candidate.rolling, temporal_definition: candidate.temporal, aggregation_definition: candidate.aggregation,
+    interaction_definition: candidate.features.length, model_family: candidate.modelFamily, statistical_test: candidate.statisticalTest,
+    correction_method: frozenSpace.multipleTestingControls[0], verified_family_size: cardinality.totalCardinality, alpha: 0.05,
+    label_confidence_policy: frozenSpace.uncertaintyLabelPolicy, uncertainty_policy: frozenSpace.uncertaintyLabelPolicy, conflict_status_policy: 'standard',
+  };
+  const frozenHypothesis = msdFreezeHypothesisRecord(hypothesisFields);
+  const hypothesisRecordResult = await msdRecordHypothesisRecord(frozenHypothesis);
+  log.push({ step: 'hypothesis_record_frozen_and_recorded', hypothesisId, contentHash: frozenHypothesis.contentHash, ok: hypothesisRecordResult.ok });
+
+  // ── STEP 8: verified multiplicity correction — NEW verified function only, never the old unverified one ──
+  // Synthetic p-values, one per enumerated candidate -- a purely illustrative statistical
+  // result, never a real finding.
+  const syntheticPValues = enumeration.candidates.map((c, i) => 0.001 + i * 0.0001);
+  const correction = msdApplySearchSpaceWideCorrectionVerified({ pValues: syntheticPValues, searchSpace: frozenSpace, claimedFamilySize: cardinality.totalCardinality, alpha: 0.05 });
+  log.push({ step: 'multiplicity_correction_verified', verifiedFamilySize: correction.verifiedFamilySize, correctionMethod: correction.correctionMethod });
+
+  // ── STEP 9: walk the EXISTING, tested lifecycle ──
+  let currentState = 'GENERATED';
+  const stageSequence = ['SCREENED', 'DISCOVERY_SUPPORTED', 'VALIDATION_PENDING', 'VALIDATED', 'OUT_OF_SAMPLE_SUPPORTED', 'ROBUSTNESS_TESTED'];
+  for (const nextState of stageSequence) {
+    if (options.failAt === currentState) {
+      const rejection = await msdRecordHypothesisTransition(hypothesisId, currentState, 'REJECTED', { reason: 'synthetic rejection at ' + currentState });
+      log.push({ step: 'transition', from: currentState, to: 'REJECTED', ok: rejection.ok });
+      return { ok: true, log, finalState: 'REJECTED', searchSpaceId: frozenSpace.searchSpaceId, datasetSnapshotId: frozenSnapshot.datasetSnapshotId, hypothesisId, cardinality, enumeration: { count: enumeration.count }, correction };
+    }
+    const evidence = nextState === 'DISCOVERY_SUPPORTED' ? { synthetic: true, correction } : { synthetic: true };
+    const transition = await msdRecordHypothesisTransition(hypothesisId, currentState, nextState, evidence);
+    log.push({ step: 'transition', from: currentState, to: nextState, ok: transition.ok });
+    if (!transition.ok) return { ok: false, log, error: 'orchestration halted: illegal transition', finalState: currentState };
+    currentState = nextState;
+  }
+
+  // Human-only acceptance gate — unmodified from Part 4.
+  if (options.humanDecision) {
+    const acceptance = await msdAcceptHypothesisAsResearchKnowledge(hypothesisId, currentState, options.humanDecision);
+    log.push({ step: 'acceptance_attempt', ok: acceptance.ok, error: acceptance.error || null });
+    if (acceptance.ok) currentState = 'ACCEPTED_AS_RESEARCH_KNOWLEDGE';
+  }
+
+  return { ok: true, log, finalState: currentState, searchSpaceId: frozenSpace.searchSpaceId, datasetSnapshotId: frozenSnapshot.datasetSnapshotId, hypothesisId, cardinality, enumeration: { count: enumeration.count }, correction };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// LEVEL 2 IMPLEMENTATION — REAL, BOUNDED, GOVERNED CANDIDATE GENERATION
+// ══════════════════════════════════════════════════════════════════════
+// Every function here operates on data PASSED IN BY THE CALLER, never
+// fetched internally — this is what makes them testable with synthetic
+// data (as done throughout this project) and usable against real data
+// via a real-browser script that fetches msdGetAllMarketStates() first
+// and passes it in. None of these functions ever call
+// msdWriteMarketState, msdOpenStateDatabase in write mode, or any
+// calibration-evidence write path.
+//
+// REUSE, NOT DUPLICATION: msdDryRunEnumerateCandidates is used AS-IS
+// for real candidate generation -- enumerating candidate DEFINITIONS is
+// pure combinatorics over the frozen search space and never touches
+// data, whether the eventual evaluation is real or synthetic. Only the
+// two genuinely new pieces below (snapshot construction from real rows,
+// and per-candidate feature materialization + statistical evaluation)
+// did not already exist.
+
+// ── Phase 3: real immutable dataset snapshot, built from real rows ──
+/**
+ * Builds the row-level payload for a real dataset snapshot. Read-only
+ * over its input array; never mutates it, never writes anything back.
+ * Applies the EXISTING uncertainty-aware labeling (msdBuildResearchLabelSet,
+ * Part 4) and the EXISTING explicit-handling guard
+ * (msdRequireExplicitUncertaintyHandling, Part 4) -- this function
+ * cannot silently proceed without an explicit uncertainty policy choice,
+ * by construction, because it delegates that decision entirely.
+ */
+function msdBuildRealSnapshotRows(allStates, uncertaintyHandlingChoice){
+  const validatedChoice = msdRequireExplicitUncertaintyHandling(uncertaintyHandlingChoice);
+  const epochLabels = msdBuildResearchLabelSet(allStates);
+  const byEpoch = new Map();
+  allStates.forEach(s => { if (!byEpoch.has(s.epoch)) byEpoch.set(s.epoch, s); }); // one representative row per epoch, for feature values
+  const rows = [];
+  let certainCount = 0, uncertainCount = 0, uncertainIncludedCount = 0;
+  epochLabels.forEach((label, epoch) => {
+    const rep = byEpoch.get(epoch);
+    if (!rep) return;
+    if (label.label_confidence === 'certain') {
+      certainCount++;
+      rows.push(Object.assign({}, rep, { event_outcome: label.event_outcome, label_confidence: 'certain', conflict_status: label.conflict_status }));
+    } else {
+      uncertainCount++;
+      if (validatedChoice.mode === 'resolution_policy') {
+        uncertainIncludedCount++;
+        // No concrete Policy B implementation is registered yet (Phase 2D,
+        // deliberately deferred) -- this branch is a documented stub,
+        // matching msdApplyUncertaintyHandling's own established pattern.
+      }
+      // mode === 'filter_certain_only': this epoch is excluded, logged in the counts returned below.
+    }
+  });
+  return { rows, epochCount: epochLabels.size, certainCount, uncertainCount, uncertainIncludedCount, droppedUncertainCount: validatedChoice.mode === 'filter_certain_only' ? uncertainCount : 0, handlingMode: validatedChoice.mode };
+}
+
+// ── Phase 5: real feature materialization for one candidate ──
+/**
+ * Computes ONE candidate's feature value series from snapshot rows.
+ * Deterministic: same rows + same candidate always produce the same
+ * series. Never mutates the input rows. Missing values follow the
+ * frozen missing-data policy (maxMissingRate) -- if the resulting
+ * missing rate exceeds it, materialization is refused explicitly
+ * rather than silently proceeding with a degraded sample.
+ */
+function msdMaterializeCandidateFeature(rows, candidate, missingDataRules){
+  const sortedRows = rows.slice().sort((a, b) => a.epoch - b.epoch);
+  function rawValue(row, featureName){
+    const v = row[featureName];
+    return (typeof v === 'number' && isFinite(v)) ? v : null;
+  }
+  function transformedValue(row, idx, featureName){
+    if (candidate.transformation === 'lag1') {
+      const prev = sortedRows[idx - 1];
+      return prev ? rawValue(prev, featureName) : null;
+    }
+    return rawValue(row, featureName); // 'raw' and any unrecognized transformation both fall back to raw -- never silently invents a different computation
+  }
+  const values = [];
+  const outcomes = [];
+  let missingCount = 0;
+  sortedRows.forEach((row, idx) => {
+    if (row.label_confidence !== 'certain') return; // uncertainty policy already applied upstream (Phase 3); never re-decided here
+    const perFeature = candidate.features.map(f => transformedValue(row, idx, f));
+    const anyMissing = perFeature.some(v => v == null);
+    if (anyMissing) { missingCount++; values.push(null); outcomes.push(row.event_outcome); return; }
+    // Interaction combination for depth > 1: product, matching this
+    // project's own established interaction convention (pdi*ndi in the
+    // earlier positive-control work) -- reused, not reinvented.
+    const combined = perFeature.reduce((a, b) => a * b, 1);
+    values.push(combined);
+    outcomes.push(row.event_outcome);
+  });
+  const totalConsidered = values.length;
+  const missingRate = totalConsidered > 0 ? missingCount / totalConsidered : 1;
+  const maxMissingRate = missingDataRules && missingDataRules.maxMissingRate != null ? missingDataRules.maxMissingRate : 0.1;
+  if (missingRate > maxMissingRate) {
+    return { ok: false, error: 'missing-data rate ' + missingRate.toFixed(4) + ' exceeds the frozen policy maximum ' + maxMissingRate, missingCount, totalConsidered };
+  }
+  // Drop the (policy-compliant) missing entries pairwise for the statistical test itself.
+  const pairedValues = [], pairedOutcomes = [];
+  for (let i = 0; i < values.length; i++) {
+    if (values[i] != null && outcomes[i] != null) { pairedValues.push(values[i]); pairedOutcomes.push(outcomes[i] === 'positive' ? 1 : 0); }
+  }
+  return { ok: true, values: pairedValues, outcomes: pairedOutcomes, missingCount, totalConsidered, missingRate };
+}
+
+// ── Phase 6: real statistical evaluation for one candidate ──
+/** Marginal MI permutation test, mirroring msdFeaturePermutationNull's exact established pattern, generalized to a single feature series against the outcome. */
+function msdSingleFeatureMIPermutationTest(featureValues, outcomeValues, observedMI, permutations, seed){
+  const rng = msdSeededRandom(seed || 1);
+  let countGE = 0;
+  for (let p = 0; p < permutations; p++) {
+    const shuffled = msdSeededShuffle(outcomeValues, rng);
+    const mi = msdMutualInformation(featureValues, shuffled, 10);
+    if (mi != null && mi >= observedMI) countGE++;
+  }
+  return (1 + countGE) / (1 + permutations);
+}
+
+/** Evaluates one candidate's already-materialized feature series statistically. Read-only; produces a result object, writes nothing. */
+function msdEvaluateCandidateStatistically(materialized, permutations, seed){
+  if (!materialized.ok || materialized.values.length < 10) {
+    return { ok: false, error: 'insufficient sample after missing-data handling', sampleSize: materialized.values ? materialized.values.length : 0 };
+  }
+  const observedMI = msdMutualInformation(materialized.values, materialized.outcomes, 10);
+  const pValue = msdSingleFeatureMIPermutationTest(materialized.values, materialized.outcomes, observedMI, permutations || 200, seed || 1);
+  const positiveCount = materialized.outcomes.filter(o => o === 1).length;
+  return {
+    ok: true, sampleSize: materialized.values.length, positiveCount, negativeCount: materialized.values.length - positiveCount,
+    effectSize: observedMI, pValue, missingCount: materialized.missingCount, missingRate: materialized.missingRate,
+  };
+}
+
+// ── Full pilot orchestrator: chains everything above with the existing, unmodified Part 6/7 governance ──
+/**
+ * REAL Level 2 pilot. Operates entirely on the `allStates` array passed
+ * in by the caller -- never fetches data itself. Never writes to
+ * MarketStates, never touches calibration evidence, never auto-accepts.
+ * Uses msdDryRunEnumerateCandidates AS-IS for candidate generation (pure
+ * combinatorics, identical whether the evaluation that follows is real
+ * or synthetic) and msdApplySearchSpaceWideCorrectionVerified
+ * exclusively for correction -- the old unverified function is never
+ * referenced anywhere in this pipeline.
+ */
+async function msdRunLevel2Pilot(allStates, frozenSearchSpace, options){
+  options = options || {};
+  const log = [];
+
+  const snapshotRows = msdBuildRealSnapshotRows(allStates, options.uncertaintyHandling || { filterCertainOnly: true });
+  log.push({ step: 'snapshot_rows_built', epochCount: snapshotRows.epochCount, certainCount: snapshotRows.certainCount, droppedUncertainCount: snapshotRows.droppedUncertainCount });
+
+  const frozenSnapshot = msdFreezeDatasetSnapshot({
+    sourceScope: 'MarketStates', symbolScope: frozenSearchSpace.symbols[0],
+    timeRangeStart: snapshotRows.rows.length ? Math.min(...snapshotRows.rows.map(r => r.epoch)) : 0,
+    timeRangeEnd: snapshotRows.rows.length ? Math.max(...snapshotRows.rows.map(r => r.epoch)) : 0,
+    eventDefinitionVersion: 'event_def_v1', schemaVersion: 'v1', searchSpaceId: frozenSearchSpace.searchSpaceId,
+    featureSchemaVersion: MSD_FEATURE_SCHEMA_VERSION, labelConfidencePolicy: snapshotRows.handlingMode,
+    datasetFingerprint: msdComputeDatasetFingerprint({ trainSet: snapshotRows.rows, valSet: [], testSet: [] }),
+  });
+  const snapshotRecord = await msdRecordDatasetSnapshot(frozenSnapshot);
+  log.push({ step: 'dataset_snapshot_frozen_and_recorded', datasetSnapshotId: frozenSnapshot.datasetSnapshotId, ok: snapshotRecord.ok });
+
+  const cardinality = msdComputeSearchSpaceCardinality(frozenSearchSpace);
+  if (cardinality.status === 'overflow') return { ok: false, log, error: 'search space overflow', cardinality };
+  const enumeration = msdDryRunEnumerateCandidates(frozenSearchSpace);
+  if (enumeration.count !== cardinality.totalCardinality) throw new Error('GOVERNANCE INVARIANT VIOLATION: enumeration count !== cardinality.');
+  log.push({ step: 'enumeration_verified', count: enumeration.count });
+
+  const candidateResults = [];
+  for (const candidate of enumeration.candidates) {
+    const materialized = msdMaterializeCandidateFeature(snapshotRows.rows, candidate, frozenSearchSpace.missingDataRules);
+    const evaluation = materialized.ok ? msdEvaluateCandidateStatistically(materialized, options.permutations || 200, options.seed || 1) : { ok: false, error: materialized.error };
+    candidateResults.push({ candidate, materialized: { ok: materialized.ok, missingCount: materialized.missingCount, missingRate: materialized.missingRate }, evaluation });
+  }
+  log.push({ step: 'candidates_evaluated', count: candidateResults.length, succeeded: candidateResults.filter(c => c.evaluation.ok).length });
+
+  const validResults = candidateResults.filter(c => c.evaluation.ok);
+  const pValues = validResults.map(c => c.evaluation.pValue);
+  const correction = pValues.length > 0 ? msdApplySearchSpaceWideCorrectionVerified({ pValues, searchSpace: frozenSearchSpace, claimedFamilySize: cardinality.totalCardinality, alpha: options.alpha || 0.05 }) : null;
+  log.push({ step: 'multiplicity_correction_verified', verifiedFamilySize: correction ? correction.verifiedFamilySize : null });
+
+  const hypotheses = [];
+  for (let i = 0; i < validResults.length; i++) {
+    const { candidate, evaluation } = validResults[i];
+    const hypothesisId = msdGenerateHypothesisId();
+    const fields = {
+      hypothesis_id: hypothesisId, parent_run_id: options.parentRunId || 'level2_pilot_run', candidate_id: msdGenerateCandidateId(),
+      search_space_id: frozenSearchSpace.searchSpaceId, search_space_version: frozenSearchSpace.searchSpaceVersion, search_space_hash: frozenSearchSpace.searchSpaceHash,
+      dataset_snapshot_id: frozenSnapshot.datasetSnapshotId, dataset_fingerprint: frozenSnapshot.datasetFingerprint,
+      event_definition_version: 'event_def_v1', feature_schema_version: MSD_FEATURE_SCHEMA_VERSION,
+      symbol: candidate.symbol, observation_window: candidate.observationWindow, lead_time: candidate.leadTime,
+      feature_definition: candidate.features, transformation_definition: candidate.transformation,
+      lag_definition: candidate.lag, rolling_definition: candidate.rolling, temporal_definition: candidate.temporal, aggregation_definition: candidate.aggregation,
+      interaction_definition: candidate.features.length, model_family: candidate.modelFamily, statistical_test: candidate.statisticalTest,
+      correction_method: frozenSearchSpace.multipleTestingControls[0], verified_family_size: cardinality.totalCardinality, alpha: options.alpha || 0.05,
+      label_confidence_policy: snapshotRows.handlingMode, uncertainty_policy: snapshotRows.handlingMode, conflict_status_policy: 'standard',
+      effect_size: evaluation.effectSize, p_value: evaluation.pValue,
+      adjusted_p_value: correction ? correction.results[i].adjustedPValue : null,
+      sample_size: evaluation.sampleSize, missing_data_count: evaluation.missingCount,
+    };
+    const frozenHypothesis = msdFreezeHypothesisRecord(fields);
+    const recordResult = await msdRecordHypothesisRecord(frozenHypothesis);
+    hypotheses.push({ hypothesisId, contentHash: frozenHypothesis.contentHash, ok: recordResult.ok, adjustedPValue: fields.adjusted_p_value });
+  }
+  log.push({ step: 'hypothesis_records_created', count: hypotheses.length });
+
+  return {
+    ok: true, log, searchSpaceId: frozenSearchSpace.searchSpaceId, datasetSnapshotId: frozenSnapshot.datasetSnapshotId,
+    cardinality: cardinality.totalCardinality, enumeratedCount: enumeration.count,
+    candidatesEvaluated: candidateResults.length, hypothesesCreated: hypotheses.length,
+    hypotheses, snapshotStats: snapshotRows,
+  };
+}
+
+// ── STEP 9: Search-space-wide multiple-testing governance ──
+/**
+ * Wraps msdBenjaminiHochberg (reused as the mathematical primitive,
+ * unmodified) but REQUIRES the caller to supply the true, complete
+ * candidate family size for the entire frozen search space actually
+ * attempted — never silently defaults to "however many p-values happen
+ * to be in this array", which is exactly the per-analyzer-scoping gap
+ * this function exists to close.
+ */
+function msdApplySearchSpaceWideCorrection(pValues, totalCandidateFamilySize, searchSpaceId, alpha){
+  if (totalCandidateFamilySize == null) throw new Error('Refusing to apply correction without an explicit totalCandidateFamilySize.');
+  if (pValues.length > totalCandidateFamilySize) throw new Error('pValues.length (' + pValues.length + ') exceeds the declared totalCandidateFamilySize (' + totalCandidateFamilySize + ').');
+  const paddedPValues = pValues.concat(new Array(totalCandidateFamilySize - pValues.length).fill(1));
+  const corrected = msdBenjaminiHochberg(paddedPValues, alpha);
+  return {
+    results: corrected.slice(0, pValues.length),
+    searchSpaceId: searchSpaceId || null,
+    totalCandidateFamilySize, numberOfValidPValues: pValues.length,
+    correctionMethod: 'Benjamini-Hochberg (search-space-wide, padded to true family size)',
+  };
+}
+
+// ── PART 6, PART C: INDEPENDENTLY VERIFIED MULTIPLE-TESTING CORRECTION ──
+// Closes the Part 5 finding directly: msdApplySearchSpaceWideCorrection
+// above trusts whatever totalCandidateFamilySize a caller supplies, with
+// no check against the frozen search space. That function is left
+// completely UNMODIFIED (Part 4's own regression tests exercise it
+// exactly as before). This is a NEW, separate, safer entry point that
+// future callers should use instead -- it REQUIRES the actual frozen
+// search space, computes the true cardinality independently via
+// msdComputeSearchSpaceCardinality, and REFUSES to proceed if a
+// caller-supplied claimedFamilySize (retained only as an assertion to
+// verify, never trusted as truth) disagrees with it.
+function msdApplySearchSpaceWideCorrectionVerified(params){
+  const { pValues, searchSpace, claimedFamilySize, alpha } = params || {};
+  if (!searchSpace || !Object.isFrozen(searchSpace)) {
+    throw new Error('Refusing correction: a valid, frozen search space is required (governance failure, not merely a missing convenience).');
+  }
+  const cardinality = msdComputeSearchSpaceCardinality(searchSpace);
+  if (cardinality.status === 'overflow') {
+    throw new Error('Refusing correction: the frozen search space itself reports OVERFLOW (' + cardinality.totalCardinality + ' > maxCandidateCount ' + cardinality.maxCandidateCount + ') — this search space was never valid for execution.');
+  }
+  const verifiedFamilySize = cardinality.totalCardinality;
+  if (claimedFamilySize != null && claimedFamilySize !== verifiedFamilySize) {
+    throw new Error('GOVERNANCE FAILURE: caller-claimed family size (' + claimedFamilySize + ') disagrees with the independently verified cardinality of the frozen search space (' + verifiedFamilySize + '). Refusing to proceed — this is exactly the falsification this function exists to prevent.');
+  }
+  if (!Array.isArray(pValues) || pValues.length > verifiedFamilySize) {
+    throw new Error('pValues.length (' + (pValues ? pValues.length : 'n/a') + ') exceeds the verified family size (' + verifiedFamilySize + ').');
+  }
+  const declaredMethod = (searchSpace.multipleTestingControls || [])[0];
+  const correctionMethod = (params.correctionMethod || declaredMethod || 'benjamini_hochberg');
+  if (declaredMethod && params.correctionMethod && params.correctionMethod !== declaredMethod) {
+    throw new Error('GOVERNANCE FAILURE: requested correctionMethod ("' + params.correctionMethod + '") does not match the frozen search space\'s own declared multipleTestingControls ("' + declaredMethod + '"). A correction policy that differs from the frozen specification cannot be used silently.');
+  }
+  const effectiveAlpha = alpha != null ? alpha : 0.05;
+  const paddedPValues = pValues.concat(new Array(verifiedFamilySize - pValues.length).fill(1));
+  const bhFn = correctionMethod === 'benjamini_yekutieli' ? msdBenjaminiYekutieli : msdBenjaminiHochberg;
+  const corrected = bhFn(paddedPValues, effectiveAlpha);
+  return {
+    results: corrected.slice(0, pValues.length),
+    verifiedFamilySize, numberOfValidPValues: pValues.length,
+    searchSpaceId: searchSpace.searchSpaceId, searchSpaceVersion: searchSpace.searchSpaceVersion, searchSpaceHash: searchSpace.searchSpaceHash,
+    correctionMethod, alpha: effectiveAlpha,
+    cardinalityExplanation: cardinality.explanation,
+  };
+}
+
 /**
  * Benjamini-Yekutieli False Discovery Rate correction (Phase 7A). Same
  * step-up structure as Benjamini-Hochberg, but scaled by the harmonic
