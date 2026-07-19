@@ -8710,6 +8710,169 @@ async function msdRunLevel2Pilot(allStates, frozenSearchSpace, options){
   };
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// PART 10 — SCIENTIFIC VALIDITY REMEDIATION (NEW, ADDITIVE FUNCTIONS ONLY)
+// ══════════════════════════════════════════════════════════════════════
+// The original msdRunLevel2Pilot, msdMaterializeCandidateFeature, and
+// msdSingleFeatureMIPermutationTest above are completely UNMODIFIED.
+// Every function below is new. The original pilot's results, provenance,
+// and hypothesis records remain exactly as they were.
+
+// ── Part C: lead-time-correct feature materialization ──
+/**
+ * Corrects the Part 9 finding directly: reuses the EXACT filtering
+ * convention already established and tested in msdBuildExperimentDataset
+ * (s.outcome === 'negative' || s.leadTime === config.leadTime) — not
+ * invented here, reused from existing, already-proven architecture.
+ * Fails loudly (throws), never silently proceeds, if zero rows satisfy
+ * the declared lead-time relationship.
+ */
+function msdMaterializeCandidateFeatureLeadTimeCorrected(rows, candidate, missingDataRules){
+  if (candidate.leadTime == null) throw new Error('Refusing ambiguous lead-time definition: candidate.leadTime is required.');
+  const leadTimeFiltered = rows.filter(r => r.event_outcome === 'negative' || r.leadTime === candidate.leadTime);
+  if (leadTimeFiltered.length === 0) throw new Error('No rows satisfy the declared lead-time relationship (leadTime=' + candidate.leadTime + ') — refusing to proceed with zero valid observations.');
+  // Reuses the ORIGINAL, unmodified materialization logic on the now-correctly-filtered row set.
+  return msdMaterializeCandidateFeature(leadTimeFiltered, candidate, missingDataRules);
+}
+
+// ── Part D/F: dependence-aware null — circular time shift ──
+// TEST SPECIFICATION (Part F, stated explicitly, not left implicit):
+//   Test statistic: mutual information (msdMutualInformation, unmodified).
+//   H0: the candidate feature contains no predictive information about
+//       the event outcome under the declared lead-time relationship.
+//   H1: the candidate feature contains predictive information.
+//   Resampling mechanism: circular shift of the OUTCOME sequence by a
+//       pseudo-random offset (never smaller than minShift), preserving
+//       the outcome sequence's own internal autocorrelation and
+//       clustering structure EXACTLY (it is the same sequence, rotated),
+//       while breaking the specific pointwise feature-outcome alignment.
+//   Number of resamples: caller-specified (200 in the revalidation run).
+//   Random seed: caller-specified, reproducible.
+//   P-value formula: (1 + count(null MI >= observed MI)) / (1 + resamples).
+//   Dependence structure PRESERVED: outcome-sequence autocorrelation,
+//       positive-label clustering, run structure.
+//   Dependence structure NOT preserved: the specific alignment between
+//       a given feature observation and its paired outcome (exactly the
+//       thing the null needs to break).
+function msdCircularShiftPermutationTest(featureValues, outcomeValues, observedMI, permutations, seed, minShift){
+  const n = outcomeValues.length;
+  const effectiveMinShift = minShift != null ? minShift : Math.max(1, Math.floor(n * 0.05)); // default: skip trivial near-identity shifts
+  if (n - effectiveMinShift * 2 <= 0) throw new Error('Sample too small for a meaningful circular-shift null at this minShift.');
+  const rng = msdSeededRandom(seed || 1);
+  let countGE = 0;
+  for (let p = 0; p < permutations; p++) {
+    const shift = effectiveMinShift + Math.floor(rng() * (n - 2 * effectiveMinShift));
+    const shifted = new Array(n);
+    for (let i = 0; i < n; i++) shifted[i] = outcomeValues[(i + shift) % n];
+    const mi = msdMutualInformation(featureValues, shifted, 10);
+    if (mi != null && mi >= observedMI) countGE++;
+  }
+  return (1 + countGE) / (1 + permutations);
+}
+
+function msdEvaluateCandidateDependenceAware(materialized, permutations, seed, minShift){
+  if (!materialized.ok || materialized.values.length < 10) {
+    return { ok: false, error: 'insufficient sample after missing-data and lead-time handling', sampleSize: materialized.values ? materialized.values.length : 0 };
+  }
+  const observedMI = msdMutualInformation(materialized.values, materialized.outcomes, 10);
+  const pValue = msdCircularShiftPermutationTest(materialized.values, materialized.outcomes, observedMI, permutations || 200, seed || 1, minShift);
+  const positiveCount = materialized.outcomes.filter(o => o === 1).length;
+  return {
+    ok: true, sampleSize: materialized.values.length, positiveCount, negativeCount: materialized.values.length - positiveCount,
+    effectSize: observedMI, pValue, missingCount: materialized.missingCount, missingRate: materialized.missingRate,
+    nullModel: 'circular_shift', minShift: minShift != null ? minShift : Math.max(1, Math.floor(materialized.values.length * 0.05)),
+  };
+}
+
+// ── Part G: revalidation orchestrator — original RSI/ADX candidates only, corrected pipeline ──
+/**
+ * Re-evaluates EXACTLY the original two candidates (rsi, adx) with the
+ * corrected lead-time filtering and the dependence-aware null. Never
+ * touches the original pilot's records. Creates NEW search-space,
+ * dataset-snapshot, and hypothesis identities -- never reuses or
+ * overwrites the original pilot's IDs.
+ */
+async function msdRunLevel2PilotRevalidation(allStates, originalSearchSpaceDefinition, options){
+  options = options || {};
+  const log = [];
+
+  // New search-space identity, explicitly marked as a revalidation of the original.
+  const revalidationSpaceDefinition = Object.assign({}, originalSearchSpaceDefinition);
+  const frozenSpace = msdFreezeSearchSpace(revalidationSpaceDefinition, options.owner || 'level2_revalidation_owner', { schemaVersion: MSD_SEARCH_SPACE_SPEC_VERSION_V2 });
+  const spaceRecord = await msdRecordSearchSpaceSpecification(frozenSpace);
+  log.push({ step: 'revalidation_search_space_frozen_and_recorded', searchSpaceId: frozenSpace.searchSpaceId, ok: spaceRecord.ok, note: 'NEW identity, original pilot search space untouched' });
+
+  const snapshotRows = msdBuildRealSnapshotRows(allStates, options.uncertaintyHandling || { filterCertainOnly: true });
+  log.push({ step: 'snapshot_rows_built', epochCount: snapshotRows.epochCount, certainCount: snapshotRows.certainCount, droppedUncertainCount: snapshotRows.droppedUncertainCount });
+
+  const frozenSnapshot = msdFreezeDatasetSnapshot({
+    sourceScope: 'MarketStates_revalidation', symbolScope: frozenSpace.symbols[0],
+    timeRangeStart: snapshotRows.rows.length ? msdSafeMin(snapshotRows.rows.map(r => r.epoch)) : 0,
+    timeRangeEnd: snapshotRows.rows.length ? msdSafeMax(snapshotRows.rows.map(r => r.epoch)) : 0,
+    eventDefinitionVersion: 'event_def_v1', schemaVersion: 'v1', searchSpaceId: frozenSpace.searchSpaceId,
+    featureSchemaVersion: MSD_FEATURE_SCHEMA_VERSION, labelConfidencePolicy: snapshotRows.handlingMode,
+    datasetFingerprint: msdComputeDatasetFingerprint({ trainSet: snapshotRows.rows, valSet: [], testSet: [] }),
+  });
+  const snapshotRecord = await msdRecordDatasetSnapshot(frozenSnapshot);
+  log.push({ step: 'revalidation_dataset_snapshot_frozen_and_recorded', datasetSnapshotId: frozenSnapshot.datasetSnapshotId, ok: snapshotRecord.ok });
+
+  const cardinality = msdComputeSearchSpaceCardinality(frozenSpace);
+  const enumeration = msdDryRunEnumerateCandidates(frozenSpace);
+  if (enumeration.count !== cardinality.totalCardinality) throw new Error('GOVERNANCE INVARIANT VIOLATION.');
+  log.push({ step: 'enumeration_verified', count: enumeration.count });
+
+  const candidateResults = [];
+  for (const candidate of enumeration.candidates) {
+    let materialized, evaluation;
+    try {
+      materialized = msdMaterializeCandidateFeatureLeadTimeCorrected(snapshotRows.rows, candidate, frozenSpace.missingDataRules);
+      evaluation = msdEvaluateCandidateDependenceAware(materialized, options.permutations || 200, options.seed || 1, options.minShift);
+    } catch (e) {
+      evaluation = { ok: false, error: e.message };
+      materialized = { ok: false };
+    }
+    candidateResults.push({ candidate, materialized: { ok: materialized.ok, missingCount: materialized.missingCount, missingRate: materialized.missingRate }, evaluation });
+  }
+  log.push({ step: 'candidates_evaluated_leadtime_corrected', count: candidateResults.length, succeeded: candidateResults.filter(c => c.evaluation.ok).length });
+
+  const validResults = candidateResults.filter(c => c.evaluation.ok);
+  const pValues = validResults.map(c => c.evaluation.pValue);
+  const correction = pValues.length > 0 ? msdApplySearchSpaceWideCorrectionVerified({ pValues, searchSpace: frozenSpace, claimedFamilySize: cardinality.totalCardinality, alpha: options.alpha || 0.05 }) : null;
+  log.push({ step: 'multiplicity_correction_verified', verifiedFamilySize: correction ? correction.verifiedFamilySize : null });
+
+  const hypotheses = [];
+  for (let i = 0; i < validResults.length; i++) {
+    const { candidate, evaluation } = validResults[i];
+    const hypothesisId = msdGenerateHypothesisId();
+    const fields = {
+      hypothesis_id: hypothesisId, parent_run_id: options.parentRunId || 'level2_revalidation_run', candidate_id: msdGenerateCandidateId(),
+      search_space_id: frozenSpace.searchSpaceId, search_space_version: frozenSpace.searchSpaceVersion, search_space_hash: frozenSpace.searchSpaceHash,
+      dataset_snapshot_id: frozenSnapshot.datasetSnapshotId, dataset_fingerprint: frozenSnapshot.datasetFingerprint,
+      event_definition_version: 'event_def_v1', feature_schema_version: MSD_FEATURE_SCHEMA_VERSION,
+      symbol: candidate.symbol, observation_window: candidate.observationWindow, lead_time: candidate.leadTime,
+      feature_definition: candidate.features, transformation_definition: candidate.transformation,
+      lag_definition: candidate.lag, rolling_definition: candidate.rolling, temporal_definition: candidate.temporal, aggregation_definition: candidate.aggregation,
+      interaction_definition: candidate.features.length, model_family: candidate.modelFamily, statistical_test: candidate.statisticalTest + '_circular_shift_null',
+      correction_method: frozenSpace.multipleTestingControls[0], verified_family_size: cardinality.totalCardinality, alpha: options.alpha || 0.05,
+      label_confidence_policy: snapshotRows.handlingMode, uncertainty_policy: snapshotRows.handlingMode, conflict_status_policy: 'standard',
+      effect_size: evaluation.effectSize, p_value: evaluation.pValue,
+      adjusted_p_value: correction ? correction.results[i].adjustedPValue : null,
+      sample_size: evaluation.sampleSize, missing_data_count: evaluation.missingCount,
+    };
+    const frozenHypothesis = msdFreezeHypothesisRecord(fields);
+    const recordResult = await msdRecordHypothesisRecord(frozenHypothesis);
+    hypotheses.push({ hypothesisId, contentHash: frozenHypothesis.contentHash, ok: recordResult.ok, adjustedPValue: fields.adjusted_p_value, sampleSize: evaluation.sampleSize, effectSize: evaluation.effectSize, rawPValue: evaluation.pValue, feature: candidate.features.join('+') });
+  }
+  log.push({ step: 'revalidation_hypothesis_records_created', count: hypotheses.length });
+
+  return {
+    ok: true, log, searchSpaceId: frozenSpace.searchSpaceId, datasetSnapshotId: frozenSnapshot.datasetSnapshotId,
+    cardinality: cardinality.totalCardinality, enumeratedCount: enumeration.count,
+    candidatesEvaluated: candidateResults.length, hypothesesCreated: hypotheses.length,
+    hypotheses, snapshotStats: snapshotRows, candidateResults,
+  };
+}
+
 // ── STEP 9: Search-space-wide multiple-testing governance ──
 /**
  * Wraps msdBenjaminiHochberg (reused as the mathematical primitive,
