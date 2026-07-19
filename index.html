@@ -8649,8 +8649,8 @@ async function msdRunLevel2Pilot(allStates, frozenSearchSpace, options){
 
   const frozenSnapshot = msdFreezeDatasetSnapshot({
     sourceScope: 'MarketStates', symbolScope: frozenSearchSpace.symbols[0],
-    timeRangeStart: snapshotRows.rows.length ? Math.min(...snapshotRows.rows.map(r => r.epoch)) : 0,
-    timeRangeEnd: snapshotRows.rows.length ? Math.max(...snapshotRows.rows.map(r => r.epoch)) : 0,
+    timeRangeStart: snapshotRows.rows.length ? msdSafeMin(snapshotRows.rows.map(r => r.epoch)) : 0,
+    timeRangeEnd: snapshotRows.rows.length ? msdSafeMax(snapshotRows.rows.map(r => r.epoch)) : 0,
     eventDefinitionVersion: 'event_def_v1', schemaVersion: 'v1', searchSpaceId: frozenSearchSpace.searchSpaceId,
     featureSchemaVersion: MSD_FEATURE_SCHEMA_VERSION, labelConfidencePolicy: snapshotRows.handlingMode,
     datasetFingerprint: msdComputeDatasetFingerprint({ trainSet: snapshotRows.rows, valSet: [], testSet: [] }),
