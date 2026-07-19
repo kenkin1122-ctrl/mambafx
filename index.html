@@ -6270,9 +6270,15 @@ function msdGeneratePositiveControlRunId(signalType, strength, mainSeed, holdout
   return 'pcrun_' + signalType + '_' + strength + '_' + mainSeed + '_' + holdoutSeed;
 }
 
-async function msdRunPositiveControlSensitivityTest(signalType, strength, mainSeed, holdoutSeed, registerFn){
+async function msdRunPositiveControlSensitivityTest(signalType, strength, mainSeed, holdoutSeed, registerFn, options){
+  options = options || {};
   const generator = signalType === 'A' ? msdGeneratePositiveControlSignalA : msdGeneratePositiveControlSignalB;
-  const n = 2000;
+  // pc_spec_v2: n and specVersion are now optional overrides, defaulting
+  // to the exact prior hardcoded values — every existing call site that
+  // omits this new parameter (all five already-completed conditions)
+  // is completely unaffected, byte-for-byte, in behavior and output.
+  const n = options.n || 2000;
+  const specVersion = options.specVersion || MSD_POSITIVE_CONTROL_SPEC_VERSION;
 
   // DEFECT 2 FIX (duplicate-execution protection): this exact condition's
   // identity is deterministic — before running anything, check whether
@@ -6286,7 +6292,7 @@ async function msdRunPositiveControlSensitivityTest(signalType, strength, mainSe
       status: 'ALREADY_EXECUTED',
       reason: 'This exact positive-control condition (signalType=' + signalType + ', strength=' + strength + ', mainSeed=' + mainSeed + ', holdoutSeed=' + holdoutSeed + ') was already executed and persisted (pcRunId=' + pcRunId + ') — returning the historical result rather than re-running and duplicating evidence.',
       pcRunId, priorResult: alreadyExecuted,
-      signalType, strength, mainSeed, holdoutSeed, specVersion: MSD_POSITIVE_CONTROL_SPEC_VERSION,
+      signalType, strength, mainSeed, holdoutSeed, specVersion,
     };
   }
 
@@ -6370,12 +6376,13 @@ async function msdRunPositiveControlSensitivityTest(signalType, strength, mainSe
   // Discovery Repository or either control ledger's own evidence.
   await msdRecordCalibrationMatrixEntry({
     condition: 'positive_control', pcRunId, signalType, strength, mainSeed, holdoutSeed,
-    knownSignal: true, observedResult: status, interpretation: reason, specVersion: MSD_POSITIVE_CONTROL_SPEC_VERSION,
+    knownSignal: true, observedResult: status, interpretation: reason, specVersion,
+    sampleSize: n, revisionReason: options.revisionReason || null,
   });
 
   return {
     status, reason, pcRunId,
-    signalType, strength, mainSeed, holdoutSeed, specVersion: MSD_POSITIVE_CONTROL_SPEC_VERSION,
+    signalType, strength, mainSeed, holdoutSeed, specVersion, sampleSize: n,
     mainResult, holdoutResult,
   };
 }
