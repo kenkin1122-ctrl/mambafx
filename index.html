@@ -8873,6 +8873,105 @@ async function msdRunLevel2PilotRevalidation(allStates, originalSearchSpaceDefin
   };
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// PART 11 — CHRONOLOGICAL STABILITY VALIDATION (PURE COMPUTATION, NO WRITES)
+// ══════════════════════════════════════════════════════════════════════
+// Deliberately makes ZERO persistent writes anywhere -- no Discovery
+// Ledger entries, no hypothesis records, no search-space/snapshot
+// records. This is a read-only diagnostic over already-validated
+// candidates, not a new discovery run, so nothing here should look like
+// one in the permanent record. Reuses msdMaterializeCandidateFeatureLeadTimeCorrected,
+// msdEvaluateCandidateDependenceAware, and msdApplySearchSpaceWideCorrectionVerified
+// EXACTLY as Part 10 validated them -- no new statistical method invented.
+
+/** Pure. Splits chronologically-sorted rows into `segmentCount` contiguous, non-overlapping, equal-row-count segments -- never shuffled. */
+function msdPartitionChronologicalSegments(rows, segmentCount){
+  const sorted = rows.slice().sort((a, b) => a.epoch - b.epoch);
+  const n = sorted.length;
+  const segments = [];
+  for (let s = 0; s < segmentCount; s++) {
+    const start = Math.floor(n * s / segmentCount);
+    const end = Math.floor(n * (s + 1) / segmentCount);
+    const segmentRows = sorted.slice(start, end);
+    segments.push({
+      segmentIndex: s, rows: segmentRows,
+      timeRangeStart: segmentRows.length ? segmentRows[0].epoch : null,
+      timeRangeEnd: segmentRows.length ? segmentRows[segmentRows.length - 1].epoch : null,
+      n: segmentRows.length,
+    });
+  }
+  return segments;
+}
+
+/**
+ * Runs the EXACT corrected candidate evaluation (leadtime-corrected
+ * materialization + circular-shift dependence-aware null +
+ * search-space-wide-verified correction with family size 2) across 4
+ * chronological segments, for exactly RSI and ADX -- no new candidates,
+ * no new search. Makes NO persistent writes. Returns a pure report.
+ */
+async function msdRunChronologicalStabilityValidation(allStates, searchSpaceDefinition, options){
+  options = options || {};
+  const permutations = options.permutations || 200;
+  const seed = options.seed || 7001;
+  const alpha = options.alpha || 0.05;
+
+  // Build the exact same frozen search space used for correction-metadata purposes
+  // ONLY -- never recorded to the Discovery Ledger (no msdRecordSearchSpaceSpecification call).
+  const frozenSpace = msdFreezeSearchSpace(searchSpaceDefinition, options.owner || 'chronological_stability_diagnostic', { schemaVersion: MSD_SEARCH_SPACE_SPEC_VERSION_V2 });
+  const cardinality = msdComputeSearchSpaceCardinality(frozenSpace);
+  const enumeration = msdDryRunEnumerateCandidates(frozenSpace);
+  if (enumeration.count !== cardinality.totalCardinality) throw new Error('GOVERNANCE INVARIANT VIOLATION.');
+  if (enumeration.count !== 2) throw new Error('Expected exactly 2 candidates (rsi, adx) for this diagnostic — found ' + enumeration.count + '. Refusing to proceed with an unexpected family size.');
+
+  const snapshotRows = msdBuildRealSnapshotRows(allStates, options.uncertaintyHandling || { filterCertainOnly: true });
+  const segments = msdPartitionChronologicalSegments(snapshotRows.rows, 4);
+
+  const segmentResults = [];
+  for (const segment of segments) {
+    const candidateOutcomes = [];
+    for (const candidate of enumeration.candidates) {
+      let materialized, evaluation;
+      try {
+        materialized = msdMaterializeCandidateFeatureLeadTimeCorrected(segment.rows, candidate, frozenSpace.missingDataRules);
+        evaluation = msdEvaluateCandidateDependenceAware(materialized, permutations, seed, options.minShift);
+      } catch (e) {
+        evaluation = { ok: false, error: e.message };
+      }
+      candidateOutcomes.push({ feature: candidate.features.join('+'), candidate, evaluation });
+    }
+    const validOutcomes = candidateOutcomes.filter(c => c.evaluation.ok);
+    const pValues = validOutcomes.map(c => c.evaluation.pValue);
+    // Correction scoped to exactly this segment's 2-candidate family -- never a wider family, never a new search.
+    const correction = pValues.length > 0 ? msdApplySearchSpaceWideCorrectionVerified({ pValues, searchSpace: frozenSpace, claimedFamilySize: cardinality.totalCardinality, alpha }) : null;
+
+    const positiveCount = segment.rows.filter(r => r.event_outcome === 'positive').length;
+    const negativeCount = segment.rows.filter(r => r.event_outcome === 'negative').length;
+
+    segmentResults.push({
+      segmentIndex: segment.segmentIndex, timeRangeStart: segment.timeRangeStart, timeRangeEnd: segment.timeRangeEnd,
+      n: segment.n, positiveCount, negativeCount,
+      candidates: candidateOutcomes.map((c, i) => ({
+        feature: c.feature, ok: c.evaluation.ok,
+        effectSize: c.evaluation.ok ? c.evaluation.effectSize : null,
+        sampleSize: c.evaluation.ok ? c.evaluation.sampleSize : null,
+        rawPValue: c.evaluation.ok ? c.evaluation.pValue : null,
+        adjustedPValue: (correction && c.evaluation.ok) ? correction.results[validOutcomes.indexOf(c)].adjustedPValue : null,
+        error: c.evaluation.ok ? null : c.evaluation.error,
+      })),
+    });
+  }
+
+  return {
+    ok: true, searchSpaceId: frozenSpace.searchSpaceId, searchSpaceHash: frozenSpace.searchSpaceHash,
+    familySize: cardinality.totalCardinality, segments: segmentResults,
+    totalEligibleRows: snapshotRows.rows.length, totalEpochs: snapshotRows.epochCount,
+    certainCount: snapshotRows.certainCount, droppedUncertainCount: snapshotRows.droppedUncertainCount,
+    nullModel: 'circular_shift', permutations, seed, alpha,
+    writesPerformed: 0, note: 'Zero persistent writes were performed by this diagnostic -- no Discovery Ledger entries, no hypothesis records, no search-space or snapshot records.',
+  };
+}
+
 // ── STEP 9: Search-space-wide multiple-testing governance ──
 /**
  * Wraps msdBenjaminiHochberg (reused as the mathematical primitive,
