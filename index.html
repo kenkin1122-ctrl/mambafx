@@ -6310,7 +6310,7 @@ async function msdRunPositiveControlSensitivityTest(signalType, strength, mainSe
     const experimentRecord = { experimentId: 'pc_' + signalType + '_' + strength + '_' + seed, symbol: config.symbol, featureVersion: config.featureVersion, leadTime: config.leadTime, randomSeed: seed, datasetEpochMin: rows[0].epoch, datasetEpochMax: rows[rows.length - 1].epoch, registrationId: null };
 
     const discovery = msdRunStatisticalDiscovery(dataset, { randomSeed: seed });
-    const trainResult = msdTrainModel(dataset);
+    const trainResult = msdTrainModel(dataset, { cbOptions: { seed } });
     // DEFECT 1 FIX (evidence isolation): recordOpts now explicitly routes
     // every discovery this run produces into PositiveControlLedger — a
     // physically separate database from the real KnowledgeBase — instead
@@ -28404,10 +28404,19 @@ function pbLightGBM(Xtr,ytr,Xte,yte,{nTrees=50,lr=0.1,numLeaves=16,nBins=32,minC
 }
 
 /* ── CatBoost approximation (ordered boosting, symmetric trees) ─────── */
-function pbCatBoost(Xtr,ytr,Xte,yte,{nTrees=50,lr=0.05,depth=4,l2=3,nBins=12}={}){
+function pbCatBoost(Xtr,ytr,Xte,yte,{nTrees=50,lr=0.05,depth=4,l2=3,nBins=12,seed=1}={}){
   const n=Xtr.length,nFeat=Xtr[0].length;
-  // Ordered boosting: shuffle once, use a growing prefix for each sample's gradient
-  const order=Array.from({length:n},(_,i)=>i).sort(()=>Math.random()-0.5);
+  // R-076 FIX: was Math.random() — genuinely unseeded, confirmed by direct
+  // isolated testing during the Signal B moderate divergence investigation.
+  // Empirically, this specific shuffle turned out not to affect this
+  // simplified implementation's output at all (each sample index still
+  // receives exactly one deterministic update regardless of traversal
+  // order) — but it remains worth fixing on general principle, since
+  // every other source of randomness in this codebase is seeded, and an
+  // unseeded call sitting unused is still a latent risk if this function
+  // is ever extended to genuinely depend on ordering.
+  const rng = msdSeededRandom(seed);
+  const order=Array.from({length:n},(_,i)=>i).sort(()=>rng()-0.5);
   const F=new Float64Array(n).fill(0);
   const trees=[];
   for(let t=0;t<nTrees;t++){
