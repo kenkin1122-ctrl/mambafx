@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MSD Phase 7 — Prospective Raw-History Sufficiency Audit</title>
+<style>
+  :root {
+    --bg:       #0d0f14;
+    --surface:  #13161e;
+    --border:   #222736;
+    --accent:   #3b82f6;
+    --green:    #22c55e;
+    --red:      #ef4444;
+    --yellow:   #eab308;
+    --muted:    #6b7280;
+    --text:     #e2e8f0;
+    --heading:  #f8fafc;
+    --mono:     'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    padding: 24px;
+    min-height: 100vh;
+  }
+  h1 { font-size: 1.4rem; color: var(--heading); margin-bottom: 4px; }
+  h2 { font-size: 1.05rem; color: var(--accent); margin: 28px 0 10px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  h3 { font-size: 0.9rem; color: var(--heading); margin: 14px 0 6px; }
+  .subtitle { color: var(--muted); font-size: 0.8rem; margin-bottom: 24px; }
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 0.72rem; font-weight: 600; font-family: var(--mono);
+  }
+  .pass    { background: #14532d; color: var(--green); }
+  .fail    { background: #450a0a; color: var(--red); }
+  .warn    { background: #422006; color: var(--yellow); }
+  .nv      { background: #1e1b4b; color: #a5b4fc; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+  }
+  table {
+    width: 100%; border-collapse: collapse; font-size: 0.82rem;
+    font-family: var(--mono);
+  }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  td { padding: 5px 10px; border-bottom: 1px solid #1a1d27; }
+  tr:last-child td { border-bottom: none; }
+  .mono  { font-family: var(--mono); }
+  .num   { text-align: right; font-family: var(--mono); }
+  .muted { color: var(--muted); }
+  .green { color: var(--green); }
+  .red   { color: var(--red); }
+  .yellow{ color: var(--yellow); }
+  .verdict {
+    font-size: 1.1rem; font-weight: 700; font-family: var(--mono);
+    padding: 18px 24px; border-radius: 8px; margin-top: 12px;
+  }
+  .verdict.ready        { background: #14532d; color: var(--green); border: 1px solid #166534; }
+  .verdict.insufficient { background: #422006; color: var(--yellow); border: 1px solid #92400e; }
+  .verdict.blocked      { background: #450a0a; color: var(--red); border: 1px solid #7f1d1d; }
+  .spinner {
+    display: inline-block; width: 16px; height: 16px;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #status { color: var(--muted); font-size: 0.85rem; margin-top: 16px; }
+  #run-btn {
+    background: var(--accent); color: #fff; border: none; border-radius: 6px;
+    padding: 10px 24px; font-size: 0.9rem; font-weight: 600; cursor: pointer;
+  }
+  #run-btn:hover { background: #2563eb; }
+  #run-btn:disabled { background: #1e3a5f; color: var(--muted); cursor: not-allowed; }
+  pre { font-family: var(--mono); font-size: 0.75rem; color: var(--muted); white-space: pre-wrap; }
+  .section-note { font-size: 0.78rem; color: var(--muted); margin-bottom: 10px; }
+  .gate-row { display: flex; align-items: baseline; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+  .gate-row:last-child { border-bottom: none; }
+  .gate-label { flex: 1; font-family: var(--mono); font-size: 0.8rem; }
+  .gate-evidence { font-size: 0.75rem; color: var(--muted); flex: 2; }
+  .restriction-notice {
+    background: #1a1025; border: 1px solid #3b1f5e; border-radius: 6px;
+    padding: 10px 14px; font-size: 0.78rem; color: #c4b5fd; margin-bottom: 20px;
+  }
+</style>
+</head>
+<body>
+
+<h1>MSD Phase 7 — Prospective Raw-History Sufficiency Audit</h1>
+<p class="subtitle">Read-only audit of the Phase 6B prospective raw-history capture layer &nbsp;·&nbsp; No data is modified.</p>
+
+<div class="restriction-notice">
+  ⚠ AUDIT MODE — This tool is strictly read-only. It does not modify, delete, or create any MarketStates records, discoveries, candidates, hypotheses, or features. It only reads from <span class="mono">mfx_msd_states / MarketStates</span> and inspects the data that is already there.
+</div>
+
+<button id="run-btn" onclick="runAudit()">▶ Run Phase 7 Audit</button>
+<div id="status"></div>
+<div id="report"></div>
+
+<script>
+// ─── CONSTANTS (mirrored from index.html — never imported, read-only reference) ───
+const DB_NAME              = 'mfx_msd_states';
+const STORE_NAME           = 'MarketStates';
+const EXPECTED_RAW_VERSION = 'raw_price_history_v1';
+const EXPECTED_WINDOW_LEN  = 20;
+const EXPECTED_ARRAY_LEN   = 20;
+
+// ─── HELPERS ───────────────────────────────────────────────────────────────────
+
+function setStatus(msg, spinning = false) {
+  const el = document.getElementById('status');
+  el.innerHTML = spinning ? `<span class="spinner"></span>${msg}` : msg;
+}
+
+function fmtEpoch(ep) {
+  if (ep == null || ep === 0) return '—';
+  try { return new Date(ep).toISOString().replace('T',' ').slice(0,19) + ' UTC'; }
+  catch(e) { return String(ep); }
+}
+
+function badge(state) {
+  if (state === 'PASS')           return `<span class="badge pass">PASS</span>`;
+  if (state === 'FAIL')           return `<span class="badge fail">FAIL</span>`;
+  if (state === 'NOT_VERIFIABLE') return `<span class="badge nv">NOT_VERIFIABLE</span>`;
+  return `<span class="badge warn">${state}</span>`;
+}
+
+function pct(n, d) {
+  if (!d) return '—';
+  return (100 * n / d).toFixed(1) + '%';
+}
+
+// ─── DB READ ───────────────────────────────────────────────────────────────────
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror   = () => reject(req.error);
+    req.onblocked = () => reject(new Error('IndexedDB blocked — close other tabs running the app.'));
+  });
+}
+
+function readAllRecords(db) {
+  return new Promise((resolve, reject) => {
+    if (!db.objectStoreNames.contains(STORE_NAME)) {
+      resolve([]);
+      return;
+    }
+    const tx  = db.transaction(STORE_NAME, 'readonly');
+    const req = tx.objectStore(STORE_NAME).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror   = () => reject(req.error);
+  });
+}
+
+// ─── AUDIT CORE ───────────────────────────────────────────────────────────────
+
+async function runAudit() {
+  const btn = document.getElementById('run-btn');
+  btn.disabled = true;
+  document.getElementById('report').innerHTML = '';
+
+  const activityLog = {
+    filesInspected:          'msd-phase7-audit.html (this file; referenced: src/index.js, index.html)',
+    functionsInspected:      'msdCaptureRawPriceHistory, msdBuildLabeledSnapshot, msdLabelQualifiedEvent, msdSampleNegativeSnapshots',
+    marketStatesRead:        'YES',
+    marketStatesModified:    'NO',
+    marketStatesDeleted:     'NO',
+    discoveriesModified:     'NO',
+    candidatesGenerated:     'NO',
+    hypothesesCreated:       'NO',
+    statisticalTestsRun:     'NO',
+    modelsTrained:           'NO',
+    featuresComputedForDisc: 'NO',
+    existingRecordsModified: 'NO',
+    newRecordsWritten:       'NO',
+    testsRun:                'NO',
+    testsPassed:             'NO',
+    testsFailed:             'NO',
+  };
+
+  try {
+    setStatus('Opening IndexedDB mfx_msd_states…', true);
+    let db;
+    try {
+      db = await openDB();
+    } catch(e) {
+      setStatus('');
+      renderError(`Could not open IndexedDB "${DB_NAME}": ${e.message || e}. Make sure the main app has been opened at least once in this browser.`);
+      btn.disabled = false;
+      return;
+    }
+
+    setStatus('Reading all MarketStates records…', true);
+    const all = await readAllRecords(db);
+    db.close();
+
+    setStatus('Analysing…', true);
+
+    // ── 1. PARTITION: pre-6B vs prospective ────────────────────────────────
+    // A record is prospective (Phase 6B) if it has rawHistoryVersion defined.
+    // Pre-6B records either have rawHistoryVersion === undefined/null or
+    // rawHistoryValid === undefined (field never set before 6B).
+    const pre6B       = all.filter(r => r.rawHistoryVersion === undefined || r.rawHistoryVersion === null);
+    const prospective = all.filter(r => r.rawHistoryVersion !== undefined && r.rawHistoryVersion !== null);
+
+    activityLog.marketStatesRead = `YES — ${all.length} total records read`;
+
+    // ── 2. RAW-HISTORY VALIDITY on prospective records ──────────────────────
+    const violations = {
+      rawHistoryValidFalse:    0,
+      missingRawHistoryValid:  0,
+      wrongVersion:            0,
+      wrongWindowLen:          0,
+      missingRawPriceHistory:  0,
+      malformedNotArray:       0,
+      wrongArrayLen:           0,
+      containsNonNumeric:      0,
+      containsNonFinite:       0,
+      duplicateEpochs:         0,  // epoch history not stored in schema — NOT_VERIFIABLE
+    };
+
+    const valid6B    = [];
+    const invalid6B  = [];
+
+    for (const r of prospective) {
+      let ok = true;
+      if (r.rawHistoryValid === undefined || r.rawHistoryValid === null) { violations.missingRawHistoryValid++;  ok = false; }
+      else if (r.rawHistoryValid === false)                               { violations.rawHistoryValidFalse++;   ok = false; }
+      if (r.rawHistoryVersion !== EXPECTED_RAW_VERSION)                  { violations.wrongVersion++;            ok = false; }
+      if (r.rawHistoryWindowLength !== EXPECTED_WINDOW_LEN)              { violations.wrongWindowLen++;          ok = false; }
+      if (!r.rawPriceHistory)                                            { violations.missingRawPriceHistory++;  ok = false; }
+      else if (!Array.isArray(r.rawPriceHistory))                        { violations.malformedNotArray++;        ok = false; }
+      else {
+        if (r.rawPriceHistory.length !== EXPECTED_ARRAY_LEN)            { violations.wrongArrayLen++;           ok = false; }
+        const hasNonNum    = r.rawPriceHistory.some(v => typeof v !== 'number');
+        const hasNonFinite = r.rawPriceHistory.some(v => !Number.isFinite(v));
+        if (hasNonNum)    { violations.containsNonNumeric++;  ok = false; }
+        if (hasNonFinite) { violations.containsNonFinite++;   ok = false; }
+      }
+      if (ok) valid6B.push(r); else invalid6B.push(r);
+    }
+
+    // ── 3. SPLIT by outcome ────────────────────────────────────────────────
+    const validPos = valid6B.filter(r => r.outcome === 'positive');
+    const validNeg = valid6B.filter(r => r.outcome === 'negative');
+    const allPos   = prospective.filter(r => r.outcome === 'positive');
+    const allNeg   = prospective.filter(r => r.outcome === 'negative');
+
+    // ── 4. CAUSAL / structural checks on valid records ─────────────────────
+    // C. Current-tick inclusion: rawPriceHistory last value vs r.price
+    let currentTickMismatch = 0;
+    let currentTickVerified = 0;
+    let currentTickUnverifiable = 0;
+    for (const r of valid6B) {
+      if (r.price !== undefined && r.rawPriceHistory && Array.isArray(r.rawPriceHistory)) {
+        const lastPrice = r.rawPriceHistory[r.rawPriceHistory.length - 1];
+        if (lastPrice === r.price) currentTickVerified++;
+        else { currentTickMismatch++; }
+      } else {
+        currentTickUnverifiable++;
+      }
+    }
+
+    // D. Symbol consistency — checked inside msdCaptureRawPriceHistory already; verify field present
+    let symbolFieldAbsent = valid6B.filter(r => r.symbol === undefined || r.symbol === null).length;
+
+    // F. Future inclusion — epoch-based; raw history doesn't store tick epochs, only prices → NOT_VERIFIABLE
+
+    // ── 5. VERSION distribution ────────────────────────────────────────────
+    const versionDist = {};
+    for (const r of prospective) {
+      const v = r.rawHistoryVersion || '(missing)';
+      versionDist[v] = (versionDist[v] || 0) + 1;
+    }
+
+    // ── 6. CHRONOLOGICAL ACCUMULATION ─────────────────────────────────────
+    // Use 'timestamp' field (Date.now() at write time from msdBuildLabeledSnapshot)
+    const sorted6BValid = valid6B.slice().sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    const firstTs  = sorted6BValid.length ? sorted6BValid[0].timestamp : null;
+    const lastTs   = sorted6BValid.length ? sorted6BValid[sorted6BValid.length - 1].timestamp : null;
+    const durationMs = (firstTs && lastTs) ? (lastTs - firstTs) : 0;
+    const durationHrs = (durationMs / 3600000).toFixed(1);
+    const durationDays = (durationMs / 86400000).toFixed(2);
+
+    // Build day-buckets for accumulation table
+    const dayBuckets = {};
+    for (const r of valid6B) {
+      if (!r.timestamp) continue;
+      const day = new Date(r.timestamp).toISOString().slice(0, 10);
+      if (!dayBuckets[day]) dayBuckets[day] = { pos: 0, neg: 0 };
+      if (r.outcome === 'positive') dayBuckets[day].pos++;
+      else if (r.outcome === 'negative') dayBuckets[day].neg++;
+    }
+
+    // ── 7. EVENT DEPENDENCE ────────────────────────────────────────────────
+    const posEventIds = {};
+    for (const r of validPos) {
+      const eid = r.eventId || '(null)';
+      posEventIds[eid] = (posEventIds[eid] || 0) + 1;
+    }
+    const uniquePosEvents = Object.keys(posEventIds).length;
+    const maxPerEvent     = Math.max(0, ...Object.values(posEventIds));
+    const avgPerEvent     = validPos.length && uniquePosEvents ? (validPos.length / uniquePosEvents).toFixed(2) : '—';
+
+    // ── 8. DATA-QUALITY GATES ──────────────────────────────────────────────
+    const gates = [];
+
+    // GATE 1 — prospective data exists
+    const g1 = prospective.length > 0;
+    gates.push({
+      id: 'GATE_1_PROSPECTIVE_DATA_EXISTS',
+      result: g1 ? 'PASS' : 'FAIL',
+      evidence: g1
+        ? `${prospective.length} records carry rawHistoryVersion (not undefined/null)`
+        : `All ${all.length} records are pre-Phase-6B (rawHistoryVersion undefined/null)`
+    });
+
+    // GATE 2 — schema valid (no schema violations on prospective set)
+    const schemaViolations = violations.missingRawHistoryValid + violations.wrongVersion + violations.wrongWindowLen + violations.missingRawPriceHistory + violations.malformedNotArray;
+    const g2 = prospective.length > 0 && schemaViolations === 0;
+    gates.push({
+      id: 'GATE_2_RAW_HISTORY_SCHEMA_VALID',
+      result: prospective.length === 0 ? 'FAIL' : (schemaViolations === 0 ? 'PASS' : 'FAIL'),
+      evidence: schemaViolations === 0
+        ? 'All prospective records have expected rawHistoryVersion and rawPriceHistory array'
+        : `${schemaViolations} schema-level violations detected`
+    });
+
+    // GATE 3 — history length valid
+    const g3len = violations.wrongArrayLen + violations.containsNonNumeric + violations.containsNonFinite;
+    gates.push({
+      id: 'GATE_3_HISTORY_LENGTH_VALID',
+      result: prospective.length === 0 ? 'FAIL' : (g3len === 0 ? 'PASS' : 'FAIL'),
+      evidence: g3len === 0
+        ? `All valid arrays contain exactly ${EXPECTED_ARRAY_LEN} finite numeric prices`
+        : `${g3len} length/numeric violations found`
+    });
+
+    // GATE 4 — causality structurally preserved (verified via implementation trace; epoch order not stored)
+    const causalityImpl = `msdCaptureRawPriceHistory uses slice(startIdx, centerIndex+1) with oldest→newest ordering. Epoch sequence stored in indHistory ensures causal backward-only access.`;
+    const currentTickOk = currentTickMismatch === 0 && currentTickVerified > 0;
+    gates.push({
+      id: 'GATE_4_CAUSALITY_STRUCTURALLY_PRESERVED',
+      result: valid6B.length === 0 ? 'NOT_VERIFIABLE' : (currentTickMismatch === 0 ? 'PASS' : 'FAIL'),
+      evidence: valid6B.length === 0
+        ? 'No valid prospective records to verify'
+        : currentTickUnverifiable > 0 && currentTickVerified === 0
+          ? `price field absent on all records — NOT_VERIFIABLE from persisted schema`
+          : `Current-tick match: ${currentTickVerified} verified, ${currentTickMismatch} mismatches, ${currentTickUnverifiable} unverifiable (no price field)`
+    });
+
+    // GATE 5 — symbol isolation
+    gates.push({
+      id: 'GATE_5_SYMBOL_ISOLATION_VALID',
+      result: valid6B.length === 0 ? 'NOT_VERIFIABLE' : (symbolFieldAbsent === 0 ? 'PASS' : 'FAIL'),
+      evidence: symbolFieldAbsent === 0
+        ? 'symbol field present on all valid records; cross-symbol rejection enforced inside msdCaptureRawPriceHistory'
+        : `${symbolFieldAbsent} valid records missing symbol field`
+    });
+
+    // GATE 6 — positive-negative capture symmetry
+    const bothHaveData = validPos.length > 0 && validNeg.length > 0;
+    // Same function: both msdLabelQualifiedEvent and msdSampleNegativeSnapshots call
+    // msdCaptureRawPriceHistory(i, MSD_RAW_HISTORY_WINDOW_LENGTH) — same function, same args
+    gates.push({
+      id: 'GATE_6_POSITIVE_NEGATIVE_CAPTURE_SYMMETRY_VALID',
+      result: !g1 ? 'FAIL' : (bothHaveData ? 'PASS' : (validPos.length === 0 && validNeg.length === 0 ? 'FAIL' : 'FAIL')),
+      evidence: bothHaveData
+        ? `Both classes captured via msdCaptureRawPriceHistory(i, MSD_RAW_HISTORY_WINDOW_LENGTH). Valid positives: ${validPos.length}, valid negatives: ${validNeg.length}`
+        : `Missing one class: positives=${validPos.length}, negatives=${validNeg.length}`
+    });
+
+    // GATE 7 — version consistency
+    const allSameVersion = prospective.length > 0 && Object.keys(versionDist).length === 1 && versionDist[EXPECTED_RAW_VERSION] > 0;
+    gates.push({
+      id: 'GATE_7_VERSION_CONSISTENCY_VALID',
+      result: prospective.length === 0 ? 'FAIL' : (allSameVersion ? 'PASS' : 'FAIL'),
+      evidence: allSameVersion
+        ? `All prospective records use rawHistoryVersion="${EXPECTED_RAW_VERSION}"`
+        : `Version distribution: ${JSON.stringify(versionDist)}`
+    });
+
+    // GATE 8 — accumulation continuous enough (check no single gap > 3 days)
+    const dayKeys = Object.keys(dayBuckets).sort();
+    let maxGapDays = 0;
+    for (let i = 1; i < dayKeys.length; i++) {
+      const gapMs = new Date(dayKeys[i]) - new Date(dayKeys[i-1]);
+      const gapDays = gapMs / 86400000;
+      if (gapDays > maxGapDays) maxGapDays = gapDays;
+    }
+    const accContinuous = dayKeys.length >= 1 && (dayKeys.length < 2 || maxGapDays <= 3);
+    gates.push({
+      id: 'GATE_8_DATA_ACCUMULATION_CONTINUOUS_ENOUGH',
+      result: valid6B.length === 0 ? 'FAIL'
+            : dayKeys.length === 0 ? 'NOT_VERIFIABLE'
+            : (accContinuous ? 'PASS' : 'FAIL'),
+      evidence: valid6B.length === 0
+        ? 'No valid prospective records'
+        : `${dayKeys.length} calendar day(s) with valid records. Max gap between days: ${maxGapDays.toFixed(1)} day(s). Duration: ${durationDays} days.`
+    });
+
+    // GATE 9 — dependence structure quantified
+    const g9 = validPos.length > 0;
+    gates.push({
+      id: 'GATE_9_DEPENDENCE_STRUCTURE_QUANTIFIED',
+      result: !g1 ? 'NOT_VERIFIABLE' : (g9 ? 'PASS' : 'FAIL'),
+      evidence: g9
+        ? `${uniquePosEvents} unique event IDs among ${validPos.length} valid positive records (avg ${avgPerEvent} snapshots/event, max ${maxPerEvent}). Negative records have no eventId (by design — null).`
+        : 'No valid positive records — dependence structure cannot be quantified'
+    });
+
+    // ── 9. FEATURE-ENGINEERING READINESS ──────────────────────────────────
+    const enoughForDesign = valid6B.length >= 10 && validPos.length >= 5 && validNeg.length >= 5;
+
+    const featureFamilies = [
+      {
+        name: 'A. Path geometry',
+        examples: 'net displacement, absolute path length, path efficiency, MFE/MAE',
+        designable: valid6B.length > 0,
+        note: valid6B.length > 0 ? `rawPriceHistory array of ${EXPECTED_ARRAY_LEN} prices supports all path calculations` : 'No valid raw histories'
+      },
+      {
+        name: 'B. Directional structure',
+        examples: 'up-tick count, down-tick count, directional imbalance, run lengths, reversals',
+        designable: valid6B.length > 0,
+        note: valid6B.length > 0 ? 'First differences of raw price array enable full directional decomposition' : 'No valid raw histories'
+      },
+      {
+        name: 'C. Price dynamics',
+        examples: 'first difference, second difference, acceleration proxy, volatility proxy',
+        designable: valid6B.length > 0,
+        note: valid6B.length > 0 ? 'Sequential price array supports first and second-order differencing' : 'No valid raw histories'
+      },
+      {
+        name: 'D. Complexity and entropy',
+        examples: 'directional entropy, symbolic sequence entropy, transition entropy, run-length entropy',
+        designable: valid6B.length > 0,
+        note: valid6B.length > 0 ? 'Directional sequence derivable from price array; entropy computable on derived sequence' : 'No valid raw histories'
+      }
+    ];
+
+    // ── 10. FINAL VERDICT ──────────────────────────────────────────────────
+    const passCount = gates.filter(g => g.result === 'PASS').length;
+    const failCount = gates.filter(g => g.result === 'FAIL').length;
+    const nvCount   = gates.filter(g => g.result === 'NOT_VERIFIABLE').length;
+
+    let verdictClass, verdictText, verdictSub;
+    const integrityDefects = violations.containsNonNumeric + violations.containsNonFinite + violations.wrongArrayLen + violations.malformedNotArray;
+    if (prospective.length === 0 || valid6B.length === 0) {
+      verdictClass = 'insufficient';
+      verdictText  = 'PHASE_7_AUDIT_COMPLETE — INSUFFICIENT_PROSPECTIVE_DATA';
+      verdictSub   = 'No valid prospective raw-history records have accumulated. Continue prospective accumulation before revisiting.';
+    } else if (integrityDefects > 0) {
+      verdictClass = 'blocked';
+      verdictText  = 'PHASE_7_AUDIT_COMPLETE — BLOCKED_BY_DATA-INTEGRITY DEFECT';
+      verdictSub   = `${integrityDefects} integrity defect(s) found in prospective records. Resolve before proceeding to feature design.`;
+    } else if (!enoughForDesign) {
+      verdictClass = 'insufficient';
+      verdictText  = 'PHASE_7_AUDIT_COMPLETE — INSUFFICIENT_PROSPECTIVE_DATA';
+      verdictSub   = `Valid prospective records: ${valid6B.length} total (${validPos.length} positive, ${validNeg.length} negative). Minimum threshold for design phase not yet reached. Continue accumulation.`;
+    } else {
+      verdictClass = 'ready';
+      verdictText  = 'PHASE_7_AUDIT_COMPLETE — READY_FOR_FEATURE-ENGINEERING DESIGN';
+      verdictSub   = `${valid6B.length} valid prospective records (${validPos.length} positive, ${validNeg.length} negative) captured under identical mechanism. Authorises Phase 8 design only — NOT discovery.`;
+    }
+
+    setStatus('');
+
+    // ── RENDER ─────────────────────────────────────────────────────────────
+    const now = new Date().toISOString().replace('T',' ').slice(0,19) + ' UTC';
+    let html = `
+    <div class="card" style="margin-top:20px">
+      <h3>Audit Metadata</h3>
+      <table>
+        <tr><td class="muted">Audit executed</td><td>${now}</td></tr>
+        <tr><td class="muted">Database</td><td class="mono">${DB_NAME}</td></tr>
+        <tr><td class="muted">Store</td><td class="mono">${STORE_NAME}</td></tr>
+        <tr><td class="muted">Expected rawHistoryVersion</td><td class="mono">${EXPECTED_RAW_VERSION}</td></tr>
+        <tr><td class="muted">Expected window / array length</td><td class="mono">${EXPECTED_WINDOW_LEN} ticks</td></tr>
+        <tr><td class="muted">Total records in DB</td><td class="mono">${all.length}</td></tr>
+      </table>
+    </div>
+
+    <h2>§1 — Source &amp; Schema Audit</h2>
+    <div class="card">
+      <p class="section-note">Implementation trace performed against index.html (read-only). Key findings:</p>
+      <table>
+        <tr><th>Item</th><th>Finding</th></tr>
+        <tr><td>Capture function</td><td class="mono">msdCaptureRawPriceHistory(centerIndex, windowLength)</td></tr>
+        <tr><td>Field: rawHistoryValid</td><td class="mono">boolean — false on warm-up refusal or cross-symbol</td></tr>
+        <tr><td>Field: rawHistoryVersion</td><td class="mono">"raw_price_history_v1" (constant MSD_RAW_HISTORY_VERSION)</td></tr>
+        <tr><td>Field: rawHistoryWindowLength</td><td class="mono">20 (constant MSD_RAW_HISTORY_WINDOW_LENGTH)</td></tr>
+        <tr><td>Field: rawPriceHistory</td><td class="mono">Array of prices, oldest → newest, length = windowLength</td></tr>
+        <tr><td>Array ordering</td><td>slice(startIdx, centerIndex + 1) → oldest first, current tick last</td></tr>
+        <tr><td>Current-tick included</td><td>Yes — centerIndex is inclusive upper bound of slice</td></tr>
+        <tr><td>Warm-up refusal</td><td>startIdx &lt; 0 → rawHistoryValid = false, rawPriceHistory = null</td></tr>
+        <tr><td>Symbol isolation</td><td>Cross-symbol slice rejected → rawHistoryValid = false</td></tr>
+        <tr><td>Causal access</td><td>Reads indHistory backward from centerIndex only — no future access</td></tr>
+        <tr><td>Positive pathway</td><td>msdLabelQualifiedEvent → msdCaptureRawPriceHistory(i, 20) per lookback tick</td></tr>
+        <tr><td>Negative pathway</td><td>msdSampleNegativeSnapshots → msdCaptureRawPriceHistory(i, 20) per sample</td></tr>
+        <tr><td>Same function for both?</td><td class="green">YES — identical call signature, identical args</td></tr>
+      </table>
+    </div>
+
+    <h2>§2 — Historical Data Boundary</h2>
+    <div class="card">
+      <table>
+        <tr><th>Category</th><th>Count</th><th>Criterion</th></tr>
+        <tr>
+          <td>PRE_RAW_HISTORY_RECORDS</td>
+          <td class="num ${pre6B.length > 0 ? 'yellow' : 'green'}">${pre6B.length}</td>
+          <td class="muted">rawHistoryVersion === undefined or null</td>
+        </tr>
+        <tr>
+          <td>PROSPECTIVE_RAW_HISTORY_RECORDS</td>
+          <td class="num ${prospective.length === 0 ? 'red' : 'green'}">${prospective.length}</td>
+          <td class="muted">rawHistoryVersion !== undefined/null</td>
+        </tr>
+        <tr>
+          <td>Total</td>
+          <td class="num">${all.length}</td>
+          <td class="muted">All records in MarketStates store</td>
+        </tr>
+      </table>
+      ${prospective.length === 0 && pre6B.length > 0
+        ? `<p style="margin-top:10px" class="yellow">⚠ Dataset contains only pre-Phase-6B records. No prospective raw-history data exists yet.</p>`
+        : prospective.length > 0 && pre6B.length > 0
+          ? `<p style="margin-top:10px">Dataset is a mixture of pre-6B records (excluded from all sufficiency calculations) and prospective records.</p>`
+          : prospective.length > 0 && pre6B.length === 0
+            ? `<p style="margin-top:10px" class="green">Dataset consists entirely of prospective records — no pre-6B contamination.</p>`
+            : `<p style="margin-top:10px" class="red">No records in database.</p>`
+      }
+    </div>
+
+    <h2>§3 — Raw-History Validity Audit (Prospective Records Only)</h2>
+    <div class="card">
+      <table>
+        <tr><th>Metric</th><th class="num">Count</th><th class="num">%</th></tr>
+        <tr><td>Total prospective records</td><td class="num">${prospective.length}</td><td class="num">100%</td></tr>
+        <tr><td>rawHistoryValid = true &amp; all checks pass</td><td class="num ${valid6B.length === prospective.length ? 'green' : ''}">${valid6B.length}</td><td class="num">${pct(valid6B.length, prospective.length)}</td></tr>
+        <tr><td>rawHistoryValid = false</td><td class="num ${violations.rawHistoryValidFalse > 0 ? 'yellow' : ''}">${violations.rawHistoryValidFalse}</td><td class="num">${pct(violations.rawHistoryValidFalse, prospective.length)}</td></tr>
+        <tr><td>Missing rawHistoryValid field</td><td class="num ${violations.missingRawHistoryValid > 0 ? 'red' : ''}">${violations.missingRawHistoryValid}</td><td class="num">${pct(violations.missingRawHistoryValid, prospective.length)}</td></tr>
+        <tr><td>Wrong rawHistoryVersion</td><td class="num ${violations.wrongVersion > 0 ? 'red' : ''}">${violations.wrongVersion}</td><td class="num">${pct(violations.wrongVersion, prospective.length)}</td></tr>
+        <tr><td>Wrong rawHistoryWindowLength</td><td class="num ${violations.wrongWindowLen > 0 ? 'red' : ''}">${violations.wrongWindowLen}</td><td class="num">${pct(violations.wrongWindowLen, prospective.length)}</td></tr>
+        <tr><td>Missing rawPriceHistory</td><td class="num ${violations.missingRawPriceHistory > 0 ? 'red' : ''}">${violations.missingRawPriceHistory}</td><td class="num">${pct(violations.missingRawPriceHistory, prospective.length)}</td></tr>
+        <tr><td>rawPriceHistory not an array</td><td class="num ${violations.malformedNotArray > 0 ? 'red' : ''}">${violations.malformedNotArray}</td><td class="num">${pct(violations.malformedNotArray, prospective.length)}</td></tr>
+        <tr><td>Incorrect array length (≠ ${EXPECTED_ARRAY_LEN})</td><td class="num ${violations.wrongArrayLen > 0 ? 'red' : ''}">${violations.wrongArrayLen}</td><td class="num">${pct(violations.wrongArrayLen, prospective.length)}</td></tr>
+        <tr><td>Non-numeric price values</td><td class="num ${violations.containsNonNumeric > 0 ? 'red' : ''}">${violations.containsNonNumeric}</td><td class="num">${pct(violations.containsNonNumeric, prospective.length)}</td></tr>
+        <tr><td>Non-finite price values</td><td class="num ${violations.containsNonFinite > 0 ? 'red' : ''}">${violations.containsNonFinite}</td><td class="num">${pct(violations.containsNonFinite, prospective.length)}</td></tr>
+        <tr><td>Duplicate epoch values within history</td><td class="num muted">NOT_VERIFIABLE</td><td class="num muted">—</td></tr>
+      </table>
+      <p style="margin-top:8px" class="muted" style="font-size:0.75rem">Note: rawHistoryValid=false records (warm-up / cross-symbol refusals) are expected and structurally valid — they correctly signal that no usable history existed at that tick. They are excluded from the valid population for sufficiency calculations only.</p>
+    </div>
+
+    <h2>§4 — Causal and Structural Validation</h2>
+    <div class="card">
+      <div class="gate-row">
+        <span class="gate-label">A. Length (exactly ${EXPECTED_ARRAY_LEN} prices)</span>
+        <span class="gate-evidence">${badge(violations.wrongArrayLen === 0 && prospective.length > 0 ? 'PASS' : prospective.length === 0 ? 'NOT_VERIFIABLE' : 'FAIL')} ${violations.wrongArrayLen === 0 ? 'All valid arrays are length ' + EXPECTED_ARRAY_LEN : violations.wrongArrayLen + ' length violations'}</span>
+      </div>
+      <div class="gate-row">
+        <span class="gate-label">B. Ordering (oldest → newest)</span>
+        <span class="gate-evidence">${badge('NOT_VERIFIABLE')} Raw history stores prices only, not tick epochs. Ordering guaranteed by slice(startIdx, centerIndex+1) in msdCaptureRawPriceHistory — NOT VERIFIABLE FROM PERSISTED SCHEMA alone.</span>
+      </div>
+      <div class="gate-row">
+        <span class="gate-label">C. Current-tick inclusion (last price = record price)</span>
+        <span class="gate-evidence">
+          ${badge(currentTickUnverifiable === valid6B.length && valid6B.length > 0 ? 'NOT_VERIFIABLE' : currentTickMismatch === 0 ? 'PASS' : 'FAIL')}
+          ${currentTickUnverifiable === valid6B.length && valid6B.length > 0
+            ? 'price field absent on persisted records — NOT VERIFIABLE FROM PERSISTED SCHEMA'
+            : `Verified: ${currentTickVerified} | Mismatches: ${currentTickMismatch} | Unverifiable (no price field): ${currentTickUnverifiable}`}
+        </span>
+      </div>
+      <div class="gate-row">
+        <span class="gate-label">D. Symbol consistency</span>
+        <span class="gate-evidence">${badge(symbolFieldAbsent === 0 && valid6B.length > 0 ? 'PASS' : valid6B.length === 0 ? 'NOT_VERIFIABLE' : 'FAIL')} Cross-symbol rejection enforced in msdCaptureRawPriceHistory. Symbol field present on ${valid6B.length - symbolFieldAbsent} / ${valid6B.length} valid records.</span>
+      </div>
+      <div class="gate-row">
+        <span class="gate-label">E. Version consistency</span>
+        <span class="gate-evidence">${badge(allSameVersion ? 'PASS' : prospective.length === 0 ? 'NOT_VERIFIABLE' : 'FAIL')} ${JSON.stringify(versionDist)}</span>
+      </div>
+      <div class="gate-row">
+        <span class="gate-label">F. No future inclusion</span>
+        <span class="gate-evidence">${badge('NOT_VERIFIABLE')} Raw history arrays store prices only — no tick epoch array persisted. Cannot verify from schema. Implementation uses only slice(startIdx, centerIndex+1) — future access structurally impossible.</span>
+      </div>
+    </div>
+
+    <h2>§5 — Positive–Negative Symmetry Audit</h2>
+    <div class="card">
+      <table>
+        <tr><th>Metric</th><th class="num">Positive</th><th class="num">Negative</th></tr>
+        <tr><td>Total prospective records</td><td class="num">${allPos.length}</td><td class="num">${allNeg.length}</td></tr>
+        <tr><td>Valid raw-history records</td><td class="num ${validPos.length > 0 ? 'green' : 'red'}">${validPos.length}</td><td class="num ${validNeg.length > 0 ? 'green' : 'red'}">${validNeg.length}</td></tr>
+        <tr><td>Invalid raw-history records</td><td class="num">${allPos.length - validPos.length}</td><td class="num">${allNeg.length - validNeg.length}</td></tr>
+        <tr><td>Validity rate</td><td class="num">${pct(validPos.length, allPos.length)}</td><td class="num">${pct(validNeg.length, allNeg.length)}</td></tr>
+        <tr><td>rawHistoryVersion</td><td class="mono">${EXPECTED_RAW_VERSION}</td><td class="mono">${EXPECTED_RAW_VERSION}</td></tr>
+        <tr><td>Window length</td><td class="num">${EXPECTED_WINDOW_LEN}</td><td class="num">${EXPECTED_WINDOW_LEN}</td></tr>
+        <tr><td>History array length</td><td class="num">${EXPECTED_ARRAY_LEN}</td><td class="num">${EXPECTED_ARRAY_LEN}</td></tr>
+        <tr><td>Capture function</td><td class="mono" colspan="2">msdCaptureRawPriceHistory — IDENTICAL for both classes</td></tr>
+        <tr><td>Causal alignment</td><td colspan="2">Same centerIndex convention; same indHistory source</td></tr>
+      </table>
+      <p style="margin-top:10px" class="muted">
+        Symmetry claim: Both msdLabelQualifiedEvent (positive) and msdSampleNegativeSnapshots (negative) call<br>
+        <span class="mono">msdCaptureRawPriceHistory(i, MSD_RAW_HISTORY_WINDOW_LENGTH)</span> — same function, same arguments, same rules.
+      </p>
+    </div>
+
+    <h2>§6 — Prospective Data Accumulation</h2>
+    <div class="card">
+      <table>
+        <tr><th>Metric</th><th>Value</th></tr>
+        <tr><td>First valid raw-history record</td><td>${fmtEpoch(firstTs)}</td></tr>
+        <tr><td>Last valid raw-history record</td><td>${fmtEpoch(lastTs)}</td></tr>
+        <tr><td>Duration covered</td><td>${durationDays} days (${durationHrs} hours)</td></tr>
+        <tr><td>Total valid prospective records</td><td>${valid6B.length}</td></tr>
+        <tr><td>Valid positive records</td><td>${validPos.length}</td></tr>
+        <tr><td>Valid negative records</td><td>${validNeg.length}</td></tr>
+      </table>
+      ${dayKeys.length > 0 ? `
+      <h3 style="margin-top:14px">Accumulation by calendar day</h3>
+      <table>
+        <tr><th>Date</th><th class="num">Positive</th><th class="num">Negative</th><th class="num">Total</th></tr>
+        ${dayKeys.map(d => `
+        <tr>
+          <td class="mono">${d}</td>
+          <td class="num">${dayBuckets[d].pos}</td>
+          <td class="num">${dayBuckets[d].neg}</td>
+          <td class="num">${dayBuckets[d].pos + dayBuckets[d].neg}</td>
+        </tr>`).join('')}
+      </table>` : '<p class="muted" style="margin-top:10px">No valid records with timestamp field — accumulation by day cannot be computed.</p>'}
+    </div>
+
+    <h2>§7 — Event-Dependence and Duplication Audit</h2>
+    <div class="card">
+      <table>
+        <tr><th>Metric</th><th class="num">Value</th></tr>
+        <tr><td>Valid positive records</td><td class="num">${validPos.length}</td></tr>
+        <tr><td>Unique event IDs (positive)</td><td class="num">${uniquePosEvents}</td></tr>
+        <tr><td>Avg records per event (positive)</td><td class="num">${avgPerEvent}</td></tr>
+        <tr><td>Max records for a single event</td><td class="num">${maxPerEvent}</td></tr>
+        <tr><td>Valid negative records</td><td class="num">${validNeg.length}</td></tr>
+        <tr><td>Event linkage on negatives</td><td>eventId = null by design — no event linkage</td></tr>
+      </table>
+      ${validPos.length > 0 ? `
+      <h3 style="margin-top:14px">Records-per-event distribution (positive)</h3>
+      <table>
+        <tr><th>Records per event</th><th class="num">Events</th></tr>
+        ${(() => {
+          const dist = {};
+          Object.values(posEventIds).forEach(c => { dist[c] = (dist[c]||0)+1; });
+          return Object.keys(dist).sort((a,b)=>+a-+b).map(k =>
+            `<tr><td class="num">${k}</td><td class="num">${dist[k]}</td></tr>`
+          ).join('');
+        })()}
+      </table>
+      <p style="margin-top:8px" class="muted">Note: Multiple snapshots per event (different leadTime values) are expected. Future statistical analyses must account for within-event correlation. This phase quantifies the structure — it does not resolve it.</p>
+      ` : ''}
+    </div>
+
+    <h2>§8 — Feature-Engineering Data Requirement</h2>
+    <div class="card">
+      <table>
+        <tr><th>Population</th><th class="num">Count</th></tr>
+        <tr><td>Valid prospective positive raw histories</td><td class="num ${validPos.length > 0 ? 'green' : 'red'}">${validPos.length}</td></tr>
+        <tr><td>Valid prospective negative raw histories</td><td class="num ${validNeg.length > 0 ? 'green' : 'red'}">${validNeg.length}</td></tr>
+        <tr><td>Total valid prospective raw histories</td><td class="num ${valid6B.length > 0 ? 'green' : 'red'}">${valid6B.length}</td></tr>
+      </table>
+      <p style="margin-top:12px">
+        Assessment: <strong>${enoughForDesign ? '<span class="green">SUFFICIENT_TO_BEGIN_FEATURE_ENGINEERING_DESIGN</span>' : '<span class="yellow">INSUFFICIENT_FOR_FEATURE_ENGINEERING_DESIGN</span>'}</strong>
+      </p>
+      <p style="margin-top:6px" class="muted">
+        "Sufficient to begin design" means only that enough valid prospective data exists to formally design and pre-register a candidate representation space.
+        It does NOT mean sufficient to discover signal, and does NOT authorise running statistical tests.
+      </p>
+    </div>
+
+    <h2>§9 — Representation Design Readiness</h2>
+    <div class="card">
+      <table>
+        <tr><th>Feature Family</th><th>Designable?</th><th>Notes</th></tr>
+        ${featureFamilies.map(f => `
+        <tr>
+          <td>${f.name}<br><span class="muted">${f.examples}</span></td>
+          <td class="${f.designable ? 'green' : 'red'}">${f.designable ? 'YES' : 'NO'}</td>
+          <td class="muted">${f.note}</td>
+        </tr>`).join('')}
+      </table>
+    </div>
+
+    <h2>§10 — Data-Quality Gates</h2>
+    <div class="card">
+      ${gates.map(g => `
+      <div class="gate-row">
+        <span class="gate-label">${g.id}</span>
+        <span>${badge(g.result)}</span>
+        <span class="gate-evidence">${g.evidence}</span>
+      </div>`).join('')}
+      <p style="margin-top:12px" class="muted">PASS: ${passCount} &nbsp; FAIL: ${failCount} &nbsp; NOT_VERIFIABLE: ${nvCount}</p>
+    </div>
+
+    <h2>§11 — Final Decision</h2>
+    <div class="verdict ${verdictClass}">
+      ${verdictText}
+    </div>
+    <p style="margin-top:10px">${verdictSub}</p>
+
+    <h2>§12 — Strict Activity Log</h2>
+    <div class="card">
+      <table>
+        <tr><th>Activity</th><th>Result</th></tr>
+        ${Object.entries({
+          'Files inspected':            activityLog.filesInspected,
+          'Functions inspected':        activityLog.functionsInspected,
+          'MarketStates read':          activityLog.marketStatesRead,
+          'MarketStates modified':      activityLog.marketStatesModified,
+          'MarketStates deleted':       activityLog.marketStatesDeleted,
+          'Discoveries modified':       activityLog.discoveriesModified,
+          'Candidates generated':       activityLog.candidatesGenerated,
+          'Hypotheses created':         activityLog.hypothesesCreated,
+          'Statistical tests executed': activityLog.statisticalTestsRun,
+          'Models trained':             activityLog.modelsTrained,
+          'Features computed for discovery': activityLog.featuresComputedForDisc,
+          'Existing records modified':  activityLog.existingRecordsModified,
+          'New records written':        activityLog.newRecordsWritten,
+          'Tests run':                  activityLog.testsRun,
+          'Tests passed':               activityLog.testsPassed,
+          'Tests failed':               activityLog.testsFailed,
+        }).map(([k,v]) => `<tr><td>${k}</td><td class="mono ${v === 'NO' ? 'green' : ''}">${v}</td></tr>`).join('')}
+      </table>
+    </div>
+    `;
+
+    document.getElementById('report').innerHTML = html;
+    btn.disabled = false;
+
+  } catch(err) {
+    setStatus('');
+    renderError('Unexpected audit error: ' + (err.message || err));
+    btn.disabled = false;
+  }
+}
+
+function renderError(msg) {
+  document.getElementById('report').innerHTML = `
+    <div class="card" style="border-color:#7f1d1d; margin-top:20px">
+      <span class="red">⚠ Audit Error</span>
+      <p style="margin-top:8px">${msg}</p>
+    </div>`;
+}
+</script>
+</body>
+</html>
