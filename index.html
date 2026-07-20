@@ -4526,6 +4526,49 @@ let msdLookbackWindow = 20;     // configurable — ticks to look back before Ru
 // discoveries can distinguish "the market changed" from "the definition
 // of a positive label changed."
 const MSD_LABEL_VERSION = 'label-v1-5tick-run';
+
+// ══════════════════════════════════════════════════════════════════════
+// PHASE 6B — PROSPECTIVE SYMMETRIC RAW-PRICE HISTORY CAPTURE
+// ══════════════════════════════════════════════════════════════════════
+// W=20 chosen to match the existing observationWindow=20 already used
+// throughout every real Level-2 experiment (Parts 9-14) -- not an
+// arbitrary new value, deliberate consistency with the established
+// convention. Reuses indHistory directly as the raw source -- no new
+// buffer, since indHistory (IND_HIST_MAX=256) already retains far more
+// than W=20 ticks per symbol, reset on symbol change (line ~23676).
+const MSD_RAW_HISTORY_VERSION = 'raw_price_history_v1';
+const MSD_RAW_HISTORY_WINDOW_LENGTH = 20;
+
+/**
+ * Captures a bounded, causal raw-price history ending at indHistory[centerIndex]
+ * inclusive. Returns rawHistoryValid:false (not a padded/fabricated
+ * result) if fewer than windowLength real prices exist yet -- the
+ * explicit warm-up policy: no fully-qualified history observation is
+ * created until enough real prices exist. Never called with any
+ * information about whether the observation will become positive or
+ * negative -- this function has no access to that information at all,
+ * by construction, since it only ever receives an index and a length.
+ */
+function msdCaptureRawPriceHistory(centerIndex, windowLength){
+  const w = windowLength || MSD_RAW_HISTORY_WINDOW_LENGTH;
+  const startIdx = centerIndex - w + 1;
+  if (startIdx < 0) return { rawHistoryValid: false, rawHistoryVersion: MSD_RAW_HISTORY_VERSION, rawHistoryWindowLength: w, rawPriceHistory: null };
+  const slice = indHistory.slice(startIdx, centerIndex + 1);
+  if (slice.length !== w) return { rawHistoryValid: false, rawHistoryVersion: MSD_RAW_HISTORY_VERSION, rawHistoryWindowLength: w, rawPriceHistory: null };
+  const symbol = slice[0].symbol;
+  if (!slice.every(s => s.symbol === symbol)) {
+    // Defense-in-depth beyond the indHistory-reset-on-symbol-change
+    // discipline -- refuses rather than silently mixing symbols.
+    return { rawHistoryValid: false, rawHistoryVersion: MSD_RAW_HISTORY_VERSION, rawHistoryWindowLength: w, rawPriceHistory: null };
+  }
+  return {
+    rawHistoryValid: true,
+    rawHistoryVersion: MSD_RAW_HISTORY_VERSION,
+    rawHistoryWindowLength: w,
+    rawPriceHistory: slice.map(s => s.price), // oldest -> newest, current tick inclusive (last element)
+  };
+}
+
 let msdClassBalanceRatio = 1;   // configurable — negative snapshots per positive snapshot
 let msdSnapshotSeq = 0;         // per-session ordinal for Snapshot IDs, same pattern as Event IDs
 let msdPositiveWindows = [];    // [{startEpoch, endEpoch}] — every positive event's window, for negative-sampling exclusion
@@ -4577,7 +4620,7 @@ function msdLabelQualifiedEvent(qualifiedEvent, featureVersion){
   const lookbackStart = Math.max(0, runStartIdx - msdLookbackWindow);
   const snapshots = [];
   for (let i = lookbackStart; i < runStartIdx; i++) {
-    snapshots.push(msdBuildLabeledSnapshot(indHistory[i], {
+    snapshots.push(msdBuildLabeledSnapshot(indHistory[i], Object.assign({
       eventId: qualifiedEvent.eventId,
       leadTime: runStartIdx - i, // ticks until Run Start
       outcome: 'positive',
@@ -4586,7 +4629,7 @@ function msdLabelQualifiedEvent(qualifiedEvent, featureVersion){
       actualRunLength: null, // not yet known — filled in on completion
       featureVersion,
       lookbackWindow: msdLookbackWindow,
-    }));
+    }, msdCaptureRawPriceHistory(i, MSD_RAW_HISTORY_WINDOW_LENGTH))));
   }
 
   if (snapshots.length) {
@@ -4631,9 +4674,9 @@ function msdSampleNegativeSnapshots(count, featureVersion){
     chosenIdx.push(pool[j]);
     pool.splice(j, 1);
   }
-  return chosenIdx.map(i => msdBuildLabeledSnapshot(indHistory[i], {
+  return chosenIdx.map(i => msdBuildLabeledSnapshot(indHistory[i], Object.assign({
     eventId: null, leadTime: null, outcome: 'negative', direction: null, runStartTick: null, actualRunLength: null, featureVersion, lookbackWindow: msdLookbackWindow,
-  }));
+  }, msdCaptureRawPriceHistory(i, MSD_RAW_HISTORY_WINDOW_LENGTH))));
 }
 
 /** Test/debug only — resets all Labeler state without touching the Detector, Event Database, or any other Prediction Bot state. Never called from production code paths. */
