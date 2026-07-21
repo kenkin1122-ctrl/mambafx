@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MSD Phase 7B — Non-Classical Discovery Experiment</title>
+<style>
+  :root {
+    --bg:      #0d0f14;
+    --surface: #13161e;
+    --border:  #222736;
+    --accent:  #3b82f6;
+    --green:   #22c55e;
+    --red:     #ef4444;
+    --yellow:  #eab308;
+    --purple:  #a855f7;
+    --muted:   #6b7280;
+    --text:    #e2e8f0;
+    --heading: #f8fafc;
+    --mono:    'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 14px; line-height: 1.6;
+    padding: 24px; min-height: 100vh;
+  }
+  h1 { font-size: 1.4rem; color: var(--heading); margin-bottom: 4px; }
+  h2 { font-size: 1.05rem; color: var(--accent); margin: 28px 0 10px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  h3 { font-size: 0.9rem; color: var(--heading); margin: 14px 0 6px; }
+  .subtitle { color: var(--muted); font-size: 0.8rem; margin-bottom: 24px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: 600; font-family: var(--mono); }
+  .pass    { background: #14532d; color: var(--green); }
+  .fail    { background: #450a0a; color: var(--red); }
+  .warn    { background: #422006; color: var(--yellow); }
+  .nv      { background: #1e1b4b; color: #a5b4fc; }
+  .sig     { background: #2d1b69; color: var(--purple); }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px 20px; margin-bottom: 16px;
+  }
+  .card.highlight { border-color: var(--accent); }
+  .card.success   { border-color: var(--green); }
+  .card.danger    { border-color: var(--red); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; font-family: var(--mono); }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  td { padding: 5px 10px; border-bottom: 1px solid #1a1d27; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr.significant td { background: #1a1432; }
+  .mono  { font-family: var(--mono); }
+  .num   { text-align: right; font-family: var(--mono); }
+  .muted { color: var(--muted); }
+  .green { color: var(--green); }
+  .red   { color: var(--red); }
+  .yellow{ color: var(--yellow); }
+  .purple{ color: var(--purple); }
+  button {
+    background: var(--accent); color: #fff; border: none; border-radius: 6px;
+    padding: 8px 20px; font-size: 0.9rem; font-weight: 600; cursor: pointer;
+    margin-right: 8px; margin-bottom: 8px; transition: opacity 0.15s;
+  }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.danger  { background: var(--red); }
+  button.success { background: #16a34a; }
+  .progress-wrap {
+    background: var(--border); border-radius: 4px; height: 8px;
+    margin: 12px 0; overflow: hidden; display: none;
+  }
+  .progress-bar { background: var(--accent); height: 100%; width: 0; transition: width 0.1s; }
+  .status-line { color: var(--muted); font-size: 0.8rem; min-height: 20px; margin: 6px 0; }
+  .kv { display: grid; grid-template-columns: 200px 1fr; gap: 4px 12px; font-size: 0.82rem; font-family: var(--mono); }
+  .kv .k { color: var(--muted); }
+  .kv .v { color: var(--text); }
+  .step-header {
+    font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--accent); margin-bottom: 10px;
+  }
+  #results-section { display: none; }
+  .verdict-box {
+    padding: 20px 24px; border-radius: 8px; border: 2px solid;
+    font-size: 1.1rem; font-weight: 700; text-align: center; margin-bottom: 20px;
+  }
+  .verdict-null { border-color: var(--green); color: var(--green); background: #14532d22; }
+  .verdict-sig  { border-color: var(--purple); color: var(--purple); background: #2d1b6922; }
+</style>
+</head>
+<body>
+<h1>MSD Phase 7B — Non-Classical Discovery Experiment</h1>
+<p class="subtitle">Symbol: 1HZ100V · 16 NC features × 5 lead times = 80 candidates · Circular-shift null (1000 permutations) · BH correction α=0.05</p>
+
+<div id="prereq-section" class="card">
+  <div class="step-header">Prerequisites</div>
+  <div id="prereq-status" class="status-line">Checking…</div>
+</div>
+
+<div id="data-section" class="card" style="display:none">
+  <div class="step-header">Data Status</div>
+  <div id="data-status" class="status-line">Loading…</div>
+  <div id="data-kv" class="kv" style="margin-top:10px"></div>
+</div>
+
+<div id="space-section" class="card" style="display:none">
+  <div class="step-header">Search Space Specification</div>
+  <div class="kv" id="space-kv"></div>
+  <div style="margin-top:14px">
+    <h3>Candidate Features (16)</h3>
+    <div id="feature-list" style="font-family:var(--mono);font-size:0.8rem;color:var(--muted);margin-top:6px;line-height:2"></div>
+  </div>
+</div>
+
+<div id="run-section" style="display:none;margin-bottom:20px">
+  <button id="run-btn" class="success">Run Phase 7B Discovery (80 candidates, 1000 permutations each)</button>
+  <div class="progress-wrap" id="progress-wrap">
+    <div class="progress-bar" id="progress-bar"></div>
+  </div>
+  <div class="status-line" id="run-status"></div>
+</div>
+
+<div id="results-section">
+  <div id="verdict-box"></div>
+
+  <h2>Results Summary</h2>
+  <div class="card">
+    <div class="kv" id="summary-kv"></div>
+  </div>
+
+  <h2>All 80 Candidates — Full Table</h2>
+  <div class="card" style="overflow-x:auto">
+    <table id="results-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Feature</th>
+          <th>Lead</th>
+          <th>n</th>
+          <th>MI (nats)</th>
+          <th>p (raw)</th>
+          <th>p (BH adj)</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="results-tbody"></tbody>
+    </table>
+  </div>
+
+  <h2>Governance Log</h2>
+  <div class="card">
+    <div id="gov-log" class="mono" style="font-size:0.78rem;white-space:pre-wrap;color:var(--muted)"></div>
+  </div>
+</div>
+
+<script>
+// ─── Constants ─────────────────────────────────────────────────────────────
+const DB_NAME    = 'mfx_msd_states';
+const STORE_NAME = 'MarketStates';
+const MOP = window.opener; // Main-app functions accessed via opener
+
+// ─── IDB helpers ───────────────────────────────────────────────────────────
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror   = () => reject(req.error);
+    req.onblocked = () => reject(new Error('IndexedDB blocked — close other tabs running the app.'));
+  });
+}
+
+function readAllStates(db) {
+  return new Promise((resolve, reject) => {
+    if (!db.objectStoreNames.contains(STORE_NAME)) { resolve([]); return; }
+    const tx  = db.transaction(STORE_NAME, 'readonly');
+    const req = tx.objectStore(STORE_NAME).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror   = () => reject(req.error);
+  });
+}
+
+// ─── UI helpers ────────────────────────────────────────────────────────────
+function badge(cls, text) { return `<span class="badge ${cls}">${text}</span>`; }
+
+function renderKv(el, pairs) {
+  el.innerHTML = pairs.map(([k, v]) => `<span class="k">${k}</span><span class="v">${v}</span>`).join('');
+}
+
+function pFmt(p) {
+  if (p == null) return '—';
+  if (p < 0.001) return p.toExponential(2);
+  return p.toFixed(4);
+}
+
+function miFmt(mi) {
+  if (mi == null || !isFinite(mi)) return '—';
+  return mi.toFixed(5);
+}
+
+// ─── Main flow ─────────────────────────────────────────────────────────────
+let _allStates = null;
+let _frozenSpace = null;
+let _runResult = null;
+
+async function init() {
+  const prereqEl = document.getElementById('prereq-status');
+
+  // 1. Check window.opener
+  if (!MOP) {
+    prereqEl.innerHTML = badge('fail', 'FAIL') +
+      ' <span class="red">This page must be opened <strong>from the main MSD app</strong> (window.open) so that window.opener is available. Open the main app, then click the Phase 7B Runner button.</span>';
+    return;
+  }
+
+  // 2. Check required functions
+  const required = [
+    'msdBuildPhase7bSearchSpaceDefinition',
+    'msdFreezeSearchSpace',
+    'msdComputeSearchSpaceCardinality',
+    'msdRunPhase7bDiscovery',
+    'msdBuildNcSnapshotRows',
+    'msdEnrichWithNonClassicalFeatures',
+    'msdValidateNonClassicalFeatures',
+    'MSD_SEARCH_SPACE_SPEC_VERSION_V2',
+    'MSD_PHASE7B_INDIVIDUAL_FEATURES',
+    'MSD_PHASE7B_MAX_CANDIDATES',
+    'MSD_PHASE7B_SYMBOL',
+  ];
+  const missing = required.filter(fn => MOP[fn] == null);
+  if (missing.length > 0) {
+    prereqEl.innerHTML = badge('fail', 'FAIL') +
+      ' <span class="red">Missing functions in opener: ' + missing.join(', ') +
+      '. Ensure the main app is fully loaded (Phase 7 + Phase 7B code present).</span>';
+    return;
+  }
+
+  // 3. Run NC validation suite as gate
+  const validationResult = MOP.msdValidateNonClassicalFeatures();
+  if (validationResult.failed > 0) {
+    prereqEl.innerHTML = badge('fail', 'FAIL') +
+      ' NC validation suite: ' + validationResult.failed + ' failure(s). Fix before running discovery.<br>' +
+      validationResult.errors.map(e => '<span class="red mono" style="font-size:0.78rem">  ' + e + '</span>').join('<br>');
+    return;
+  }
+
+  prereqEl.innerHTML =
+    badge('pass', 'PASS') + ' window.opener connected · ' +
+    badge('pass', 'PASS') + ' NC validation suite: ' + validationResult.passed + '/' + validationResult.total + ' assertions pass';
+
+  // 4. Open IDB and read states
+  document.getElementById('data-section').style.display = '';
+  const dataEl  = document.getElementById('data-status');
+  const dataKvEl = document.getElementById('data-kv');
+  let db;
+  try {
+    dataEl.textContent = 'Opening IndexedDB…';
+    db = await openDB();
+    dataEl.textContent = 'Reading MarketStates…';
+    _allStates = await readAllStates(db);
+    db.close();
+  } catch (e) {
+    dataEl.innerHTML = badge('fail', 'ERROR') + ' ' + (e.message || String(e));
+    return;
+  }
+
+  // Compute NC eligibility counts via opener
+  const enrichResult = MOP.msdEnrichWithNonClassicalFeatures(_allStates);
+  const symbol7b = MOP.MSD_PHASE7B_SYMBOL;
+  const forSymbol = _allStates.filter(s => s.symbol === symbol7b);
+  const enrichSym = MOP.msdEnrichWithNonClassicalFeatures(forSymbol);
+  const positives = forSymbol.filter(s => s.outcome === 'positive').length;
+  const negatives = forSymbol.filter(s => s.outcome === 'negative').length;
+
+  dataEl.innerHTML = badge('pass', 'LOADED') + ' ' + _allStates.length + ' total states';
+  renderKv(dataKvEl, [
+    ['Total records',         _allStates.length.toLocaleString()],
+    ['Symbol 1HZ100V records', forSymbol.length.toLocaleString()],
+    ['NC-eligible (symbol)',   enrichSym.eligible.toLocaleString()],
+    ['NC-ineligible (symbol)', enrichSym.ineligible.toLocaleString()],
+    ['Positives (symbol)',     positives.toLocaleString()],
+    ['Negatives (symbol)',     negatives.toLocaleString()],
+  ]);
+
+  if (enrichSym.eligible < 30) {
+    dataEl.innerHTML += ' ' + badge('warn', 'INSUFFICIENT DATA') + ' <span class="yellow">Need ≥30 NC-eligible records for 1HZ100V. Capture more data first.</span>';
+    return;
+  }
+
+  // 5. Build and display search space
+  document.getElementById('space-section').style.display = '';
+  const spaceKvEl   = document.getElementById('space-kv');
+  const featureListEl = document.getElementById('feature-list');
+
+  const spaceDef    = MOP.msdBuildPhase7bSearchSpaceDefinition();
+  _frozenSpace = MOP.msdFreezeSearchSpace(spaceDef, 'phase7b_runner', { schemaVersion: MOP.MSD_SEARCH_SPACE_SPEC_VERSION_V2 });
+  const cardinality = MOP.msdComputeSearchSpaceCardinality(_frozenSpace);
+
+  renderKv(spaceKvEl, [
+    ['Search space ID',     _frozenSpace.searchSpaceId],
+    ['Search space hash',   _frozenSpace.searchSpaceHash],
+    ['Schema version',      _frozenSpace.searchSpaceVersion],
+    ['Symbol',              spaceDef.symbols.join(', ')],
+    ['Observation window',  spaceDef.observationWindows.join(', ') + ' ticks'],
+    ['Lead times',          spaceDef.leadTimes.join(', ') + ' ticks'],
+    ['Interaction depth',   String(spaceDef.interactionDepth)],
+    ['Individual features', String(spaceDef.individualFeatures.length)],
+    ['Cardinality',         cardinality.totalCardinality + ' candidates'],
+    ['Max candidates',      String(spaceDef.maxCandidateCount)],
+    ['Null model',          'circular-shift permutation (1000 permutations)'],
+    ['Correction',          'Benjamini-Hochberg (α = 0.05)'],
+  ]);
+
+  featureListEl.innerHTML = MOP.MSD_PHASE7B_INDIVIDUAL_FEATURES
+    .map((f, i) => `<span class="mono" style="color:var(--text);margin-right:18px">${String(i+1).padStart(2,'0')} ${f}</span>`)
+    .join('');
+
+  // 6. Show run button
+  document.getElementById('run-section').style.display = '';
+  document.getElementById('run-btn').onclick = runDiscovery;
+}
+
+async function runDiscovery() {
+  const btn      = document.getElementById('run-btn');
+  const statusEl = document.getElementById('run-status');
+  const progress = document.getElementById('progress-wrap');
+  const bar      = document.getElementById('progress-bar');
+
+  btn.disabled = true;
+  progress.style.display = 'block';
+  statusEl.textContent = 'Starting Phase 7B discovery run…';
+
+  const t0 = Date.now();
+  let lastProgressPct = 0;
+
+  try {
+    _runResult = await MOP.msdRunPhase7bDiscovery(_allStates, _frozenSpace, {
+      permutations: 1000,
+      seed: 42,
+      alpha: 0.05,
+      parentRunId: 'phase7b_nc_discovery_run_' + Date.now(),
+      onProgress: (i, total, candidate) => {
+        const pct = Math.round((i / total) * 100);
+        if (pct !== lastProgressPct) {
+          lastProgressPct = pct;
+          bar.style.width = pct + '%';
+          statusEl.textContent = `Evaluating candidate ${i + 1}/${total}: ${candidate.features.join('+')} @ leadTime=${candidate.leadTime}`;
+        }
+      },
+    });
+  } catch (e) {
+    statusEl.innerHTML = badge('fail', 'ERROR') + ' ' + (e.message || String(e));
+    btn.disabled = false;
+    return;
+  }
+
+  const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+  bar.style.width = '100%';
+  statusEl.innerHTML = badge('pass', 'COMPLETE') + ' ' + elapsed + 's elapsed';
+
+  renderResults(_runResult);
+}
+
+function renderResults(r) {
+  document.getElementById('results-section').style.display = '';
+
+  // Verdict
+  const verdictEl = document.getElementById('verdict-box');
+  if (!r.ok) {
+    verdictEl.innerHTML = `<div class="verdict-box" style="border-color:var(--red);color:var(--red);background:#45090a22">DISCOVERY FAILED: ${r.error}</div>`;
+  } else if (r.practicallySignificant && r.practicallySignificant.length > 0) {
+    verdictEl.innerHTML = `<div class="verdict-box verdict-sig">⚠ DISCOVERY: ${r.practicallySignificant.length} candidate(s) survive BH correction AND practical significance gate</div>`;
+  } else if (r.significantHypotheses && r.significantHypotheses.length > 0) {
+    verdictEl.innerHTML = `<div class="verdict-box verdict-sig">MARGINAL: ${r.significantHypotheses.length} candidate(s) survive BH but FAIL practical significance gate (MI &lt; 0.01 nats)</div>`;
+  } else {
+    verdictEl.innerHTML = `<div class="verdict-box verdict-null">✓ NULL RESULT: No non-classical feature shows statistically significant predictive information after BH correction (α = 0.05)</div>`;
+  }
+
+  // Summary
+  const snap = r.snapshotStats || {};
+  renderKv(document.getElementById('summary-kv'), [
+    ['Search space ID',      r.searchSpaceId || '—'],
+    ['Dataset snapshot ID',  r.datasetSnapshotId || '—'],
+    ['Candidates evaluated', String(r.candidatesEvaluated)],
+    ['Permutations/candidate', String(r.permutations)],
+    ['RNG seed',             String(r.seed)],
+    ['Usable rows',          String(snap.rows ? snap.rows.length : '—')],
+    ['Certain-label rows',   String(snap.certainCount || '—')],
+    ['NC-eligible records',  String(snap.eligibleCount || '—')],
+    ['Significant after BH', String(r.significantHypotheses ? r.significantHypotheses.length : 0) + ' / ' + r.candidatesEvaluated],
+    ['Practical gate (≥0.01 nat)', String(r.practicallySignificant ? r.practicallySignificant.length : 0)],
+    ['Hypothesis records created', String(r.hypothesesCreated)],
+  ]);
+
+  // Full results table
+  const tbody = document.getElementById('results-tbody');
+  const hyps = r.hypotheses || [];
+
+  // Sort: significant first, then by adjusted p-value ascending
+  const sorted = hyps.slice().sort((a, b) => {
+    if (a.isSignificant !== b.isSignificant) return a.isSignificant ? -1 : 1;
+    const pa = a.adjustedPValue != null ? a.adjustedPValue : 1;
+    const pb = b.adjustedPValue != null ? b.adjustedPValue : 1;
+    return pa - pb;
+  });
+
+  tbody.innerHTML = sorted.map((h, i) => {
+    const sig = h.isSignificant;
+    const pract = sig && h.effectSize >= 0.01;
+    const statusBadge = pract ? badge('sig', 'SIGNIFICANT*') : sig ? badge('warn', 'SIG (no practical)') : '<span class="muted">—</span>';
+    return `<tr class="${sig ? 'significant' : ''}">
+      <td class="num muted">${i + 1}</td>
+      <td>${h.feature}</td>
+      <td class="num">${h.leadTime}</td>
+      <td class="num">${h.sampleSize != null ? h.sampleSize.toLocaleString() : '—'}</td>
+      <td class="num">${miFmt(h.effectSize)}</td>
+      <td class="num">${pFmt(h.rawPValue)}</td>
+      <td class="num">${pFmt(h.adjustedPValue)}</td>
+      <td>${statusBadge}</td>
+    </tr>`;
+  }).join('');
+
+  // Governance log
+  const logEl = document.getElementById('gov-log');
+  logEl.textContent = (r.log || []).map(entry => JSON.stringify(entry, null, 2)).join('\n\n');
+}
+
+// ─── Boot ──────────────────────────────────────────────────────────────────
+init().catch(e => {
+  document.getElementById('prereq-status').innerHTML =
+    '<span class="badge fail">ERROR</span> ' + (e.message || String(e));
+});
+</script>
+</body>
+</html>

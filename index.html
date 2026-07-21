@@ -7603,6 +7603,7 @@ function msdValidateNonClassicalFeatures(){
     snapshotId: 'ut_e1', epoch: 1000, price: 119, symbol: 'R_100',
     outcome: 'positive', leadTime: 1, featureVersion: 'v1',
     rawHistoryValid: true,
+    rawHistoryWindowLength: 20, // required by Phase 7A eligibility gate (Architecture Defect 3.3)
     rawPriceHistory: Array.from({ length: 20 }, (_, i) => 100 + i),
   };
   const snap_noHist = {
@@ -7641,15 +7642,19 @@ function msdValidateNonClassicalFeatures(){
 
   // ── Group 11: ncf_runEntropy > 0 for genuinely diverse run lengths (Phase 7A Validation Gap 2) ──
   // All existing run-entropy tests cover H=0 cases (uniform run lengths).
-  // This tests a sequence with run lengths [3,1,2,1,5,1,3,1,1]:
-  // rlCounts={3:2,1:5,2:1,5:1}, total=9 runs.
-  // Expected H = ln(9) - (2·ln(2) + 5·ln(5)) / 9  ≈ 1.149 nats
+  // This tests a sequence with run lengths [3,1,2,1,5,1,3,1,1,1]:
+  // rlCounts={1:6,2:1,3:2,5:1}, total=10 runs.
+  // Expected H = −(6/10·ln(6/10) + 2/10·ln(2/10) + 1/10·ln(1/10) + 1/10·ln(1/10)) ≈ 1.089 nats
+  // NOTE (Phase 7B fix): the sequence produces 10 runs, not 9. The final direction
+  // run (one down-tick at position 19) is a separate run from the preceding up-run,
+  // giving runLengths=[3,1,2,1,5,1,3,1,1,1] via exhaustive trace of the direction
+  // sequence [+,+,+,−,+,+,−,+,+,+,+,+,−,+,+,+,−,+,−].
   const g11 = [100,101,102,103,100,101,102,100,101,102,103,104,105,100,101,102,103,100,101,100];
   const g11R = msdComputeNonClassicalFeatures(g11);
   assert('G11 diverse runs: not null', g11R !== null, true);
   if (g11R){
     assert('G11 ncf_runEntropy > 0', g11R.ncf_runEntropy > 0, true);
-    const g11ExpH = Math.log(9) - (2 * Math.log(2) + 5 * Math.log(5)) / 9;
+    const g11ExpH = -(6/10*Math.log(6/10) + 2/10*Math.log(2/10) + 1/10*Math.log(1/10) + 1/10*Math.log(1/10));
     assert('G11 ncf_runEntropy exact value', g11R.ncf_runEntropy, g11ExpH, 1e-10);
   }
 
@@ -7708,10 +7713,15 @@ function msdValidateNonClassicalFeatures(){
     assert('G16 ncf_permEntropy3 > 0 (diverse patterns exist)', g16R.ncf_permEntropy3 > 0, true);
   }
 
-  // ── Group 17: Symmetry — ascending vs. price-reversed sequence (Phase 7A Validation Gap 8) ──
-  // For ascending P and descending P': several features must satisfy symmetric identities.
-  const g17a = Array.from({ length: 20 }, (_, i) => 100 + i);  // ascending
-  const g17d = Array.from({ length: 20 }, (_, i) => 119 - i);  // descending (price-reversed)
+  // ── Group 17: Symmetry — ascending vs. descending from same p0 (Phase 7A Validation Gap 8) ──
+  // For a uniformly ascending sequence and the corresponding uniformly descending
+  // sequence starting at the SAME p0, several features satisfy symmetric identities.
+  // NOTE (Phase 7B fix): the original fixture used g17d=[119..100] (reversed price-axis,
+  // p0=119), which breaks mfe/mae symmetry because both features divide by |p0|. The
+  // correct fixture for mfe(asc)=mae(desc) requires the same p0 for both sequences;
+  // g17d now starts at p0=100 and descends to 81.
+  const g17a = Array.from({ length: 20 }, (_, i) => 100 + i);  // ascending:  [100..119]
+  const g17d = Array.from({ length: 20 }, (_, i) => 100 - i);  // descending: [100..81], same p0=100
   const r17a = msdComputeNonClassicalFeatures(g17a);
   const r17d = msdComputeNonClassicalFeatures(g17d);
   if (r17a && r17d){
@@ -9276,6 +9286,71 @@ function msdBuildRealSnapshotRows(allStates, uncertaintyHandlingChoice){
   return { rows, epochCount: epochLabels.size, certainCount, uncertainCount, uncertainIncludedCount, droppedUncertainCount: validatedChoice.mode === 'filter_certain_only' ? uncertainCount : 0, handlingMode: validatedChoice.mode };
 }
 
+// ── Phase 7B: NC-enriched snapshot rows for the non-classical discovery run ──
+/**
+ * Builds snapshot rows for Phase 7B by enriching allStates with the 18
+ * non-classical features and then applying the same labelling and
+ * uncertainty-handling pipeline as msdBuildRealSnapshotRows.
+ *
+ * NC features are computed on-demand from rawPriceHistory — never read
+ * from or written to IndexedDB. Records ineligible for NC enrichment
+ * (rawHistoryValid !== true, or wrong window length) are excluded
+ * deterministically; they hold no rawPriceHistory from which features
+ * could be derived.
+ *
+ * @param {object[]} allStates               — raw MarketState records
+ * @param {object}   uncertaintyHandlingChoice — { filterCertainOnly: true } or similar
+ * @returns {{ rows, epochCount, certainCount, uncertainCount,
+ *             droppedUncertainCount, handlingMode,
+ *             eligibleCount, ineligibleCount }}
+ */
+function msdBuildNcSnapshotRows(allStates, uncertaintyHandlingChoice) {
+  const validatedChoice = msdRequireExplicitUncertaintyHandling(uncertaintyHandlingChoice);
+
+  // Step 1: Enrich all states with NC features (pure — originals never mutated).
+  const enrichResult = msdEnrichWithNonClassicalFeatures(allStates);
+
+  // Step 2: Research label set from the ORIGINAL, unmodified allStates.
+  // Mirrors msdBuildRealSnapshotRows exactly, preserving epoch identity and
+  // the same label-set semantics for every observation.
+  const epochLabels = msdBuildResearchLabelSet(allStates);
+
+  // Step 3: Epoch-keyed map from NC-eligible enriched records only.
+  const byEpoch = new Map();
+  enrichResult.enriched.forEach(s => {
+    if (s.ncf_eligible === true && !byEpoch.has(s.epoch)) byEpoch.set(s.epoch, s);
+  });
+
+  // Step 4: Pair labels with enriched records, applying uncertainty policy.
+  const rows = [];
+  let certainCount = 0, uncertainCount = 0;
+  epochLabels.forEach((label, epoch) => {
+    const rep = byEpoch.get(epoch);
+    if (!rep) return; // epoch not NC-eligible — excluded deterministically
+    if (label.label_confidence === 'certain') {
+      certainCount++;
+      rows.push(Object.assign({}, rep, {
+        event_outcome:    label.event_outcome,
+        label_confidence: 'certain',
+        conflict_status:  label.conflict_status,
+      }));
+    } else {
+      uncertainCount++;
+      if (validatedChoice.mode === 'resolution_policy') {
+        // Policy B stub — deliberately unimplemented, matching msdBuildRealSnapshotRows.
+      }
+      // filter_certain_only: epoch excluded; counted above.
+    }
+  });
+
+  return {
+    rows, epochCount: epochLabels.size, certainCount, uncertainCount,
+    droppedUncertainCount: validatedChoice.mode === 'filter_certain_only' ? uncertainCount : 0,
+    handlingMode: validatedChoice.mode,
+    eligibleCount: enrichResult.eligible, ineligibleCount: enrichResult.ineligible,
+  };
+}
+
 // ── Phase 5: real feature materialization for one candidate ──
 /**
  * Computes ONE candidate's feature value series from snapshot rows.
@@ -9595,6 +9670,270 @@ async function msdRunLevel2PilotRevalidation(allStates, originalSearchSpaceDefin
     cardinality: cardinality.totalCardinality, enumeratedCount: enumeration.count,
     candidatesEvaluated: candidateResults.length, hypothesesCreated: hypotheses.length,
     hypotheses, snapshotStats: snapshotRows, candidateResults,
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// PART 12 — PHASE 7B: FIRST NON-CLASSICAL DISCOVERY EXPERIMENT
+// ══════════════════════════════════════════════════════════════════════
+// Implements the Phase 7B search space (16 non-classical features × 5
+// lead times, symbol 1HZ100V, 80 candidates) and the full discovery
+// orchestrator. The corrected pipeline from Part 10 is reused verbatim:
+// lead-time-corrected materialization + circular-shift null model +
+// BH correction + hypothesis record creation.
+//
+// ADDITIVE ONLY: no existing function is modified.
+//
+// CANDIDATE FAMILY (16 features):
+//   ncf_meanFirstDiff and ncf_meanAbsFirstDiff are excluded because they
+//   are exact linear multiples of ncf_netDisplacement and ncf_absPathLength
+//   for fixed n=20, providing no independent statistical information.
+//
+// EXPECTED CARDINALITY:
+//   C(16,1) × 5 lead times × 1 (all other dimensions singleton) = 80.
+// ══════════════════════════════════════════════════════════════════════
+
+/** 16 Phase 7B candidate features (18 NC features minus 2 collinear). */
+const MSD_PHASE7B_INDIVIDUAL_FEATURES = Object.freeze([
+  // Family A — Path Geometry (5)
+  'ncf_netDisplacement', 'ncf_absPathLength', 'ncf_pathEfficiency',
+  'ncf_mfe', 'ncf_mae',
+  // Family B — Directional Structure (6)
+  'ncf_upTickCount', 'ncf_downTickCount', 'ncf_dirImbalance',
+  'ncf_currentRunLen', 'ncf_maxRunLen', 'ncf_reversalCount',
+  // Family C — Price Dynamics (2 of 4; ncf_meanFirstDiff + ncf_meanAbsFirstDiff excluded)
+  'ncf_stdFirstDiff', 'ncf_meanSecondDiff',
+  // Family D — Complexity/Entropy (3)
+  'ncf_dirEntropy', 'ncf_runEntropy', 'ncf_permEntropy3',
+]);
+
+/** Expected cardinality for the Phase 7B search space. */
+const MSD_PHASE7B_MAX_CANDIDATES = 80;
+
+/** Primary symbol for Phase 7B. */
+const MSD_PHASE7B_SYMBOL = '1HZ100V';
+
+/**
+ * Returns an UNFROZEN Phase 7B search space definition object.
+ * Freeze with msdFreezeSearchSpace(..., MSD_SEARCH_SPACE_SPEC_VERSION_V2)
+ * before passing to any governance or enumeration function.
+ * Externalised so the runner page can construct the identical definition
+ * without duplicating the constant block.
+ */
+function msdBuildPhase7bSearchSpaceDefinition() {
+  return {
+    symbols:                 [MSD_PHASE7B_SYMBOL],
+    observationWindows:      [20],
+    leadTimes:               [1, 2, 3, 4, 5],
+    individualFeatures:      MSD_PHASE7B_INDIVIDUAL_FEATURES.slice(),
+    featureTransformations:  ['raw'],
+    lagOperators:            ['none'],
+    rollingOperators:        ['none'],
+    temporalOperators:       ['none'],
+    aggregationOperators:    ['none'],
+    statisticalTests:        ['mutual_information'],
+    candidateModelFamilies:  ['mutual_information'],
+    multipleTestingControls: ['benjamini_hochberg'],
+    interactionDepth:        1,
+    maxCandidateCount:       MSD_PHASE7B_MAX_CANDIDATES,
+    exclusionRules:          [], // collinear features excluded by omission from individualFeatures
+    missingDataRules:        { maxMissingRate: 0.1 },
+    uncertaintyLabelPolicy:  'filter_certain_only',
+  };
+}
+
+/**
+ * Phase 7B full discovery orchestrator — non-classical feature family.
+ *
+ * Mirrors msdRunLevel2PilotRevalidation's corrected pipeline exactly,
+ * substituting msdBuildNcSnapshotRows for msdBuildRealSnapshotRows so
+ * that the NC features (computed from rawPriceHistory on-demand) are
+ * available on every row object when msdMaterializeCandidateFeature
+ * reads row[featureName]. All downstream pipeline steps — lead-time-
+ * corrected materialization, circular-shift null model, BH correction,
+ * hypothesis record creation — are REUSED UNMODIFIED.
+ *
+ * @param {object[]} allStates           — all MarketState snapshots from IDB
+ * @param {object}   frozenSearchSpace   — result of msdFreezeSearchSpace
+ * @param {object}   [options]
+ * @param {number}   [options.permutations=1000]  — permutation count
+ * @param {number}   [options.seed=42]            — reproducible RNG seed
+ * @param {number}   [options.minShift]            — minimum circular shift
+ * @param {number}   [options.alpha=0.05]          — family-wise alpha
+ * @param {string}   [options.parentRunId]
+ * @param {object}   [options.uncertaintyHandling]  — default: filterCertainOnly
+ * @param {Function} [options.onProgress]           — callback(i, total, candidate)
+ * @returns {Promise<object>}
+ */
+async function msdRunPhase7bDiscovery(allStates, frozenSearchSpace, options) {
+  options = options || {};
+  const log = [];
+
+  if (!Object.isFrozen(frozenSearchSpace)) {
+    throw new Error('msdRunPhase7bDiscovery: frozenSearchSpace must be frozen via msdFreezeSearchSpace before use.');
+  }
+
+  // ── Step 1: Record search space ───────────────────────────────────────────────
+  const spaceRecord = await msdRecordSearchSpaceSpecification(frozenSearchSpace);
+  log.push({ step: 'p7b_search_space_recorded', searchSpaceId: frozenSearchSpace.searchSpaceId, ok: spaceRecord.ok });
+
+  // ── Step 2: Build NC-enriched snapshot rows ───────────────────────────────────
+  const uncertaintyHandling = options.uncertaintyHandling || { filterCertainOnly: true };
+  const snapshotRows = msdBuildNcSnapshotRows(allStates, uncertaintyHandling);
+  log.push({
+    step: 'p7b_nc_snapshot_rows_built', epochCount: snapshotRows.epochCount,
+    certainCount: snapshotRows.certainCount, droppedUncertainCount: snapshotRows.droppedUncertainCount,
+    eligibleCount: snapshotRows.eligibleCount, ineligibleCount: snapshotRows.ineligibleCount,
+    usableRows: snapshotRows.rows.length,
+  });
+
+  if (snapshotRows.rows.length < 30) {
+    return { ok: false, log, error: 'Insufficient usable observations (' + snapshotRows.rows.length + '). Capture more data first.' };
+  }
+
+  // ── Step 3: Record dataset snapshot ──────────────────────────────────────────
+  const frozenSnapshot = msdFreezeDatasetSnapshot({
+    sourceScope:             'MarketStates_NC_Phase7B',
+    symbolScope:             frozenSearchSpace.symbols[0],
+    timeRangeStart:          snapshotRows.rows.length ? msdSafeMin(snapshotRows.rows.map(r => r.epoch)) : 0,
+    timeRangeEnd:            snapshotRows.rows.length ? msdSafeMax(snapshotRows.rows.map(r => r.epoch)) : 0,
+    eventDefinitionVersion:  'event_def_v1',
+    schemaVersion:           'v1',
+    searchSpaceId:           frozenSearchSpace.searchSpaceId,
+    featureSchemaVersion:    MSD_FEATURE_SCHEMA_VERSION,
+    labelConfidencePolicy:   snapshotRows.handlingMode,
+    datasetFingerprint:      msdComputeDatasetFingerprint({ trainSet: snapshotRows.rows, valSet: [], testSet: [] }),
+  });
+  const snapshotRecord = await msdRecordDatasetSnapshot(frozenSnapshot);
+  log.push({ step: 'p7b_dataset_snapshot_recorded', datasetSnapshotId: frozenSnapshot.datasetSnapshotId, ok: snapshotRecord.ok });
+
+  // ── Step 4: Verify cardinality and enumerate ──────────────────────────────────
+  const cardinality = msdComputeSearchSpaceCardinality(frozenSearchSpace);
+  if (cardinality.status === 'overflow') return { ok: false, log, error: 'Search space cardinality overflow', cardinality };
+  const enumeration = msdDryRunEnumerateCandidates(frozenSearchSpace);
+  if (enumeration.count !== cardinality.totalCardinality) {
+    throw new Error('GOVERNANCE INVARIANT VIOLATION: enumeration count (' + enumeration.count + ') !== computed cardinality (' + cardinality.totalCardinality + ').');
+  }
+  log.push({ step: 'p7b_enumeration_verified', count: enumeration.count, verifiedCardinality: cardinality.totalCardinality });
+
+  // ── Step 5: Evaluate every candidate ─────────────────────────────────────────
+  const permutations = options.permutations != null ? options.permutations : 1000;
+  const seed         = options.seed         != null ? options.seed         : 42;
+  const candidateResults = [];
+  for (let ci = 0; ci < enumeration.candidates.length; ci++) {
+    const candidate = enumeration.candidates[ci];
+    if (typeof options.onProgress === 'function') options.onProgress(ci, enumeration.candidates.length, candidate);
+    let materialized, evaluation;
+    try {
+      materialized = msdMaterializeCandidateFeatureLeadTimeCorrected(snapshotRows.rows, candidate, frozenSearchSpace.missingDataRules);
+      evaluation   = msdEvaluateCandidateDependenceAware(materialized, permutations, seed, options.minShift);
+    } catch (e) {
+      materialized = { ok: false, missingCount: null, missingRate: null };
+      evaluation   = { ok: false, error: e.message };
+    }
+    candidateResults.push({
+      candidate,
+      materialized: { ok: materialized.ok, missingCount: materialized.missingCount, missingRate: materialized.missingRate },
+      evaluation,
+    });
+  }
+  const succeededCount = candidateResults.filter(c => c.evaluation.ok).length;
+  log.push({ step: 'p7b_candidates_evaluated', count: candidateResults.length, succeeded: succeededCount });
+
+  // ── Step 6: Multiplicity correction (Benjamini-Hochberg) ─────────────────────
+  const validResults = candidateResults.filter(c => c.evaluation.ok);
+  const pValues      = validResults.map(c => c.evaluation.pValue);
+  const correction   = pValues.length > 0
+    ? msdApplySearchSpaceWideCorrectionVerified({
+        pValues, searchSpace: frozenSearchSpace,
+        claimedFamilySize: cardinality.totalCardinality,
+        alpha: options.alpha || 0.05,
+      })
+    : null;
+  log.push({
+    step: 'p7b_multiplicity_correction_applied', method: 'benjamini_hochberg',
+    verifiedFamilySize: correction ? correction.verifiedFamilySize : null,
+  });
+
+  // ── Step 7: Create hypothesis records ────────────────────────────────────────
+  const hypotheses = [];
+  for (let i = 0; i < validResults.length; i++) {
+    const { candidate, evaluation } = validResults[i];
+    const adjustedPValue = correction ? correction.results[i].adjustedPValue : null;
+    const hypothesisId   = msdGenerateHypothesisId();
+    const fields = {
+      hypothesis_id:             hypothesisId,
+      parent_run_id:             options.parentRunId || 'phase7b_nc_discovery_run',
+      candidate_id:              msdGenerateCandidateId(),
+      search_space_id:           frozenSearchSpace.searchSpaceId,
+      search_space_version:      frozenSearchSpace.searchSpaceVersion,
+      search_space_hash:         frozenSearchSpace.searchSpaceHash,
+      dataset_snapshot_id:       frozenSnapshot.datasetSnapshotId,
+      dataset_fingerprint:       frozenSnapshot.datasetFingerprint,
+      event_definition_version:  'event_def_v1',
+      feature_schema_version:    MSD_FEATURE_SCHEMA_VERSION,
+      symbol:                    candidate.symbol,
+      observation_window:        candidate.observationWindow,
+      lead_time:                 candidate.leadTime,
+      feature_definition:        candidate.features,
+      transformation_definition: candidate.transformation,
+      lag_definition:            candidate.lag,
+      rolling_definition:        candidate.rolling,
+      temporal_definition:       candidate.temporal,
+      aggregation_definition:    candidate.aggregation,
+      interaction_definition:    candidate.features.length,
+      model_family:              candidate.modelFamily,
+      statistical_test:          candidate.statisticalTest + '_circular_shift_null',
+      correction_method:         frozenSearchSpace.multipleTestingControls[0],
+      verified_family_size:      cardinality.totalCardinality,
+      alpha:                     options.alpha || 0.05,
+      label_confidence_policy:   snapshotRows.handlingMode,
+      uncertainty_policy:        snapshotRows.handlingMode,
+      conflict_status_policy:    'standard',
+      effect_size:               evaluation.effectSize,
+      p_value:                   evaluation.pValue,
+      adjusted_p_value:          adjustedPValue,
+      sample_size:               evaluation.sampleSize,
+      missing_data_count:        evaluation.missingCount,
+      nc_feature_version:        MSD_NC_FEATURE_VERSION,
+    };
+    const frozenHypothesis = msdFreezeHypothesisRecord(fields);
+    const recordResult = await msdRecordHypothesisRecord(frozenHypothesis);
+    const isSignificant = adjustedPValue != null && adjustedPValue < (options.alpha || 0.05);
+    hypotheses.push({
+      hypothesisId, contentHash: frozenHypothesis.contentHash, ok: recordResult.ok,
+      feature: candidate.features.join('+'), leadTime: candidate.leadTime,
+      effectSize: evaluation.effectSize, rawPValue: evaluation.pValue,
+      adjustedPValue, isSignificant, sampleSize: evaluation.sampleSize,
+      missingRate: evaluation.missingRate,
+    });
+  }
+  log.push({ step: 'p7b_hypothesis_records_created', count: hypotheses.length });
+
+  // ── Step 8: Practical significance gate ──────────────────────────────────────
+  const alpha = options.alpha || 0.05;
+  const practicalThreshold = 0.01; // nats — minimum meaningful MI for Phase 7B
+  const significantHypotheses = hypotheses.filter(h => h.isSignificant);
+  const practicallySignificant = significantHypotheses.filter(h => h.effectSize >= practicalThreshold);
+  log.push({
+    step: 'p7b_practical_gate', totalCandidates: candidateResults.length,
+    evaluatedOk: succeededCount, significantAfterBH: significantHypotheses.length,
+    passedPracticalGate: practicallySignificant.length, practicalThreshold_nats: practicalThreshold,
+  });
+
+  return {
+    ok: true, log,
+    searchSpaceId:       frozenSearchSpace.searchSpaceId,
+    datasetSnapshotId:   frozenSnapshot.datasetSnapshotId,
+    cardinality:         cardinality.totalCardinality,
+    enumeratedCount:     enumeration.count,
+    candidatesEvaluated: candidateResults.length,
+    hypothesesCreated:   hypotheses.length,
+    hypotheses, significantHypotheses, practicallySignificant,
+    snapshotStats:       snapshotRows,
+    candidateResults,
+    permutations, seed, alpha,
+    practicalThreshold_nats: practicalThreshold,
   };
 }
 

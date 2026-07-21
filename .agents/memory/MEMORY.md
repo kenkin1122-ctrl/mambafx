@@ -1,2 +1,3 @@
 - [Phase 7 NC Feature Engineering](phase7-nc-features.md) — 18 ncf_v1 features derived from rawPriceHistory at dataset-build time; enrichment layer, not stored in IndexedDB.
 - [Phase 7A Master Review](phase7a-review.md) — Full 6-deliverable audit complete; 3 defects fixed; 10 validation gaps patched; Phase 7B authorized.
+- [Phase 7B Implementation](phase7b-implementation.md) — NC discovery orchestrator, runner page, 3 test fixes; 115/0 assertions.
