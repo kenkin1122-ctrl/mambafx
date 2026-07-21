@@ -1,48 +1,67 @@
 ---
 name: Phase 8 Campaign
-description: Phase 8 — First Official NC Discovery Campaign runner page; uses existing infrastructure with zero new index.html functions
+description: Phase 8 server-side execution engine + campaign runner; GET /api/phase8/seal, POST /api/phase8/run; standalone page.
 ---
 
 ## Phase 8: First Official Non-Classical Discovery Campaign
 
-### What Was Built
+### What Was Built (Server-Side Execution Path)
 
-Single runner page: `msd-phase8-campaign.html` (~1 100 lines, no new index.html additions).
+Three files created/updated; zero new functions in index.html:
 
-### Design
+| File | Role |
+|---|---|
+| `phase8-engine.js` | Node.js vm engine — loads MSD functions from index.html lines 3170–11287 |
+| `server.js` | Added GET /api/phase8/seal + POST /api/phase8/run endpoints |
+| `msd-phase8-campaign.html` | Standalone runner — no window.opener needed |
 
-All computation delegated to existing Phase 7B infrastructure — zero new functions added to index.html. The page is a scientific document renderer.
+### vm Extraction Details (CRITICAL)
 
-**Two-phase UI:**
-1. **Protocol Seal** — shown on load before any data access. Builds and freezes the search space, renders all 12 pre-registration fields + search-space hash/ID. User must confirm before data is read.
-2. **Campaign Execution** — triggered by "Begin Phase 8 Campaign". Calls `msdRunPhase7bDiscovery` with `onProgress` callback for candidate-level progress.
+- Extract **HTML lines 3170–11287** (`slice(3169, 11287)`) — all MSD functions, no UI code.
+- Cut at 11287 because it's the last clean balanced-block parse boundary before non-ASCII chars (U+2550 ═, U+2014 —) in JSDoc comments starting at line 11443.
+- `const` declarations are NOT accessible via `ctx.CONST_NAME` — the EXPORT_IIFE suffix captures them.
+- `MSD_CODE_VERSION` and `MSD_STATISTICAL_ENGINE_VERSION` are at lines 12672-12673 (past cut) — pre-define them on the context object.
+- `window.addEventListener` is called at top-level (line 3272) — must add `ctx.addEventListener = () => {}` BEFORE setting `ctx.window = ctx`.
+- `msdBuildPhase7bSearchSpaceDefinition()` is missing `featureFamilies` field required by `msdFreezeSearchSpace` — patch it in the engine after loading: `featureFamilies: ['non_classical']`.
 
-**Why zero new functions:** Phase 8 rules explicitly prohibit feature additions, schema changes, or infrastructure expansion. `msdRunPhase7bDiscovery` already handles pre-registration (Step 1 — records search space before building dataset), dataset snapshot (Step 3), evaluation (Step 5), BH correction (Step 6), and hypothesis record creation (Step 7) internally.
+**Why:** `function` declarations become context properties; `const`/`let` do NOT — they live in the script's lexical scope only. The EXPORT_IIFE suffix runs in the SAME script's lexical scope so it CAN read those bindings and copy them to `this`.
+
+### IDB Override Strategy
+
+- `msdWriteFinding`, `msdWriteDiscoveryLedgerEntry` → `async () => ({ ok: true })`
+- `msdGetAllFindings`, `msdGetAllDiscoveryLedgerEntries` → `async () => []`
+- `msdRecordHypothesisRecord` → bypass provenance check, return `{ ok: true, entryId: 'server_...' }`
+- `msdGetSearchSpaceSpecifications`, `msdGetDatasetSnapshots` → `async () => []`
+
+### Protocol Seal (verified in production)
+
+- searchSpaceVersion: search_space_spec_v2
+- totalCardinality: 80 (16 features × 5 lead times)
+- symbol: 1HZ100V, featureVersion: ncf_v1
+- seed: 42, permutations: 1000, alpha: 0.05, practicalThreshold: 0.01 nats
+- nullModel: circular_shift_permutation, correction: benjamini_hochberg
 
 ### 8-Step Report Structure
 
 | Step | Content |
 |---|---|
-| 1 | Pre-registration record — confirms IDB write before data read |
-| 2 | Dataset snapshot — fingerprint, uncertainty filtering, usable row count |
-| 3 | Discovery evaluation — 80/80 confirmed, permutations=1000, seed=42 |
-| 4 | Multiplicity correction chain — 80→80→80→80 invariant verification |
-| 5 | Full scientific report (rankings table, family breakdown, lead-time dist, integrity checks, contamination audit) |
-| 6 | Scientific interpretation (supported/not-supported/limitations/alternatives) |
-| 7 | Discovery decisions — 4 categories: DISCOVERY CANDIDATE / STAT-SIG ONLY / PRAC-SIG ONLY / NOT SIGNIFICANT |
-| 8 | Next phase authorization (Phase 9 if discoveries; next representation family recommendations if null result) |
+| 1 | Pre-registration record |
+| 2 | Dataset snapshot |
+| 3 | Discovery evaluation |
+| 4 | Multiplicity correction chain |
+| 5 | Full scientific report |
+| 6 | Scientific interpretation |
+| 7 | Discovery decisions (4 categories) |
+| 8 | Final authorization |
 
 ### Discovery Decision Logic (pre-registered)
 - **DISCOVERY CANDIDATE**: BH adj-p < 0.05 AND MI ≥ 0.01 nats
-- **STAT-SIG ONLY**: adj-p < 0.05 but MI < 0.01 nats
+- **STAT-SIG ONLY**: adj-p < 0.05 but MI < 0.01 nats  
 - **PRAC-SIG ONLY**: MI ≥ 0.01 nats but adj-p ≥ 0.05
 - **NOT SIGNIFICANT**: neither criterion met
 
-**Why:** practical threshold 0.01 nats is hardcoded inside `msdRunPhase7bDiscovery` at line 9915 and must be matched exactly in the runner page.
+### CSS Gotcha
+`#seal-section { display:none; }` is a CSS rule — use `style.display = 'block'` (not `''`) to override it from JS. Setting `''` only removes inline styles, not CSS-class or ID-rule display.
 
-### Entry Points
-- Phase 7C runner (`msd-phase7c-verification.html`) shows "Open Phase 8" button only after READY_FOR_PHASE8_DISCOVERY verdict
-- Phase 7B runner (`msd-phase7b-discovery.html`) has "Open Phase 7C Verification" → chain leads naturally to Phase 8
-
-### MOP References (11 unique, all verified)
-msdValidateNonClassicalFeatures, msdBuildPhase7bSearchSpaceDefinition, msdFreezeSearchSpace, MSD_SEARCH_SPACE_SPEC_VERSION_V2, msdComputeSearchSpaceCardinality, MSD_PHASE7B_INDIVIDUAL_FEATURES, MSD_NC_FEATURE_VERSION, msdRunPhase7bDiscovery, MSD_PHASE7B_SYMBOL, MSD_PHASE7B_MAX_CANDIDATES, msdDryRunEnumerateCandidates.
+### featureFamilies Bug in Phase 7B Runner
+`msdBuildPhase7bSearchSpaceDefinition()` does NOT include `featureFamilies` but `msdFreezeSearchSpace` requires it. Fixed in phase8-engine.js by patching the function post-load. The same bug exists in `msd-phase7b-discovery.html` line 303 — fix by adding `featureFamilies: ['non_classical']` to spaceDef after calling msdBuildPhase7bSearchSpaceDefinition().

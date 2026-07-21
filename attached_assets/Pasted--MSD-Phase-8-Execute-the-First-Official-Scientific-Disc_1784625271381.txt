@@ -1,0 +1,194 @@
+# MSD Phase 8 — Execute the First Official Scientific Discovery Experiment
+
+The MSD research platform has completed all engineering, governance, validation, and verification phases.
+
+The laboratory is complete.
+
+From this point onward, **do not modify the platform unless a genuine defect is discovered**.
+
+This phase is **not an engineering task**.
+
+This is the **first official scientific experiment** conducted using the completed MSD laboratory.
+
+---
+
+## Objectives
+
+Execute the frozen Phase 8 protocol exactly as pre-registered.
+
+No architecture changes.
+
+No feature additions.
+
+No statistical methodology changes.
+
+No governance changes.
+
+No manual intervention.
+
+No post-hoc decisions.
+
+---
+
+## Step 1 — Execute the Frozen Protocol
+
+Run the official Phase 8 campaign using the existing implementation.
+
+Before execution, verify:
+
+* Search-space hash
+* Protocol version
+* Feature version
+* Dataset snapshot
+* Dataset fingerprint
+* Candidate count
+* Family size
+
+These must exactly match the frozen protocol.
+
+---
+
+## Step 2 — Execute the Discovery Campaign
+
+Evaluate all 80 pre-registered candidates.
+
+Requirements:
+
+* Evaluate every candidate exactly once.
+* No candidate may be skipped.
+* No candidate may be re-run.
+* No adaptive stopping.
+* No manual exclusions.
+
+Use the existing governance infrastructure exactly as implemented.
+
+---
+
+## Step 3 — Produce the Complete Scientific Report
+
+Produce a complete report containing:
+
+### Experiment Metadata
+
+* Experiment ID
+* Protocol version
+* Search-space ID
+* Search-space hash
+* Dataset snapshot ID
+* Dataset fingerprint
+* Feature version
+* Raw-history version
+* Software version
+* Random seed
+* Permutation count
+* Runtime
+
+### Candidate Results
+
+For every candidate report:
+
+* Feature
+* Lead time
+* Effect size
+* Raw p-value
+* Adjusted p-value
+* Statistical significance
+* Practical significance
+* Final classification
+
+Sort by adjusted p-value.
+
+---
+
+## Step 4 — Scientific Interpretation
+
+Separate conclusions into four sections:
+
+### Supported by Evidence
+
+Only statements directly supported by the experiment.
+
+### Not Supported
+
+Explicitly state what cannot be concluded.
+
+### Limitations
+
+Identify all limitations of the current experiment.
+
+### Alternative Explanations
+
+Discuss plausible alternative explanations without overstating evidence.
+
+---
+
+## Step 5 — Discovery Classification
+
+Classify every candidate as exactly one of:
+
+* NOT SIGNIFICANT
+* STATISTICALLY SIGNIFICANT ONLY
+* PRACTICALLY SIGNIFICANT ONLY
+* DISCOVERY CANDIDATE
+
+Only candidates satisfying the complete pre-registered criterion may be classified as DISCOVERY CANDIDATE.
+
+---
+
+## Step 6 — Generate an Immutable Experiment Record
+
+Automatically generate a permanent experiment record.
+
+Include:
+
+* Experiment ID
+* Timestamp
+* Search-space hash
+* Dataset snapshot ID
+* Dataset fingerprint
+* Protocol version
+* Software version
+* Feature version
+* Candidate count
+* Family size
+* Statistical method
+* Null model
+* Multiple-testing correction
+* Runtime
+* Complete candidate table
+* Scientific conclusions
+* Authorization decision
+
+Store this as an immutable experiment artifact.
+
+---
+
+## Step 7 — Final Scientific Decision
+
+If zero discovery candidates survive:
+
+* Declare a valid null result.
+* Do not weaken the statistical criteria.
+* Recommend the next scientifically justified representation family.
+
+If one or more discovery candidates survive:
+
+* Do **not** accept them as research knowledge.
+* Authorize **Phase 9 — Discovery Validation** only.
+
+---
+
+## Rules
+
+Throughout this experiment:
+
+* Preserve append-only storage.
+* Preserve frozen search spaces.
+* Preserve hypothesis governance.
+* Preserve reproducibility.
+* Preserve causal timing.
+* Preserve statistical integrity.
+
+Do not redesign any part of the MSD platform unless a genuine implementation defect is discovered during execution.
+
+Return the complete scientific experiment report and the final authorization decision.

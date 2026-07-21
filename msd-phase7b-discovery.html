@@ -301,6 +301,9 @@ async function init() {
   const featureListEl = document.getElementById('feature-list');
 
   const spaceDef    = MOP.msdBuildPhase7bSearchSpaceDefinition();
+  // msdFreezeSearchSpace (v1 schema) requires featureFamilies; the builder omits it.
+  // The NC feature family's semantic label is 'non_classical'.
+  if (!spaceDef.featureFamilies) spaceDef.featureFamilies = ['non_classical'];
   _frozenSpace = MOP.msdFreezeSearchSpace(spaceDef, 'phase7b_runner', { schemaVersion: MOP.MSD_SEARCH_SPACE_SPEC_VERSION_V2 });
   const cardinality = MOP.msdComputeSearchSpaceCardinality(_frozenSpace);
 
