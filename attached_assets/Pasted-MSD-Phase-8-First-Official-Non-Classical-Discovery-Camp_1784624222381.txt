@@ -1,0 +1,211 @@
+MSD Phase 8 — First Official Non-Classical Discovery Campaign
+
+Phase 7C has been completed successfully.
+
+The discovery engine has now undergone:
+
+• Engineering validation
+• Mathematical validation
+• Governance validation
+• Reproducibility validation
+• Negative-control validation
+• Positive-control validation
+• Sensitivity validation
+• Seed-stability validation
+
+The laboratory infrastructure is considered complete.
+
+From this point onward, we are no longer building the laboratory.
+
+We are using the laboratory.
+
+==========================================================
+OBJECTIVE
+==========================================================
+
+Conduct the first official scientific discovery campaign using the validated non-classical feature family.
+
+This is a scientific experiment.
+
+Not an engineering exercise.
+
+No architectural redesign.
+
+No infrastructure expansion.
+
+No feature additions.
+
+No schema changes.
+
+No governance modifications.
+
+==========================================================
+STEP 1 — FINAL PRE-REGISTRATION
+==========================================================
+
+Freeze the complete experiment before reading any MarketStates.
+
+Register:
+
+• protocol name
+• protocol version
+• search-space version
+• feature version
+• raw-history version
+• search-space hash
+• dataset snapshot
+• event definition version
+• statistical protocol
+• null model
+• multiplicity correction
+• discovery criterion
+
+Everything must become immutable before execution.
+
+==========================================================
+STEP 2 — DATASET SNAPSHOT
+==========================================================
+
+Create the official frozen dataset snapshot.
+
+Verify:
+
+• fingerprint
+• reproducibility
+• uncertainty filtering
+• rawHistory eligibility
+• featureVersion compatibility
+
+Produce the dataset manifest.
+
+==========================================================
+STEP 3 — NON-CLASSICAL DISCOVERY
+==========================================================
+
+Evaluate every pre-registered candidate.
+
+No manual intervention.
+
+No exclusions.
+
+No adaptive stopping.
+
+No post-hoc filtering.
+
+Run the complete discovery pipeline.
+
+==========================================================
+STEP 4 — MULTIPLICITY CORRECTION
+==========================================================
+
+Apply the verified family-wide correction.
+
+Verify:
+
+candidate count
+
+↓
+
+enumeration count
+
+↓
+
+family size
+
+↓
+
+corrected family size
+
+All must agree exactly.
+
+==========================================================
+STEP 5 — COMPLETE SCIENTIFIC REPORT
+==========================================================
+
+Produce the complete experiment report.
+
+Include:
+
+• candidate rankings
+• effect sizes
+• raw p-values
+• adjusted p-values
+• discovery decisions
+• practical significance
+• feature families
+• lead-time distributions
+• hypothesis records
+• integrity checks
+• contamination audit
+
+Nothing should be omitted.
+
+==========================================================
+STEP 6 — SCIENTIFIC INTERPRETATION
+==========================================================
+
+Interpret the results conservatively.
+
+Separate:
+
+Supported conclusions
+
+Not supported conclusions
+
+Limitations
+
+Alternative explanations
+
+Do not overstate evidence.
+
+==========================================================
+STEP 7 — DISCOVERY DECISION
+==========================================================
+
+For every candidate determine:
+
+NOT SIGNIFICANT
+
+STATISTICALLY SIGNIFICANT ONLY
+
+PRACTICALLY SIGNIFICANT ONLY
+
+DISCOVERY CANDIDATE
+
+Only candidates satisfying the complete pre-registered criterion become DISCOVERY CANDIDATES.
+
+Nothing is automatically accepted as scientific knowledge.
+
+==========================================================
+STEP 8 — NEXT PHASE AUTHORIZATION
+==========================================================
+
+If zero discovery candidates survive:
+
+recommend the next scientifically justified representation family.
+
+If one or more discovery candidates survive:
+
+recommend Phase 9 validation only.
+
+No discoveries become accepted research knowledge until Phase 9 is successfully completed.
+
+==========================================================
+RULES
+==========================================================
+
+No architectural redesign.
+
+No feature engineering.
+
+No schema changes.
+
+No governance changes.
+
+No modifications to previous phases.
+
+Use the existing MSD infrastructure exactly as implemented.
+
+Treat this as the first official scientific experiment conducted by the completed MSD research platform.
+
+Return a complete scientific report.

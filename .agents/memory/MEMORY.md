@@ -2,3 +2,4 @@
 - [Phase 7A Master Review](phase7a-review.md) — Full 6-deliverable audit complete; 3 defects fixed; 10 validation gaps patched; Phase 7B authorized.
 - [Phase 7B Implementation](phase7b-implementation.md) — NC discovery orchestrator, runner page, 3 test fixes; 115/0 assertions.
 - [Phase 7C Verification](phase7c-verification.md) — 6 pure-computation verification functions + 9-step runner page; 115/0 assertions still pass.
+- [Phase 8 Campaign](phase8-campaign.md) — First official NC discovery runner page; zero new index.html functions; 8-step scientific report.

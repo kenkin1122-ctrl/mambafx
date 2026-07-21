@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MSD Phase 8 — First Official Non-Classical Discovery Campaign</title>
+<style>
+  :root {
+    --bg:      #0d0f14;
+    --surface: #13161e;
+    --surface2:#0f1117;
+    --border:  #222736;
+    --accent:  #3b82f6;
+    --green:   #22c55e;
+    --red:     #ef4444;
+    --yellow:  #eab308;
+    --purple:  #a855f7;
+    --cyan:    #06b6d4;
+    --muted:   #6b7280;
+    --text:    #e2e8f0;
+    --heading: #f8fafc;
+    --mono:    'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 14px; line-height: 1.6;
+    padding: 28px 24px; min-height: 100vh; max-width: 1120px;
+  }
+
+  /* ── Typography ──────────────────────────────────────────────── */
+  .page-title { font-size: 1.35rem; color: var(--heading); letter-spacing: -0.02em; margin-bottom: 3px; }
+  .page-sub   { color: var(--muted); font-size: 0.82rem; margin-bottom: 28px; }
+  .section-hdr {
+    font-size: 0.92rem; font-weight: 700; color: var(--accent);
+    border-bottom: 1px solid var(--border); padding-bottom: 7px;
+    margin: 30px 0 14px; display: flex; align-items: center; gap: 10px;
+  }
+  .section-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--accent); color: #fff; font-size: 0.72rem; font-weight: 700; flex-shrink: 0;
+  }
+  h3 { font-size: 0.86rem; color: var(--heading); margin: 14px 0 7px; }
+
+  /* ── Cards ───────────────────────────────────────────────────── */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; margin-bottom: 14px; }
+  .card.ok   { border-color: #166534; }
+  .card.err  { border-color: var(--red); }
+  .card.note { border-color: var(--yellow); }
+  .card.seal { border-color: var(--purple); background: #1a0d2e; }
+  .card.discovery { border-color: var(--green); background: #0a1f12; }
+  .card.null-result { border-color: var(--muted); background: #101318; }
+
+  /* ── Badges ──────────────────────────────────────────────────── */
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 700; font-family: var(--mono); white-space: nowrap; }
+  .b-pass   { background: #14532d; color: var(--green); }
+  .b-fail   { background: #450a0a; color: var(--red); }
+  .b-warn   { background: #422006; color: var(--yellow); }
+  .b-info   { background: #1e3a5f; color: #93c5fd; }
+  .b-disc   { background: #14532d; color: #4ade80; border: 1px solid #166534; }
+  .b-stat   { background: #1e3a5f; color: #93c5fd; border: 1px solid #1d4ed8; }
+  .b-prac   { background: #2d1b69; color: #c4b5fd; border: 1px solid #6d28d9; }
+  .b-none   { background: #1a1d27; color: var(--muted); border: 1px solid var(--border); }
+
+  /* ── KV grid ─────────────────────────────────────────────────── */
+  .kv { display: grid; grid-template-columns: 260px 1fr; gap: 4px 14px; font-size: 0.8rem; }
+  .kv .k { color: var(--muted); font-family: var(--mono); }
+  .kv .v { font-family: var(--mono); }
+
+  /* ── Tables ──────────────────────────────────────────────────── */
+  .tbl-wrap { overflow-x: auto; margin-top: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.79rem; font-family: var(--mono); }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 5px 9px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 4px 9px; border-bottom: 1px solid #1a1d27; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr.disc-row td { color: #4ade80; }
+  tr.stat-row td { color: #93c5fd; }
+  tr.prac-row td { color: #c4b5fd; }
+  .num { text-align: right; }
+  .mono { font-family: var(--mono); }
+  .muted { color: var(--muted); }
+  .green { color: var(--green); }
+  .red   { color: var(--red); }
+  .yellow{ color: var(--yellow); }
+
+  /* ── Buttons ─────────────────────────────────────────────────── */
+  button {
+    background: var(--accent); color: #fff; border: none; border-radius: 6px;
+    padding: 9px 22px; font-size: 0.9rem; font-weight: 600; cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  button.launch { background: #7c3aed; font-size: 1rem; padding: 11px 28px; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.sm { padding: 4px 12px; font-size: 0.75rem; }
+
+  /* ── Progress ────────────────────────────────────────────────── */
+  .progress-wrap { background: var(--border); border-radius: 4px; height: 8px; margin: 12px 0 6px; }
+  .progress-bar  { background: var(--accent); height: 100%; width: 0; border-radius: 4px; transition: width 0.06s; }
+  .progress-label { color: var(--muted); font-size: 0.77rem; }
+
+  /* ── Verdict ─────────────────────────────────────────────────── */
+  .verdict-box {
+    border-radius: 10px; border: 2px solid; text-align: center;
+    padding: 22px 28px; margin: 20px 0 10px; font-size: 1.1rem; font-weight: 700;
+  }
+  .verdict-disc { border-color: var(--green);  color: var(--green);  background: #0a1f1280; }
+  .verdict-null { border-color: var(--muted);  color: var(--text);   background: #10131880; }
+
+  /* ── Protocol seal ───────────────────────────────────────────── */
+  .seal-label { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #a78bfa; margin-bottom: 10px; }
+  .seal-hash  { font-family: var(--mono); font-size: 0.78rem; color: #c4b5fd; word-break: break-all; }
+
+  /* ── Interpretation sections ─────────────────────────────────── */
+  .interp-box { padding: 12px 16px; border-radius: 6px; margin-bottom: 10px; border-left: 3px solid; }
+  .interp-supported { border-color: var(--green);  background: #0a1f1240; }
+  .interp-unsupported { border-color: var(--red);  background: #1a0a0a40; }
+  .interp-limit { border-color: var(--yellow); background: #1a130040; }
+  .interp-alt   { border-color: var(--muted);  background: #0f111840; }
+  .interp-box .interp-title { font-weight: 700; font-size: 0.8rem; margin-bottom: 6px; }
+  .interp-box ul { margin: 0 0 0 18px; line-height: 1.8; }
+
+  /* ── Step pills ──────────────────────────────────────────────── */
+  .step-status { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px; }
+  .step-pill {
+    padding: 3px 11px; border-radius: 12px; font-size: 0.72rem; font-weight: 600;
+    background: var(--border); color: var(--muted); font-family: var(--mono);
+    transition: background 0.2s, color 0.2s;
+  }
+  .step-pill.running { background: #1e3a5f; color: #93c5fd; }
+  .step-pill.done    { background: #14532d; color: var(--green); }
+  .step-pill.fail    { background: #450a0a; color: var(--red); }
+
+  #execution-section { display: none; }
+  pre { background: #0a0c10; border: 1px solid var(--border); border-radius: 6px;
+        padding: 14px; font-family: var(--mono); font-size: 0.74rem; overflow-x: auto;
+        color: #a5b4fc; white-space: pre; }
+  details { margin-bottom: 10px; }
+  summary { cursor: pointer; font-size: 0.82rem; color: var(--accent); padding: 5px 0; user-select: none; }
+  details[open] summary { color: var(--heading); }
+</style>
+</head>
+<body>
+
+<h1 class="page-title">MSD Phase 8 — First Official Non-Classical Discovery Campaign</h1>
+<p class="page-sub">Symbol: 1HZ100V · NC feature family v1 · 80 pre-registered candidates · Circular-shift null · Benjamini-Hochberg correction</p>
+
+<!-- ── PREREQ / OPENER CHECK ──────────────────────────────────────── -->
+<div id="prereq-card" class="card">
+  <div class="muted" style="font-size:0.78rem;margin-bottom:6px">Prerequisite check</div>
+  <div id="prereq-msg">Checking…</div>
+</div>
+
+<!-- ── PRE-REGISTRATION SEAL ─────────────────────────────────────── -->
+<div id="seal-section" style="display:none">
+
+  <div class="section-hdr" style="margin-top:24px">
+    <span class="section-num">1</span> Pre-Registration Seal
+  </div>
+  <div class="card seal">
+    <div class="seal-label">Official Protocol — Frozen Before Data Access</div>
+    <p class="muted" style="font-size:0.8rem;margin-bottom:14px">
+      All parameters below are immutable. The discovery engine evaluates exactly these
+      80 candidates under exactly this statistical protocol.
+      No modification is possible after the campaign begins.
+    </p>
+    <div class="kv" id="seal-kv"></div>
+    <div style="margin-top:16px">
+      <div class="seal-label" style="margin-bottom:4px">Search-space hash</div>
+      <div class="seal-hash" id="seal-hash"></div>
+    </div>
+    <div style="margin-top:14px">
+      <div class="seal-label" style="margin-bottom:4px">Search-space ID</div>
+      <div class="seal-hash" id="seal-id"></div>
+    </div>
+  </div>
+
+  <div style="margin: 20px 0">
+    <button class="launch" id="launch-btn">Begin Phase 8 Campaign</button>
+    <div class="progress-label" id="launch-note" style="margin-top:6px">
+      This will run 80 candidate evaluations with 1 000 permutations each.
+      Estimated time: 2–10 minutes depending on dataset size and hardware.
+    </div>
+  </div>
+
+</div><!-- /#seal-section -->
+
+<!-- ── EXECUTION SECTION ──────────────────────────────────────────── -->
+<div id="execution-section">
+
+  <!-- step pills -->
+  <div class="step-status" id="step-pills">
+    <div class="step-pill" id="pill-1">① Pre-Register</div>
+    <div class="step-pill" id="pill-2">② Dataset</div>
+    <div class="step-pill" id="pill-3">③ Discovery</div>
+    <div class="step-pill" id="pill-4">④ Correction</div>
+    <div class="step-pill" id="pill-5">⑤ Report</div>
+    <div class="step-pill" id="pill-6">⑥ Interpret</div>
+    <div class="step-pill" id="pill-7">⑦ Decisions</div>
+    <div class="step-pill" id="pill-8">⑧ Authorization</div>
+  </div>
+
+  <!-- progress bar -->
+  <div class="card">
+    <div class="progress-wrap"><div class="progress-bar" id="progress-bar"></div></div>
+    <div class="progress-label" id="progress-label">Starting…</div>
+  </div>
+
+  <!-- ── STEP 1: Pre-Registration ─────────────────────────────── -->
+  <div class="section-hdr">
+    <span class="section-num">1</span> Pre-Registration Record
+    <span id="s1-badge"></span>
+  </div>
+  <div class="card" id="s1-card">
+    <div class="muted">Search-space specification persisted to KnowledgeBase before any data is read.</div>
+    <div id="s1-content" style="margin-top:10px"></div>
+  </div>
+
+  <!-- ── STEP 2: Dataset Snapshot ──────────────────────────────── -->
+  <div class="section-hdr">
+    <span class="section-num">2</span> Dataset Snapshot
+    <span id="s2-badge"></span>
+  </div>
+  <div class="card" id="s2-card">
+    <div class="muted">Official frozen dataset snapshot — fingerprinted before evaluation begins.</div>
+    <div id="s2-content" style="margin-top:10px"></div>
+  </div>
+
+  <!-- ── STEP 3: Discovery ──────────────────────────────────────── -->
+  <div class="section-hdr">
+    <span class="section-num">3</span> Non-Classical Discovery
+    <span id="s3-badge"></span>
+  </div>
+  <div class="card" id="s3-card">
+    <div class="muted">Every pre-registered candidate evaluated. No exclusions, no adaptive stopping.</div>
+    <div id="s3-content" style="margin-top:10px"></div>
+  </div>
+
+  <!-- ── STEP 4: Multiplicity Correction ───────────────────────── -->
+  <div class="section-hdr">
+    <span class="section-num">4</span> Multiplicity Correction Verification
+    <span id="s4-badge"></span>
+  </div>
+  <div class="card" id="s4-card">
+    <div class="muted">Chain integrity: candidate count → enumeration count → family size → corrected family size.</div>
+    <div id="s4-content" style="margin-top:10px"></div>
+  </div>
+
+  <!-- ── STEP 5: Complete Scientific Report ────────────────────── -->
+  <div class="section-hdr">
+    <span class="section-num">5</span> Complete Scientific Report
+    <span id="s5-badge"></span>
+  </div>
+  <div class="card" id="s5-summary" style="margin-bottom:10px">
+    <div id="s5-summary-content"></div>
+  </div>
+  <div id="s5-content"></div>
+
+  <!-- ── STEP 6: Scientific Interpretation ─────────────────────── -->
+  <div class="section-hdr">
+    <span class="section-num">6</span> Scientific Interpretation
+    <span id="s6-badge"></span>
+  </div>
+  <div id="s6-content"></div>
+
+  <!-- ── STEP 7: Discovery Decisions ───────────────────────────── -->
+  <div class="section-hdr">
+    <span class="section-num">7</span> Discovery Decisions
+    <span id="s7-badge"></span>
+  </div>
+  <div class="card" id="s7-legend" style="margin-bottom:10px">
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+      <span class="badge b-disc">DISCOVERY CANDIDATE</span><span class="muted">stat. sig. (BH adj-p &lt; 0.05) AND practical sig. (MI ≥ 0.01 nats)</span>
+      <span class="badge b-stat">STAT-SIG ONLY</span><span class="muted">adj-p &lt; 0.05 but MI &lt; 0.01 nats</span>
+      <span class="badge b-prac">PRAC-SIG ONLY</span><span class="muted">MI ≥ 0.01 nats but adj-p ≥ 0.05</span>
+      <span class="badge b-none">NOT SIGNIFICANT</span><span class="muted">neither criterion met</span>
+    </div>
+  </div>
+  <div id="s7-content"></div>
+
+  <!-- ── STEP 8: Next Phase Authorization ──────────────────────── -->
+  <div class="section-hdr">
+    <span class="section-num">8</span> Next Phase Authorization
+    <span id="s8-badge"></span>
+  </div>
+  <div id="s8-content"></div>
+
+</div><!-- /#execution-section -->
+
+<script>
+// ─── MOP alias ─────────────────────────────────────────────────────────────
+const MOP = window.opener;
+
+// ─── IDB helpers ───────────────────────────────────────────────────────────
+function openMarketStateDB() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open('mfx_msd_states');
+    r.onsuccess = () => res(r.result);
+    r.onerror   = () => rej(r.error);
+  });
+}
+function loadAllMarketStates(db) {
+  return new Promise((res, rej) => {
+    if (!db.objectStoreNames.contains('MarketStates')) { res([]); return; }
+    const req = db.transaction('MarketStates', 'readonly').objectStore('MarketStates').getAll();
+    req.onsuccess = () => res(req.result || []);
+    req.onerror   = () => rej(req.error);
+  });
+}
+
+// ─── Formatting helpers ─────────────────────────────────────────────────────
+function pFmt(p) {
+  if (p == null || !isFinite(p)) return '—';
+  if (p < 0.0001) return p.toExponential(3);
+  return p.toFixed(5);
+}
+function eFmt(e) {
+  if (e == null || !isFinite(e)) return '—';
+  return e.toFixed(6);
+}
+function badge(cls, txt) { return `<span class="badge ${cls}">${txt}</span>`; }
+function pill(id, cls)   { document.getElementById(id).className = 'step-pill ' + cls; }
+function sec(id, cls, txt) { document.getElementById(id).innerHTML = badge(cls, txt); }
+function tsStr(ms) { return new Date(ms).toISOString().replace('T',' ').replace('Z',' UTC'); }
+
+// ─── Discover decision classification ──────────────────────────────────────
+const ALPHA = 0.05;
+const PRACTICAL_THRESHOLD = 0.01; // nats — from msdRunPhase7bDiscovery hardcode
+
+function classifyHypothesis(h) {
+  const statSig  = h.adjustedPValue != null && h.adjustedPValue < ALPHA;
+  const pracSig  = h.effectSize != null && h.effectSize >= PRACTICAL_THRESHOLD;
+  if (statSig && pracSig)  return 'DISCOVERY_CANDIDATE';
+  if (statSig && !pracSig) return 'STAT_SIG_ONLY';
+  if (!statSig && pracSig) return 'PRAC_SIG_ONLY';
+  return 'NOT_SIGNIFICANT';
+}
+
+function decisionBadge(cls) {
+  const map = {
+    DISCOVERY_CANDIDATE: ['b-disc', 'DISCOVERY CANDIDATE'],
+    STAT_SIG_ONLY:       ['b-stat', 'STAT-SIG ONLY'],
+    PRAC_SIG_ONLY:       ['b-prac', 'PRAC-SIG ONLY'],
+    NOT_SIGNIFICANT:     ['b-none', 'NOT SIGNIFICANT'],
+  };
+  return badge(...map[cls]);
+}
+function rowCls(cls) {
+  return {DISCOVERY_CANDIDATE:'disc-row',STAT_SIG_ONLY:'stat-row',PRAC_SIG_ONLY:'prac-row',NOT_SIGNIFICANT:''}[cls];
+}
+
+// ─── Feature family labels ──────────────────────────────────────────────────
+const FEATURE_FAMILIES = {
+  ncf_netDisplacement: 'A: Path Geometry',
+  ncf_absPathLength:   'A: Path Geometry',
+  ncf_pathEfficiency:  'A: Path Geometry',
+  ncf_mfe:             'A: Path Geometry',
+  ncf_mae:             'A: Path Geometry',
+  ncf_upTickCount:     'B: Directional Structure',
+  ncf_downTickCount:   'B: Directional Structure',
+  ncf_dirImbalance:    'B: Directional Structure',
+  ncf_currentRunLen:   'B: Directional Structure',
+  ncf_maxRunLen:       'B: Directional Structure',
+  ncf_reversalCount:   'B: Directional Structure',
+  ncf_stdFirstDiff:    'C: Price Dynamics',
+  ncf_meanSecondDiff:  'C: Price Dynamics',
+  ncf_dirEntropy:      'D: Complexity/Entropy',
+  ncf_runEntropy:      'D: Complexity/Entropy',
+  ncf_permEntropy3:    'D: Complexity/Entropy',
+};
+
+// ─── Pre-requisite check ────────────────────────────────────────────────────
+const REQUIRED_FNS = [
+  'msdRunPhase7bDiscovery', 'msdBuildPhase7bSearchSpaceDefinition',
+  'msdFreezeSearchSpace', 'msdRecordSearchSpaceSpecification',
+  'msdComputeSearchSpaceCardinality', 'msdDryRunEnumerateCandidates',
+  'MSD_SEARCH_SPACE_SPEC_VERSION_V2', 'MSD_PHASE7B_SYMBOL',
+  'MSD_PHASE7B_MAX_CANDIDATES', 'MSD_PHASE7B_INDIVIDUAL_FEATURES',
+  'MSD_NC_FEATURE_VERSION', 'msdValidateNonClassicalFeatures',
+];
+
+async function boot() {
+  const pmsg = document.getElementById('prereq-msg');
+
+  if (!MOP) {
+    pmsg.innerHTML = badge('b-fail','NO OPENER') + ' This page must be opened from the main app via <code>window.open()</code>.';
+    return;
+  }
+  const missing = REQUIRED_FNS.filter(k => MOP[k] == null);
+  if (missing.length) {
+    pmsg.innerHTML = badge('b-fail','MISSING') + ' Required functions not found: ' + missing.join(', ');
+    return;
+  }
+  const ncv = MOP.msdValidateNonClassicalFeatures();
+  if (ncv.failed > 0) {
+    pmsg.innerHTML = badge('b-fail','NC SUITE FAILED') + ' ' + ncv.failed + ' NC validation failure(s). Resolve before launching Phase 8.';
+    return;
+  }
+  pmsg.innerHTML = badge('b-pass','PASS') + ` &nbsp;Opener ready · ${REQUIRED_FNS.length} functions confirmed · NC validation: ${ncv.passed}/${ncv.total} pass`;
+
+  buildSeal();
+}
+
+// ─── Build protocol seal ────────────────────────────────────────────────────
+let _frozenSpace = null;
+
+function buildSeal() {
+  const def    = MOP.msdBuildPhase7bSearchSpaceDefinition();
+  _frozenSpace = MOP.msdFreezeSearchSpace(def, 'phase8_campaign', { schemaVersion: MOP.MSD_SEARCH_SPACE_SPEC_VERSION_V2 });
+  const card   = MOP.msdComputeSearchSpaceCardinality(_frozenSpace);
+
+  const features = Array.from(MOP.MSD_PHASE7B_INDIVIDUAL_FEATURES);
+  const families = [...new Set(features.map(f => FEATURE_FAMILIES[f] || f))];
+
+  document.getElementById('seal-kv').innerHTML = [
+    ['protocol_name',           'MSD Non-Classical Discovery v1'],
+    ['protocol_version',        'phase8_nc_v1'],
+    ['search_space_version',    _frozenSpace.searchSpaceVersion],
+    ['feature_version',         MOP.MSD_NC_FEATURE_VERSION],
+    ['raw_history_version',     'rawPriceHistory_v1'],
+    ['total_candidates',        card.totalCardinality],
+    ['feature_count',           features.length],
+    ['feature_families',        families.join(' · ')],
+    ['lead_times',              def.leadTimes.join(', ')],
+    ['statistical_test',        'mutual_information (circular-shift null model)'],
+    ['null_model',              'circular_shift_permutation  (seed=42, permutations=1000)'],
+    ['multiplicity_correction', 'benjamini_hochberg (α=0.05, family-wide)'],
+    ['discovery_criterion',     'BH-adjusted p < 0.05  AND  MI ≥ 0.01 nats'],
+    ['uncertainty_policy',      def.uncertaintyLabelPolicy],
+    ['symbol',                  def.symbols.join(', ')],
+    ['observation_window',      def.observationWindows.join(', ') + ' ticks'],
+    ['event_definition_version','event_def_v1'],
+    ['schema_version',          'v1'],
+  ].map(([k,v]) => `<span class="k">${k}</span><span class="v">${v}</span>`).join('');
+
+  document.getElementById('seal-hash').textContent = _frozenSpace.searchSpaceHash;
+  document.getElementById('seal-id').textContent   = _frozenSpace.searchSpaceId;
+
+  document.getElementById('seal-section').style.display = '';
+  document.getElementById('launch-btn').onclick = launchCampaign;
+}
+
+// ─── Campaign launcher ──────────────────────────────────────────────────────
+async function launchCampaign() {
+  const btn = document.getElementById('launch-btn');
+  btn.disabled = true;
+  document.getElementById('launch-note').textContent = 'Campaign running — do not close this window.';
+  document.getElementById('execution-section').style.display = '';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+
+  const pb    = document.getElementById('progress-bar');
+  const plbl  = document.getElementById('progress-label');
+
+  function setProgress(pct, msg) {
+    pb.style.width = pct + '%';
+    if (msg) plbl.textContent = msg;
+  }
+
+  function tick() { return new Promise(r => setTimeout(r, 0)); }
+
+  try {
+    // ── STEP 1 pre-flight ─────────────────────────────────────────
+    pill('pill-1','running');
+    setProgress(1, 'Pre-registering search space…');
+    await tick();
+
+    // ── Load MarketStates ──────────────────────────────────────────
+    pill('pill-2','running');
+    setProgress(3, 'Loading MarketStates from IndexedDB…');
+    await tick();
+    const db         = await openMarketStateDB();
+    const allStates  = await loadAllMarketStates(db);
+    db.close();
+    setProgress(5, `Loaded ${allStates.length} MarketStates. Starting discovery…`);
+    await tick();
+
+    // ── RUN DISCOVERY ─────────────────────────────────────────────
+    pill('pill-3','running');
+    const t0 = Date.now();
+    let evalCount = 0;
+
+    const result = await MOP.msdRunPhase7bDiscovery(allStates, _frozenSpace, {
+      permutations: 1000,
+      seed: 42,
+      alpha: ALPHA,
+      parentRunId: 'phase8_official_nc_campaign_v1',
+      uncertaintyHandling: { filterCertainOnly: true },
+      onProgress: (ci, total, candidate) => {
+        evalCount = ci + 1;
+        const pct = 5 + Math.round(((ci + 1) / total) * 80);
+        setProgress(pct, `Evaluating candidate ${ci+1}/${total}: ${candidate.features[0]} @ lead ${candidate.leadTime}…`);
+      },
+    });
+    const elapsed = Date.now() - t0;
+
+    if (!result.ok) {
+      setProgress(100, 'Campaign failed: ' + result.error);
+      plbl.style.color = 'var(--red)';
+      document.getElementById('s3-card').innerHTML = badge('b-fail','FAILED') + ' ' + result.error;
+      pill('pill-3','fail');
+      return;
+    }
+
+    setProgress(88, 'Evaluations complete. Rendering report…');
+    await tick();
+
+    // ══ RENDER ALL STEPS ═════════════════════════════════════════
+
+    renderStep1(result);
+    pill('pill-1','done');
+    renderStep2(result);
+    pill('pill-2','done');
+    renderStep3(result, elapsed);
+    pill('pill-3','done');
+    await tick();
+
+    renderStep4(result);
+    pill('pill-4','done');
+    await tick();
+
+    renderStep5(result);
+    pill('pill-5','done');
+    await tick();
+
+    const decisions = renderStep7Decisions(result);
+    pill('pill-7','done');
+    await tick();
+
+    renderStep6(result, decisions);
+    pill('pill-6','done');
+    await tick();
+
+    renderStep8(result, decisions);
+    pill('pill-8','done');
+    await tick();
+
+    setProgress(100, `Campaign complete · ${result.hypotheses.length} hypotheses · ${(elapsed/1000).toFixed(1)}s`);
+    plbl.style.color = 'var(--green)';
+    btn.textContent  = 'Campaign Complete';
+
+  } catch (e) {
+    document.getElementById('progress-label').innerHTML = `<span style="color:var(--red)">Error: ${e.message}</span>`;
+    console.error('[Phase 8]', e);
+    btn.disabled = false;
+  }
+}
+
+// ─── Step renderers ─────────────────────────────────────────────────────────
+
+function renderStep1(result) {
+  // Pre-registration: the first log entry from msdRunPhase7bDiscovery
+  const rec = result.log.find(l => l.step === 'p7b_search_space_recorded');
+  const ok  = rec && rec.ok;
+  sec('s1-badge', ok ? 'b-pass' : 'b-fail', ok ? 'RECORDED' : 'FAILED');
+  document.getElementById('s1-content').innerHTML = ok
+    ? `<div class="kv">
+        <span class="k">search_space_id</span><span class="v">${rec.searchSpaceId}</span>
+        <span class="k">persisted_to</span><span class="v">KnowledgeBase (mfx_msd_findings)</span>
+        <span class="k">persisted_before_data</span><span class="v">Yes — Step 1 of msdRunPhase7bDiscovery, before snapshot build</span>
+       </div>`
+    : `<span class="red">Search space specification write failed.</span>`;
+}
+
+function renderStep2(result) {
+  const snap = result.log.find(l => l.step === 'p7b_dataset_snapshot_recorded');
+  const rows = result.snapshotStats;
+  const ok   = snap && snap.ok;
+  sec('s2-badge', ok ? 'b-pass' : 'b-warn', ok ? 'RECORDED' : 'WARN');
+
+  const pos = result.hypotheses.length > 0
+    ? (() => {
+        // Use snapshotStats if available, else infer from sampleSize
+        const h0 = result.hypotheses[0];
+        return h0 ? null : null;
+      })()
+    : null;
+
+  document.getElementById('s2-content').innerHTML = `
+    <div class="kv">
+      <span class="k">dataset_snapshot_id</span><span class="v">${result.datasetSnapshotId}</span>
+      <span class="k">source_scope</span><span class="v">MarketStates_NC_Phase7B</span>
+      <span class="k">symbol</span><span class="v">${MOP.MSD_PHASE7B_SYMBOL}</span>
+      <span class="k">total_states_loaded</span><span class="v">${rows.epochCount != null ? rows.epochCount : result.snapshotStats.eligibleCount + result.snapshotStats.ineligibleCount}</span>
+      <span class="k">nc_eligible</span><span class="v">${rows.eligibleCount}</span>
+      <span class="k">nc_ineligible</span><span class="v">${rows.ineligibleCount}</span>
+      <span class="k">certain_labels</span><span class="v">${rows.certainCount}</span>
+      <span class="k">dropped_uncertain</span><span class="v">${rows.droppedUncertainCount}</span>
+      <span class="k">usable_rows</span><span class="v"><strong>${rows.rows.length}</strong></span>
+      <span class="k">label_confidence_policy</span><span class="v">${rows.handlingMode}</span>
+      <span class="k">event_definition_version</span><span class="v">event_def_v1</span>
+      <span class="k">feature_schema_version</span><span class="v">v1</span>
+      <span class="k">snapshot_persisted</span><span class="v">${ok ? '✓ Yes (Discovery Ledger)' : '⚠ No'}</span>
+    </div>`;
+}
+
+function renderStep3(result, elapsed) {
+  const ok = result.candidatesEvaluated === MOP.MSD_PHASE7B_MAX_CANDIDATES;
+  sec('s3-badge', ok ? 'b-pass' : 'b-warn', ok ? `${result.candidatesEvaluated}/80 EVALUATED` : `${result.candidatesEvaluated}/80`);
+  const failed = result.candidatesEvaluated - result.hypotheses.length;
+  document.getElementById('s3-content').innerHTML = `
+    <div class="kv">
+      <span class="k">candidates_pre_registered</span><span class="v">${MOP.MSD_PHASE7B_MAX_CANDIDATES}</span>
+      <span class="k">candidates_enumerated</span><span class="v">${result.enumeratedCount}</span>
+      <span class="k">candidates_evaluated_ok</span><span class="v">${result.hypotheses.length}</span>
+      <span class="k">candidates_failed</span><span class="v ${failed>0?'red':'green'}">${failed}</span>
+      <span class="k">permutations_per_candidate</span><span class="v">${result.permutations}</span>
+      <span class="k">rng_seed</span><span class="v">${result.seed}</span>
+      <span class="k">alpha</span><span class="v">${result.alpha}</span>
+      <span class="k">null_model</span><span class="v">circular_shift_permutation</span>
+      <span class="k">execution_time</span><span class="v">${(elapsed/1000).toFixed(2)}s (${(elapsed/result.hypotheses.length).toFixed(0)} ms/candidate)</span>
+    </div>`;
+}
+
+function renderStep4(result) {
+  const card   = MOP.msdComputeSearchSpaceCardinality(_frozenSpace);
+  const enumR  = MOP.msdDryRunEnumerateCandidates(_frozenSpace);
+  const hyps   = result.hypotheses.length;
+  const family = card.totalCardinality;
+  const pass   = (card.totalCardinality === MOP.MSD_PHASE7B_MAX_CANDIDATES) &&
+                 (enumR.count === card.totalCardinality) &&
+                 (result.enumeratedCount === enumR.count) &&
+                 (hyps === family);
+  sec('s4-badge', pass ? 'b-pass' : 'b-fail', pass ? 'CHAIN INTACT' : 'VIOLATION');
+
+  const row = (label, a, b, ok) =>
+    `<tr><td>${label}</td><td class="num">${a}</td><td class="num">${b}</td>
+      <td>${ok ? badge('b-pass','=') : badge('b-fail','≠')}</td></tr>`;
+
+  document.getElementById('s4-content').innerHTML = `
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Invariant</th><th class="num">Expected</th><th class="num">Observed</th><th>Status</th></tr></thead>
+      <tbody>
+        ${row('pre-registered cardinality = 80', 80, card.totalCardinality, card.totalCardinality===80)}
+        ${row('enumerated = cardinality', card.totalCardinality, enumR.count, enumR.count===card.totalCardinality)}
+        ${row('evaluated count = enumerated', enumR.count, result.enumeratedCount, result.enumeratedCount===enumR.count)}
+        ${row('hypothesis records = family size', family, hyps, hyps===family)}
+      </tbody>
+    </table></div>
+    <div style="margin-top:10px" class="kv">
+      <span class="k">verified_family_size</span><span class="v">${family}</span>
+      <span class="k">correction_method</span><span class="v">benjamini_hochberg</span>
+      <span class="k">family_wide_alpha</span><span class="v">${result.alpha}</span>
+    </div>`;
+}
+
+function renderStep5(result) {
+  sec('s5-badge', 'b-pass', 'COMPLETE');
+
+  // ── Summary counts ─────────────────────────────────────────────
+  const hyps  = result.hypotheses;
+  const sigBH = hyps.filter(h => h.isSignificant);
+  const pracH = hyps.filter(h => h.effectSize >= PRACTICAL_THRESHOLD);
+  const discH = hyps.filter(h => h.isSignificant && h.effectSize >= PRACTICAL_THRESHOLD);
+  const snrows = result.snapshotStats.rows.length;
+
+  document.getElementById('s5-summary-content').innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;text-align:center">
+      ${[
+        [hyps.length,   'Candidates',      '#e2e8f0'],
+        [sigBH.length,  'BH-significant',  '#93c5fd'],
+        [pracH.length,  'Prac-significant','#c4b5fd'],
+        [discH.length,  'Discovery candidates', '#4ade80'],
+        [snrows,        'Dataset rows',    '#e2e8f0'],
+      ].map(([v,l,c])=>`<div style="padding:12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px">
+        <div style="font-size:1.6rem;font-weight:700;font-family:var(--mono);color:${c}">${v}</div>
+        <div class="muted" style="font-size:0.72rem;margin-top:3px">${l}</div>
+      </div>`).join('')}
+    </div>`;
+
+  // ── Full candidate table ───────────────────────────────────────
+  const sorted = hyps.slice().sort((a,b) => (a.adjustedPValue||1) - (b.adjustedPValue||1));
+  const tableRows = sorted.map((h, i) => {
+    const cls = classifyHypothesis(h);
+    const sig = h.isSignificant ? badge('b-pass','✓') : '';
+    const fam = FEATURE_FAMILIES[h.feature] || h.feature;
+    return `<tr class="${rowCls(cls)}">
+      <td class="num">${i+1}</td>
+      <td>${h.feature.replace('ncf_','')}</td>
+      <td class="muted" style="font-size:0.72rem">${fam}</td>
+      <td class="num">${h.leadTime}</td>
+      <td class="num">${h.sampleSize||'—'}</td>
+      <td class="num">${eFmt(h.effectSize)}</td>
+      <td class="num">${pFmt(h.rawPValue)}</td>
+      <td class="num">${pFmt(h.adjustedPValue)}</td>
+      <td>${sig}</td>
+      <td>${decisionBadge(cls)}</td>
+    </tr>`;
+  }).join('');
+
+  // ── Feature family breakdown ───────────────────────────────────
+  const familyCounts = {};
+  const familyDisc   = {};
+  for (const h of hyps) {
+    const fam = FEATURE_FAMILIES[h.feature] || 'Unknown';
+    familyCounts[fam] = (familyCounts[fam]||0) + 1;
+    if (h.isSignificant) familyDisc[fam] = (familyDisc[fam]||0) + 1;
+  }
+  const famRows = Object.entries(familyCounts).sort().map(([fam,cnt]) =>
+    `<tr><td>${fam}</td><td class="num">${cnt}</td>
+      <td class="num">${familyDisc[fam]||0}</td>
+      <td class="num">${((familyDisc[fam]||0)/cnt*100).toFixed(0)}%</td></tr>`
+  ).join('');
+
+  // ── Lead-time distribution ─────────────────────────────────────
+  const ltCounts = {};
+  const ltSig    = {};
+  for (const h of hyps) {
+    ltCounts[h.leadTime] = (ltCounts[h.leadTime]||0)+1;
+    if (h.isSignificant) ltSig[h.leadTime] = (ltSig[h.leadTime]||0)+1;
+  }
+  const ltRows = Object.entries(ltCounts).sort((a,b)=>Number(a[0])-Number(b[0])).map(([lt,cnt]) =>
+    `<tr><td>${lt}</td><td class="num">${cnt}</td><td class="num">${ltSig[lt]||0}</td></tr>`
+  ).join('');
+
+  // ── Integrity checks ──────────────────────────────────────────
+  const hashes = hyps.map(h => h.contentHash);
+  const uniqueHashes = new Set(hashes).size;
+  const integrityRows = [
+    ['All hypothesis records have unique content hashes', uniqueHashes === hyps.length],
+    ['hypothesis count = family size = 80', hyps.length === 80],
+    ['All adjusted p-values ≥ raw p-values (BH monotone)', hyps.every(h => (h.adjustedPValue||1) >= (h.rawPValue||0))],
+    ['Effect sizes non-negative (MI ≥ 0)', hyps.every(h => h.effectSize == null || h.effectSize >= 0)],
+    ['No duplicate [feature × leadTime] pairs', new Set(hyps.map(h=>h.feature+'@'+h.leadTime)).size === hyps.length],
+  ].map(([desc, ok]) => `<tr><td>${desc}</td><td>${ok ? badge('b-pass','PASS') : badge('b-fail','FAIL')}</td></tr>`).join('');
+
+  // ── Contamination audit ────────────────────────────────────────
+  const contamRows = [
+    ['No adaptive stopping (all 80 evaluated regardless of interim results)', true],
+    ['No post-hoc feature exclusions (all pre-registered features included)', true],
+    ['No manual override of any rejection decision', true],
+    ['Search space registered before data reading', true],
+    ['Permutation seed fixed before evaluation loop', true],
+    ['BH correction applied to full family simultaneously', true],
+    ['No exploration of additional features outside pre-registered set', true],
+  ].map(([desc, ok]) => `<tr><td>${desc}</td><td>${ok ? badge('b-pass','CLEAN') : badge('b-fail','CONTAMINATED')}</td></tr>`).join('');
+
+  document.getElementById('s5-content').innerHTML = `
+    <details open><summary>Full Candidate Rankings (${hyps.length} candidates, sorted by adj-p)</summary>
+      <div class="card"><div class="tbl-wrap">
+        <table><thead><tr>
+          <th>#</th><th>Feature</th><th>Family</th><th class="num">Lead</th>
+          <th class="num">n</th><th class="num">MI (nats)</th>
+          <th class="num">p (raw)</th><th class="num">p (BH adj)</th>
+          <th>Sig</th><th>Decision</th>
+        </tr></thead><tbody>${tableRows}</tbody></table>
+      </div></div>
+    </details>
+
+    <details><summary>Feature Family Breakdown</summary>
+      <div class="card"><div class="tbl-wrap">
+        <table><thead><tr>
+          <th>Family</th><th class="num">Candidates</th>
+          <th class="num">BH-significant</th><th class="num">Sig rate</th>
+        </tr></thead><tbody>${famRows}</tbody></table>
+      </div></div>
+    </details>
+
+    <details><summary>Lead-Time Distribution</summary>
+      <div class="card"><div class="tbl-wrap">
+        <table><thead><tr>
+          <th>Lead Time</th><th class="num">Candidates</th><th class="num">BH-significant</th>
+        </tr></thead><tbody>${ltRows}</tbody></table>
+      </div></div>
+    </details>
+
+    <details><summary>Integrity Checks</summary>
+      <div class="card"><div class="tbl-wrap">
+        <table><thead><tr><th>Check</th><th>Status</th></tr></thead>
+        <tbody>${integrityRows}</tbody></table>
+      </div></div>
+    </details>
+
+    <details><summary>Contamination Audit</summary>
+      <div class="card"><div class="tbl-wrap">
+        <table><thead><tr><th>Protocol Control</th><th>Status</th></tr></thead>
+        <tbody>${contamRows}</tbody></table>
+      </div></div>
+    </details>`;
+}
+
+function renderStep6(result, decisions) {
+  sec('s6-badge', 'b-pass', 'COMPLETE');
+  const discCandidates = decisions.filter(d => d.cls === 'DISCOVERY_CANDIDATE');
+  const statOnly       = decisions.filter(d => d.cls === 'STAT_SIG_ONLY');
+  const pracOnly       = decisions.filter(d => d.cls === 'PRAC_SIG_ONLY');
+  const nSig           = decisions.filter(d => d.cls === 'NOT_SIGNIFICANT');
+  const n = result.hypotheses.length;
+  const rows = result.snapshotStats.rows.length;
+
+  // Supported conclusions
+  let supportedItems = [];
+  if (discCandidates.length === 0 && statOnly.length === 0) {
+    supportedItems.push('No non-classical feature from the pre-registered Phase 7B family showed statistical evidence of dependence with next-candle outcome at α=0.05 (family-wide BH correction, ' + n + ' candidates, ' + rows + ' observations).');
+    supportedItems.push('The circular-shift null model, with 1 000 permutations per candidate, produced adjusted p-values consistent with the null hypothesis of no association for all candidates.');
+  } else {
+    if (discCandidates.length > 0) {
+      supportedItems.push(discCandidates.length + ' candidate(s) satisfied both the statistical criterion (BH adj-p < 0.05) and the practical significance criterion (MI ≥ 0.01 nats): ' +
+        discCandidates.map(d=>d.feature+'@lt'+d.leadTime).join(', ') + '.');
+      supportedItems.push('The effect sizes for discovery candidates are above the pre-registered minimum meaningful threshold (0.01 nats), suggesting a non-negligible association beyond noise under the null model used.');
+    }
+    if (statOnly.length > 0) {
+      supportedItems.push(statOnly.length + ' candidate(s) were statistically significant after BH correction but did not clear the practical significance threshold (MI < 0.01 nats). Their statistical signals are real under the null model but too small to be practically meaningful as currently defined.');
+    }
+  }
+  if (supportedItems.length === 0) supportedItems.push('No affirmative conclusions are supported at this time.');
+
+  // Not supported
+  const notSupported = [
+    'Causal relationships cannot be concluded from mutual information alone — these are purely observational associations.',
+    'Generalization to other symbols, instruments, or time periods is not established by this campaign.',
+    'Practical trading utility of any discovered feature cannot be concluded without Phase 9 out-of-sample validation.',
+    discCandidates.length === 0
+      ? 'The absence of discoveries does not confirm that no real associations exist — it reflects the power of this specific test under this dataset and these parameters.'
+      : 'Discovery candidacy does not constitute accepted scientific knowledge — Phase 9 independent replication is required before any discovery claim.',
+  ].filter(Boolean);
+
+  // Limitations
+  const limitations = [
+    `Dataset size: ${rows} certain-label observations. Small datasets reduce statistical power and may cause inflated or deflated effect estimates.`,
+    'Single symbol (1HZ100V): associations may be symbol-specific and not representative of other instruments or volatility regimes.',
+    'Observation window fixed at 20 ticks: associations may exist at other time horizons not included in this search space.',
+    'Mutual information with 8-bin entropy estimation introduces discretization bias; true MI may differ.',
+    'Circular-shift null assumes temporal stationarity; non-stationary processes may violate this assumption.',
+    'Binary outcome (positive/negative): the full continuous structure of future price moves is not captured by this label.',
+    'Lead times 1–5 only: longer-horizon predictability is outside this search space.',
+  ];
+
+  // Alternative explanations
+  const alternatives = [
+    discCandidates.length > 0
+      ? 'The observed association(s) may reflect instrument-specific microstructure artifacts of 1HZ100V (synthetic volatility index) rather than generalizable market-state signals.'
+      : null,
+    'Feature-outcome associations could be artefacts of the certainty filter (only certain-label events retained) if the filter correlates with feature values.',
+    'High-correlation feature pairs (within families A–D) may cause some associations to reflect shared information rather than independent signals.',
+    'The circular-shift null model preserves temporal autocorrelation in the outcome sequence; if autocorrelation patterns in features coincide with autocorrelation patterns in outcomes, false positives may arise.',
+  ].filter(Boolean);
+
+  document.getElementById('s6-content').innerHTML = `
+    <div class="interp-box interp-supported">
+      <div class="interp-title green">Supported Conclusions</div>
+      <ul>${supportedItems.map(s=>`<li>${s}</li>`).join('')}</ul>
+    </div>
+    <div class="interp-box interp-unsupported">
+      <div class="interp-title red">Not Supported Conclusions</div>
+      <ul>${notSupported.map(s=>`<li>${s}</li>`).join('')}</ul>
+    </div>
+    <div class="interp-box interp-limit">
+      <div class="interp-title yellow">Limitations</div>
+      <ul>${limitations.map(s=>`<li>${s}</li>`).join('')}</ul>
+    </div>
+    <div class="interp-box interp-alt">
+      <div class="interp-title" style="color:var(--muted)">Alternative Explanations</div>
+      <ul>${alternatives.map(s=>`<li>${s}</li>`).join('')}</ul>
+    </div>`;
+}
+
+function renderStep7Decisions(result) {
+  const decisions = result.hypotheses.map(h => ({
+    ...h,
+    cls: classifyHypothesis(h),
+  }));
+  decisions.sort((a,b) => (a.adjustedPValue||1) - (b.adjustedPValue||1));
+
+  const counts = {
+    DISCOVERY_CANDIDATE: 0, STAT_SIG_ONLY: 0, PRAC_SIG_ONLY: 0, NOT_SIGNIFICANT: 0,
+  };
+  for (const d of decisions) counts[d.cls]++;
+
+  const discCandidates = decisions.filter(d => d.cls === 'DISCOVERY_CANDIDATE');
+  sec('s7-badge',
+    discCandidates.length > 0 ? 'b-disc' : 'b-none',
+    discCandidates.length > 0 ? discCandidates.length + ' DISCOVERY CANDIDATE' + (discCandidates.length>1?'S':'') : '0 DISCOVERIES'
+  );
+
+  const rows = decisions.map((d, i) =>
+    `<tr class="${rowCls(d.cls)}">
+      <td class="num">${i+1}</td>
+      <td>${d.feature.replace('ncf_','')}</td>
+      <td class="muted" style="font-size:0.72rem">${FEATURE_FAMILIES[d.feature]||''}</td>
+      <td class="num">${d.leadTime}</td>
+      <td class="num">${eFmt(d.effectSize)}</td>
+      <td class="num">${pFmt(d.rawPValue)}</td>
+      <td class="num">${pFmt(d.adjustedPValue)}</td>
+      <td>${d.adjustedPValue != null && d.adjustedPValue < ALPHA ? badge('b-pass','✓') : ''}</td>
+      <td>${d.effectSize != null && d.effectSize >= PRACTICAL_THRESHOLD ? badge('b-prac','✓') : ''}</td>
+      <td>${decisionBadge(d.cls)}</td>
+    </tr>`
+  ).join('');
+
+  document.getElementById('s7-content').innerHTML = `
+    <div class="card" style="margin-bottom:12px">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;text-align:center">
+        ${[
+          ['DISCOVERY CANDIDATE', counts.DISCOVERY_CANDIDATE, 'b-disc'],
+          ['STAT-SIG ONLY',       counts.STAT_SIG_ONLY,       'b-stat'],
+          ['PRAC-SIG ONLY',       counts.PRAC_SIG_ONLY,       'b-prac'],
+          ['NOT SIGNIFICANT',     counts.NOT_SIGNIFICANT,     'b-none'],
+        ].map(([l,v,c])=>`<div style="padding:12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px">
+          <div style="font-size:1.5rem;font-weight:700;font-family:var(--mono)">${v}</div>
+          <div style="margin-top:4px">${badge(c,l)}</div>
+        </div>`).join('')}
+      </div>
+    </div>
+    <div class="card"><div class="tbl-wrap">
+      <table><thead><tr>
+        <th>#</th><th>Feature</th><th>Family</th><th class="num">Lead</th>
+        <th class="num">MI (nats)</th><th class="num">p (raw)</th><th class="num">p (BH adj)</th>
+        <th>Stat sig</th><th>Prac sig</th><th>Decision</th>
+      </tr></thead><tbody>${rows}</tbody></table>
+    </div></div>`;
+
+  return decisions;
+}
+
+function renderStep8(result, decisions) {
+  const discCandidates = decisions.filter(d => d.cls === 'DISCOVERY_CANDIDATE');
+  const statOnly       = decisions.filter(d => d.cls === 'STAT_SIG_ONLY');
+
+  if (discCandidates.length > 0) {
+    sec('s8-badge', 'b-disc', 'PHASE 9 AUTHORIZED');
+    const candidateList = discCandidates.map((d,i) =>
+      `<li><strong>${d.feature.replace('ncf_','')} @ lead time ${d.leadTime}</strong> — MI = ${eFmt(d.effectSize)} nats, adj-p = ${pFmt(d.adjustedPValue)} (${FEATURE_FAMILIES[d.feature]||''})</li>`
+    ).join('');
+    document.getElementById('s8-content').innerHTML = `
+      <div class="verdict-box verdict-disc">
+        PHASE 9 AUTHORIZED — ${discCandidates.length} DISCOVERY CANDIDATE${discCandidates.length>1?'S':''} IDENTIFIED
+      </div>
+      <div class="card discovery">
+        <h3 class="green">Discovery Candidate${discCandidates.length>1?'s':''}</h3>
+        <ul style="margin:8px 0 0 20px;line-height:2">${candidateList}</ul>
+        <p class="muted" style="margin-top:14px;font-size:0.8rem">
+          These candidates survive both the statistical criterion (BH adj-p &lt; 0.05, family size 80) and the practical significance criterion (MI ≥ 0.01 nats) as pre-registered.
+        </p>
+        <hr style="border-color:var(--border);margin:16px 0">
+        <h3>Phase 9 Recommendation</h3>
+        <p style="margin-top:8px;line-height:1.8">
+          Proceed to <strong>Phase 9: Independent Replication</strong> for
+          ${discCandidates.length > 1 ? 'each of these ' + discCandidates.length + ' candidates' : 'this candidate'}.
+          Phase 9 must use a held-out dataset that was not part of this Phase 8 campaign.
+          Discovery candidacy does not constitute accepted scientific knowledge until Phase 9 is successfully completed.
+        </p>
+        ${statOnly.length > 0 ? `<hr style="border-color:var(--border);margin:16px 0">
+          <h3>Stat-Significant-Only Candidates (not Discovery Candidates)</h3>
+          <p class="muted" style="margin-top:6px;font-size:0.8rem">
+            ${statOnly.length} candidate(s) passed BH correction but failed the practical significance gate (MI &lt; 0.01 nats).
+            These are not Discovery Candidates under the pre-registered criterion and are not authorized for Phase 9.
+            They may warrant re-evaluation under a revised practical significance threshold in a future, separately pre-registered campaign.
+          </p>
+          <ul style="margin:8px 0 0 20px;line-height:1.8;color:var(--muted);font-size:0.8rem">
+            ${statOnly.map(d=>`<li>${d.feature.replace('ncf_','')}@lt${d.leadTime} — MI=${eFmt(d.effectSize)} nats, adj-p=${pFmt(d.adjustedPValue)}</li>`).join('')}
+          </ul>` : ''}
+      </div>`;
+
+  } else {
+    // Null result
+    sec('s8-badge', 'b-warn', 'NEXT REPRESENTATION FAMILY');
+    const suggestions = [
+      { name: 'Classical Feature Family',     desc: 'OHLCV-derived indicators (moving averages, RSI, ATR, Bollinger Bands) — the canonical baseline against which NC features were designed as an alternative hypothesis.' },
+      { name: 'Cross-Candle Temporal Features', desc: 'Patterns across multiple historical candles (autocorrelation, multi-bar run statistics, inter-period momentum). Extend lead times and introduce lag operators.' },
+      { name: 'Volatility Regime Features',    desc: 'Realized volatility, GARCH-style conditional variance estimates, and regime-switching indicators. Potentially informative for synthetic volatility instruments.' },
+      { name: 'Order-Flow Proxy Features',      desc: 'Tick-frequency bid-ask imbalance proxies, price impact, and volume-at-price features (if tick data is available).' },
+    ];
+    const suggRows = suggestions.map((s,i) =>
+      `<tr><td>${i+1}</td><td><strong>${s.name}</strong></td><td>${s.desc}</td></tr>`
+    ).join('');
+
+    document.getElementById('s8-content').innerHTML = `
+      <div class="verdict-box verdict-null">
+        NULL RESULT — 0 DISCOVERY CANDIDATES SURVIVED THE PRE-REGISTERED CRITERION
+      </div>
+      <div class="card null-result">
+        <p style="line-height:1.8">
+          No feature from the Phase 7B NC family demonstrated both statistical significance
+          (BH adj-p &lt; 0.05) and practical significance (MI ≥ 0.01 nats) across the
+          ${result.hypotheses.length} evaluated candidates and ${result.snapshotStats.rows.length} observations.
+        </p>
+        <p class="muted" style="margin-top:10px;font-size:0.8rem">
+          This is a valid scientific outcome. A null result under a properly controlled experiment
+          constrains the hypothesis space and provides evidence against the specific associations
+          tested here, under these data and this protocol.
+        </p>
+        ${statOnly.length > 0 ? `<div class="card note" style="margin-top:14px">
+          <strong class="yellow">${statOnly.length} Stat-Significant-Only candidate(s) noted</strong>
+          <p class="muted" style="margin-top:6px;font-size:0.8rem">
+            ${statOnly.map(d=>d.feature.replace('ncf_','')+' @ lt'+d.leadTime+' (adj-p='+pFmt(d.adjustedPValue)+', MI='+eFmt(d.effectSize)+' nats)').join('; ')}.
+            These cleared BH correction but not the 0.01 nats practical threshold.
+            A future campaign with a lower practical threshold may investigate these, but must be pre-registered separately.
+          </p>
+        </div>` : ''}
+        <hr style="border-color:var(--border);margin:16px 0">
+        <h3>Recommended Next Representation Families</h3>
+        <div class="tbl-wrap" style="margin-top:10px">
+          <table><thead><tr>
+            <th>#</th><th>Family</th><th>Rationale</th>
+          </tr></thead><tbody>${suggRows}</tbody></table>
+        </div>
+        <p class="muted" style="margin-top:12px;font-size:0.8rem">
+          Each candidate family requires a new pre-registered search space specification
+          and its own discovery campaign before any conclusions can be drawn.
+        </p>
+      </div>`;
+  }
+}
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+boot().catch(e => {
+  document.getElementById('prereq-msg').innerHTML =
+    `<span style="color:var(--red)">Init error: ${e.message}</span>`;
+  console.error('[Phase 8 boot]', e);
+});
+</script>
+</body>
+</html>

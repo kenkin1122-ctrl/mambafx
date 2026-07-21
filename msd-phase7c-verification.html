@@ -177,6 +177,14 @@
 
 </div><!-- /#all-steps -->
 
+<div id="phase8-link" style="display:none;margin-bottom:24px">
+  <div class="card" style="border-color:#7c3aed;background:#1a0d2e">
+    <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#a78bfa;margin-bottom:8px">Next Step</div>
+    <p style="font-size:0.82rem;margin-bottom:12px">Phase 7C verification is complete. The discovery platform is cleared for the first official scientific discovery campaign.</p>
+    <button class="success" onclick="window.open('msd-phase8-campaign.html')">Open Phase 8 — First Official Discovery Campaign</button>
+  </div>
+</div>
+
 <script>
 // ─── Constants ─────────────────────────────────────────────────────────────
 const DB_NAME    = 'mfx_msd_states';
@@ -753,6 +761,10 @@ function runStep9(results) {
         </ul>
         <p class="muted" style="margin-top:12px">Resolve all blocking issues before interpreting Phase 7B results as research evidence.</p>
       </div>`;
+  }
+  if (ready) {
+    document.getElementById('phase8-link').style.display = '';
+    document.getElementById('phase8-link').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
   return { ready, failures };
 }
