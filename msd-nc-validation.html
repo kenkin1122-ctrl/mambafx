@@ -200,7 +200,10 @@ function msdComputeNonClassicalFeatures(rawPriceHistory) {
 function msdEnrichWithNonClassicalFeatures(snapshots) {
   let eligible = 0, ineligible = 0;
   const enriched = snapshots.map(snap => {
-    if (snap.rawHistoryValid !== true || !Array.isArray(snap.rawPriceHistory)) {
+    // Phase 7A fix (Defect 3.3): explicit rawHistoryWindowLength contract check.
+    if (snap.rawHistoryValid !== true ||
+        !Array.isArray(snap.rawPriceHistory) ||
+        snap.rawHistoryWindowLength !== MSD_NC_REQUIRED_WINDOW_LENGTH) {
       ineligible++;
       return Object.assign({}, snap, { ncf_eligible: false, ncf_version: null });
     }
@@ -394,6 +397,7 @@ function msdValidateNonClassicalFeatures() {
     snapshotId: 'test_e1', epoch: 1000, price: 119, symbol: 'R_100',
     outcome: 'positive', leadTime: 1, featureVersion: 'v1',
     rawHistoryValid: true,
+    rawHistoryWindowLength: 20, // required by Phase 7A eligibility gate fix (Defect 3.3)
     rawPriceHistory: Array.from({ length: 20 }, (_, i) => 100 + i),
   };
   const ineligibleSnap1 = {
@@ -417,6 +421,104 @@ function msdValidateNonClassicalFeatures() {
   assert('G9 enrichment: eligible snap has ncf_netDisplacement', Number.isFinite(enrichResult.enriched[0].ncf_netDisplacement), true);
   assert('G9 enrichment: original fields preserved (snapshotId)', enrichResult.enriched[0].snapshotId === 'test_e1', true);
   assert('G9 enrichment: original snapshot not mutated', !('ncf_eligible' in eligibleSnap), true);
+
+  // ── Group 10: p0=0 edge case for ncf_mfe / ncf_mae ──────────────────────────
+  const g10 = Array.from({ length: 20 }, (_, i) => i); // [0,1,2,...,19], p0=0
+  const g10R = msdComputeNonClassicalFeatures(g10);
+  assert('G10 p0=0: not null', g10R !== null, true);
+  if (g10R) {
+    assert('G10 p0=0: ncf_mfe = 0 (explicit branch)', g10R.ncf_mfe, 0);
+    assert('G10 p0=0: ncf_mae = 0 (explicit branch)', g10R.ncf_mae, 0);
+    assert('G10 p0=0: other features still finite', Number.isFinite(g10R.ncf_netDisplacement), true);
+  }
+
+  // ── Group 11: ncf_runEntropy > 0 for diverse run lengths ─────────────────────
+  // Sequence produces run lengths [3,1,2,1,5,1,3,1,1], 9 runs.
+  // Expected H = ln(9) − (2·ln(2) + 5·ln(5)) / 9 ≈ 1.149 nats
+  const g11 = [100,101,102,103,100,101,102,100,101,102,103,104,105,100,101,102,103,100,101,100];
+  const g11R = msdComputeNonClassicalFeatures(g11);
+  assert('G11 diverse runs: not null', g11R !== null, true);
+  if (g11R) {
+    assert('G11 ncf_runEntropy > 0', g11R.ncf_runEntropy > 0, true);
+    const g11ExpH = Math.log(9) - (2 * Math.log(2) + 5 * Math.log(5)) / 9;
+    assert('G11 ncf_runEntropy exact value', g11R.ncf_runEntropy, g11ExpH, 1e-10);
+  }
+
+  // ── Group 12: ncf_dirEntropy analytical fixture — alternating sequence ────────
+  // upCount=10, downCount=9, flatCount=0, total=19
+  // H = −(10/19)·ln(10/19) − (9/19)·ln(9/19)
+  const g12 = Array.from({ length: 20 }, (_, i) => 100 + (i % 2));
+  const g12R = msdComputeNonClassicalFeatures(g12);
+  if (g12R) {
+    const g12ExpH = -((10 / 19) * Math.log(10 / 19) + (9 / 19) * Math.log(9 / 19));
+    assert('G12 ncf_dirEntropy alt = −(10/19)ln(10/19)−(9/19)ln(9/19)', g12R.ncf_dirEntropy, g12ExpH, 1e-12);
+  }
+
+  // ── Group 13: Input immutability — rawPriceHistory must not be mutated ────────
+  const g13 = Array.from({ length: 20 }, (_, i) => 100 + i * 0.5);
+  const g13First = g13[0], g13Last = g13[19], g13Len = g13.length;
+  msdComputeNonClassicalFeatures(g13);
+  assert('G13 immutability: first element unchanged', g13[0], g13First);
+  assert('G13 immutability: last element unchanged',  g13[19], g13Last);
+  assert('G13 immutability: length unchanged',        g13.length, g13Len);
+
+  // ── Group 14: Collinearity identity tests ─────────────────────────────────────
+  // ncf_meanFirstDiff    ≡ ncf_netDisplacement / 19  (exact for n=20)
+  // ncf_meanAbsFirstDiff ≡ ncf_absPathLength / 19    (exact for n=20)
+  const g14 = [100,102,99,105,101,98,103,100,104,102,99,101,103,100,102,98,105,103,100,104];
+  const g14R = msdComputeNonClassicalFeatures(g14);
+  if (g14R) {
+    assert('G14 meanFirstDiff×19 = netDisplacement',    g14R.ncf_meanFirstDiff * 19,    g14R.ncf_netDisplacement, 1e-9);
+    assert('G14 meanAbsFirstDiff×19 = absPathLength',   g14R.ncf_meanAbsFirstDiff * 19, g14R.ncf_absPathLength,   1e-9);
+  }
+
+  // ── Group 15: ncf_stdFirstDiff non-degenerate analytical fixture ──────────────
+  // Alternating [100,101,...]: diffs = 10×(+1) + 9×(−1), mean=1/19.
+  // sumSqDev = 10×(18/19)² + 9×(20/19)² = 6840/361
+  // variance(Bessel) = 6840/(361×18) = 380/361 → std = √380 / 19
+  const g15 = Array.from({ length: 20 }, (_, i) => 100 + (i % 2));
+  const g15R = msdComputeNonClassicalFeatures(g15);
+  if (g15R) {
+    assert('G15 ncf_stdFirstDiff alt = √380/19', g15R.ncf_stdFirstDiff, Math.sqrt(380) / 19, 1e-10);
+  }
+
+  // ── Group 16: ncf_permEntropy3 tie handling — non-strict ≤ convention ─────────
+  // Sequence: prices[0]=prices[1]=100, prices[2]=101 → triple (100,100,101)
+  // a≤b (100≤100) && b≤c (100≤101) → '012'. Tie treated as non-decreasing.
+  const g16 = [100,100,101,100,101,102,100,101,100,101,102,103,100,101,100,101,102,100,101,102];
+  const g16R = msdComputeNonClassicalFeatures(g16);
+  assert('G16 partial-tie: not null', g16R !== null, true);
+  if (g16R) {
+    assert('G16 ncf_permEntropy3 finite',           Number.isFinite(g16R.ncf_permEntropy3), true);
+    assert('G16 ncf_permEntropy3 in [0, ln(6)]',   g16R.ncf_permEntropy3 <= Math.log(6) + 1e-10, true);
+    assert('G16 ncf_permEntropy3 > 0 (diverse patterns)', g16R.ncf_permEntropy3 > 0, true);
+  }
+
+  // ── Group 17: Symmetry — ascending vs. descending sequence ───────────────────
+  const g17a = Array.from({ length: 20 }, (_, i) => 100 + i);
+  const g17d = Array.from({ length: 20 }, (_, i) => 119 - i);
+  const r17a = msdComputeNonClassicalFeatures(g17a);
+  const r17d = msdComputeNonClassicalFeatures(g17d);
+  if (r17a && r17d) {
+    assert('G17 netDisp(asc) = −netDisp(desc)',    r17a.ncf_netDisplacement, -r17d.ncf_netDisplacement, 1e-10);
+    assert('G17 absPathLength equal',              r17a.ncf_absPathLength,    r17d.ncf_absPathLength,    1e-10);
+    assert('G17 pathEfficiency equal',             r17a.ncf_pathEfficiency,   r17d.ncf_pathEfficiency,   1e-10);
+    assert('G17 mfe(asc) = mae(desc)',             r17a.ncf_mfe,              r17d.ncf_mae,              1e-10);
+    assert('G17 mae(asc) = mfe(desc)',             r17a.ncf_mae,              r17d.ncf_mfe,              1e-10);
+    assert('G17 upTick(asc) = downTick(desc)',     r17a.ncf_upTickCount,      r17d.ncf_downTickCount);
+    assert('G17 dirImbalance(asc) = −dirImbalance(desc)', r17a.ncf_dirImbalance, -r17d.ncf_dirImbalance, 1e-10);
+    assert('G17 reversalCount equal',              r17a.ncf_reversalCount,    r17d.ncf_reversalCount);
+    assert('G17 maxRunLen equal',                  r17a.ncf_maxRunLen,        r17d.ncf_maxRunLen);
+  }
+
+  // ── Group 18: ncf_meanSecondDiff telescoping identity ────────────────────────
+  // By telescoping: Σ(dᵢ₊₁−dᵢ) = d₁₈−d₀ → meanSecondDiff = (d₁₈−d₀)/18
+  const g18 = [100,102,99,105,101,98,103,100,104,102,99,101,103,100,102,98,105,103,100,104];
+  const g18R = msdComputeNonClassicalFeatures(g18);
+  if (g18R) {
+    const g18ExpMSD = (g18[19] - g18[18] - g18[1] + g18[0]) / 18;
+    assert('G18 meanSecondDiff = (d₁₈−d₀)/18 (telescoping)', g18R.ncf_meanSecondDiff, g18ExpMSD, 1e-10);
+  }
 
   return { passed, failed: errors.length, total: passed + errors.length, errors, details };
 }

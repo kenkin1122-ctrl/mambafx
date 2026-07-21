@@ -7105,6 +7105,21 @@ const MSD_NC_FEATURE_VERSION = 'ncf_v1';
 // Stated as a separate constant so msdComputeNonClassicalFeatures can be
 // unit-tested without access to that Phase 6B constant.
 const MSD_NC_REQUIRED_WINDOW_LENGTH = 20;
+// Runtime sync assertion (Phase 7A audit — Architecture Defect 3.2):
+// MSD_NC_REQUIRED_WINDOW_LENGTH must always equal MSD_RAW_HISTORY_WINDOW_LENGTH.
+// If a future phase changes the capture window without updating this constant,
+// this assertion fires at page-load time rather than silently producing wrong
+// eligibility results in msdEnrichWithNonClassicalFeatures.
+// typeof guard: MSD_RAW_HISTORY_WINDOW_LENGTH is defined earlier in the file;
+// this is a no-op in any testing context where it is unavailable.
+if (typeof MSD_RAW_HISTORY_WINDOW_LENGTH !== 'undefined' &&
+    MSD_NC_REQUIRED_WINDOW_LENGTH !== MSD_RAW_HISTORY_WINDOW_LENGTH) {
+  throw new Error(
+    '[Phase 7 NC] MSD_NC_REQUIRED_WINDOW_LENGTH (' + MSD_NC_REQUIRED_WINDOW_LENGTH + ') ' +
+    'must equal MSD_RAW_HISTORY_WINDOW_LENGTH (' + MSD_RAW_HISTORY_WINDOW_LENGTH + '). ' +
+    'One was changed without updating the other. Synchronize them before proceeding.'
+  );
+}
 
 // Canonical key list for ncf_v1 — NEVER modified after definition.
 // Introducing new features or changing a formula requires a new version
@@ -7124,10 +7139,19 @@ const MSD_NC_FEATURE_KEYS = [
   'ncf_maxRunLen',         // length of longest monotone run
   'ncf_reversalCount',     // direction changes in non-flat sequence
   // C. Price Dynamics (4)
-  'ncf_meanFirstDiff',     // mean of first differences
-  'ncf_stdFirstDiff',      // std dev of first differences (Bessel-corrected)
-  'ncf_meanAbsFirstDiff',  // mean |first diff| (volatility proxy)
-  'ncf_meanSecondDiff',    // mean of second differences (acceleration proxy)
+  // ⚠ COLLINEARITY NOTE (Phase 7A mathematical audit):
+  //   ncf_meanFirstDiff    ≡ ncf_netDisplacement / 19   — exact algebraic identity for n=20.
+  //                          Telescoping identity: Σdᵢ = p₁₉−p₀, so mean = (p₁₉−p₀)/19.
+  //   ncf_meanAbsFirstDiff ≡ ncf_absPathLength / 19     — exact algebraic identity for n=20.
+  //                          Definition: Σ|dᵢ|/19 = absPathLength/19.
+  // For Phase 7B discovery these two features are EXCLUDED from the candidate family
+  // (reducing family size from 18 to 16) to avoid wasting BH correction budget on
+  // features that carry zero additional information beyond their canonical partners.
+  // They remain here for completeness and non-discovery use cases.
+  'ncf_meanFirstDiff',     // mean of first differences [≡ ncf_netDisplacement/19 for n=20]
+  'ncf_stdFirstDiff',      // std dev of first differences (Bessel-corrected, n−1 denominator)
+  'ncf_meanAbsFirstDiff',  // mean |first diff| (volatility proxy) [≡ ncf_absPathLength/19 for n=20]
+  'ncf_meanSecondDiff',    // mean of second differences (acceleration proxy; telescopes to (d₁₈−d₀)/18)
   // D. Complexity / Entropy (3) — all values in natural units (nats)
   'ncf_dirEntropy',        // Shannon H of {up, down, flat} distribution
   'ncf_runEntropy',        // Shannon H of run-length distribution
@@ -7285,10 +7309,16 @@ function msdComputeNonClassicalFeatures(rawPriceHistory){
   for (const r of runLengths){ const k = String(r); rlCounts[k] = (rlCounts[k] || 0) + 1; }
   const ncf_runEntropy = _msdShannonEntropy(rlCounts, runLengths.length);
 
-  // Permutation entropy, order 3:
+  // Permutation entropy, order 3 — Bandt & Pompe (2002) ordinal pattern convention:
   // For each consecutive triple (pᵢ, pᵢ₊₁, pᵢ₊₂), assign one of 6
   // ordinal patterns ('012','021','102','120','201','210'), then compute
   // H over the resulting 18-pattern distribution.
+  // TIE CONVENTION (Phase 7A audit — Mathematical Note F18): non-strict
+  // inequalities (≤) are used, matching the standard Bandt-Pompe (2002) approach.
+  // Equal consecutive prices within a triple are classified as '012' (non-decreasing).
+  // Example: (100, 100, 101) → a≤b && b≤c → '012'.
+  // For synthetic index tick data, exact intra-triple ties are rare in practice.
+  // This convention is fixed for ncf_v1; any change requires a new version string.
   const permCounts = {};
   for (let i = 0; i <= n - 3; i++){
     const a = prices[i], b = prices[i + 1], c = prices[i + 2];
@@ -7340,7 +7370,14 @@ function msdComputeNonClassicalFeatures(rawPriceHistory){
 function msdEnrichWithNonClassicalFeatures(snapshots){
   let eligible = 0, ineligible = 0;
   const enriched = snapshots.map(snap => {
-    if (snap.rawHistoryValid !== true || !Array.isArray(snap.rawPriceHistory)){
+    if (snap.rawHistoryValid !== true ||
+        !Array.isArray(snap.rawPriceHistory)  ||
+        // Explicit window-length contract: only enrich records whose stored
+        // rawHistoryWindowLength matches what this NC version requires.
+        // msdComputeNonClassicalFeatures also guards against wrong-length arrays,
+        // but that protection is indirect — this check enforces the contract
+        // explicitly at the boundary (Phase 7A audit — Architecture Defect 3.3).
+        snap.rawHistoryWindowLength !== MSD_NC_REQUIRED_WINDOW_LENGTH){
       ineligible++;
       return Object.assign({}, snap, { ncf_eligible: false, ncf_version: null });
     }
@@ -7379,6 +7416,22 @@ function msdEnrichWithNonClassicalFeatures(snapshots){
  *                               plus ncEnrichmentReport
  */
 function msdBuildNcExperimentDataset(allStates, config){
+  // GUARD (Phase 7A audit — Architecture Defect 3.1):
+  // NC-enriched records keep their original stored featureVersion ('v1'), not the
+  // NC computation version ('ncf_v1'). If a caller passes config.featureVersion =
+  // MSD_NC_FEATURE_VERSION, msdPartitionProductionHoldout's featureVersion filter
+  // returns 0 records — producing a silent empty dataset with no error or warning.
+  // This guard converts that silent failure into a clear, actionable error.
+  if (config.featureVersion === MSD_NC_FEATURE_VERSION) {
+    throw new Error(
+      'msdBuildNcExperimentDataset: config.featureVersion must be the stored schema ' +
+      'version (e.g. "v1"), not the NC computation version ("' + MSD_NC_FEATURE_VERSION + '"). ' +
+      'Enriched records inherit featureVersion from the stored record — the enrichment ' +
+      'layer adds ncf_* fields but does not change featureVersion. ' +
+      'Pass the featureVersion that your MarketState records were captured with (check ' +
+      'MSD_FEATURE_SCHEMA_VERSION for the current stored schema version).'
+    );
+  }
   const { enriched, eligible, ineligible } = msdEnrichWithNonClassicalFeatures(allStates);
   const eligibleOnly = enriched.filter(s => s.ncf_eligible === true);
   const dataset = msdBuildExperimentDataset(eligibleOnly, config);
@@ -7573,6 +7626,129 @@ function msdValidateNonClassicalFeatures(){
   assert('G9 snap_ok: ncf_netDisplacement finite', Number.isFinite(enrichOut.enriched[0].ncf_netDisplacement), true);
   assert('G9 original fields preserved',      enrichOut.enriched[0].snapshotId === 'ut_e1', true);
   assert('G9 original object not mutated',    !('ncf_eligible' in snap_ok),                 true);
+
+  // ── Group 10: p0=0 edge case for ncf_mfe / ncf_mae (Phase 7A Validation Gap 1) ──
+  // When prices[0]=0, the implementation uses the explicit zero-price branch (→ 0),
+  // avoiding 0/0. This branch must be tested because it is never exercised by G2–G5.
+  const g10 = Array.from({ length: 20 }, (_, i) => i); // [0,1,2,...,19], p0=0
+  const g10R = msdComputeNonClassicalFeatures(g10);
+  assert('G10 p0=0: not null',  g10R !== null, true);
+  if (g10R){
+    assert('G10 p0=0: ncf_mfe = 0 (explicit branch)', g10R.ncf_mfe, 0);
+    assert('G10 p0=0: ncf_mae = 0 (explicit branch)', g10R.ncf_mae, 0);
+    assert('G10 p0=0: other features still finite', Number.isFinite(g10R.ncf_netDisplacement), true);
+  }
+
+  // ── Group 11: ncf_runEntropy > 0 for genuinely diverse run lengths (Phase 7A Validation Gap 2) ──
+  // All existing run-entropy tests cover H=0 cases (uniform run lengths).
+  // This tests a sequence with run lengths [3,1,2,1,5,1,3,1,1]:
+  // rlCounts={3:2,1:5,2:1,5:1}, total=9 runs.
+  // Expected H = ln(9) - (2·ln(2) + 5·ln(5)) / 9  ≈ 1.149 nats
+  const g11 = [100,101,102,103,100,101,102,100,101,102,103,104,105,100,101,102,103,100,101,100];
+  const g11R = msdComputeNonClassicalFeatures(g11);
+  assert('G11 diverse runs: not null', g11R !== null, true);
+  if (g11R){
+    assert('G11 ncf_runEntropy > 0', g11R.ncf_runEntropy > 0, true);
+    const g11ExpH = Math.log(9) - (2 * Math.log(2) + 5 * Math.log(5)) / 9;
+    assert('G11 ncf_runEntropy exact value', g11R.ncf_runEntropy, g11ExpH, 1e-10);
+  }
+
+  // ── Group 12: ncf_dirEntropy analytical fixture for alternating sequence (Phase 7A Validation Gap 3) ──
+  // G5 tests the alternating sequence but does not assert ncf_dirEntropy.
+  // upCount=10, downCount=9, flatCount=0, total=19.
+  // H = −(10/19)·ln(10/19) − (9/19)·ln(9/19)
+  const g12 = Array.from({ length: 20 }, (_, i) => 100 + (i % 2));
+  const g12R = msdComputeNonClassicalFeatures(g12);
+  if (g12R){
+    const g12ExpH = -((10/19) * Math.log(10/19) + (9/19) * Math.log(9/19));
+    assert('G12 ncf_dirEntropy alt = −(10/19)ln(10/19)−(9/19)ln(9/19)', g12R.ncf_dirEntropy, g12ExpH, 1e-12);
+  }
+
+  // ── Group 13: Input immutability — rawPriceHistory array must not be mutated (Phase 7A Validation Gap 4) ──
+  const g13 = Array.from({ length: 20 }, (_, i) => 100 + i * 0.5);
+  const g13FirstVal = g13[0], g13LastVal = g13[19], g13Len = g13.length;
+  msdComputeNonClassicalFeatures(g13);
+  assert('G13 immutability: first element unchanged', g13[0], g13FirstVal);
+  assert('G13 immutability: last element unchanged',  g13[19], g13LastVal);
+  assert('G13 immutability: length unchanged',        g13.length, g13Len);
+
+  // ── Group 14: Collinearity identity tests (Phase 7A Validation Gap 5) ──
+  // ncf_meanFirstDiff ≡ ncf_netDisplacement / 19  (exact, for any valid n=20 input)
+  // ncf_meanAbsFirstDiff ≡ ncf_absPathLength / 19 (exact, for any valid n=20 input)
+  const g14 = [100,102,99,105,101,98,103,100,104,102,99,101,103,100,102,98,105,103,100,104];
+  const g14R = msdComputeNonClassicalFeatures(g14);
+  if (g14R){
+    assert('G14 meanFirstDiff×19 = netDisplacement',    g14R.ncf_meanFirstDiff * 19,    g14R.ncf_netDisplacement, 1e-9);
+    assert('G14 meanAbsFirstDiff×19 = absPathLength',   g14R.ncf_meanAbsFirstDiff * 19, g14R.ncf_absPathLength,   1e-9);
+  }
+
+  // ── Group 15: ncf_stdFirstDiff non-degenerate analytical fixture (Phase 7A Validation Gap 6) ──
+  // Alternating [100,101,...]: diffs = 10×(+1), 9×(−1), mean=1/19.
+  // sumSqDev = 10×(18/19)² + 9×(20/19)² = (3240+3600)/361 = 6840/361
+  // variance(Bessel) = 6840/(361×18) = 380/361
+  // std = √(380/361) = √380 / 19
+  const g15 = Array.from({ length: 20 }, (_, i) => 100 + (i % 2));
+  const g15R = msdComputeNonClassicalFeatures(g15);
+  if (g15R){
+    const g15ExpStd = Math.sqrt(380) / 19;
+    assert('G15 ncf_stdFirstDiff alt = √380/19', g15R.ncf_stdFirstDiff, g15ExpStd, 1e-10);
+  }
+
+  // ── Group 16: ncf_permEntropy3 tie handling — partial-tie triples → '012' (Phase 7A Validation Gap 7) ──
+  // Sequence where prices[0]=prices[1]=100, prices[2]=101:
+  // first triple (100,100,101): a≤b (100≤100 TRUE) && b≤c (100≤101 TRUE) → '012'. Verified.
+  const g16 = [100,100,101,100,101,102,100,101,100,101,102,103,100,101,100,101,102,100,101,102];
+  const g16R = msdComputeNonClassicalFeatures(g16);
+  assert('G16 partial-tie sequence: not null',          g16R !== null, true);
+  if (g16R){
+    assert('G16 ncf_permEntropy3 finite',               Number.isFinite(g16R.ncf_permEntropy3), true);
+    assert('G16 ncf_permEntropy3 in [0, ln(6)]',        g16R.ncf_permEntropy3 <= Math.log(6) + 1e-10, true);
+    // The flat sub-sequence [100,100,101] maps to '012' (non-strict ≤ convention).
+    // Entropy should be > 0 because other triples produce non-'012' patterns.
+    assert('G16 ncf_permEntropy3 > 0 (diverse patterns exist)', g16R.ncf_permEntropy3 > 0, true);
+  }
+
+  // ── Group 17: Symmetry — ascending vs. price-reversed sequence (Phase 7A Validation Gap 8) ──
+  // For ascending P and descending P': several features must satisfy symmetric identities.
+  const g17a = Array.from({ length: 20 }, (_, i) => 100 + i);  // ascending
+  const g17d = Array.from({ length: 20 }, (_, i) => 119 - i);  // descending (price-reversed)
+  const r17a = msdComputeNonClassicalFeatures(g17a);
+  const r17d = msdComputeNonClassicalFeatures(g17d);
+  if (r17a && r17d){
+    assert('G17 symmetry: netDisp(asc) = −netDisp(desc)',  r17a.ncf_netDisplacement, -r17d.ncf_netDisplacement, 1e-10);
+    assert('G17 symmetry: absPathLength equal',            r17a.ncf_absPathLength,    r17d.ncf_absPathLength,    1e-10);
+    assert('G17 symmetry: pathEfficiency equal',           r17a.ncf_pathEfficiency,   r17d.ncf_pathEfficiency,   1e-10);
+    assert('G17 symmetry: mfe(asc) = mae(desc)',           r17a.ncf_mfe,              r17d.ncf_mae,              1e-10);
+    assert('G17 symmetry: mae(asc) = mfe(desc)',           r17a.ncf_mae,              r17d.ncf_mfe,              1e-10);
+    assert('G17 symmetry: upTick(asc) = downTick(desc)',   r17a.ncf_upTickCount,      r17d.ncf_downTickCount);
+    assert('G17 symmetry: dirImbalance(asc) = −dirImbalance(desc)', r17a.ncf_dirImbalance, -r17d.ncf_dirImbalance, 1e-10);
+    assert('G17 symmetry: reversalCount equal',            r17a.ncf_reversalCount,    r17d.ncf_reversalCount);
+    assert('G17 symmetry: maxRunLen equal',                r17a.ncf_maxRunLen,        r17d.ncf_maxRunLen);
+  }
+
+  // ── Group 18: ncf_meanSecondDiff telescoping identity (Phase 7A Validation Gap 9) ──
+  // By telescoping: Σ(dᵢ₊₁−dᵢ) = d₁₈−d₀  where dᵢ = prices[i+1]−prices[i].
+  // Therefore: ncf_meanSecondDiff = (d₁₈ − d₀) / 18  =  (prices[19]−prices[18] − prices[1]+prices[0]) / 18.
+  const g18 = [100,102,99,105,101,98,103,100,104,102,99,101,103,100,102,98,105,103,100,104];
+  const g18R = msdComputeNonClassicalFeatures(g18);
+  if (g18R){
+    const g18_d0  = g18[1]  - g18[0];   // first diff
+    const g18_d18 = g18[19] - g18[18];  // last diff
+    const g18ExpMSD = (g18_d18 - g18_d0) / 18;
+    assert('G18 meanSecondDiff = (d₁₈−d₀)/18 (telescoping)', g18R.ncf_meanSecondDiff, g18ExpMSD, 1e-10);
+  }
+
+  // ── Group 19: msdBuildNcExperimentDataset featureVersion guard (Phase 7A Validation Gap 10) ──
+  // After Phase 7A fix Task 1, passing config.featureVersion = MSD_NC_FEATURE_VERSION
+  // must throw a descriptive error, not silently return an empty dataset.
+  let g19Threw = false;
+  try {
+    msdBuildNcExperimentDataset([], { featureVersion: MSD_NC_FEATURE_VERSION, symbol: 'R_100', randomSeed: 1, trainingSplit: 0.7, samplingRatio: 1 });
+  } catch(e){
+    // Accept any error whose message mentions featureVersion or the version string — confirms it is the guard, not an unrelated error.
+    g19Threw = typeof e.message === 'string' && (e.message.includes('featureVersion') || e.message.includes(MSD_NC_FEATURE_VERSION));
+  }
+  assert('G19 wrong featureVersion → descriptive error (not silent empty)', g19Threw, true);
 
   return { passed, failed: errors.length, total: passed + errors.length, errors };
 }
