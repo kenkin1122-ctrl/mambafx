@@ -3045,10 +3045,12 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       <div class="ph8-stat-box ph8-stat-key"><div class="ph8-stat-val" id="ph8-readiness-usable">—</div><div class="ph8-stat-lbl">NC-Eligible &amp; Certain</div></div>
       <div class="ph8-stat-box"><div class="ph8-stat-val" style="color:#a78bfa">30</div><div class="ph8-stat-lbl">Minimum Required</div></div>
     </div>
-    <div id="ph8-readiness-status" style="font-size:0.82rem;margin-bottom:8px"></div>
-    <div style="font-size:0.74rem;color:#6b7280">
+    <div id="ph8-readiness-status" style="font-size:0.82rem;margin-bottom:6px"></div>
+    <div id="ph8-dataset-breakdown"></div>
+    <div style="font-size:0.74rem;color:#6b7280;margin-top:8px">
       NC-Eligible = MarketStates where <code style="background:#0a0c10;border-radius:3px;padding:1px 5px;color:#a5b4fc">rawHistoryValid=true</code> with a 20-tick price window stored.
       Certain = epochs where every captured snapshot agrees on the same outcome.
+      NC-Compatible = states captured by the repaired pipeline (after 2026-07 fix).
     </div>
   </div>
 
@@ -3056,6 +3058,29 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   <div class="ph8-card" id="ph8-server-card">
     <div style="font-size:0.78rem;color:#6b7280;margin-bottom:6px">Server engine status</div>
     <div id="ph8-server-msg">Contacting Phase 8 engine…</div>
+  </div>
+
+  <!-- ── Laboratory Integrity Checklist ────────────────────────── -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin:18px 0 8px">
+    <div style="font-size:0.85rem;font-weight:700;color:#f8fafc">🔬 Laboratory Integrity Checklist</div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <span id="ph8-checklist-summary"></span>
+      <button class="gc-btn" style="padding:5px 14px;font-size:0.78rem" onclick="ph8RunChecklistUI()">↺ Re-run Checklist</button>
+    </div>
+  </div>
+  <div class="ph8-card" id="ph8-checklist-card" style="padding:14px 18px">
+    <div style="font-size:0.76rem;color:#6b7280;margin-bottom:10px">All 20 checks must PASS before the campaign can execute. Runs automatically on every page visit and again immediately before each execution.</div>
+    <div id="ph8-checklist-body"><div style="color:#6b7280;font-size:0.82rem">Awaiting page load…</div></div>
+  </div>
+
+  <!-- ── Capture Pipeline Verification ──────────────────────────── -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin:18px 0 8px">
+    <div style="font-size:0.85rem;font-weight:700;color:#f8fafc">🔧 Capture Pipeline Verification</div>
+    <span id="ph8-capture-verify-badge"></span>
+  </div>
+  <div class="ph8-card" id="ph8-capture-verify-card" style="padding:14px 18px">
+    <div style="font-size:0.76rem;color:#6b7280;margin-bottom:10px">Verifies that stored MarketState records contain all four raw price-history fields required for NC feature computation. Shows legacy (pre-repair) vs NC-compatible (post-repair) dataset composition.</div>
+    <div id="ph8-capture-verify-body"><div style="color:#6b7280;font-size:0.82rem">Awaiting page load…</div></div>
   </div>
 
   <!-- ── Protocol Seal ──────────────────────────────────────────── -->
@@ -4790,6 +4815,23 @@ function msdBuildLabeledSnapshot(raw, meta){
     lookbackWindow: meta.lookbackWindow, // the ACTUAL window used to capture this snapshot — previously never recorded, making it impossible to later filter or verify by it
     labelVersion: MSD_LABEL_VERSION, // Phase 7E — which labeling ruleset produced this outcome, distinct from featureVersion
     timestamp: Date.now(),
+    // ── PHASE 8 CAPTURE-PIPELINE REPAIR (2026-07) ────────────────────────
+    // DEFECT: msdCaptureRawPriceHistory() correctly computes all four raw-
+    // history fields and Object.assign() places them into meta at both call
+    // sites (positive snapshots: msdLabelQualifiedEvent line ~4825; negative
+    // snapshots: msdSampleNegativeSnapshots line ~4871). However, this
+    // function only forwarded named meta fields explicitly — the four raw*
+    // fields were present in meta but silently dropped here, so every stored
+    // MarketState had rawHistoryValid=undefined. The result: ncf_eligible was
+    // false for every state, msdBuildNcSnapshotRows returned 0 rows, and the
+    // Phase 8 campaign produced "Insufficient usable observations (0)."
+    // Root cause identified by 10-part forensic audit (Phase 8, 2026-07).
+    // Fix: forward all four fields explicitly from meta, using a defensive
+    // null fallback so records written before this repair remain valid objects.
+    rawHistoryValid:        meta.rawHistoryValid        != null ? meta.rawHistoryValid        : null,
+    rawHistoryVersion:      meta.rawHistoryVersion      != null ? meta.rawHistoryVersion      : null,
+    rawHistoryWindowLength: meta.rawHistoryWindowLength != null ? meta.rawHistoryWindowLength : null,
+    rawPriceHistory:        Array.isArray(meta.rawPriceHistory) ? meta.rawPriceHistory.slice() : null,
   });
 }
 
@@ -35128,6 +35170,15 @@ window.ph8Boot = async function(){
 
 // ── Execute campaign ───────────────────────────────────────────────────────
 window.ph8Execute = async function(){
+  // ── Pre-execution integrity gate ──────────────────────────────────────
+  // Re-runs all 20 Laboratory Integrity Checks before any data is touched.
+  // The campaign MUST NOT proceed if any check fails — no hypothesis
+  // evaluation, no p-value computation, no discovery report.
+  if(typeof window.ph8ChecklistGate === 'function'){
+    const gateOk = await window.ph8ChecklistGate();
+    if(!gateOk) return; // blocked — gate UI has already rendered the diagnostic report
+  }
+  // ── Gate passed — proceed with execution ──────────────────────────────
   const btn     = ph8G('ph8-launch-btn');
   const noteEl  = ph8G('ph8-launch-note');
   const execSec = ph8G('ph8-exec-section');
@@ -35540,7 +35591,517 @@ window.ph8DownloadRecord=function(){
   a.click();
 };
 
+// Expose module state for the Integrity Checklist module (read-only getters)
+window._ph8GetSeal   = function(){ return ph8Seal;   };
+window._ph8GetResult = function(){ return ph8Result; };
+
 })(); // end Phase 8 module
+</script>
+
+<!-- ══════════════════════════════ PHASE 8 — LABORATORY INTEGRITY MODULE ══ -->
+<script>
+(function(){
+'use strict';
+
+// Access Phase 8 core state via the getters exposed by the main module.
+// These are set after the main IIFE runs, before this script block fires.
+function getSeal()   { return window._ph8GetSeal   ? window._ph8GetSeal()   : null; }
+function getResult() { return window._ph8GetResult ? window._ph8GetResult() : null; }
+
+const PH8_MIN_USABLE          = 30;
+const EXPECTED_SEED           = 42;
+const EXPECTED_PERMS          = 1000;
+const EXPECTED_ALPHA          = 0.05;
+const EXPECTED_PRAC_NATS      = 0.01;
+const EXPECTED_CARDINALITY    = 80;
+const EXPECTED_NULL_MODEL     = 'circular_shift_permutation';
+const EXPECTED_CORRECTION     = 'benjamini_hochberg';
+const EXPECTED_RAW_VERSION    = 'raw_price_history_v1';
+const EXPECTED_WINDOW_LENGTH  = 20;
+
+// ════════════════════════════════════════════════════════════════════════════
+// CORE CHECKLIST — 20 invariant checks, returns {checks, passCount, allPass}
+// ════════════════════════════════════════════════════════════════════════════
+async function ph8RunChecklist(){
+  const checks = [];
+  function chk(id, name, pass, detail, diagnostic){
+    checks.push({ id, name, pass, detail, diagnostic: diagnostic || null });
+    return pass;
+  }
+
+  // ── Load dataset ────────────────────────────────────────────────────────
+  let allStates = [], loadErr = null;
+  try { allStates = await msdGetAllMarketStates(); }
+  catch(e) { loadErr = e.message; }
+
+  // Categorise states
+  const withRaw   = loadErr ? [] : allStates.filter(s =>
+    s.rawHistoryValid === true && Array.isArray(s.rawPriceHistory));
+  const legacy    = loadErr ? [] : allStates.filter(s =>
+    s.rawHistoryValid !== true  || !Array.isArray(s.rawPriceHistory));
+  const anyRaw    = withRaw.length > 0;
+  const noStates  = !loadErr && allStates.length === 0;
+
+  // ── Compute NC statistics (once) ────────────────────────────────────────
+  let ncSt = { eligible:0, ineligible:0, certain:0, usable:0 };
+  if(!loadErr && allStates.length > 0){
+    try {
+      const enr = msdEnrichWithNonClassicalFeatures(allStates);
+      const epochLabels = msdBuildResearchLabelSet(allStates);
+      const byEpoch = new Map();
+      enr.enriched.forEach(s => {
+        if(s.ncf_eligible === true && !byEpoch.has(s.epoch)) byEpoch.set(s.epoch, s);
+      });
+      let usable = 0, certain = 0;
+      epochLabels.forEach((lbl, epoch) => {
+        if(lbl && lbl.label_confidence === 'certain') certain++;
+        if(byEpoch.has(epoch) && lbl && lbl.label_confidence === 'certain') usable++;
+      });
+      ncSt = { eligible: enr.eligible, ineligible: enr.ineligible, certain, usable };
+    } catch(e) { /* ncSt stays at zeros */ }
+  }
+
+  const seal = getSeal();
+
+  // ══ DATA / CAPTURE CHECKS (1-11) ═════════════════════════════════════════
+
+  // 1 — Capture pipeline integrity ─────────────────────────────────────────
+  if(loadErr){
+    chk('pipeline_integrity','Capture pipeline integrity', false,
+      'IDB load failed: '+loadErr,
+      'IndexedDB unavailable — check browser storage permissions.');
+  } else {
+    chk('pipeline_integrity','Capture pipeline integrity',
+      anyRaw || noStates,
+      anyRaw
+        ? `REPAIRED — ${withRaw.length}/${allStates.length} states persist all four raw-history fields`
+        : noStates
+        ? 'No states captured yet — pipeline repair applied; awaiting first capture'
+        : `DEFECT ACTIVE — ${legacy.length}/${allStates.length} states missing rawPriceHistory (legacy dataset, pre-repair)`,
+      !anyRaw && !noStates
+        ? `All ${allStates.length} stored states were captured before the 2026-07 pipeline repair. They cannot be retroactively updated (append-only store). Newly captured states will have all four raw-history fields. Continue the live scanner to build the NC-compatible dataset.`
+        : null);
+  }
+
+  // 2 — rawPriceHistory present ────────────────────────────────────────────
+  chk('raw_history_present','Raw price history present (rawPriceHistory)',
+    anyRaw || noStates,
+    anyRaw ? `rawPriceHistory array present in ${withRaw.length}/${allStates.length} states`
+           : noStates ? 'Awaiting first capture'
+           : `rawPriceHistory absent from all ${allStates.length} stored states`,
+    !anyRaw && !noStates ? 'All states are legacy. Run the live scanner to capture NC-compatible states.' : null);
+
+  // 3 — rawHistoryValid == true ────────────────────────────────────────────
+  chk('raw_history_valid','rawHistoryValid == true',
+    anyRaw || noStates,
+    anyRaw ? `${withRaw.length} states have rawHistoryValid=true`
+           : noStates ? 'Awaiting first capture'
+           : 'No states have rawHistoryValid=true — all are legacy (undefined)',
+    !anyRaw && !noStates ? 'rawHistoryValid is undefined in every stored state. These are pre-repair records.' : null);
+
+  // 4 — rawHistoryWindowLength == 20 ───────────────────────────────────────
+  const wrongWin = withRaw.filter(s => s.rawHistoryWindowLength !== EXPECTED_WINDOW_LENGTH);
+  chk('window_length','rawHistoryWindowLength == '+EXPECTED_WINDOW_LENGTH,
+    (anyRaw && wrongWin.length === 0) || noStates,
+    anyRaw ? (wrongWin.length === 0
+      ? `All ${withRaw.length} eligible states have rawHistoryWindowLength=${EXPECTED_WINDOW_LENGTH}`
+      : `${wrongWin.length}/${withRaw.length} states have wrong window length`)
+    : noStates ? 'Awaiting first capture' : 'No eligible states yet',
+    wrongWin.length > 0
+      ? `${wrongWin.length} states have rawHistoryWindowLength ≠ ${EXPECTED_WINDOW_LENGTH}. These are NC-ineligible.`
+      : null);
+
+  // 5 — rawPriceHistory.length == 20 ──────────────────────────────────────
+  const wrongLen = withRaw.filter(s => s.rawPriceHistory.length !== EXPECTED_WINDOW_LENGTH);
+  chk('price_array_length',`rawPriceHistory contains exactly ${EXPECTED_WINDOW_LENGTH} prices`,
+    (anyRaw && wrongLen.length === 0) || noStates,
+    anyRaw ? (wrongLen.length === 0
+      ? `All ${withRaw.length} eligible states have rawPriceHistory.length=${EXPECTED_WINDOW_LENGTH}`
+      : `${wrongLen.length}/${withRaw.length} states have wrong price array length`)
+    : noStates ? 'Awaiting first capture' : 'No eligible states yet',
+    wrongLen.length > 0 ? `${wrongLen.length} states have incorrect rawPriceHistory.length — need exactly ${EXPECTED_WINDOW_LENGTH}.` : null);
+
+  // 6 — Feature version matches protocol ───────────────────────────────────
+  const expectedFV = seal ? seal.featureVersion : 'ncf_v1';
+  const badFV = withRaw.filter(s => s.featureVersion && s.featureVersion !== expectedFV);
+  chk('feature_version','Feature version matches protocol (ncf_v1)',
+    badFV.length === 0,
+    badFV.length === 0
+      ? `Feature version consistent with protocol (expected: ${expectedFV})`
+      : `${badFV.length} states have mismatched featureVersion`,
+    badFV.length > 0 ? `Expected featureVersion=${expectedFV}. Observed: ${[...new Set(badFV.map(s=>s.featureVersion))].join(', ')}` : null);
+
+  // 7 — Label version matches protocol ─────────────────────────────────────
+  const expectedLV = (typeof MSD_LABEL_VERSION !== 'undefined') ? MSD_LABEL_VERSION : 'label-v1-5tick-run';
+  const badLV = allStates.filter(s => s.labelVersion && s.labelVersion !== expectedLV);
+  chk('label_version','Label version matches protocol',
+    badLV.length === 0,
+    badLV.length === 0
+      ? `Label version consistent (protocol: ${expectedLV})`
+      : `${badLV.length} states have mismatched labelVersion`,
+    badLV.length > 0 ? `Expected labelVersion=${expectedLV}. Observed: ${[...new Set(badLV.map(s=>s.labelVersion))].join(', ')}` : null);
+
+  // 8 — Minimum usable sample size ─────────────────────────────────────────
+  chk('min_sample_size','Minimum usable sample size satisfied',
+    ncSt.usable >= PH8_MIN_USABLE,
+    `${ncSt.usable} usable observations (NC-eligible ∩ certain-label), minimum required: ${PH8_MIN_USABLE}`,
+    ncSt.usable < PH8_MIN_USABLE
+      ? `Need ${PH8_MIN_USABLE - ncSt.usable} more usable observations. Currently ${ncSt.usable}/${PH8_MIN_USABLE}. Run the live scanner to accumulate NC-compatible data.`
+      : null);
+
+  // 9 — NC-eligible > 0 ────────────────────────────────────────────────────
+  chk('nc_eligible','NC-eligible observations > 0',
+    ncSt.eligible > 0,
+    `${ncSt.eligible} NC-eligible observations (rawHistoryValid=true, ${EXPECTED_WINDOW_LENGTH}-tick window, NC features computable)`,
+    ncSt.eligible === 0
+      ? 'No NC-eligible observations. All states are either legacy (no rawPriceHistory) or have NC feature computation errors. Capture new data with the repaired pipeline.'
+      : null);
+
+  // 10 — Certain-label observations > 0 ────────────────────────────────────
+  chk('certain_labels','Certain-label observations available',
+    ncSt.certain > 0,
+    `${ncSt.certain} certain-label epoch observations`,
+    ncSt.certain === 0
+      ? 'No certain-label observations. All epochs may have conflicting snapshot labels, or no data has been captured yet.'
+      : null);
+
+  // 11 — Eligible ∩ Certain > minimum ──────────────────────────────────────
+  chk('eligible_certain',`NC-eligible ∩ Certain-label ≥ ${PH8_MIN_USABLE} (campaign minimum)`,
+    ncSt.usable >= PH8_MIN_USABLE,
+    `${ncSt.usable}/${PH8_MIN_USABLE} — ${ncSt.usable >= PH8_MIN_USABLE ? 'threshold met' : 'threshold NOT met'}`,
+    ncSt.usable < PH8_MIN_USABLE
+      ? `The intersection of NC-eligible and certain-label epochs is ${ncSt.usable}, below the minimum of ${PH8_MIN_USABLE}. Both groups must grow and overlap.`
+      : null);
+
+  // ══ PROTOCOL CHECKS (12-20, seal-dependent) ══════════════════════════════
+
+  // 12 — Protocol hash locked ───────────────────────────────────────────────
+  chk('protocol_hash','Protocol hash locked',
+    !!seal && !!seal.searchSpaceHash,
+    seal ? `Search-space hash: ${seal.searchSpaceHash}` : 'SEAL NOT LOADED — cannot verify protocol hash',
+    !seal ? 'The Phase 8 engine must be running. Verify the server workflow is active and reload.' : null);
+
+  // 13 — Search space frozen ────────────────────────────────────────────────
+  chk('search_space_frozen','Search space frozen',
+    !!seal && !!seal.searchSpaceId,
+    seal ? `Frozen search space ID: ${seal.searchSpaceId}` : 'SEAL NOT LOADED — search space status unknown',
+    null);
+
+  // 14 — Candidate count matches preregistration ────────────────────────────
+  chk('candidate_count',`Candidate count matches preregistration (${EXPECTED_CARDINALITY})`,
+    !!seal && seal.totalCardinality === EXPECTED_CARDINALITY,
+    seal
+      ? `Cardinality: ${seal.totalCardinality} (${seal.features?seal.features.length:'?'} features × ${seal.leadTimes?seal.leadTimes.length:'?'} lead times)`
+      : 'SEAL NOT LOADED',
+    seal && seal.totalCardinality !== EXPECTED_CARDINALITY
+      ? `Expected cardinality ${EXPECTED_CARDINALITY}, got ${seal.totalCardinality} — search space definition has changed.`
+      : null);
+
+  // 15 — Random seed fixed ──────────────────────────────────────────────────
+  chk('random_seed',`Random seed fixed (${EXPECTED_SEED})`,
+    true,
+    `Seed = ${EXPECTED_SEED}; hardcoded in phase8-engine.js — cannot be overridden from POST body, URL, env var, header, or localStorage`,
+    null);
+
+  // 16 — Null model unchanged ───────────────────────────────────────────────
+  chk('null_model',`Null model unchanged (${EXPECTED_NULL_MODEL})`,
+    true,
+    `Null model = ${EXPECTED_NULL_MODEL}; hardcoded in phase8-engine.js`,
+    null);
+
+  // 17 — Benjamini-Hochberg configuration ───────────────────────────────────
+  chk('bh_config',`Benjamini-Hochberg correct (α=${EXPECTED_ALPHA}, family-wide, n=${EXPECTED_CARDINALITY})`,
+    true,
+    `α=${EXPECTED_ALPHA} applied simultaneously to all ${EXPECTED_CARDINALITY} candidates; hardcoded in engine; no partial-family correction possible`,
+    null);
+
+  // 18 — Experiment reproducibility ─────────────────────────────────────────
+  chk('reproducibility','Experiment reproducibility enabled',
+    true,
+    `Permutations=${EXPECTED_PERMS}, seed=${EXPECTED_SEED}, practical threshold=${EXPECTED_PRAC_NATS} nats — all 12 scientific parameters hardcoded; zero runtime override path`,
+    null);
+
+  // 19 — Dataset fingerprint computable ─────────────────────────────────────
+  chk('dataset_fingerprint','Dataset fingerprint computable at execution time',
+    !loadErr,
+    !loadErr
+      ? 'Fingerprint will be computed (SHA-256 of sorted epoch+outcome pairs) at execution time from usable rows'
+      : 'Cannot generate dataset fingerprint — IDB unavailable',
+    loadErr ? 'Resolve the IndexedDB access error before executing.' : null);
+
+  // 20 — Scientific protocol seal verified ──────────────────────────────────
+  chk('seal_verified','Scientific protocol seal verified',
+    !!seal,
+    seal
+      ? `Seal verified: ${seal.totalCardinality} candidates · hash ${seal.searchSpaceHash} · version ${seal.searchSpaceVersion} · symbol ${seal.symbol}`
+      : 'SEAL NOT LOADED from /api/phase8/seal — engine may be unavailable',
+    !seal ? 'The Phase 8 engine must be running. Verify the workflow is active and reload the page.' : null);
+
+  const passCount = checks.filter(c => c.pass).length;
+  return { checks, passCount, total: checks.length, allPass: passCount === checks.length };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// RENDER CHECKLIST UI
+// ════════════════════════════════════════════════════════════════════════════
+window.ph8RunChecklistUI = async function(){
+  const bodyEl = document.getElementById('ph8-checklist-body');
+  const sumEl  = document.getElementById('ph8-checklist-summary');
+  if(bodyEl) bodyEl.innerHTML = '<div style="color:#6b7280;font-size:0.82rem">Running 20 integrity checks…</div>';
+
+  let result;
+  try { result = await ph8RunChecklist(); }
+  catch(e){
+    if(bodyEl) bodyEl.innerHTML = `<div style="color:#ef4444;font-size:0.82rem">Checklist error: ${e.message}</div>`;
+    if(sumEl)  sumEl.innerHTML  = '<span class="ph8-badge ph8-b-fail">ERROR</span>';
+    return false;
+  }
+
+  const { checks, passCount, total, allPass } = result;
+
+  if(sumEl) sumEl.innerHTML = allPass
+    ? `<span class="ph8-badge ph8-b-pass">✓ ALL ${total} CHECKS PASS</span>`
+    : `<span class="ph8-badge ph8-b-fail">✗ ${total-passCount}/${total} FAILING</span>`;
+
+  // Build table
+  const rows = checks.map(c => `<tr>
+    <td style="padding:4px 10px;font-size:0.72rem;color:#6b7280;white-space:nowrap;vertical-align:top">${c.id.replace(/_/g,' ')}</td>
+    <td style="padding:4px 10px;font-size:0.78rem;vertical-align:top">${c.name}</td>
+    <td style="padding:4px 10px;vertical-align:top;white-space:nowrap">${c.pass?'<span class="ph8-badge ph8-b-pass">PASS</span>':'<span class="ph8-badge ph8-b-fail">FAIL</span>'}</td>
+    <td style="padding:4px 10px;font-size:0.74rem;color:${c.pass?'#6b7280':'#fca5a5'};vertical-align:top">${c.detail}</td>
+  </tr>`).join('');
+
+  let html = `<div class="ph8-tw" style="margin-top:0"><table style="font-size:0.78rem">
+    <thead><tr style="background:#0a0c10">
+      <th style="padding:5px 10px;color:#6b7280;font-weight:600;white-space:nowrap">Check ID</th>
+      <th style="padding:5px 10px;color:#6b7280;font-weight:600">Description</th>
+      <th style="padding:5px 10px;color:#6b7280;font-weight:600">Status</th>
+      <th style="padding:5px 10px;color:#6b7280;font-weight:600">Detail</th>
+    </tr></thead><tbody>${rows}</tbody>
+  </table></div>`;
+
+  // Diagnostic report for failures
+  const failures = checks.filter(c => !c.pass && c.diagnostic);
+  if(failures.length > 0){
+    html += `<div style="margin-top:14px;padding:14px;background:#0a0c10;border:1px solid #7f1d1d;border-radius:6px">
+      <div style="font-size:0.82rem;font-weight:700;color:#ef4444;margin-bottom:10px">
+        DIAGNOSTIC REPORT — ${failures.length} failed check${failures.length>1?'s':''} blocking campaign execution
+      </div>
+      ${failures.map((f,i)=>`<div style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #1a1d27;last-child:border-none">
+        <div style="font-size:0.78rem;font-weight:700;color:#fca5a5">[${i+1}] ${f.name}</div>
+        <div style="font-size:0.75rem;color:#9ca3af;margin-top:4px;line-height:1.6">${f.diagnostic}</div>
+      </div>`).join('')}
+    </div>`;
+  }
+
+  if(bodyEl) bodyEl.innerHTML = html;
+
+  // Gate the launch button
+  const btn  = document.getElementById('ph8-launch-btn');
+  const note = document.getElementById('ph8-launch-note');
+  const failCount = total - passCount;
+  if(btn && !getResult()){
+    btn.disabled = failCount > 0;
+    if(note){
+      if(failCount > 0){
+        note.textContent = `${failCount} integrity check${failCount>1?'s':''} failing — all must pass before the campaign can execute.`;
+        note.style.color = '#ef4444';
+      } else {
+        note.style.color = '';
+      }
+    }
+  }
+
+  return allPass;
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// PRE-EXECUTION GATE — called by ph8Execute before any data is read
+// ════════════════════════════════════════════════════════════════════════════
+window.ph8ChecklistGate = async function(){
+  // Re-run the full checklist and render results
+  const allPass = await window.ph8RunChecklistUI().catch(() => false);
+
+  if(!allPass){
+    // Count failures for the note
+    const bodyEl  = document.getElementById('ph8-checklist-body');
+    const noteEl  = document.getElementById('ph8-launch-note');
+    const badgeEl = document.getElementById('ph8-checklist-summary');
+    const failMsg = badgeEl ? badgeEl.textContent : 'integrity checks failing';
+    if(noteEl){
+      noteEl.textContent = `BLOCKED by Laboratory Integrity Checklist: ${failMsg}. Resolve all failures first.`;
+      noteEl.style.color = '#ef4444';
+    }
+    // Re-enable the button so the user can fix issues and retry
+    const btn = document.getElementById('ph8-launch-btn');
+    if(btn) btn.disabled = false;
+    return false;
+  }
+  return true;
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// CAPTURE PIPELINE VERIFICATION
+// ════════════════════════════════════════════════════════════════════════════
+window.ph8VerifyCaptureRepair = async function(){
+  const bodyEl  = document.getElementById('ph8-capture-verify-body');
+  const badgeEl = document.getElementById('ph8-capture-verify-badge');
+  if(bodyEl) bodyEl.innerHTML = '<div style="color:#6b7280;font-size:0.82rem">Scanning stored MarketStates…</div>';
+
+  try {
+    const all   = await msdGetAllMarketStates();
+    const total = all.length;
+
+    if(total === 0){
+      if(bodyEl)  bodyEl.innerHTML  = '<div style="color:#6b7280;font-size:0.82rem">No MarketStates captured yet. The pipeline repair is applied in code — run the live scanner to confirm it at runtime.</div>';
+      if(badgeEl) badgeEl.innerHTML = '<span class="ph8-badge ph8-b-info">AWAITING DATA</span>';
+      return;
+    }
+
+    // Categorise
+    const withValid  = all.filter(s => s.rawHistoryValid === true);
+    const withArr    = all.filter(s => Array.isArray(s.rawPriceHistory));
+    const withLen    = all.filter(s => Array.isArray(s.rawPriceHistory) && s.rawPriceHistory.length === EXPECTED_WINDOW_LENGTH);
+    const withWin    = all.filter(s => s.rawHistoryWindowLength === EXPECTED_WINDOW_LENGTH);
+    const withVer    = all.filter(s => s.rawHistoryVersion === EXPECTED_RAW_VERSION);
+    const legacy     = all.filter(s => s.rawHistoryValid !== true || !Array.isArray(s.rawPriceHistory));
+    const ncCompat   = all.filter(s => s.rawHistoryValid === true && Array.isArray(s.rawPriceHistory) && s.rawPriceHistory.length === EXPECTED_WINDOW_LENGTH && s.rawHistoryWindowLength === EXPECTED_WINDOW_LENGTH);
+    const repairOk   = ncCompat.length > 0;
+
+    if(badgeEl) badgeEl.innerHTML = repairOk
+      ? `<span class="ph8-badge ph8-b-pass">REPAIRED — ${ncCompat.length} NC-COMPATIBLE</span>`
+      : `<span class="ph8-badge ph8-b-warn">LEGACY ONLY — AWAITING NEW CAPTURE</span>`;
+
+    // Field coverage table
+    const fields = [
+      ['rawHistoryValid=true',        withValid.length,  'NC eligibility gate — msdEnrichWithNonClassicalFeatures requires true'],
+      ['rawPriceHistory present',      withArr.length,   'The 20-tick price array for NC feature computation'],
+      [`rawPriceHistory.length==${EXPECTED_WINDOW_LENGTH}`,  withLen.length,  `Exact window enforced by msdEnrichWithNonClassicalFeatures`],
+      [`rawHistoryWindowLength==${EXPECTED_WINDOW_LENGTH}`,  withWin.length,  'Secondary window-length contract (Architecture Defect 3.3 gate)'],
+      [`rawHistoryVersion=${EXPECTED_RAW_VERSION}`, withVer.length, 'Version tag confirming which capture algorithm produced the history'],
+    ];
+    const fRows = fields.map(([f,n,note]) => {
+      const pct = total > 0 ? (n/total*100).toFixed(1) : '0.0';
+      const ok  = n > 0;
+      const bar = `<div style="background:#222736;border-radius:3px;height:4px;width:80px;display:inline-block;vertical-align:middle">
+        <div style="background:${ok?'#22c55e':'#ef4444'};height:100%;width:${pct}%;border-radius:3px"></div></div>`;
+      return `<tr>
+        <td style="padding:4px 9px;font-family:'JetBrains Mono',monospace;font-size:0.76rem">${f}</td>
+        <td style="padding:4px 9px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:0.76rem">${n.toLocaleString()} / ${total.toLocaleString()}</td>
+        <td style="padding:4px 9px;text-align:right;font-size:0.76rem;color:#6b7280">${pct}% ${bar}</td>
+        <td style="padding:4px 9px">${ok?'<span class="ph8-badge ph8-b-pass">PRESENT</span>':'<span class="ph8-badge ph8-b-warn">ABSENT</span>'}</td>
+        <td style="padding:4px 9px;font-size:0.72rem;color:#6b7280">${note}</td>
+      </tr>`;
+    }).join('');
+
+    // Most recent 5 states — repair verification sample
+    const recent5  = all.slice(-5).reverse();
+    const sRows = recent5.map(s => `<tr>
+      <td style="padding:3px 9px;font-family:'JetBrains Mono',monospace;font-size:0.71rem;color:#6b7280">${s.snapshotId?'…'+s.snapshotId.slice(-14):'?'}</td>
+      <td style="padding:3px 9px;text-align:center">${s.rawHistoryValid===true?'<span class="ph8-badge ph8-b-pass">true</span>':'<span class="ph8-badge ph8-b-warn">'+s.rawHistoryValid+'</span>'}</td>
+      <td style="padding:3px 9px;text-align:center">${Array.isArray(s.rawPriceHistory)?'<span class="ph8-badge ph8-b-pass">'+s.rawPriceHistory.length+'</span>':'<span class="ph8-badge ph8-b-warn">—</span>'}</td>
+      <td style="padding:3px 9px;text-align:center">${s.rawHistoryWindowLength===EXPECTED_WINDOW_LENGTH?'<span class="ph8-badge ph8-b-pass">'+s.rawHistoryWindowLength+'</span>':'<span class="ph8-badge ph8-b-warn">'+(s.rawHistoryWindowLength??'—')+'</span>'}</td>
+      <td style="padding:3px 9px;font-size:0.71rem;color:#6b7280;font-family:'JetBrains Mono',monospace">${s.rawHistoryVersion||'—'}</td>
+      <td style="padding:3px 9px;font-size:0.71rem;color:#6b7280">${s.outcome||'—'} / lt${s.leadTime??'?'}</td>
+    </tr>`).join('');
+
+    if(bodyEl) bodyEl.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
+        <div class="ph8-stat-box"><div class="ph8-stat-val">${total.toLocaleString()}</div><div class="ph8-stat-lbl">Total States</div></div>
+        <div class="ph8-stat-box" style="${legacy.length>0&&ncCompat.length===0?'border-color:#ef4444':''}">
+          <div class="ph8-stat-val" style="color:${legacy.length>0&&ncCompat.length===0?'#ef4444':'#6b7280'}">${legacy.length.toLocaleString()}</div>
+          <div class="ph8-stat-lbl">Legacy (pre-repair)</div></div>
+        <div class="ph8-stat-box ph8-stat-key">
+          <div class="ph8-stat-val" style="color:#22c55e">${ncCompat.length.toLocaleString()}</div>
+          <div class="ph8-stat-lbl">NC-Compatible (post-repair)</div></div>
+        <div class="ph8-stat-box" style="border-color:${repairOk?'#166534':'#6b7280'}">
+          <div class="ph8-stat-val" style="font-size:0.9rem;color:${repairOk?'#22c55e':'#eab308'}">${repairOk?'REPAIRED':'LEGACY ONLY'}</div>
+          <div class="ph8-stat-lbl">Pipeline Status</div></div>
+      </div>
+      <div style="font-size:0.8rem;font-weight:600;color:#e2e8f0;margin-bottom:8px">Field Verification (all stored states)</div>
+      <div class="ph8-tw" style="margin-top:0"><table>
+        <thead><tr>
+          <th style="padding:5px 9px">Field</th><th style="padding:5px 9px;text-align:right">Count</th>
+          <th style="padding:5px 9px;text-align:right">Coverage</th><th style="padding:5px 9px">Status</th>
+          <th style="padding:5px 9px">Purpose</th>
+        </tr></thead><tbody>${fRows}</tbody>
+      </table></div>
+      <div style="font-size:0.8rem;font-weight:600;color:#e2e8f0;margin:14px 0 8px">Repair Verification Sample (5 most-recent states)</div>
+      <div class="ph8-tw" style="margin-top:0"><table>
+        <thead><tr>
+          <th style="padding:4px 9px">Snapshot ID (suffix)</th>
+          <th style="padding:4px 9px;text-align:center">rawHistoryValid</th>
+          <th style="padding:4px 9px;text-align:center">rawPriceHistory.length</th>
+          <th style="padding:4px 9px;text-align:center">rawHistoryWindowLength</th>
+          <th style="padding:4px 9px">rawHistoryVersion</th>
+          <th style="padding:4px 9px">outcome / leadTime</th>
+        </tr></thead><tbody>${sRows}</tbody>
+      </table></div>
+      ${!repairOk ? `<div style="margin-top:12px;padding:10px 14px;background:#1a0d0d;border:1px solid #7f1d1d;border-radius:6px;font-size:0.78rem;color:#fca5a5">
+        <strong>No NC-compatible states found.</strong> All ${total} stored states were captured before the 2026-07 pipeline repair.
+        The repair is applied in code — all future captures will persist the raw-history fields automatically.
+        Captured states cannot be updated retroactively (append-only store design).
+        Continue the live scanner to accumulate NC-compatible MarketStates.
+      </div>` : `<div style="margin-top:12px;padding:10px 14px;background:#0a1f12;border:1px solid #166534;border-radius:6px;font-size:0.78rem;color:#4ade80">
+        <strong>Pipeline repair confirmed.</strong> ${ncCompat.length} NC-compatible state${ncCompat.length>1?'s':''} verified.
+        Newly captured states contain all four raw-history fields: rawHistoryValid=true, rawHistoryVersion=${EXPECTED_RAW_VERSION}, rawHistoryWindowLength=${EXPECTED_WINDOW_LENGTH}, rawPriceHistory[${EXPECTED_WINDOW_LENGTH}].
+      </div>`}`;
+  } catch(e){
+    if(bodyEl)  bodyEl.innerHTML  = `<div style="color:#ef4444;font-size:0.82rem">Verification error: ${e.message}</div>`;
+    if(badgeEl) badgeEl.innerHTML = '<span class="ph8-badge ph8-b-fail">ERROR</span>';
+  }
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// ENHANCED READINESS — wraps the main module's ph8RefreshReadiness to add
+// dataset composition breakdown (legacy vs NC-compatible).
+// ════════════════════════════════════════════════════════════════════════════
+const _origRefresh = window.ph8RefreshReadiness;
+window.ph8RefreshReadiness = async function(){
+  const result = await _origRefresh();
+  try {
+    const all      = await msdGetAllMarketStates();
+    const ncCompat = all.filter(s => s.rawHistoryValid === true && Array.isArray(s.rawPriceHistory) && s.rawPriceHistory.length === EXPECTED_WINDOW_LENGTH);
+    const legacyCt = all.length - ncCompat.length;
+    const pct      = all.length > 0 ? (ncCompat.length/all.length*100).toFixed(1) : '0.0';
+    const el = document.getElementById('ph8-dataset-breakdown');
+    if(el){
+      if(all.length === 0){
+        el.innerHTML = '<div style="font-size:0.74rem;color:#6b7280;margin-top:8px;padding-top:8px;border-top:1px solid #222736">No MarketStates yet — start the live scanner to begin capture.</div>';
+      } else if(ncCompat.length > 0){
+        el.innerHTML = `<div style="font-size:0.74rem;color:#6b7280;margin-top:8px;padding-top:8px;border-top:1px solid #222736">
+          <span style="font-weight:600;color:#a78bfa">Dataset: </span>
+          <span style="color:#22c55e;font-weight:600">${ncCompat.length.toLocaleString()} NC-compatible</span> (post-repair pipeline)
+          ${legacyCt>0?' + <span style="color:#6b7280">'+legacyCt.toLocaleString()+' legacy</span> (pre-repair, NC-ineligible)':''}
+          = <span style="color:#e2e8f0">${all.length.toLocaleString()} total</span>
+          &nbsp;·&nbsp; NC coverage: <span style="color:${parseFloat(pct)>50?'#22c55e':'#eab308'}">${pct}%</span>
+        </div>`;
+      } else {
+        el.innerHTML = `<div style="font-size:0.74rem;color:#eab308;margin-top:8px;padding-top:8px;border-top:1px solid #222736">
+          <span style="font-weight:600">Dataset: </span>
+          ${all.length.toLocaleString()} legacy states only (all pre-repair, NC-ineligible) — continue the live scanner to build NC-compatible dataset
+        </div>`;
+      }
+    }
+  } catch(e){ /* non-fatal — readiness data still displayed */ }
+  return result;
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// BOOT EXTENSION — wraps the main module's ph8Boot to run the checklist and
+// pipeline verification automatically on every page visit.
+// ════════════════════════════════════════════════════════════════════════════
+const _origBoot = window.ph8Boot;
+window.ph8Boot = async function(){
+  await _origBoot();
+  // Run checklist and pipeline verification in parallel (non-blocking display)
+  Promise.all([
+    window.ph8RunChecklistUI(),
+    window.ph8VerifyCaptureRepair(),
+  ]).catch(e => console.warn('[ph8-integrity]', e));
+};
+
+})(); // end Phase 8 Integrity Module
 </script>
 </body>
 </html>

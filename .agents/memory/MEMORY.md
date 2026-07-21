@@ -3,3 +3,4 @@
 - [Phase 7B Implementation](phase7b-implementation.md) — NC discovery orchestrator, runner page, 3 test fixes; 115/0 assertions.
 - [Phase 7C Verification](phase7c-verification.md) — 6 pure-computation verification functions + 9-step runner page; 115/0 assertions still pass.
 - [Phase 8 Campaign](phase8-campaign.md) — Server-side engine (vm, lines 3170-11287), GET /api/phase8/seal + POST /api/phase8/run, standalone runner page; 8-step report.
+- [Phase 8 Capture Pipeline Repair](phase8-capture-pipeline-repair.md) — msdBuildLabeledSnapshot was silently dropping 4 raw* fields from meta; fix + 20-check integrity checklist architecture.
