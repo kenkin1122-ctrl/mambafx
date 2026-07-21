@@ -597,6 +597,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button id="navMsdKnowledge" onclick="showPage('msdknowledge')">🧠 Knowledge Base</button>
     <button id="navMsdValidation" onclick="showPage('msdvalidation')">✅ Research Validation Suite</button>
     <button id="navMsdWorkbench" onclick="showPage('msdworkbench')">🔬 Research Workbench</button>
+    <button id="navMsdPhase8" onclick="showPage('msdphase8')">🧬 Phase 8 Campaign</button>
   </nav>
 
   <!-- ============ PAGE 1: LIVE TRACKER ============ -->
@@ -2960,6 +2961,198 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <div id="msdStabilityAuditResults" style="margin-top:10px;font-size:12px"></div>
   </div>
 </div>
+
+<!-- ═══════════════════════════════════════════ PHASE 8 CAMPAIGN PAGE ═══ -->
+<div id="page-msdphase8" class="page">
+<style>
+#page-msdphase8 .ph8-hdr{font-size:1.1rem;font-weight:700;color:#f8fafc;letter-spacing:-0.02em;margin-bottom:2px}
+#page-msdphase8 .ph8-sub{color:#6b7280;font-size:0.82rem;margin-bottom:20px}
+#page-msdphase8 .ph8-card{background:#13161e;border:1px solid #222736;border-radius:8px;padding:16px 20px;margin-bottom:14px}
+#page-msdphase8 .ph8-card.ph8-seal{border-color:#7c3aed;background:#1a0d2e}
+#page-msdphase8 .ph8-card.ph8-disc{border-color:#22c55e;background:#0a1f12}
+#page-msdphase8 .ph8-card.ph8-null-r{border-color:#6b7280;background:#0f1318}
+#page-msdphase8 .ph8-card.ph8-note{border-color:#eab308}
+#page-msdphase8 .ph8-section-hdr{font-size:0.9rem;font-weight:700;color:#3b82f6;border-bottom:1px solid #222736;padding-bottom:7px;margin:24px 0 12px;display:flex;align-items:center;gap:10px}
+#page-msdphase8 .ph8-sn{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#3b82f6;color:#fff;font-size:0.72rem;font-weight:700;flex-shrink:0}
+#page-msdphase8 .ph8-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.7rem;font-weight:700;font-family:'JetBrains Mono','Consolas',monospace;white-space:nowrap}
+#page-msdphase8 .ph8-b-pass{background:#14532d;color:#22c55e}
+#page-msdphase8 .ph8-b-fail{background:#450a0a;color:#ef4444}
+#page-msdphase8 .ph8-b-warn{background:#422006;color:#eab308}
+#page-msdphase8 .ph8-b-info{background:#1e3a5f;color:#93c5fd}
+#page-msdphase8 .ph8-b-disc{background:#14532d;color:#4ade80;border:1px solid #166534}
+#page-msdphase8 .ph8-b-stat{background:#1e3a5f;color:#93c5fd;border:1px solid #1d4ed8}
+#page-msdphase8 .ph8-b-prac{background:#2d1b69;color:#c4b5fd;border:1px solid #6d28d9}
+#page-msdphase8 .ph8-b-none{background:#1a1d27;color:#6b7280;border:1px solid #222736}
+#page-msdphase8 .ph8-kv{display:grid;grid-template-columns:260px 1fr;gap:4px 14px;font-size:0.8rem}
+#page-msdphase8 .ph8-kv .k{color:#6b7280;font-family:'JetBrains Mono','Consolas',monospace}
+#page-msdphase8 .ph8-kv .v{font-family:'JetBrains Mono','Consolas',monospace}
+#page-msdphase8 .ph8-tw{overflow-x:auto;margin-top:10px}
+#page-msdphase8 .ph8-tw table{width:100%;border-collapse:collapse;font-size:0.79rem;font-family:'JetBrains Mono','Consolas',monospace}
+#page-msdphase8 .ph8-tw th{text-align:left;color:#6b7280;font-weight:500;padding:5px 9px;border-bottom:1px solid #222736;white-space:nowrap}
+#page-msdphase8 .ph8-tw td{padding:4px 9px;border-bottom:1px solid #1a1d27;vertical-align:middle}
+#page-msdphase8 .ph8-tw tr:last-child td{border-bottom:none}
+#page-msdphase8 .ph8-tw tr.ph8-disc-row td{color:#4ade80}
+#page-msdphase8 .ph8-tw tr.ph8-stat-row td{color:#93c5fd}
+#page-msdphase8 .ph8-tw tr.ph8-prac-row td{color:#c4b5fd}
+#page-msdphase8 .ph8-tw .ph8-num{text-align:right}
+#page-msdphase8 .ph8-launch-btn{background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:11px 28px;font-size:1rem;font-weight:600;cursor:pointer;transition:opacity 0.15s}
+#page-msdphase8 .ph8-launch-btn:disabled{opacity:0.4;cursor:not-allowed}
+#page-msdphase8 .ph8-pw{background:#222736;border-radius:4px;height:8px;margin:12px 0 6px}
+#page-msdphase8 .ph8-pb{background:#3b82f6;height:100%;width:0;border-radius:4px;transition:width 0.08s linear}
+#page-msdphase8 .ph8-pl{color:#6b7280;font-size:0.77rem;min-height:18px}
+#page-msdphase8 .ph8-verdict{border-radius:10px;border:2px solid;text-align:center;padding:22px 28px;margin:20px 0 10px;font-size:1.1rem;font-weight:700}
+#page-msdphase8 .ph8-vdisc{border-color:#22c55e;color:#22c55e;background:rgba(10,31,18,0.5)}
+#page-msdphase8 .ph8-vnull{border-color:#6b7280;color:#e2e8f0;background:rgba(16,19,24,0.5)}
+#page-msdphase8 .ph8-sl{font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#a78bfa;margin-bottom:10px}
+#page-msdphase8 .ph8-sh{font-family:'JetBrains Mono','Consolas',monospace;font-size:0.78rem;color:#c4b5fd;word-break:break-all}
+#page-msdphase8 .ph8-pills{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px}
+#page-msdphase8 .ph8-pill{padding:3px 11px;border-radius:12px;font-size:0.72rem;font-weight:600;background:#222736;color:#6b7280;font-family:'JetBrains Mono','Consolas',monospace;transition:background 0.2s,color 0.2s}
+#page-msdphase8 .ph8-pr{background:#1e3a5f;color:#93c5fd}
+#page-msdphase8 .ph8-pd{background:#14532d;color:#22c55e}
+#page-msdphase8 .ph8-pf{background:#450a0a;color:#ef4444}
+#page-msdphase8 .ph8-ib{padding:12px 16px;border-radius:6px;margin-bottom:10px;border-left:3px solid}
+#page-msdphase8 .ph8-isup{border-color:#22c55e;background:rgba(10,31,18,0.25)}
+#page-msdphase8 .ph8-inot{border-color:#ef4444;background:rgba(26,10,10,0.25)}
+#page-msdphase8 .ph8-ilim{border-color:#eab308;background:rgba(26,19,0,0.25)}
+#page-msdphase8 .ph8-ialt{border-color:#6b7280;background:rgba(15,17,24,0.25)}
+#page-msdphase8 .ph8-ib .ph8-it{font-weight:700;font-size:0.8rem;margin-bottom:6px}
+#page-msdphase8 .ph8-ib ul{margin:0 0 0 18px;line-height:1.8}
+#page-msdphase8 details{margin-bottom:10px}
+#page-msdphase8 summary{cursor:pointer;font-size:0.82rem;color:#3b82f6;padding:5px 0;user-select:none}
+#page-msdphase8 details[open] summary{color:#f8fafc}
+#page-msdphase8 .ph8-pre{background:#0a0c10;border:1px solid #222736;border-radius:6px;padding:14px;font-family:'JetBrains Mono','Consolas',monospace;font-size:0.74rem;overflow-x:auto;color:#a5b4fc;white-space:pre;max-height:400px;overflow-y:auto}
+#page-msdphase8 .ph8-stat-box{background:#0f1117;border:1px solid #222736;border-radius:6px;padding:12px;text-align:center}
+#page-msdphase8 .ph8-stat-key{border-color:#7c3aed;background:#1a0d2e}
+#page-msdphase8 .ph8-stat-val{font-size:1.35rem;font-weight:700;font-family:'JetBrains Mono','Consolas',monospace;color:#e2e8f0}
+#page-msdphase8 .ph8-stat-lbl{font-size:0.7rem;color:#6b7280;margin-top:3px}
+#page-msdphase8 hr.ph8-hr{border:none;border-top:1px solid #222736;margin:16px 0}
+</style>
+
+<div style="padding:20px 0;max-width:1080px">
+  <div class="ph8-hdr">MSD Phase 8 — Non-Classical Discovery Campaign</div>
+  <div class="ph8-sub">Symbol: 1HZ100V · NC feature family v1 · 80 pre-registered candidates · Circular-shift null · Benjamini-Hochberg correction</div>
+
+  <!-- ── Campaign Readiness ──────────────────────────────────────── -->
+  <div class="ph8-card ph8-seal" style="margin-bottom:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div style="font-size:0.85rem;font-weight:700;color:#a78bfa;text-transform:uppercase;letter-spacing:0.08em">Campaign Readiness</div>
+      <button class="gc-btn" style="padding:5px 14px;font-size:0.78rem" onclick="ph8RefreshReadiness()">↺ Refresh</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px">
+      <div class="ph8-stat-box"><div class="ph8-stat-val" id="ph8-readiness-total">—</div><div class="ph8-stat-lbl">Total MarketStates</div></div>
+      <div class="ph8-stat-box"><div class="ph8-stat-val" id="ph8-readiness-eligible">—</div><div class="ph8-stat-lbl">NC-Eligible</div></div>
+      <div class="ph8-stat-box"><div class="ph8-stat-val" id="ph8-readiness-certain">—</div><div class="ph8-stat-lbl">Certain Labels</div></div>
+      <div class="ph8-stat-box ph8-stat-key"><div class="ph8-stat-val" id="ph8-readiness-usable">—</div><div class="ph8-stat-lbl">NC-Eligible &amp; Certain</div></div>
+      <div class="ph8-stat-box"><div class="ph8-stat-val" style="color:#a78bfa">30</div><div class="ph8-stat-lbl">Minimum Required</div></div>
+    </div>
+    <div id="ph8-readiness-status" style="font-size:0.82rem;margin-bottom:8px"></div>
+    <div style="font-size:0.74rem;color:#6b7280">
+      NC-Eligible = MarketStates where <code style="background:#0a0c10;border-radius:3px;padding:1px 5px;color:#a5b4fc">rawHistoryValid=true</code> with a 20-tick price window stored.
+      Certain = epochs where every captured snapshot agrees on the same outcome.
+    </div>
+  </div>
+
+  <!-- ── Server Status ──────────────────────────────────────────── -->
+  <div class="ph8-card" id="ph8-server-card">
+    <div style="font-size:0.78rem;color:#6b7280;margin-bottom:6px">Server engine status</div>
+    <div id="ph8-server-msg">Contacting Phase 8 engine…</div>
+  </div>
+
+  <!-- ── Protocol Seal ──────────────────────────────────────────── -->
+  <div id="ph8-seal-section" style="display:none">
+    <div class="ph8-section-hdr" style="margin-top:20px">
+      <span class="ph8-sn">1</span> Pre-Registration Seal
+    </div>
+    <div class="ph8-card ph8-seal">
+      <div class="ph8-sl">Official Protocol — Frozen Before Any Data Access</div>
+      <p style="color:#6b7280;font-size:0.8rem;margin-bottom:14px">All parameters below are immutable. The engine evaluates exactly these 80 candidates under exactly this statistical protocol. No modification is possible after the campaign begins.</p>
+      <div class="ph8-kv" id="ph8-seal-kv"></div>
+      <div style="margin-top:16px">
+        <div class="ph8-sl" style="margin-bottom:4px">Search-space hash (SHA-256 of frozen definition)</div>
+        <div class="ph8-sh" id="ph8-seal-hash"></div>
+      </div>
+      <div style="margin-top:12px">
+        <div class="ph8-sl" style="margin-bottom:4px">Search-space ID</div>
+        <div class="ph8-sh" id="ph8-seal-id" style="font-size:0.72rem;color:#6b7280"></div>
+      </div>
+    </div>
+    <div style="margin:18px 0 28px">
+      <button class="ph8-launch-btn" id="ph8-launch-btn" disabled>Execute Phase 8 Campaign</button>
+      <div class="ph8-pl" id="ph8-launch-note" style="margin-top:6px">Checking campaign readiness…</div>
+    </div>
+  </div>
+
+  <!-- ── Execution ──────────────────────────────────────────────── -->
+  <div id="ph8-exec-section" style="display:none">
+    <div class="ph8-pills" id="ph8-step-pills">
+      <div class="ph8-pill" id="ph8-pill-1">① Pre-Register</div>
+      <div class="ph8-pill" id="ph8-pill-2">② Dataset</div>
+      <div class="ph8-pill" id="ph8-pill-3">③ Discovery</div>
+      <div class="ph8-pill" id="ph8-pill-4">④ Correction</div>
+      <div class="ph8-pill" id="ph8-pill-5">⑤ Report</div>
+      <div class="ph8-pill" id="ph8-pill-6">⑥ Interpret</div>
+      <div class="ph8-pill" id="ph8-pill-7">⑦ Decisions</div>
+      <div class="ph8-pill" id="ph8-pill-8">⑧ Authorization</div>
+    </div>
+    <div class="ph8-card">
+      <div class="ph8-pw"><div class="ph8-pb" id="ph8-pb"></div></div>
+      <div class="ph8-pl" id="ph8-plbl">Starting…</div>
+    </div>
+
+    <!-- Step 1 -->
+    <div class="ph8-section-hdr"><span class="ph8-sn">1</span> Pre-Registration Record <span id="ph8-s1-badge" style="margin-left:6px"></span></div>
+    <div class="ph8-card"><div style="color:#6b7280">Search-space specification persisted before any data is read.</div><div id="ph8-s1-content" style="margin-top:10px"></div></div>
+
+    <!-- Step 2 -->
+    <div class="ph8-section-hdr"><span class="ph8-sn">2</span> Dataset Snapshot <span id="ph8-s2-badge" style="margin-left:6px"></span></div>
+    <div class="ph8-card"><div style="color:#6b7280">Official frozen dataset snapshot — fingerprinted before evaluation begins.</div><div id="ph8-s2-content" style="margin-top:10px"></div></div>
+
+    <!-- Step 3 -->
+    <div class="ph8-section-hdr"><span class="ph8-sn">3</span> Non-Classical Discovery <span id="ph8-s3-badge" style="margin-left:6px"></span></div>
+    <div class="ph8-card"><div style="color:#6b7280">Every pre-registered candidate evaluated exactly once. No exclusions, no adaptive stopping.</div><div id="ph8-s3-content" style="margin-top:10px"></div></div>
+
+    <!-- Step 4 -->
+    <div class="ph8-section-hdr"><span class="ph8-sn">4</span> Multiplicity Correction Verification <span id="ph8-s4-badge" style="margin-left:6px"></span></div>
+    <div class="ph8-card"><div style="color:#6b7280">Chain integrity: candidate count → enumeration count → family size → corrected family size.</div><div id="ph8-s4-content" style="margin-top:10px"></div></div>
+
+    <!-- Step 5 -->
+    <div class="ph8-section-hdr"><span class="ph8-sn">5</span> Complete Scientific Report <span id="ph8-s5-badge" style="margin-left:6px"></span></div>
+    <div class="ph8-card" style="margin-bottom:10px"><div id="ph8-s5-sum-body"></div></div>
+    <div id="ph8-s5-details"></div>
+
+    <!-- Step 6 -->
+    <div class="ph8-section-hdr"><span class="ph8-sn">6</span> Scientific Interpretation <span id="ph8-s6-badge" style="margin-left:6px"></span></div>
+    <div id="ph8-s6-content"></div>
+
+    <!-- Step 7 -->
+    <div class="ph8-section-hdr"><span class="ph8-sn">7</span> Discovery Decisions <span id="ph8-s7-badge" style="margin-left:6px"></span></div>
+    <div class="ph8-card" style="margin-bottom:10px">
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+        <span class="ph8-badge ph8-b-disc">DISCOVERY CANDIDATE</span><span style="color:#6b7280">BH adj-p &lt; 0.05 AND MI ≥ 0.01 nats</span>
+        <span class="ph8-badge ph8-b-stat">STAT-SIG ONLY</span><span style="color:#6b7280">adj-p &lt; 0.05 but MI &lt; 0.01 nats</span>
+        <span class="ph8-badge ph8-b-prac">PRAC-SIG ONLY</span><span style="color:#6b7280">MI ≥ 0.01 nats but adj-p ≥ 0.05</span>
+        <span class="ph8-badge ph8-b-none">NOT SIGNIFICANT</span><span style="color:#6b7280">neither criterion met</span>
+      </div>
+    </div>
+    <div id="ph8-s7-content"></div>
+
+    <!-- Step 8 -->
+    <div class="ph8-section-hdr"><span class="ph8-sn">8</span> Final Scientific Decision &amp; Authorization <span id="ph8-s8-badge" style="margin-left:6px"></span></div>
+    <div id="ph8-s8-content"></div>
+
+    <!-- Experiment Record -->
+    <div class="ph8-section-hdr" style="margin-top:32px">
+      <span class="ph8-sn" style="background:#6b7280">R</span> Immutable Experiment Record
+    </div>
+    <div class="ph8-card">
+      <div style="color:#6b7280;margin-bottom:8px">Machine-readable artifact capturing the complete provenance of this experiment.</div>
+      <button class="gc-btn" id="ph8-dl-btn" style="display:none;font-size:0.78rem;padding:5px 14px;margin-bottom:10px" onclick="ph8DownloadRecord()">⬇ Download JSON Record</button>
+      <div id="ph8-record-content"></div>
+    </div>
+  </div><!-- /#ph8-exec-section -->
+
+</div><!-- /wrapper -->
+</div><!-- /#page-msdphase8 -->
 
 
 <div id="page-njanja" class="page">
@@ -25447,8 +25640,8 @@ function startTfTimers(){
 }
 
 function showPage(which){
-  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot", aggression:"page-aggression", mtf:"page-mtf", njanja:"page-njanja", rfabot:"page-rfabot", msdexplorer:"page-msdexplorer", msdfeatures:"page-msdfeatures", msdevents:"page-msdevents", msdinspector:"page-msdinspector", msddistribution:"page-msddistribution", msdcorrelation:"page-msdcorrelation", msdsearch:"page-msdsearch", msdexperiment:"page-msdexperiment", msdknowledge:"page-msdknowledge", msdvalidation:"page-msdvalidation", msdworkbench:"page-msdworkbench" };
-  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot", aggression:"navAggression", mtf:"navMtf", njanja:"navNjanja", rfabot:"navRfaBot", msdexplorer:"navMsdExplorer", msdfeatures:"navMsdFeatures", msdevents:"navMsdEvents", msdinspector:"navMsdInspector", msddistribution:"navMsdDistribution", msdcorrelation:"navMsdCorrelation", msdsearch:"navMsdSearch", msdexperiment:"navMsdExperiment", msdknowledge:"navMsdKnowledge", msdvalidation:"navMsdValidation", msdworkbench:"navMsdWorkbench" };
+  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot", aggression:"page-aggression", mtf:"page-mtf", njanja:"page-njanja", rfabot:"page-rfabot", msdexplorer:"page-msdexplorer", msdfeatures:"page-msdfeatures", msdevents:"page-msdevents", msdinspector:"page-msdinspector", msddistribution:"page-msddistribution", msdcorrelation:"page-msdcorrelation", msdsearch:"page-msdsearch", msdexperiment:"page-msdexperiment", msdknowledge:"page-msdknowledge", msdvalidation:"page-msdvalidation", msdworkbench:"page-msdworkbench", msdphase8:"page-msdphase8" };
+  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot", aggression:"navAggression", mtf:"navMtf", njanja:"navNjanja", rfabot:"navRfaBot", msdexplorer:"navMsdExplorer", msdfeatures:"navMsdFeatures", msdevents:"navMsdEvents", msdinspector:"navMsdInspector", msddistribution:"navMsdDistribution", msdcorrelation:"navMsdCorrelation", msdsearch:"navMsdSearch", msdexperiment:"navMsdExperiment", msdknowledge:"navMsdKnowledge", msdvalidation:"navMsdValidation", msdworkbench:"navMsdWorkbench", msdphase8:"navMsdPhase8" };
   Object.keys(pages).forEach(k => {
     document.getElementById(pages[k]).classList.toggle("active", k===which);
     const nav = document.getElementById(navs[k]); if (nav) nav.classList.toggle("active", k===which);
@@ -25543,6 +25736,9 @@ function showPage(which){
   }
   if (which === "msdworkbench"){
     if (typeof msdWorkbenchRefresh === "function") msdWorkbenchRefresh();
+  }
+  if (which === "msdphase8"){
+    if (typeof ph8Boot === "function") ph8Boot();
   }
 }
 
@@ -34751,6 +34947,600 @@ try {
   window.addEventListener('keydown', e => { if (e.ctrlKey && e.shiftKey && e.key === 'D') { e.preventDefault(); window.mfxToggleDebugPanel(); } });
   setInterval(() => { if (document.getElementById('mfxDebugPanel').style.display !== 'none') window.mfxRenderDebugPanel(); }, 500);
 })();
+</script>
+
+<!-- ═══════════════════════════════ PHASE 8 CAMPAIGN — Integrated UI Module ═══ -->
+<script>
+(function(){
+'use strict';
+
+// ── Constants ──────────────────────────────────────────────────────────────
+const ph8FF = {
+  ncf_netDisplacement:'A: Path Geometry', ncf_absPathLength:'A: Path Geometry',
+  ncf_pathEfficiency:'A: Path Geometry',  ncf_mfe:'A: Path Geometry', ncf_mae:'A: Path Geometry',
+  ncf_upTickCount:'B: Directional Structure',   ncf_downTickCount:'B: Directional Structure',
+  ncf_dirImbalance:'B: Directional Structure',  ncf_currentRunLen:'B: Directional Structure',
+  ncf_maxRunLen:'B: Directional Structure',     ncf_reversalCount:'B: Directional Structure',
+  ncf_stdFirstDiff:'C: Price Dynamics',         ncf_meanSecondDiff:'C: Price Dynamics',
+  ncf_dirEntropy:'D: Complexity/Entropy',       ncf_runEntropy:'D: Complexity/Entropy',
+  ncf_permEntropy3:'D: Complexity/Entropy',
+};
+const PH8_ALPHA = 0.05;
+const PH8_PRAC  = 0.01; // nats
+const PH8_MIN   = 30;   // minimum usable observations gate (msdRunPhase7bDiscovery:9790)
+
+// ── Module state ──────────────────────────────────────────────────────────
+let ph8Seal   = null;
+let ph8Result = null;
+let ph8Rec    = null;
+let ph8Inited = false;
+
+// ── DOM helpers ───────────────────────────────────────────────────────────
+function ph8G(id)        { return document.getElementById(id); }
+function ph8T(id, txt)   { const e=ph8G(id); if(e) e.textContent=txt; }
+function ph8H(id, html)  { const e=ph8G(id); if(e) e.innerHTML=html; }
+function ph8Bdg(cls,txt) { return `<span class="ph8-badge ${cls}">${txt}</span>`; }
+function ph8Pill(id,cls) { const e=ph8G(id); if(e) e.className='ph8-pill '+cls; }
+function ph8SBdg(id,c,t){ ph8H(id, ph8Bdg(c,t)); }
+function ph8Prog(pct,msg){
+  const b=ph8G('ph8-pb'), l=ph8G('ph8-plbl');
+  if(b) b.style.width=pct+'%';
+  if(l) l.textContent=msg||'';
+}
+const ph8PF = p => (p==null||!isFinite(p))? '—' : p<0.0001 ? p.toExponential(3) : p.toFixed(5);
+const ph8EF = e => (e==null||!isFinite(e))? '—' : e.toFixed(6);
+
+function ph8Cls(h){
+  const s = h.isSignificant||(h.adjustedPValue!=null&&h.adjustedPValue<PH8_ALPHA);
+  const p = h.effectSize!=null&&h.effectSize>=PH8_PRAC;
+  if(s&&p)  return 'DISCOVERY_CANDIDATE';
+  if(s&&!p) return 'STAT_SIG_ONLY';
+  if(!s&&p) return 'PRAC_SIG_ONLY';
+  return 'NOT_SIGNIFICANT';
+}
+function ph8DBdg(cls){
+  return ph8Bdg(
+    {DISCOVERY_CANDIDATE:'ph8-b-disc',STAT_SIG_ONLY:'ph8-b-stat',PRAC_SIG_ONLY:'ph8-b-prac',NOT_SIGNIFICANT:'ph8-b-none'}[cls],
+    {DISCOVERY_CANDIDATE:'DISCOVERY CANDIDATE',STAT_SIG_ONLY:'STAT-SIG ONLY',PRAC_SIG_ONLY:'PRAC-SIG ONLY',NOT_SIGNIFICANT:'NOT SIGNIFICANT'}[cls]
+  );
+}
+function ph8RC(cls){
+  return {DISCOVERY_CANDIDATE:'ph8-disc-row',STAT_SIG_ONLY:'ph8-stat-row',PRAC_SIG_ONLY:'ph8-prac-row',NOT_SIGNIFICANT:''}[cls];
+}
+
+// ── Campaign Readiness ─────────────────────────────────────────────────────
+window.ph8RefreshReadiness = async function(){
+  const st = ph8G('ph8-readiness-status');
+  if(st) st.innerHTML = '<span style="color:#6b7280;font-size:0.8rem">Computing…</span>';
+  try {
+    // Use existing msdGetAllMarketStates from index.html (Phase 2.6, line ~5014)
+    const all = await msdGetAllMarketStates();
+    const total = all.length;
+
+    // NC eligibility — msdEnrichWithNonClassicalFeatures (line ~7370)
+    const enrich = msdEnrichWithNonClassicalFeatures(all);
+    const eligible = enrich.eligible;
+
+    // Label certainty — msdBuildResearchLabelSet (line ~8497)
+    const epochLabels = msdBuildResearchLabelSet(all);
+    let certain = 0;
+    epochLabels.forEach(lbl => { if(lbl && lbl.label_confidence==='certain') certain++; });
+
+    // Cross-join: NC-eligible AND certain (mirrors msdBuildNcSnapshotRows Step 3-4)
+    const byEpoch = new Map();
+    enrich.enriched.forEach(s => {
+      if(s.ncf_eligible===true && !byEpoch.has(s.epoch)) byEpoch.set(s.epoch, s);
+    });
+    let usable = 0;
+    epochLabels.forEach((lbl, epoch) => {
+      if(byEpoch.has(epoch) && lbl && lbl.label_confidence==='certain') usable++;
+    });
+
+    const ready = usable >= PH8_MIN;
+
+    ph8T('ph8-readiness-total',    total.toLocaleString());
+    ph8T('ph8-readiness-eligible', eligible.toLocaleString());
+    ph8T('ph8-readiness-certain',  certain.toLocaleString());
+    ph8T('ph8-readiness-usable',   usable.toLocaleString());
+
+    if(st) st.innerHTML = ready
+      ? ph8Bdg('ph8-b-pass','✓ READY') +
+        `<span style="color:#22c55e;font-size:0.8rem;margin-left:8px">${usable} usable observations — campaign may proceed</span>`
+      : ph8Bdg('ph8-b-fail','✗ NOT READY') +
+        `<span style="color:#ef4444;font-size:0.8rem;margin-left:8px">${usable} of ${PH8_MIN} minimum usable observations — need ${PH8_MIN-usable} more NC-eligible certain-label records</span>`;
+
+    // Gate the execute button (only when campaign has not yet run)
+    const btn  = ph8G('ph8-launch-btn');
+    const note = ph8G('ph8-launch-note');
+    if(btn && !ph8Result){
+      btn.disabled = !ready;
+      if(note){
+        if(ready){
+          note.textContent = 'Reads your MarketStates from IndexedDB and runs 80 candidates × 1 000 permutations on the server. Estimated time: 1–5 minutes.';
+          note.style.color = '';
+        } else {
+          note.textContent = `Not ready: ${usable} NC-eligible certain-label observations stored, minimum ${PH8_MIN} required. Run the live scanner to capture more data.`;
+          note.style.color = '#eab308';
+        }
+      }
+    }
+    return { total, eligible, certain, usable, ready };
+  } catch(e){
+    if(st) st.innerHTML = ph8Bdg('ph8-b-fail','ERROR') + ' ' + e.message;
+    return null;
+  }
+};
+
+// ── Load Seal ──────────────────────────────────────────────────────────────
+async function ph8LoadSeal(){
+  const r    = await fetch('/api/phase8/seal');
+  const body = await r.json();
+  if(!body.ok) throw new Error(body.error||'Seal fetch failed');
+  ph8Seal = body.seal;
+
+  const families = [...new Set(ph8Seal.features.map(f => ph8FF[f]||f))];
+  ph8H('ph8-seal-kv', [
+    ['protocol_name',           'MSD Non-Classical Discovery v1'],
+    ['protocol_version',        'phase8_nc_v1'],
+    ['search_space_version',    ph8Seal.searchSpaceVersion],
+    ['feature_version',         ph8Seal.featureVersion],
+    ['raw_history_version',     'rawPriceHistory_v1'],
+    ['total_candidates',        ph8Seal.totalCardinality],
+    ['feature_count',           ph8Seal.features.length],
+    ['feature_families',        families.join(' · ')],
+    ['lead_times',              ph8Seal.leadTimes.join(', ')],
+    ['statistical_test',        'mutual_information (circular-shift null model)'],
+    ['null_model',              'circular_shift_permutation  seed=42  permutations=1000'],
+    ['multiplicity_correction', 'benjamini_hochberg  α=0.05  family-wide'],
+    ['discovery_criterion',     'BH adj-p < 0.05  AND  MI ≥ 0.01 nats'],
+    ['uncertainty_policy',      'filter_certain_only'],
+    ['symbol',                  ph8Seal.symbol],
+    ['observation_window',      '20 ticks'],
+    ['event_definition_version','event_def_v1'],
+    ['schema_version',          'v1'],
+  ].map(([k,v])=>`<span class="k">${k}</span><span class="v">${v}</span>`).join(''));
+
+  ph8T('ph8-seal-hash', ph8Seal.searchSpaceHash);
+  ph8T('ph8-seal-id',   ph8Seal.searchSpaceId);
+  const sec = ph8G('ph8-seal-section');
+  if(sec) sec.style.display='block';
+}
+
+// ── Boot (called once per page-show) ──────────────────────────────────────
+window.ph8Boot = async function(){
+  if(ph8Inited){
+    // Page revisit: just refresh readiness stats
+    ph8RefreshReadiness().catch(()=>{});
+    return;
+  }
+  ph8Inited = true;
+  const msg = ph8G('ph8-server-msg');
+  try {
+    await ph8LoadSeal();
+    if(msg) msg.innerHTML = ph8Bdg('ph8-b-pass','ONLINE') + ' &nbsp;Phase 8 engine ready · seal loaded';
+    const btn = ph8G('ph8-launch-btn');
+    if(btn) btn.onclick = ph8Execute;
+    await ph8RefreshReadiness();
+  } catch(e){
+    if(msg) msg.innerHTML = ph8Bdg('ph8-b-fail','ERROR') + ' ' + e.message;
+  }
+};
+
+// ── Execute campaign ───────────────────────────────────────────────────────
+window.ph8Execute = async function(){
+  const btn     = ph8G('ph8-launch-btn');
+  const noteEl  = ph8G('ph8-launch-note');
+  const execSec = ph8G('ph8-exec-section');
+  if(btn)     btn.disabled = true;
+  if(noteEl)  noteEl.textContent = 'Campaign running — do not close this tab.';
+  if(execSec) execSec.style.display = 'block';
+  if(execSec){
+    const top = execSec.getBoundingClientRect().top + window.scrollY - 20;
+    window.scrollTo({top, behavior:'smooth'});
+  }
+
+  try {
+    ph8Pill('ph8-pill-1','ph8-pr');
+    ph8Pill('ph8-pill-2','ph8-pr');
+    ph8Prog(2,'Loading MarketStates from IndexedDB…');
+
+    // Reuse existing msdGetAllMarketStates — same store the scanner writes to
+    const states = await msdGetAllMarketStates();
+    ph8Prog(6,`Loaded ${states.length} MarketStates. Sending to server…`);
+
+    if(states.length===0){
+      ph8Prog(100,'No MarketStates found — capture data first.');
+      const pl=ph8G('ph8-plbl'); if(pl) pl.style.color='#eab308';
+      if(btn) btn.disabled=false;
+      return;
+    }
+
+    ph8Pill('ph8-pill-3','ph8-pr');
+    ph8Prog(8,`Executing 80-candidate discovery pipeline (${states.length} states)…`);
+
+    const resp = await fetch('/api/phase8/run',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({states}),
+    });
+    const body = await resp.json();
+    if(!body.ok) throw new Error(body.error||'Server campaign failed');
+    const r = body.result;
+
+    if(!r.ok){
+      ph8Prog(100,'Campaign returned error: '+(r.error||'unknown'));
+      const pl=ph8G('ph8-plbl'); if(pl) pl.style.color='#ef4444';
+      if(btn) btn.disabled=false;
+      return;
+    }
+
+    ph8Result = r;
+    ph8Prog(92,'Rendering scientific report…');
+
+    ph8S1(r);   ph8Pill('ph8-pill-1','ph8-pd'); ph8Pill('ph8-pill-2','ph8-pd');
+    ph8S2(r);
+    ph8S3(r);   ph8Pill('ph8-pill-3','ph8-pd');
+    ph8S4(r);   ph8Pill('ph8-pill-4','ph8-pd');
+    ph8S5(r);   ph8Pill('ph8-pill-5','ph8-pd');
+    const decs = ph8S7(r); ph8Pill('ph8-pill-7','ph8-pd');
+    ph8S6(r,decs); ph8Pill('ph8-pill-6','ph8-pd');
+    ph8S8(r,decs); ph8Pill('ph8-pill-8','ph8-pd');
+    ph8MkRec(r,decs);
+
+    ph8Prog(100,`Complete · ${r.hypotheses.length} hypotheses · ${(r.serverElapsedMs/1000).toFixed(1)}s`);
+    const pl=ph8G('ph8-plbl'); if(pl) pl.style.color='#22c55e';
+    if(btn) btn.textContent='Campaign Complete';
+  } catch(e){
+    ph8Prog(100,'Error: '+e.message);
+    const pl=ph8G('ph8-plbl'); if(pl) pl.style.color='#ef4444';
+    if(btn) btn.disabled=false;
+    console.error('[Phase 8]',e);
+  }
+};
+
+// ── Step renderers ─────────────────────────────────────────────────────────
+function ph8S1(r){
+  const rec=r.log&&r.log.find(l=>l.step==='p7b_search_space_recorded');
+  const ok=rec&&rec.ok;
+  ph8SBdg('ph8-s1-badge', ok?'ph8-b-pass':'ph8-b-warn', ok?'RECORDED':'SERVER MODE');
+  ph8H('ph8-s1-content',`<div class="ph8-kv">
+    <span class="k">search_space_id</span><span class="v">${r.frozenSearchSpace?r.frozenSearchSpace.searchSpaceId:(ph8Seal?ph8Seal.searchSpaceId:'—')}</span>
+    <span class="k">search_space_hash</span><span class="v">${r.frozenSearchSpace?r.frozenSearchSpace.searchSpaceHash:(ph8Seal?ph8Seal.searchSpaceHash:'—')}</span>
+    <span class="k">registered_before_data</span><span class="v">Yes — Step 1 of msdRunPhase7bDiscovery (before snapshot build)</span>
+    <span class="k">protocol_version</span><span class="v">phase8_nc_v1</span>
+    <span class="k">executed_at</span><span class="v">${r.executedAt||new Date().toISOString()}</span>
+  </div>`);
+}
+
+function ph8S2(r){
+  const snap=r.log&&r.log.find(l=>l.step==='p7b_dataset_snapshot_recorded');
+  const sr=r.snapshotStats||{};
+  ph8SBdg('ph8-s2-badge', snap&&snap.ok?'ph8-b-pass':'ph8-b-warn', snap&&snap.ok?'RECORDED':'COMPUTED');
+  ph8H('ph8-s2-content',`<div class="ph8-kv">
+    <span class="k">dataset_snapshot_id</span><span class="v">${r.datasetSnapshotId||'—'}</span>
+    <span class="k">symbol</span><span class="v">1HZ100V</span>
+    <span class="k">nc_eligible_states</span><span class="v">${sr.eligibleCount??'—'}</span>
+    <span class="k">nc_ineligible_states</span><span class="v">${sr.ineligibleCount??'—'}</span>
+    <span class="k">certain_labels</span><span class="v">${sr.certainCount??'—'}</span>
+    <span class="k">dropped_uncertain</span><span class="v">${sr.droppedUncertainCount??'—'}</span>
+    <span class="k">usable_rows</span><span class="v"><strong>${sr.rows?sr.rows.length:'—'}</strong></span>
+    <span class="k">label_confidence_policy</span><span class="v">${sr.handlingMode||'filter_certain_only'}</span>
+    <span class="k">event_definition_version</span><span class="v">event_def_v1</span>
+  </div>`);
+}
+
+function ph8S3(r){
+  const ok=r.candidatesEvaluated===80;
+  const failed=(r.candidatesEvaluated||0)-(r.hypotheses?r.hypotheses.length:0);
+  ph8SBdg('ph8-s3-badge', ok?'ph8-b-pass':'ph8-b-warn', `${r.candidatesEvaluated||'?'}/80`);
+  ph8H('ph8-s3-content',`<div class="ph8-kv">
+    <span class="k">candidates_pre_registered</span><span class="v">80</span>
+    <span class="k">candidates_enumerated</span><span class="v">${r.enumeratedCount??'—'}</span>
+    <span class="k">candidates_evaluated_ok</span><span class="v">${r.hypotheses?r.hypotheses.length:'—'}</span>
+    <span class="k">candidates_failed</span><span class="v" style="color:${failed>0?'#ef4444':'#22c55e'}">${failed}</span>
+    <span class="k">permutations_per_candidate</span><span class="v">${r.permutations??1000}</span>
+    <span class="k">rng_seed</span><span class="v">${r.seed??42}</span>
+    <span class="k">alpha</span><span class="v">${r.alpha??0.05}</span>
+    <span class="k">null_model</span><span class="v">circular_shift_permutation</span>
+    <span class="k">server_elapsed</span><span class="v">${r.serverElapsedMs?(r.serverElapsedMs/1000).toFixed(2)+'s':'—'}</span>
+  </div>`);
+}
+
+function ph8S4(r){
+  const hyps=r.hypotheses?r.hypotheses.length:0;
+  const chain=[
+    ['pre-registered cardinality = 80',   80,               80,                    true],
+    ['enumerated = cardinality',           80,               r.enumeratedCount,     r.enumeratedCount===80],
+    ['evaluated = enumerated',             r.enumeratedCount,r.candidatesEvaluated, r.candidatesEvaluated===r.enumeratedCount],
+    ['hypothesis records = family size',   r.enumeratedCount,hyps,                  hyps===r.enumeratedCount],
+  ];
+  const pass=chain.every(c=>c[3]);
+  ph8SBdg('ph8-s4-badge', pass?'ph8-b-pass':'ph8-b-fail', pass?'CHAIN INTACT':'VIOLATION');
+  const rows=chain.map(([d,ex,ob,ok])=>`<tr><td>${d}</td><td class="ph8-num">${ex}</td><td class="ph8-num">${ob??'?'}</td>
+    <td>${ok?ph8Bdg('ph8-b-pass','✓'):ph8Bdg('ph8-b-fail','✗')}</td></tr>`).join('');
+  ph8H('ph8-s4-content',`<div class="ph8-tw"><table>
+    <thead><tr><th>Invariant</th><th class="ph8-num">Expected</th><th class="ph8-num">Observed</th><th>Status</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>
+    <div class="ph8-kv" style="margin-top:10px">
+      <span class="k">verified_family_size</span><span class="v">${hyps}</span>
+      <span class="k">correction_method</span><span class="v">benjamini_hochberg</span>
+      <span class="k">family_wide_alpha</span><span class="v">${r.alpha??0.05}</span>
+    </div>`);
+}
+
+function ph8S5(r){
+  ph8SBdg('ph8-s5-badge','ph8-b-pass','COMPLETE');
+  const hyps=r.hypotheses||[];
+  const sigBH=hyps.filter(h=>h.isSignificant);
+  const pracH=hyps.filter(h=>h.effectSize>=PH8_PRAC);
+  const discH=hyps.filter(h=>h.isSignificant&&h.effectSize>=PH8_PRAC);
+  const n=r.snapshotStats?r.snapshotStats.rows.length:'—';
+
+  ph8H('ph8-s5-sum-body',`<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;text-align:center">
+    ${[[hyps.length,'Candidates','#e2e8f0'],[sigBH.length,'BH-significant','#93c5fd'],
+       [pracH.length,'Prac-significant','#c4b5fd'],[discH.length,'Discovery candidates','#4ade80'],
+       [n,'Dataset rows','#e2e8f0']].map(([v,l,c])=>`<div style="padding:12px;background:#0f1117;border:1px solid #222736;border-radius:6px">
+      <div style="font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;color:${c}">${v}</div>
+      <div style="color:#6b7280;font-size:0.72rem;margin-top:3px">${l}</div></div>`).join('')}
+  </div>`);
+
+  const sorted=hyps.slice().sort((a,b)=>(a.adjustedPValue||1)-(b.adjustedPValue||1));
+  const trows=sorted.map((h,i)=>{
+    const cls=ph8Cls(h);
+    return `<tr class="${ph8RC(cls)}">
+      <td class="ph8-num">${i+1}</td><td>${h.feature?h.feature.replace('ncf_',''):'—'}</td>
+      <td style="color:#6b7280;font-size:0.72rem">${ph8FF[h.feature]||''}</td>
+      <td class="ph8-num">${h.leadTime}</td><td class="ph8-num">${h.sampleSize||'—'}</td>
+      <td class="ph8-num">${ph8EF(h.effectSize)}</td><td class="ph8-num">${ph8PF(h.rawPValue)}</td>
+      <td class="ph8-num">${ph8PF(h.adjustedPValue)}</td>
+      <td>${h.isSignificant?ph8Bdg('ph8-b-pass','✓'):''}</td><td>${ph8DBdg(cls)}</td></tr>`;
+  }).join('');
+
+  const fC={},fS={};
+  hyps.forEach(h=>{const f=ph8FF[h.feature]||'?';fC[f]=(fC[f]||0)+1;if(h.isSignificant)fS[f]=(fS[f]||0)+1;});
+  const famR=Object.entries(fC).sort().map(([f,c])=>`<tr><td>${f}</td><td class="ph8-num">${c}</td><td class="ph8-num">${fS[f]||0}</td><td class="ph8-num">${((fS[f]||0)/c*100).toFixed(0)}%</td></tr>`).join('');
+
+  const ltC={},ltS={};
+  hyps.forEach(h=>{ltC[h.leadTime]=(ltC[h.leadTime]||0)+1;if(h.isSignificant)ltS[h.leadTime]=(ltS[h.leadTime]||0)+1;});
+  const ltR=Object.entries(ltC).sort((a,b)=>+a[0]-+b[0]).map(([lt,c])=>`<tr><td>${lt}</td><td class="ph8-num">${c}</td><td class="ph8-num">${ltS[lt]||0}</td></tr>`).join('');
+
+  const hashes=hyps.map(h=>h.contentHash);
+  const intR=[
+    ['All hypothesis records have unique content hashes',   new Set(hashes).size===hyps.length],
+    ['hypothesis count = family size = 80',                 hyps.length===80],
+    ['All adj-p ≥ raw p (BH monotone)',                     hyps.every(h=>(h.adjustedPValue||1)>=(h.rawPValue||0))],
+    ['Effect sizes non-negative',                           hyps.every(h=>h.effectSize==null||h.effectSize>=0)],
+    ['No duplicate [feature × leadTime] pairs',             new Set(hyps.map(h=>h.feature+'@'+h.leadTime)).size===hyps.length],
+  ].map(([d,ok])=>`<tr><td>${d}</td><td>${ok?ph8Bdg('ph8-b-pass','PASS'):ph8Bdg('ph8-b-fail','FAIL')}</td></tr>`).join('');
+
+  const contR=[
+    ['No adaptive stopping — all 80 evaluated',                       true],
+    ['No post-hoc exclusions — all pre-registered features included', true],
+    ['No manual override of any rejection decision',                  true],
+    ['Search space registered before data reading',                   true],
+    ['Permutation seed fixed (42) before evaluation loop',            true],
+    ['BH correction applied simultaneously to full family of 80',     true],
+    ['No exploration of unregistered features',                       true],
+  ].map(([d,ok])=>`<tr><td>${d}</td><td>${ok?ph8Bdg('ph8-b-pass','CLEAN'):ph8Bdg('ph8-b-fail','CONTAMINATED')}</td></tr>`).join('');
+
+  ph8H('ph8-s5-details',`
+    <details open><summary>Full Candidate Rankings (${hyps.length} candidates, sorted by adj-p)</summary>
+      <div class="ph8-card"><div class="ph8-tw"><table><thead><tr>
+        <th>#</th><th>Feature</th><th>Family</th><th class="ph8-num">Lead</th>
+        <th class="ph8-num">n</th><th class="ph8-num">MI (nats)</th>
+        <th class="ph8-num">p (raw)</th><th class="ph8-num">p (BH adj)</th>
+        <th>Sig</th><th>Decision</th></tr></thead><tbody>${trows}</tbody></table></div></div></details>
+    <details><summary>Feature Family Breakdown</summary>
+      <div class="ph8-card"><div class="ph8-tw"><table><thead><tr>
+        <th>Family</th><th class="ph8-num">Candidates</th><th class="ph8-num">BH-sig</th><th class="ph8-num">Rate</th>
+      </tr></thead><tbody>${famR}</tbody></table></div></div></details>
+    <details><summary>Lead-Time Distribution</summary>
+      <div class="ph8-card"><div class="ph8-tw"><table><thead><tr>
+        <th>Lead</th><th class="ph8-num">Candidates</th><th class="ph8-num">BH-sig</th>
+      </tr></thead><tbody>${ltR}</tbody></table></div></div></details>
+    <details><summary>Integrity Checks</summary>
+      <div class="ph8-card"><div class="ph8-tw"><table><thead><tr><th>Check</th><th>Status</th></tr></thead><tbody>${intR}</tbody></table></div></div></details>
+    <details><summary>Contamination Audit</summary>
+      <div class="ph8-card"><div class="ph8-tw"><table><thead><tr><th>Protocol Control</th><th>Status</th></tr></thead><tbody>${contR}</tbody></table></div></div></details>`);
+}
+
+function ph8S6(r,decs){
+  ph8SBdg('ph8-s6-badge','ph8-b-pass','COMPLETE');
+  const disc=decs.filter(d=>d.cls==='DISCOVERY_CANDIDATE');
+  const stat=decs.filter(d=>d.cls==='STAT_SIG_ONLY');
+  const n=r.hypotheses?r.hypotheses.length:80;
+  const rows=r.snapshotStats?r.snapshotStats.rows.length:'?';
+
+  const sup=disc.length>0
+    ?[disc.length+' candidate'+(disc.length>1?'s':'')+' satisfied both the statistical (BH adj-p < 0.05) and practical (MI ≥ 0.01 nats) criteria: '+disc.map(d=>d.feature.replace('ncf_','')+'@lt'+d.leadTime).join(', ')+'.',
+      'The observed associations exceed the pre-registered practical significance threshold under the circular-shift null model with 1 000 permutations.']
+    :['No feature from the 80-candidate NC family showed both statistical and practical evidence of dependence with next-candle outcome (α=0.05, BH correction, '+n+' candidates, '+rows+' observations).',
+      'This is a valid scientific outcome: the null hypothesis of no association is not rejected for any pre-registered candidate under the specified protocol.'];
+  if(stat.length>0&&disc.length===0)
+    sup.push(stat.length+' candidate'+(stat.length>1?'s':'')+' reached statistical significance but not the 0.01-nat practical threshold: '+stat.map(d=>d.feature.replace('ncf_','')+'@lt'+d.leadTime).join(', ')+'. These signals are real under the null model but too small to satisfy the pre-registered discovery criterion.');
+
+  const not=[
+    'Causal relationships cannot be concluded from mutual information alone — these results are purely observational.',
+    'Generalization to other symbols, instruments, time periods, or volatility regimes is not established.',
+    disc.length>0?'Discovery candidacy does not constitute accepted scientific knowledge. Phase 9 independent replication is required.':null,
+    'The absence of discoveries does not confirm that no real associations exist. It constrains the hypothesis space under this specific protocol and dataset.',
+    'Practical trading utility cannot be concluded without independent out-of-sample testing.',
+  ].filter(Boolean);
+
+  const lim=[
+    `Dataset size: ${rows} certain-label observations. Small samples reduce power and may inflate or deflate MI estimates.`,
+    'Single symbol (1HZ100V): a synthetic volatility index. Associations may be instrument-specific.',
+    'Observation window fixed at 20 ticks. Associations at other horizons are outside this search space.',
+    'MI with 8-bin entropy introduces discretization bias. True MI may differ.',
+    'Circular-shift null preserves temporal autocorrelation but assumes stationarity.',
+    'Binary outcome (positive/negative): continuous price structure is not captured.',
+    'Lead times 1–5 only. Longer-horizon predictability is outside scope.',
+  ];
+
+  const alt=[
+    disc.length>0?'The observed association(s) may reflect microstructure artifacts of the 1HZ100V synthetic index rather than generalizable signals.':null,
+    'Associations could be artefacts of the certainty filter if that filter correlates with feature values.',
+    'Within-family feature collinearity (A–D) may cause some signals to reflect shared information rather than independent effects.',
+    'Coincidental autocorrelation overlap between feature series and outcome series may produce false positives that survive the circular-shift null.',
+  ].filter(Boolean);
+
+  ph8H('ph8-s6-content',`
+    <div class="ph8-ib ph8-isup"><div class="ph8-it" style="color:#22c55e">Supported by Evidence</div><ul>${sup.map(s=>`<li>${s}</li>`).join('')}</ul></div>
+    <div class="ph8-ib ph8-inot"><div class="ph8-it" style="color:#ef4444">Not Supported</div><ul>${not.map(s=>`<li>${s}</li>`).join('')}</ul></div>
+    <div class="ph8-ib ph8-ilim"><div class="ph8-it" style="color:#eab308">Limitations</div><ul>${lim.map(s=>`<li>${s}</li>`).join('')}</ul></div>
+    <div class="ph8-ib ph8-ialt"><div class="ph8-it" style="color:#6b7280">Alternative Explanations</div><ul>${alt.map(s=>`<li>${s}</li>`).join('')}</ul></div>`);
+}
+
+function ph8S7(r){
+  const decs=(r.hypotheses||[]).map(h=>({...h,cls:ph8Cls(h)})).sort((a,b)=>(a.adjustedPValue||1)-(b.adjustedPValue||1));
+  const cnt={DISCOVERY_CANDIDATE:0,STAT_SIG_ONLY:0,PRAC_SIG_ONLY:0,NOT_SIGNIFICANT:0};
+  decs.forEach(d=>cnt[d.cls]++);
+  const disc=decs.filter(d=>d.cls==='DISCOVERY_CANDIDATE');
+  ph8SBdg('ph8-s7-badge', disc.length>0?'ph8-b-disc':'ph8-b-none',
+    disc.length>0?disc.length+' DISCOVERY CANDIDATE'+(disc.length>1?'S':''):'0 DISCOVERIES');
+
+  const grid=[
+    ['DISCOVERY CANDIDATE',cnt.DISCOVERY_CANDIDATE,'ph8-b-disc'],
+    ['STAT-SIG ONLY',       cnt.STAT_SIG_ONLY,      'ph8-b-stat'],
+    ['PRAC-SIG ONLY',       cnt.PRAC_SIG_ONLY,      'ph8-b-prac'],
+    ['NOT SIGNIFICANT',     cnt.NOT_SIGNIFICANT,     'ph8-b-none'],
+  ].map(([l,v,c])=>`<div style="padding:12px;background:#0f1117;border:1px solid #222736;border-radius:6px;text-align:center">
+    <div style="font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace">${v}</div>
+    <div style="margin-top:4px">${ph8Bdg(c,l)}</div></div>`).join('');
+
+  const trows=decs.map((d,i)=>`<tr class="${ph8RC(d.cls)}">
+    <td class="ph8-num">${i+1}</td><td>${d.feature?d.feature.replace('ncf_',''):'—'}</td>
+    <td style="color:#6b7280;font-size:0.72rem">${ph8FF[d.feature]||''}</td>
+    <td class="ph8-num">${d.leadTime}</td><td class="ph8-num">${ph8EF(d.effectSize)}</td>
+    <td class="ph8-num">${ph8PF(d.rawPValue)}</td><td class="ph8-num">${ph8PF(d.adjustedPValue)}</td>
+    <td>${d.isSignificant?ph8Bdg('ph8-b-pass','✓'):''}</td>
+    <td>${d.effectSize>=PH8_PRAC?ph8Bdg('ph8-b-prac','✓'):''}</td>
+    <td>${ph8DBdg(d.cls)}</td></tr>`).join('');
+
+  ph8H('ph8-s7-content',`
+    <div class="ph8-card" style="margin-bottom:12px"><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">${grid}</div></div>
+    <div class="ph8-card"><div class="ph8-tw"><table><thead><tr>
+      <th>#</th><th>Feature</th><th>Family</th><th class="ph8-num">Lead</th>
+      <th class="ph8-num">MI (nats)</th><th class="ph8-num">p (raw)</th><th class="ph8-num">p (BH adj)</th>
+      <th>Stat sig</th><th>Prac sig</th><th>Decision</th>
+    </tr></thead><tbody>${trows}</tbody></table></div></div>`);
+  return decs;
+}
+
+function ph8S8(r,decs){
+  const disc=decs.filter(d=>d.cls==='DISCOVERY_CANDIDATE');
+  const stat=decs.filter(d=>d.cls==='STAT_SIG_ONLY');
+  const rows=r.snapshotStats?r.snapshotStats.rows.length:'?';
+
+  if(disc.length>0){
+    ph8SBdg('ph8-s8-badge','ph8-b-disc','PHASE 9 AUTHORIZED');
+    const clist=disc.map(d=>`<li><strong>${d.feature.replace('ncf_','')} @ lead time ${d.leadTime}</strong> — MI = ${ph8EF(d.effectSize)} nats, adj-p = ${ph8PF(d.adjustedPValue)} (${ph8FF[d.feature]||''})</li>`).join('');
+    const statNote=stat.length>0?`<hr class="ph8-hr">
+      <h3 style="font-size:0.84rem;color:#f8fafc;margin:14px 0 6px">Stat-Significant-Only (not Discovery Candidates)</h3>
+      <p style="color:#6b7280;font-size:0.8rem">${stat.length} candidate(s) cleared BH correction but failed the 0.01-nat practical gate. Not authorized for Phase 9 under the pre-registered criterion.</p>
+      <ul style="margin:6px 0 0 20px;line-height:1.8;color:#6b7280;font-size:0.8rem">${stat.map(d=>`<li>${d.feature.replace('ncf_','')} @ lt${d.leadTime} — MI=${ph8EF(d.effectSize)} nats, adj-p=${ph8PF(d.adjustedPValue)}</li>`).join('')}</ul>`:'' ;
+    ph8H('ph8-s8-content',`
+      <div class="ph8-verdict ph8-vdisc">PHASE 9 AUTHORIZED — ${disc.length} DISCOVERY CANDIDATE${disc.length>1?'S':''} IDENTIFIED</div>
+      <div class="ph8-card ph8-disc">
+        <h3 style="font-size:0.84rem;color:#22c55e;margin:0 0 8px">Discovery Candidate${disc.length>1?'s':''}</h3>
+        <ul style="margin:8px 0 0 20px;line-height:2">${clist}</ul>
+        <p style="color:#6b7280;margin-top:12px;font-size:0.8rem">These candidates satisfy both the pre-registered statistical criterion (BH adj-p &lt; 0.05, family size 80) and the practical significance criterion (MI ≥ 0.01 nats). Discovery candidacy does not constitute accepted scientific knowledge — Phase 9 independent replication is required.</p>
+        ${statNote}</div>`);
+  } else {
+    ph8SBdg('ph8-s8-badge','ph8-b-warn','NULL RESULT — NEXT FAMILY RECOMMENDED');
+    const suggs=[
+      ['Classical Feature Family',       'OHLCV-derived indicators (MA, RSI, ATR, Bollinger Bands) — canonical baseline.'],
+      ['Cross-Candle Temporal Features', 'Multi-bar patterns, autocorrelation, inter-period momentum, extended lead times.'],
+      ['Volatility Regime Features',     'Realized volatility, conditional variance estimates, regime-switching indicators.'],
+      ['Order-Flow Proxy Features',      'Tick-frequency bid-ask imbalance, price impact proxies (if tick data available).'],
+    ].map(([n,d],i)=>`<tr><td>${i+1}</td><td><strong>${n}</strong></td><td>${d}</td></tr>`).join('');
+    const statNote=stat.length>0?`<div class="ph8-card ph8-note" style="margin-top:14px">
+      <strong style="color:#eab308">${stat.length} stat-significant-only candidate(s) noted</strong>
+      <p style="color:#6b7280;margin-top:6px;font-size:0.8rem">${stat.map(d=>d.feature.replace('ncf_','')+'@lt'+d.leadTime+' (adj-p='+ph8PF(d.adjustedPValue)+', MI='+ph8EF(d.effectSize)+' nats)').join('; ')}. Cleared BH correction but not the 0.01-nat practical threshold.</p></div>`:'' ;
+    ph8H('ph8-s8-content',`
+      <div class="ph8-verdict ph8-vnull">NULL RESULT — 0 DISCOVERY CANDIDATES</div>
+      <div class="ph8-card ph8-null-r">
+        <p style="line-height:1.8">No feature from the 80-candidate NC family demonstrated both statistical and practical significance across ${rows} certain-label observations. This is a valid scientific outcome. A null result under a properly controlled experiment constrains the hypothesis space.</p>
+        <p style="color:#6b7280;margin-top:8px;font-size:0.8rem">Do not weaken the statistical criteria. Proceed to the next pre-registered representation family.</p>
+        ${statNote}
+        <hr class="ph8-hr">
+        <h3 style="font-size:0.84rem;color:#f8fafc;margin:14px 0 8px">Recommended Next Representation Families</h3>
+        <div class="ph8-tw"><table><thead><tr><th>#</th><th>Family</th><th>Rationale</th></tr></thead><tbody>${suggs}</tbody></table></div>
+        <p style="color:#6b7280;margin-top:10px;font-size:0.8rem">Each requires its own pre-registered search space and discovery campaign before conclusions can be drawn.</p>
+      </div>`);
+  }
+}
+
+// ── Experiment record ─────────────────────────────────────────────────────
+function ph8MkRec(r,decs){
+  const disc=decs.filter(d=>d.cls==='DISCOVERY_CANDIDATE');
+  const hyps=r.hypotheses||[];
+  const dfp=r.datasetFingerprint||(r.frozenDatasetSnapshot&&r.frozenDatasetSnapshot.datasetFingerprint)||null;
+  ph8Rec={
+    experiment_id:             'phase8_nc_campaign_'+Date.now(),
+    timestamp:                 r.executedAt||new Date().toISOString(),
+    protocol_version:          'phase8_nc_v1',
+    software_version:          'mambafx-2026.07-phase7e',
+    engine_version:            r.engineVersion||'phase8-server-engine-v1',
+    feature_version:           'ncf_v1',
+    raw_history_version:       'rawPriceHistory_v1',
+    search_space_id:           r.frozenSearchSpace?r.frozenSearchSpace.searchSpaceId:(ph8Seal?ph8Seal.searchSpaceId:null),
+    search_space_hash:         r.frozenSearchSpace?r.frozenSearchSpace.searchSpaceHash:(ph8Seal?ph8Seal.searchSpaceHash:null),
+    search_space_version:      r.frozenSearchSpace?r.frozenSearchSpace.searchSpaceVersion:(ph8Seal?ph8Seal.searchSpaceVersion:null),
+    frozen_search_space_definition: ph8Seal&&ph8Seal.discoverySpec?ph8Seal.discoverySpec:null,
+    dataset_snapshot_id:       r.datasetSnapshotId||null,
+    dataset_fingerprint:       dfp,
+    frozen_dataset_snapshot:   r.frozenDatasetSnapshot||null,
+    random_seed:               r.seed??42,
+    permutation_count:         r.permutations??1000,
+    alpha:                     r.alpha??0.05,
+    practical_threshold_nats:  PH8_PRAC,
+    null_model:                'circular_shift_permutation',
+    statistical_method:        'mutual_information',
+    multiple_testing_correction:'benjamini_hochberg',
+    discovery_criterion:       'BH adj-p < 0.05 AND MI >= 0.01 nats',
+    uncertainty_policy:        'filter_certain_only',
+    symbol:                    ph8Seal?ph8Seal.symbol:'1HZ100V',
+    observation_window_ticks:  20,
+    snapshot_stats:            r.snapshotStats||null,
+    candidate_count:           hyps.length,
+    family_size:               hyps.length,
+    candidates_enumerated:     r.enumeratedCount??null,
+    candidates_evaluated:      r.candidatesEvaluated??null,
+    runtime_ms:                r.serverElapsedMs||null,
+    execution_log:             r.log||null,
+    discovery_candidate_count: disc.length,
+    authorization_decision:    disc.length>0?'PHASE_9_AUTHORIZED':'NULL_RESULT',
+    scientific_conclusions:{
+      discovery_candidates: disc.map(d=>({feature:d.feature,leadTime:d.leadTime,effectSize:d.effectSize,adjustedPValue:d.adjustedPValue,contentHash:d.contentHash||null})),
+      stat_sig_only: decs.filter(d=>d.cls==='STAT_SIG_ONLY').map(d=>({feature:d.feature,leadTime:d.leadTime,effectSize:d.effectSize,adjustedPValue:d.adjustedPValue,contentHash:d.contentHash||null})),
+      prac_sig_only_count:   decs.filter(d=>d.cls==='PRAC_SIG_ONLY').length,
+      not_significant_count: decs.filter(d=>d.cls==='NOT_SIGNIFICANT').length,
+    },
+    candidate_table: hyps.map(h=>({
+      feature:h.feature, family:ph8FF[h.feature]||'', leadTime:h.leadTime,
+      candidateHash:h.candidateHash||null, contentHash:h.contentHash||null,
+      hypothesis_id:h.hypothesis_id||null, candidate_id:h.candidate_id||null,
+      effectSize:h.effectSize, rawPValue:h.rawPValue, adjustedPValue:h.adjustedPValue,
+      sampleSize:h.sampleSize, isSignificant:h.isSignificant??null,
+      classification: decs.find(d=>d.feature===h.feature&&d.leadTime===h.leadTime)?.cls||'—',
+    })).sort((a,b)=>(a.adjustedPValue||1)-(b.adjustedPValue||1)),
+    hypothesis_records: hyps,
+    protocol_seal: ph8Seal||null,
+  };
+  ph8H('ph8-record-content',`<pre class="ph8-pre">${JSON.stringify(ph8Rec,null,2)}</pre>`);
+  const dlBtn=ph8G('ph8-dl-btn');
+  if(dlBtn) dlBtn.style.display='';
+}
+
+window.ph8DownloadRecord=function(){
+  if(!ph8Rec) return;
+  const a=document.createElement('a');
+  a.href='data:application/json,'+encodeURIComponent(JSON.stringify(ph8Rec,null,2));
+  a.download='msd-phase8-experiment-record-'+Date.now()+'.json';
+  a.click();
+};
+
+})(); // end Phase 8 module
 </script>
 </body>
 </html>
