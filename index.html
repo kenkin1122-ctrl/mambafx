@@ -9938,6 +9938,490 @@ async function msdRunPhase7bDiscovery(allStates, frozenSearchSpace, options) {
 }
 
 // ══════════════════════════════════════════════════════════════════════
+// PART 13 — PHASE 7C: INDEPENDENT SCIENTIFIC VERIFICATION
+// ══════════════════════════════════════════════════════════════════════
+// Validates the Phase 7B discovery pipeline itself before any results
+// are interpreted as research evidence.  Covers:
+//   Step 1 — Pipeline reproducibility (identical results with same seed)
+//   Step 2 — Candidate completeness (80 enumerated = 80 evaluated = 80 recorded)
+//   Step 3 — Negative controls (random labels / random features / constant features)
+//   Step 4 — Positive control (synthetic feature with known signal)
+//   Step 5 — Sensitivity (permutation-count stability: 500/1000/2000)
+//   Step 6 — Seed stability (p-value variability across seeds)
+//   Step 7 — Feature diagnostics (descriptive stats, Pearson, MI matrices)
+//   Step 8 — Experiment manifest (machine-readable record)
+//   Step 9 — Scientific readiness decision
+//
+// ADDITIVE ONLY: no existing function is modified.
+// Makes ZERO persistent writes (no Discovery Ledger entries, no hypothesis
+// records, no search-space/snapshot records).  All Phase 7C experiments are
+// meta-experiments about the engine — not real discoveries.
+// ══════════════════════════════════════════════════════════════════════
+
+/**
+ * Pure evaluation pipeline for Phase 7C control experiments.
+ *
+ * Identical logic to the evaluation loop in msdRunPhase7bDiscovery but makes
+ * ZERO persistent writes.  The caller supplies pre-built rows (allowing
+ * injection of modified data for controls) and a frozen search space.
+ *
+ * Returns a result object with hypothesisSummaries, candidateResults,
+ * correction, and summary counts — never touches IDB.
+ *
+ * @param {object[]} rows            — pre-built NC-enriched snapshot rows (may be modified for controls)
+ * @param {object}   frozenSearchSpace — frozen search space from msdFreezeSearchSpace
+ * @param {object}   [options]
+ * @param {number}   [options.permutations=1000]
+ * @param {number}   [options.seed=42]
+ * @param {number}   [options.alpha=0.05]
+ * @param {Function} [options.onProgress]
+ * @returns {{ ok, enumeratedCount, verifiedCardinality, evaluatedOkCount, significantCount,
+ *             candidateResults, hypothesisSummaries, correction, permutations, seed, alpha }}
+ */
+function msdRunPhase7cControlPipeline(rows, frozenSearchSpace, options) {
+  options = options || {};
+  const permutations = options.permutations != null ? options.permutations : 1000;
+  const seed         = options.seed         != null ? options.seed         : 42;
+  const alpha        = options.alpha        != null ? options.alpha        : 0.05;
+
+  if (!Object.isFrozen(frozenSearchSpace)) {
+    throw new Error('msdRunPhase7cControlPipeline: frozenSearchSpace must be frozen via msdFreezeSearchSpace.');
+  }
+
+  const cardinality = msdComputeSearchSpaceCardinality(frozenSearchSpace);
+  if (cardinality.status === 'overflow') {
+    throw new Error('msdRunPhase7cControlPipeline: search space cardinality overflow.');
+  }
+
+  const enumeration = msdDryRunEnumerateCandidates(frozenSearchSpace);
+  if (enumeration.count !== cardinality.totalCardinality) {
+    throw new Error(
+      'GOVERNANCE INVARIANT VIOLATION (Phase 7C): enumeration count (' + enumeration.count +
+      ') !== computed cardinality (' + cardinality.totalCardinality + ').'
+    );
+  }
+
+  const candidateResults = [];
+  for (let ci = 0; ci < enumeration.candidates.length; ci++) {
+    const candidate = enumeration.candidates[ci];
+    if (typeof options.onProgress === 'function') options.onProgress(ci, enumeration.candidates.length, candidate);
+    let materialized, evaluation;
+    try {
+      materialized = msdMaterializeCandidateFeatureLeadTimeCorrected(rows, candidate, frozenSearchSpace.missingDataRules);
+      evaluation   = msdEvaluateCandidateDependenceAware(materialized, permutations, seed, options.minShift);
+    } catch (e) {
+      materialized = { ok: false, missingCount: null, missingRate: null };
+      evaluation   = { ok: false, error: e.message };
+    }
+    candidateResults.push({
+      candidate,
+      materialized: { ok: materialized.ok, missingCount: materialized.missingCount, missingRate: materialized.missingRate },
+      evaluation,
+    });
+  }
+
+  const validResults = candidateResults.filter(c => c.evaluation.ok);
+  const pValues      = validResults.map(c => c.evaluation.pValue);
+  const correction   = pValues.length > 0
+    ? msdApplySearchSpaceWideCorrectionVerified({
+        pValues, searchSpace: frozenSearchSpace,
+        claimedFamilySize: cardinality.totalCardinality, alpha,
+      })
+    : null;
+
+  const hypothesisSummaries = validResults.map((r, i) => ({
+    feature:        r.candidate.features.join('+'),
+    leadTime:       r.candidate.leadTime,
+    candidateHash:  r.candidate.candidateHash,
+    effectSize:     r.evaluation.effectSize,
+    rawPValue:      r.evaluation.pValue,
+    adjustedPValue: correction ? correction.results[i].adjustedPValue : null,
+    rejected:       correction ? correction.results[i].rejected       : false,
+    sampleSize:     r.evaluation.sampleSize,
+    missingRate:    r.evaluation.missingRate,
+  }));
+
+  const significantCount = hypothesisSummaries.filter(h => h.rejected).length;
+
+  return {
+    ok: true,
+    enumeratedCount:    enumeration.count,
+    verifiedCardinality: cardinality.totalCardinality,
+    evaluatedOkCount:   validResults.length,
+    failedCount:        candidateResults.length - validResults.length,
+    significantCount,
+    candidateResults,
+    hypothesisSummaries,
+    correction,
+    permutations, seed, alpha,
+  };
+}
+
+/**
+ * Runs one Phase 7C negative control experiment.
+ *
+ * Applies one of three data-destruction transformations to in-memory row
+ * copies, then runs the pure control pipeline.  Expected outcome: zero
+ * discoveries (family-wise error controlled).
+ *
+ * @param {object[]} rows           — original NC-enriched rows (never mutated)
+ * @param {object}   frozenSearchSpace
+ * @param {'random_labels'|'random_features'|'constant_features'} controlType
+ * @param {object}   [options]      — passed through to msdRunPhase7cControlPipeline;
+ *                                    options.seed governs the shuffle/fill RNG
+ *                                    (offset internally so it does not collide with
+ *                                    the permutation-test seed)
+ * @returns {{ controlType, discoveryCount, evaluatedOkCount, enumeratedCount, result }}
+ */
+function msdRunPhase7cNegativeControl(rows, frozenSearchSpace, controlType, options) {
+  options = options || {};
+  const seed = options.seed != null ? options.seed : 42;
+  // Offset so the corruption RNG never shares state with the permutation-test RNG.
+  const rng  = msdSeededRandom(seed + 0xBEEF);
+
+  const featureKeys = (typeof MSD_PHASE7B_INDIVIDUAL_FEATURES !== 'undefined')
+    ? Array.from(MSD_PHASE7B_INDIVIDUAL_FEATURES)
+    : [
+        'ncf_netDisplacement','ncf_absPathLength','ncf_pathEfficiency',
+        'ncf_mfe','ncf_mae','ncf_upTickCount','ncf_downTickCount',
+        'ncf_dirImbalance','ncf_currentRunLen','ncf_maxRunLen','ncf_reversalCount',
+        'ncf_stdFirstDiff','ncf_meanSecondDiff','ncf_dirEntropy','ncf_runEntropy',
+      ];
+
+  let modifiedRows;
+
+  if (controlType === 'random_labels') {
+    // Shuffle event_outcome deterministically — feature values left intact.
+    const outcomes = rows.map(r => r.event_outcome);
+    const shuffled = msdSeededShuffle(outcomes, rng);
+    modifiedRows = rows.map((r, i) => Object.assign({}, r, { event_outcome: shuffled[i] }));
+
+  } else if (controlType === 'random_features') {
+    // Replace every ncf_* value with a seeded uniform draw from [−1, 1].
+    modifiedRows = rows.map(r => {
+      const patch = {};
+      for (const k of featureKeys) patch[k] = rng() * 2 - 1;
+      return Object.assign({}, r, patch);
+    });
+
+  } else if (controlType === 'constant_features') {
+    // Replace every ncf_* value with its per-feature mean — zero variance, zero MI.
+    const sums = {}, counts = {};
+    for (const k of featureKeys) { sums[k] = 0; counts[k] = 0; }
+    for (const r of rows) {
+      for (const k of featureKeys) {
+        if (Number.isFinite(r[k])) { sums[k] += r[k]; counts[k]++; }
+      }
+    }
+    const means = {};
+    for (const k of featureKeys) means[k] = counts[k] > 0 ? sums[k] / counts[k] : 0;
+    modifiedRows = rows.map(r => Object.assign({}, r, means));
+
+  } else {
+    throw new Error(
+      'msdRunPhase7cNegativeControl: unknown controlType "' + controlType +
+      '". Expected one of: random_labels, random_features, constant_features.'
+    );
+  }
+
+  const result = msdRunPhase7cControlPipeline(modifiedRows, frozenSearchSpace, options);
+  return {
+    controlType,
+    discoveryCount:   result.significantCount,
+    evaluatedOkCount: result.evaluatedOkCount,
+    enumeratedCount:  result.enumeratedCount,
+    result,
+  };
+}
+
+/**
+ * Runs one Phase 7C positive control experiment.
+ *
+ * Injects a synthetic feature with a deterministic, known association to the
+ * event outcome into in-memory row copies.  Creates an isolated, single-candidate
+ * mock search space.  Verifies that the discovery engine detects the signal.
+ *
+ * The synthetic feature is NEVER stored to IDB and the mock search space is NEVER
+ * recorded to the Discovery Ledger.  Both are purely in-memory meta-experiments.
+ *
+ * Synthetic feature construction (Box-Muller, seeded):
+ *   positive outcome → value = signalStrength + N(0, 0.5)
+ *   negative outcome → value = 0              + N(0, 0.5)
+ *
+ * @param {object[]} rows              — original NC-enriched rows (never mutated)
+ * @param {object}   frozenSearchSpace — used only to inherit symbol and missingDataRules
+ * @param {object}   [options]
+ * @param {number}   [options.seed=42]
+ * @param {number}   [options.signalStrength=1.0]  — mean shift for positive outcomes
+ * @param {number}   [options.permutations=1000]
+ * @returns {{ syntheticFeatureName, signalStrength, sampleSize, positiveCount,
+ *             detectedSignal, effectSize, rawPValue, adjustedPValue, result }}
+ */
+function msdRunPhase7cPositiveControl(rows, frozenSearchSpace, options) {
+  options = options || {};
+  const seed           = options.seed           != null ? options.seed           : 42;
+  const signalStrength = options.signalStrength != null ? options.signalStrength : 1.0;
+
+  // Box-Muller normal sampler driven by the seeded RNG.
+  const rng = msdSeededRandom(seed + 0x4D1A3);
+  function gaussianRng() {
+    const u1 = rng(), u2 = rng();
+    return Math.sqrt(-2 * Math.log(Math.max(u1, 1e-15))) * Math.cos(2 * Math.PI * u2);
+  }
+
+  const syntheticFeatureName = 'ncf_SYNTHETIC_positive_signal';
+
+  // Inject the synthetic feature into copies of every row.
+  let positiveCount = 0;
+  const modifiedRows = rows.map(r => {
+    const isPositive = r.event_outcome === 'positive' || r.event_outcome === 1;
+    if (isPositive) positiveCount++;
+    const featureValue = (isPositive ? signalStrength : 0) + gaussianRng() * 0.5;
+    return Object.assign({}, r, { [syntheticFeatureName]: featureValue });
+  });
+
+  // Minimal, isolated mock search space: 1 synthetic feature × 1 lead time = 1 candidate.
+  // This search space is NEVER passed to msdRecordSearchSpaceSpecification.
+  const mockSpaceDef = {
+    symbols:                [frozenSearchSpace.symbols[0]],
+    leadTimes:              [1],
+    individualFeatures:     [syntheticFeatureName],
+    interactionDepth:       1,
+    maxCandidateCount:      1,
+    multipleTestingControls: ['benjamini_hochberg'],
+    nullModel:              'circular_shift',
+    missingDataRules:       frozenSearchSpace.missingDataRules || { maxMissingRate: 0.1 },
+    searchSpaceVersion:     'phase7c_positive_control_v1',
+  };
+  const mockFrozenSpace = msdFreezeSearchSpace(
+    mockSpaceDef, 'phase7c_positive_control',
+    { schemaVersion: MSD_SEARCH_SPACE_SPEC_VERSION_V2 }
+  );
+
+  const result = msdRunPhase7cControlPipeline(modifiedRows, mockFrozenSpace, options);
+
+  const h         = result.hypothesisSummaries[0] || null;
+  const detected  = h ? h.rejected === true : false;
+
+  return {
+    syntheticFeatureName,
+    signalStrength,
+    sampleSize:     modifiedRows.length,
+    positiveCount,
+    detectedSignal: detected,
+    effectSize:     h ? h.effectSize     : null,
+    rawPValue:      h ? h.rawPValue      : null,
+    adjustedPValue: h ? h.adjustedPValue : null,
+    result,
+  };
+}
+
+/**
+ * Compares two Phase 7C control pipeline results for exact reproducibility.
+ *
+ * Candidates are matched by candidateHash (deterministic from feature + leadTime).
+ * For a fixed seed and fixed rows, effect sizes and p-values must be bit-identical.
+ * Only runtime metadata (timestamps, hypothesis IDs) is permitted to differ.
+ *
+ * @param {object} run1 — result from msdRunPhase7cControlPipeline
+ * @param {object} run2 — result from msdRunPhase7cControlPipeline
+ * @returns {{ identical, differencesFound, diffs, run1CandidateCount,
+ *             run2CandidateCount, run1SignificantCount, run2SignificantCount }}
+ */
+function msdValidatePhase7cReproducibility(run1, run2) {
+  const diffs   = [];
+  let identical = true;
+
+  if (run1.enumeratedCount !== run2.enumeratedCount) {
+    diffs.push({ field: 'enumeratedCount', run1: run1.enumeratedCount, run2: run2.enumeratedCount });
+    identical = false;
+  }
+
+  if (run1.verifiedCardinality !== run2.verifiedCardinality) {
+    diffs.push({ field: 'verifiedCardinality', run1: run1.verifiedCardinality, run2: run2.verifiedCardinality });
+    identical = false;
+  }
+
+  // Match by candidateHash
+  const map1 = new Map(run1.hypothesisSummaries.map(h => [h.candidateHash, h]));
+  const map2 = new Map(run2.hypothesisSummaries.map(h => [h.candidateHash, h]));
+
+  if (map1.size !== map2.size) {
+    diffs.push({ field: 'hypothesisCount', run1: map1.size, run2: map2.size });
+    identical = false;
+  }
+
+  for (const [hash, h1] of map1) {
+    const h2 = map2.get(hash);
+    if (!h2) {
+      diffs.push({ candidateHash: hash, field: 'missing_in_run2', run1: h1.feature + '@lt' + h1.leadTime, run2: null });
+      identical = false;
+      continue;
+    }
+    for (const field of ['effectSize', 'rawPValue', 'adjustedPValue', 'rejected', 'sampleSize']) {
+      if (h1[field] !== h2[field]) {
+        diffs.push({ candidateHash: hash, feature: h1.feature, leadTime: h1.leadTime, field, run1: h1[field], run2: h2[field] });
+        identical = false;
+      }
+    }
+  }
+
+  if (run1.significantCount !== run2.significantCount) {
+    diffs.push({ field: 'significantCount', run1: run1.significantCount, run2: run2.significantCount });
+    identical = false;
+  }
+
+  return {
+    identical,
+    differencesFound:       diffs.length,
+    diffs,
+    run1CandidateCount:     run1.enumeratedCount,
+    run2CandidateCount:     run2.enumeratedCount,
+    run1SignificantCount:   run1.significantCount,
+    run2SignificantCount:   run2.significantCount,
+  };
+}
+
+/**
+ * Computes descriptive diagnostics for a set of NC feature keys across NC-enriched rows.
+ *
+ * Per feature: n, mean, variance, std, min, max, skewness (Fisher's), excess kurtosis,
+ * missing-value rate, histogram (10 equal-width bins with explicit edge array).
+ *
+ * Pairwise matrices (featureKeys × featureKeys):
+ *   pearsonMatrix — Pearson r (null when either feature is constant or n < 2)
+ *   miMatrix      — binned Mutual Information in bits (8 bins; null on diagonal and n < 2)
+ *
+ * No hypothesis testing is performed here.
+ *
+ * @param {object[]} rows        — NC-enriched snapshot rows from msdBuildNcSnapshotRows
+ * @param {string[]} featureKeys — list of ncf_* feature keys to analyse
+ * @returns {{ perFeature, pearsonMatrix, miMatrix, featureKeys, rowCount }}
+ */
+function msdComputePhase7cFeatureDiagnostics(rows, featureKeys) {
+  const perFeature = {};
+
+  for (const k of featureKeys) {
+    const values = [];
+    let missingCount = 0;
+    for (const r of rows) {
+      if (Number.isFinite(r[k])) values.push(r[k]);
+      else missingCount++;
+    }
+    const n = values.length;
+    const missingRate = rows.length > 0 ? missingCount / rows.length : 0;
+
+    if (n === 0) {
+      perFeature[k] = { n, missingCount, missingRate, mean: null, variance: null, std: null,
+                        min: null, max: null, skewness: null, kurtosis: null, histogram: null };
+      continue;
+    }
+
+    // Welford's online algorithm — numerically stable mean + variance.
+    let mean = 0, M2 = 0, min = values[0], max = values[0];
+    for (let i = 0; i < n; i++) {
+      const x = values[i];
+      const delta = x - mean;
+      mean += delta / (i + 1);
+      M2   += delta * (x - mean);
+      if (x < min) min = x;
+      if (x > max) max = x;
+    }
+    const variance = n > 1 ? M2 / (n - 1) : 0;
+    const std      = Math.sqrt(variance);
+
+    // Raw third and fourth central moments for skewness and excess kurtosis.
+    let m3 = 0, m4 = 0;
+    for (let i = 0; i < n; i++) {
+      const d2 = (values[i] - mean) * (values[i] - mean);
+      m3 += d2 * (values[i] - mean);
+      m4 += d2 * d2;
+    }
+    m3 /= n; m4 /= n;
+    const skewness = std > 0 ? m3 / (std * std * std) : 0;
+    const kurtosis = std > 0 ? m4 / (std * std * std * std) - 3 : 0; // excess
+
+    // Histogram: 10 equal-width bins, edges array length 11.
+    const BIN_COUNT = 10;
+    const range    = max - min;
+    const edges    = [];
+    for (let b = 0; b <= BIN_COUNT; b++) edges.push(min + range * b / BIN_COUNT);
+    const bins = new Array(BIN_COUNT).fill(0);
+    for (const v of values) {
+      if (range === 0) { bins[0]++; continue; }
+      let idx = Math.floor((v - min) / range * BIN_COUNT);
+      if (idx >= BIN_COUNT) idx = BIN_COUNT - 1;
+      bins[idx]++;
+    }
+
+    perFeature[k] = { n, missingCount, missingRate, mean, variance, std, min, max,
+                      skewness, kurtosis, histogram: { bins, edges, binCount: BIN_COUNT } };
+  }
+
+  // Pairwise Pearson correlation matrix and pairwise MI matrix.
+  const pearsonMatrix = {}, miMatrix = {};
+  for (const ki of featureKeys) {
+    pearsonMatrix[ki] = {};
+    miMatrix[ki]      = {};
+    for (const kj of featureKeys) {
+      if (ki === kj) { pearsonMatrix[ki][kj] = 1.0; miMatrix[ki][kj] = null; continue; }
+      const xs = [], ys = [];
+      for (const r of rows) {
+        if (Number.isFinite(r[ki]) && Number.isFinite(r[kj])) { xs.push(r[ki]); ys.push(r[kj]); }
+      }
+      if (xs.length < 2) { pearsonMatrix[ki][kj] = null; miMatrix[ki][kj] = null; continue; }
+      pearsonMatrix[ki][kj] = msdPearsonCorrelation(xs, ys);
+      miMatrix[ki][kj]      = msdMutualInformation(xs, ys, 8); // bits
+    }
+  }
+
+  return { perFeature, pearsonMatrix, miMatrix, featureKeys, rowCount: rows.length };
+}
+
+/**
+ * Generates a machine-readable Phase 7C experiment manifest — a plain object
+ * containing every field needed for exact future reproduction.
+ *
+ * @param {object} params
+ * @returns {object} manifest
+ */
+function msdGeneratePhase7cManifest(params) {
+  params = params || {};
+  return {
+    protocolName:                       'MSD Phase 7C — Independent Scientific Verification',
+    protocolVersion:                    'phase7c_v1',
+    searchSpaceId:                      params.searchSpaceId                      || null,
+    searchSpaceHash:                    params.searchSpaceHash                    || null,
+    datasetSnapshotId:                  params.datasetSnapshotId                  || null,
+    featureVersion:                     MSD_NC_FEATURE_VERSION,
+    rawHistoryVersion:                  'v1',
+    candidateCount:                     params.candidateCount                     != null ? params.candidateCount : 80,
+    hypothesisCount:                    params.hypothesisCount                    != null ? params.hypothesisCount : 80,
+    permutationCount:                   params.permutations                       != null ? params.permutations   : 1000,
+    statisticalTest:                    'mutual_information_binned_circular_shift',
+    nullModel:                          'circular_shift',
+    correctionMethod:                   'benjamini_hochberg',
+    uncertaintyPolicy:                  params.uncertaintyPolicy                  || 'filterCertainOnly',
+    randomSeed:                         params.seed                               != null ? params.seed           : 42,
+    executionTimestamp:                 params.executionTimestamp                 || null,
+    softwareVersion:                    'MSD_Phase7C_v1',
+    executionDurationMs:                params.executionDurationMs                != null ? params.executionDurationMs : null,
+    symbolScope:                        params.symbol                             || (typeof MSD_PHASE7B_SYMBOL !== 'undefined' ? MSD_PHASE7B_SYMBOL : null),
+    ncFeatureCount:                     params.ncFeatureCount                     != null ? params.ncFeatureCount : 16,
+    excludedCollinearFeatures:          ['ncf_meanFirstDiff', 'ncf_meanAbsFirstDiff'],
+    collinearityReason:                 'exact linear multiples of ncf_netDisplacement and ncf_absPathLength for fixed n=20',
+    alpha:                              params.alpha                              != null ? params.alpha          : 0.05,
+    practicalSignificanceThreshold_nats: 0.01,
+    phase7bSearchSpaceVersion:          params.searchSpaceVersion                 || null,
+    sampleSize:                         params.sampleSize                         || null,
+    positiveCount:                      params.positiveCount                      || null,
+    negativeCount:                      params.negativeCount                      || null,
+  };
+}
+
+// ── End of Phase 7C: Independent Scientific Verification ──────────────────────
+
+// ══════════════════════════════════════════════════════════════════════
 // PART 11 — CHRONOLOGICAL STABILITY VALIDATION (PURE COMPUTATION, NO WRITES)
 // ══════════════════════════════════════════════════════════════════════
 // Deliberately makes ZERO persistent writes anywhere -- no Discovery

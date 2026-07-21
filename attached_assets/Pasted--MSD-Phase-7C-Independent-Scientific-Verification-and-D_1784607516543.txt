@@ -1,0 +1,291 @@
+# MSD Phase 7C — Independent Scientific Verification and Discovery Pipeline Audit
+
+You are continuing the MSD Scientific Research Laboratory.
+
+Phase 7B implementation is complete.
+
+**Do not redesign the architecture.**
+
+**Do not modify existing scientific methodology unless a genuine defect is discovered.**
+
+Your task is **not** to discover new market signals.
+
+Your task is to independently verify that the entire Phase 7B discovery pipeline is scientifically trustworthy before any discoveries are accepted as research evidence.
+
+This is a validation phase for the **research engine itself**.
+
+---
+
+# Current Project Status
+
+Completed:
+
+* Phase 1 – MarketState capture and event definition
+* Phase 2 – Dataset construction and append-only storage
+* Phase 3 – Classical feature computation and ML infrastructure
+* Phase 4 – Scientific governance (frozen search spaces, hypothesis lifecycle, multiplicity correction, reproducibility)
+* Phase 5 – Classical feature discovery (45 candidates, valid null result)
+* Phase 6A – Architecture audit
+* Phase 6B – Prospective raw-history capture
+* Phase 7A – Non-classical feature engineering, validation and governance
+* Phase 7B – Non-classical discovery pipeline implementation (80 candidates)
+
+No new features are to be added during this phase.
+
+---
+
+# Objective
+
+Scientifically validate the **entire discovery pipeline** before interpreting any Phase 7B experimental results.
+
+Treat the discovery engine itself as the subject under test.
+
+---
+
+# STEP 1 — Pipeline Reproducibility Audit
+
+Execute the identical frozen protocol at least twice using identical inputs and identical random seed.
+
+Verify:
+
+* identical search-space hash
+* identical dataset snapshot (when appropriate)
+* identical candidate enumeration
+* identical feature values
+* identical effect sizes
+* identical raw p-values
+* identical adjusted p-values
+* identical hypothesis outcomes
+* identical discovery count
+
+The only permissible differences are runtime metadata (timestamps, IDs intentionally designed to be unique).
+
+Produce a reproducibility report.
+
+---
+
+# STEP 2 — Candidate Completeness Audit
+
+Prove mathematically and programmatically that:
+
+Frozen Search Space
+↓
+
+80 candidates expected
+↓
+
+80 candidates enumerated
+↓
+
+80 candidates evaluated
+↓
+
+80 hypothesis records created
+↓
+
+80 corrected
+↓
+
+80 reported
+
+Verify:
+
+* zero missing candidates
+* zero duplicates
+* zero hash collisions
+* zero silently discarded candidates
+* zero post-hoc filtering
+
+Produce an integrity report.
+
+---
+
+# STEP 3 — Negative Control Experiments
+
+Verify that the pipeline does not produce false discoveries when information is intentionally destroyed.
+
+Design and execute scientifically justified negative controls such as:
+
+* randomly permuted labels
+* randomly generated feature values
+* constant-value features
+* circularly shifted outcomes beyond meaningful alignment
+
+Expected outcome:
+
+* zero accepted discoveries
+* family-wise error remains controlled
+* governance remains unchanged
+
+Document every negative control and its outcome.
+
+---
+
+# STEP 4 — Positive Control Experiment
+
+Construct one synthetic feature with a known injected association to the target outcome.
+
+This feature exists solely to verify that the discovery engine can detect a true signal.
+
+Requirements:
+
+* deterministic construction
+* no modification of existing MarketStates
+* isolated from real research results
+* clearly identified as synthetic
+
+Verify that:
+
+* the pipeline detects the synthetic association
+* multiplicity correction behaves correctly
+* hypothesis lifecycle functions normally
+
+Remove the synthetic feature after testing.
+
+---
+
+# STEP 5 — Sensitivity Analysis
+
+Evaluate robustness of the statistical engine.
+
+Repeat discovery using multiple permutation counts, for example:
+
+* 500
+* 1000
+* 2000
+
+Assess whether:
+
+* rankings remain stable
+* adjusted p-values remain consistent
+* conclusions change materially
+
+If conclusions change substantially, explain why.
+
+---
+
+# STEP 6 — Random Seed Stability
+
+Execute the same protocol using multiple valid random seeds.
+
+Evaluate:
+
+* ranking stability
+* effect-size stability
+* p-value variability
+* discovery consistency
+
+The purpose is not to obtain identical permutation sequences, but to determine whether scientific conclusions are stable.
+
+---
+
+# STEP 7 — Feature Diagnostics
+
+For every non-classical feature compute descriptive diagnostics only.
+
+Include:
+
+* mean
+* variance
+* minimum
+* maximum
+* histogram
+* skewness
+* kurtosis
+* missing-value rate
+* pairwise Pearson correlation matrix
+* pairwise mutual information matrix
+
+Do not perform additional hypothesis testing during this step.
+
+Its purpose is to understand feature behaviour and identify redundancy.
+
+---
+
+# STEP 8 — Experiment Manifest
+
+Automatically generate a machine-readable experiment manifest.
+
+Include:
+
+* protocol name
+* protocol version
+* search-space ID
+* search-space hash
+* dataset snapshot ID
+* feature version
+* raw-history version
+* candidate count
+* hypothesis count
+* permutation count
+* statistical test
+* null model
+* correction method
+* uncertainty policy
+* random seed
+* execution timestamp
+* software version
+* execution duration
+
+This manifest must be sufficient for exact future reproduction.
+
+---
+
+# STEP 9 — Scientific Readiness Decision
+
+Based on all verification evidence, issue one of two decisions:
+
+READY_FOR_PHASE8_DISCOVERY
+
+or
+
+NOT_READY
+
+If NOT_READY:
+
+identify every blocking issue with supporting evidence.
+
+If READY:
+
+explicitly certify that the MSD discovery platform has passed engineering and scientific verification and is suitable for interpreting Phase 7B discovery results.
+
+---
+
+# Constraints
+
+Throughout this phase:
+
+* preserve append-only storage
+* preserve deterministic execution
+* preserve frozen search spaces
+* preserve hypothesis governance
+* preserve reproducibility
+* preserve causal timing
+* preserve statistical methodology
+
+Do not:
+
+* redesign existing architecture
+* rewrite historical MarketStates
+* weaken governance
+* modify accepted protocols without evidence
+* introduce look-ahead bias
+* silently change feature definitions
+
+---
+
+# Deliverables
+
+Produce:
+
+1. Pipeline Reproducibility Report
+2. Candidate Completeness Report
+3. Negative Control Report
+4. Positive Control Report
+5. Sensitivity Analysis Report
+6. Random Seed Stability Report
+7. Feature Diagnostics Report
+8. Experiment Manifest
+9. Scientific Readiness Report
+
+Only after all deliverables are complete and the platform is formally declared **READY_FOR_PHASE8_DISCOVERY** should the first official non-classical discovery campaign be interpreted as scientific evidence.

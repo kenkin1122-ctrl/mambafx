@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MSD Phase 7C — Independent Scientific Verification</title>
+<style>
+  :root {
+    --bg:      #0d0f14;
+    --surface: #13161e;
+    --border:  #222736;
+    --accent:  #3b82f6;
+    --green:   #22c55e;
+    --red:     #ef4444;
+    --yellow:  #eab308;
+    --purple:  #a855f7;
+    --cyan:    #06b6d4;
+    --muted:   #6b7280;
+    --text:    #e2e8f0;
+    --heading: #f8fafc;
+    --mono:    'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 14px; line-height: 1.6;
+    padding: 24px; min-height: 100vh; max-width: 1100px;
+  }
+  h1 { font-size: 1.4rem; color: var(--heading); margin-bottom: 4px; }
+  h2 {
+    font-size: 1.0rem; color: var(--accent); margin: 28px 0 10px;
+    border-bottom: 1px solid var(--border); padding-bottom: 6px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  h3 { font-size: 0.88rem; color: var(--heading); margin: 14px 0 6px; }
+  .subtitle { color: var(--muted); font-size: 0.8rem; margin-bottom: 24px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: 700; font-family: var(--mono); }
+  .pass   { background: #14532d; color: var(--green); }
+  .fail   { background: #450a0a; color: var(--red); }
+  .warn   { background: #422006; color: var(--yellow); }
+  .info   { background: #1e3a5f; color: #93c5fd; }
+  .sig    { background: #2d1b69; color: var(--purple); }
+  .card   { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; margin-bottom: 16px; }
+  .card.success { border-color: var(--green); }
+  .card.danger  { border-color: var(--red); }
+  .card.warn    { border-color: var(--yellow); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.8rem; font-family: var(--mono); }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 4px 8px; border-bottom: 1px solid #1a1d27; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  .mono  { font-family: var(--mono); }
+  .num   { text-align: right; font-family: var(--mono); }
+  .muted { color: var(--muted); font-size: 0.8rem; }
+  .green { color: var(--green); }
+  .red   { color: var(--red); }
+  .yellow{ color: var(--yellow); }
+  .purple{ color: var(--purple); }
+  .cyan  { color: var(--cyan); }
+  button {
+    background: var(--accent); color: #fff; border: none; border-radius: 6px;
+    padding: 8px 20px; font-size: 0.9rem; font-weight: 600; cursor: pointer;
+    margin-right: 8px; margin-bottom: 8px; transition: opacity 0.15s;
+  }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.success { background: #16a34a; }
+  button.sm { padding: 4px 12px; font-size: 0.78rem; }
+  .progress-wrap { background: var(--border); border-radius: 4px; height: 6px; margin: 10px 0; overflow: hidden; display: none; }
+  .progress-bar  { background: var(--accent); height: 100%; width: 0; transition: width 0.08s; }
+  .status-line   { color: var(--muted); font-size: 0.78rem; min-height: 18px; margin: 4px 0; }
+  .kv { display: grid; grid-template-columns: 220px 1fr; gap: 3px 12px; font-size: 0.81rem; font-family: var(--mono); }
+  .kv .k { color: var(--muted); }
+  .step-hdr { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); margin-bottom: 10px; }
+  .verdict-box { padding: 20px 24px; border-radius: 8px; border: 2px solid; font-size: 1.15rem; font-weight: 700; text-align: center; margin: 24px 0 8px; }
+  .verdict-ready { border-color: var(--green);  color: var(--green);  background: #14532d22; }
+  .verdict-fail  { border-color: var(--red);    color: var(--red);    background: #450a0a22; }
+  details { margin-bottom: 12px; }
+  summary { cursor: pointer; font-size: 0.82rem; color: var(--accent); padding: 6px 0; user-select: none; }
+  details[open] summary { color: var(--heading); }
+  .heatmap-wrap { overflow-x: auto; margin-top: 10px; }
+  .heatmap { border-collapse: collapse; font-size: 0.65rem; font-family: var(--mono); }
+  .heatmap th { padding: 3px 5px; color: var(--muted); font-weight: 400; white-space: nowrap; }
+  .heatmap td { padding: 3px 5px; text-align: right; white-space: nowrap; border: 1px solid #1a1d27; }
+  .heatmap .row-label { color: var(--muted); text-align: left; }
+  pre { background: #0a0c10; border: 1px solid var(--border); border-radius: 6px; padding: 14px;
+        font-size: 0.75rem; font-family: var(--mono); overflow-x: auto; white-space: pre; color: #a5b4fc; }
+  #all-steps { display: none; }
+</style>
+</head>
+<body>
+
+<h1>MSD Phase 7C — Independent Scientific Verification</h1>
+<p class="subtitle">Validates the Phase 7B discovery pipeline before results are interpreted as research evidence · 9 verification steps</p>
+
+<!-- ─── PREREQS ────────────────────────────────────────────────────── -->
+<div id="prereq-card" class="card">
+  <div class="step-hdr">Prerequisites</div>
+  <div id="prereq-status" class="status-line">Checking…</div>
+</div>
+
+<!-- ─── DATA STATUS ───────────────────────────────────────────────── -->
+<div id="data-card" class="card" style="display:none">
+  <div class="step-hdr">Data Status</div>
+  <div id="data-status" class="status-line">Loading MarketStates from IndexedDB…</div>
+  <div id="data-kv" class="kv" style="margin-top:10px"></div>
+</div>
+
+<!-- ─── RUN BUTTON ───────────────────────────────────────────────── -->
+<div id="run-section" style="display:none; margin-bottom:20px">
+  <button id="run-btn" class="success">Run Phase 7C Verification (9 steps)</button>
+  <div class="progress-wrap" id="progress-wrap"><div class="progress-bar" id="progress-bar"></div></div>
+  <div class="status-line" id="run-status"></div>
+</div>
+
+<!-- ─── ALL REPORTS ───────────────────────────────────────────────── -->
+<div id="all-steps">
+
+<!-- STEP 1 -->
+<h2>Step 1 — Pipeline Reproducibility <span id="s1-badge"></span></h2>
+<div class="card" id="s1-card">
+  <div class="muted">Run the identical protocol twice with the same seed. Expect bit-identical results.</div>
+  <div id="s1-content" style="margin-top:12px"></div>
+</div>
+
+<!-- STEP 2 -->
+<h2>Step 2 — Candidate Completeness <span id="s2-badge"></span></h2>
+<div class="card" id="s2-card">
+  <div class="muted">Verify 80→80→80→80: search space → enumerated → evaluated → hypotheses.</div>
+  <div id="s2-content" style="margin-top:12px"></div>
+</div>
+
+<!-- STEP 3 -->
+<h2>Step 3 — Negative Controls <span id="s3-badge"></span></h2>
+<div class="card" id="s3-card">
+  <div class="muted">Information-destroyed datasets must produce zero discoveries.</div>
+  <div id="s3-content" style="margin-top:12px"></div>
+</div>
+
+<!-- STEP 4 -->
+<h2>Step 4 — Positive Control <span id="s4-badge"></span></h2>
+<div class="card" id="s4-card">
+  <div class="muted">Synthetic feature with known signal. Pipeline must detect it.</div>
+  <div id="s4-content" style="margin-top:12px"></div>
+</div>
+
+<!-- STEP 5 -->
+<h2>Step 5 — Sensitivity Analysis <span id="s5-badge"></span></h2>
+<div class="card" id="s5-card">
+  <div class="muted">Permutation counts 500 / 1000 / 2000. Rankings and conclusions must remain stable.</div>
+  <div id="s5-content" style="margin-top:12px"></div>
+</div>
+
+<!-- STEP 6 -->
+<h2>Step 6 — Random Seed Stability <span id="s6-badge"></span></h2>
+<div class="card" id="s6-card">
+  <div class="muted">Seeds 42 / 123 / 999. Scientific conclusions must not depend on seed choice.</div>
+  <div id="s6-content" style="margin-top:12px"></div>
+</div>
+
+<!-- STEP 7 -->
+<h2>Step 7 — Feature Diagnostics <span id="s7-badge"></span></h2>
+<div class="card" id="s7-card">
+  <div class="muted">Descriptive statistics, Pearson correlation, and Mutual Information matrices for all 16 NC features.</div>
+  <div id="s7-content" style="margin-top:12px"></div>
+</div>
+
+<!-- STEP 8 -->
+<h2>Step 8 — Experiment Manifest <span id="s8-badge"></span></h2>
+<div class="card" id="s8-card">
+  <div class="muted">Machine-readable manifest sufficient for exact future reproduction.</div>
+  <div id="s8-content" style="margin-top:12px"></div>
+</div>
+
+<!-- STEP 9 -->
+<h2>Step 9 — Scientific Readiness Decision <span id="s9-badge"></span></h2>
+<div id="s9-content"></div>
+
+</div><!-- /#all-steps -->
+
+<script>
+// ─── Constants ─────────────────────────────────────────────────────────────
+const DB_NAME    = 'mfx_msd_states';
+const STORE_NAME = 'MarketStates';
+const MOP = window.opener;
+
+// ─── IDB helpers ───────────────────────────────────────────────────────────
+function openDB() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(DB_NAME);
+    r.onsuccess = () => res(r.result);
+    r.onerror   = () => rej(r.error);
+  });
+}
+function readAllStates(db) {
+  return new Promise((res, rej) => {
+    if (!db.objectStoreNames.contains(STORE_NAME)) { res([]); return; }
+    const tx  = db.transaction(STORE_NAME, 'readonly');
+    const req = tx.objectStore(STORE_NAME).getAll();
+    req.onsuccess = () => res(req.result || []);
+    req.onerror   = () => rej(req.error);
+  });
+}
+
+// ─── UI helpers ────────────────────────────────────────────────────────────
+function badge(cls, txt) { return `<span class="badge ${cls}">${txt}</span>`; }
+function setBadge(id, cls, txt) { document.getElementById(id).innerHTML = badge(cls, txt); }
+function pFmt(p) {
+  if (p == null) return '—';
+  if (p < 0.001) return p.toExponential(2);
+  return p.toFixed(4);
+}
+function nFmt(x, d) {
+  if (x == null || !isFinite(x)) return '—';
+  return x.toFixed(d != null ? d : 5);
+}
+function renderKv(el, pairs) {
+  el.innerHTML = pairs.map(([k,v]) => `<span class="k">${k}</span><span class="v">${v}</span>`).join('');
+}
+function setProgress(pct, msg) {
+  document.getElementById('progress-bar').style.width = pct + '%';
+  if (msg) document.getElementById('run-status').textContent = msg;
+}
+function showProgress() {
+  document.getElementById('progress-wrap').style.display = 'block';
+}
+// Yield to browser to update UI
+function tick() { return new Promise(r => setTimeout(r, 0)); }
+
+// ─── Prerequisite check ────────────────────────────────────────────────────
+const REQUIRED_FNS = [
+  'msdBuildPhase7bSearchSpaceDefinition',
+  'msdFreezeSearchSpace',
+  'msdComputeSearchSpaceCardinality',
+  'msdDryRunEnumerateCandidates',
+  'msdBuildNcSnapshotRows',
+  'msdRunPhase7cControlPipeline',
+  'msdRunPhase7cNegativeControl',
+  'msdRunPhase7cPositiveControl',
+  'msdComputePhase7cFeatureDiagnostics',
+  'msdGeneratePhase7cManifest',
+  'msdValidatePhase7cReproducibility',
+  'msdValidateNonClassicalFeatures',
+  'MSD_SEARCH_SPACE_SPEC_VERSION_V2',
+  'MSD_PHASE7B_INDIVIDUAL_FEATURES',
+  'MSD_PHASE7B_MAX_CANDIDATES',
+  'MSD_PHASE7B_SYMBOL',
+  'MSD_NC_FEATURE_VERSION',
+];
+
+async function checkPrereqs() {
+  const el = document.getElementById('prereq-status');
+  if (!MOP) {
+    el.innerHTML = badge('fail','NO OPENER') + ' &nbsp;This page must be opened from the main app via <code>window.open()</code>, not navigated to directly.';
+    return false;
+  }
+  const missing = REQUIRED_FNS.filter(fn => MOP[fn] == null);
+  if (missing.length) {
+    el.innerHTML = badge('fail','MISSING') + ' &nbsp;Required functions not found in opener: ' + missing.join(', ');
+    return false;
+  }
+  // Run NC validation suite
+  const ncv = MOP.msdValidateNonClassicalFeatures();
+  if (ncv.failed > 0) {
+    el.innerHTML = badge('fail','NC SUITE FAILED') + ' &nbsp;' + ncv.failed + ' assertion(s) failed in the NC validation suite. Fix before running Phase 7C.';
+    return false;
+  }
+  el.innerHTML = badge('pass','PASS') + ` &nbsp;Opener detected · ${REQUIRED_FNS.length} functions found · NC validation suite: ${ncv.passed}/${ncv.total} assertions pass ✓`;
+  return true;
+}
+
+// ─── State ─────────────────────────────────────────────────────────────────
+let _allStates   = null;
+let _ncRows      = null;  // { rows, ... }
+let _frozenSpace = null;
+let _startTs     = null;
+let _manifest    = null;
+
+// ─── Main async init ───────────────────────────────────────────────────────
+async function init() {
+  const ok = await checkPrereqs();
+  if (!ok) return;
+
+  // Load data
+  document.getElementById('data-card').style.display = '';
+  try {
+    const db   = await openDB();
+    _allStates = await readAllStates(db);
+    db.close();
+  } catch (e) {
+    document.getElementById('data-status').innerHTML = badge('fail','IDB ERROR') + ' ' + e.message;
+    return;
+  }
+
+  // Build NC snapshot rows
+  _ncRows = MOP.msdBuildNcSnapshotRows(_allStates, { filterCertainOnly: true });
+
+  document.getElementById('data-status').innerHTML = badge(_ncRows.rows.length >= 30 ? 'pass' : 'warn', _ncRows.rows.length >= 30 ? 'OK' : 'LOW N');
+  renderKv(document.getElementById('data-kv'), [
+    ['Total MarketStates',      _allStates.length],
+    ['NC-eligible records',     _ncRows.eligibleCount],
+    ['NC-ineligible records',   _ncRows.ineligibleCount],
+    ['Certain-label rows',      _ncRows.certainCount],
+    ['Dropped (uncertain)',      _ncRows.droppedUncertainCount],
+    ['Usable rows for pipeline', _ncRows.rows.length],
+    ['Positive outcomes',        _ncRows.rows.filter(r=>r.event_outcome==='positive').length],
+    ['Negative outcomes',        _ncRows.rows.filter(r=>r.event_outcome==='negative').length],
+  ]);
+
+  if (_ncRows.rows.length < 30) {
+    document.getElementById('run-section').style.display = '';
+    document.getElementById('run-status').innerHTML = badge('warn','LOW DATA') + ' Only ' + _ncRows.rows.length + ' usable rows — capture more data for reliable Phase 7C results.';
+    document.getElementById('run-btn').disabled = true;
+    return;
+  }
+
+  // Build frozen search space
+  const spaceDef = MOP.msdBuildPhase7bSearchSpaceDefinition();
+  _frozenSpace   = MOP.msdFreezeSearchSpace(spaceDef, 'phase7c_verification', { schemaVersion: MOP.MSD_SEARCH_SPACE_SPEC_VERSION_V2 });
+
+  document.getElementById('run-section').style.display = '';
+  document.getElementById('run-btn').onclick = runVerification;
+}
+
+// ─── Step runners ─────────────────────────────────────────────────────────
+
+function renderCandidateTable(summaries) {
+  const sorted = summaries.slice().sort((a,b) => (a.adjustedPValue||1) - (b.adjustedPValue||1));
+  const rows   = sorted.map((h,i) => {
+    const sig = h.rejected;
+    return `<tr${sig?' class="sig"':''}>
+      <td class="num">${i+1}</td>
+      <td>${h.feature}</td>
+      <td class="num">${h.leadTime}</td>
+      <td class="num">${h.sampleSize||'—'}</td>
+      <td class="num">${nFmt(h.effectSize)}</td>
+      <td class="num">${pFmt(h.rawPValue)}</td>
+      <td class="num">${pFmt(h.adjustedPValue)}</td>
+      <td>${sig ? badge('sig','SIG') : badge('info','ns')}</td>
+    </tr>`;
+  }).join('');
+  return `<table><thead><tr>
+    <th>#</th><th>Feature</th><th>Lead</th><th>n</th>
+    <th>MI (nats)</th><th>p (raw)</th><th>p (BH adj)</th><th>Status</th>
+  </tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+// ── Step 1: Reproducibility ────────────────────────────────────────────────
+async function runStep1() {
+  setProgress(2, 'Step 1: Reproducibility — run A…');
+  await tick();
+  const opts1 = { permutations: 500, seed: 42, alpha: 0.05 };
+  const run1  = MOP.msdRunPhase7cControlPipeline(_ncRows.rows, _frozenSpace, opts1);
+  setProgress(12, 'Step 1: Reproducibility — run B (same parameters)…');
+  await tick();
+  const run2  = MOP.msdRunPhase7cControlPipeline(_ncRows.rows, _frozenSpace, opts1);
+  setProgress(20, 'Step 1: Comparing…');
+  await tick();
+
+  const cmp   = MOP.msdValidatePhase7cReproducibility(run1, run2);
+  const el    = document.getElementById('s1-content');
+  const pass  = cmp.identical;
+  setBadge('s1-badge', pass ? 'pass' : 'fail', pass ? 'PASS' : 'FAIL');
+
+  if (pass) {
+    el.innerHTML = `<p class="green">✓ Bit-identical results across both runs. ${run1.enumeratedCount} candidates, seed=42, permutations=500.</p>
+      <p class="muted" style="margin-top:8px">Effect sizes, raw p-values, adjusted p-values, rejection decisions, and sample sizes are identical in both runs.</p>`;
+  } else {
+    el.innerHTML = `<p class="red">✗ ${cmp.differencesFound} difference(s) found.</p>
+      <pre>${JSON.stringify(cmp.diffs.slice(0,5), null, 2)}</pre>`;
+  }
+  return { run1, run2, cmp, pass };
+}
+
+// ── Step 2: Completeness ──────────────────────────────────────────────────
+function runStep2(run1) {
+  const card       = document.getElementById('s2-card');
+  const el         = document.getElementById('s2-content');
+  const cardinality = MOP.msdComputeSearchSpaceCardinality(_frozenSpace);
+  const enumeration = MOP.msdDryRunEnumerateCandidates(_frozenSpace);
+  const evaluated   = run1.evaluatedOkCount;
+  const failed      = run1.failedCount;
+  const hyps        = run1.hypothesisSummaries.length;
+
+  // Check uniqueness
+  const hashes    = enumeration.candidates.map(c => c.candidateHash);
+  const uniqueH   = new Set(hashes).size;
+  const features  = enumeration.candidates.map(c => c.features[0]);
+  const fCounts   = {};
+  for (const f of features) fCounts[f] = (fCounts[f]||0)+1;
+  const leadTimes = enumeration.candidates.map(c => c.leadTime);
+  const ltCounts  = {};
+  for (const lt of leadTimes) ltCounts[lt] = (ltCounts[lt]||0)+1;
+
+  const expected  = MOP.MSD_PHASE7B_MAX_CANDIDATES;
+  const pass = cardinality.totalCardinality === expected &&
+               enumeration.count === expected &&
+               evaluated + failed === expected &&
+               hyps === expected &&
+               uniqueH === expected;
+
+  setBadge('s2-badge', pass ? 'pass' : 'fail', pass ? 'PASS — 80/80/80/80' : 'FAIL');
+
+  el.innerHTML = `
+    <div class="kv">
+      <span class="k">Search space cardinality</span><span class="v">${cardinality.totalCardinality} ${cardinality.totalCardinality===expected ? badge('pass','✓') : badge('fail','✗')}</span>
+      <span class="k">Candidates enumerated</span><span class="v">${enumeration.count} ${enumeration.count===expected ? badge('pass','✓') : badge('fail','✗')}</span>
+      <span class="k">Candidates evaluated (ok)</span><span class="v">${evaluated} ${evaluated===expected ? badge('pass','✓') : badge('warn',''+evaluated)}</span>
+      <span class="k">Candidates failed</span><span class="v">${failed} ${failed===0 ? badge('pass','0') : badge('fail',''+failed)}</span>
+      <span class="k">Hypothesis summaries</span><span class="v">${hyps} ${hyps===expected ? badge('pass','✓') : badge('fail','✗')}</span>
+      <span class="k">Unique candidate hashes</span><span class="v">${uniqueH} ${uniqueH===expected ? badge('pass','✓') : badge('fail',''+uniqueH)}</span>
+    </div>
+    <div style="margin-top:14px">
+      <h3>Feature coverage (each feature appears at ${Object.values(fCounts)[0] || '?'} lead times)</h3>
+      <div style="font-family:var(--mono);font-size:0.78rem;color:var(--muted);margin-top:6px">
+        ${Object.entries(fCounts).map(([f,c])=>`${f}: ${c}`).join('<br>')}
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <h3>Lead-time coverage (each lead time has ${Object.values(ltCounts)[0] || '?'} features)</h3>
+      <div style="font-family:var(--mono);font-size:0.78rem;color:var(--muted);margin-top:6px">
+        ${Object.entries(ltCounts).sort((a,b)=>Number(a[0])-Number(b[0])).map(([lt,c])=>`lt=${lt}: ${c} candidates`).join('<br>')}
+      </div>
+    </div>`;
+  return { pass };
+}
+
+// ── Step 3: Negative controls ─────────────────────────────────────────────
+async function runStep3() {
+  const el = document.getElementById('s3-content');
+  const controls = [
+    { type: 'random_labels',    label: 'Random Labels',    desc: 'Event outcomes shuffled (seeded). Features intact.' },
+    { type: 'random_features',  label: 'Random Features',  desc: 'All ncf_* values replaced with seeded uniform draws.' },
+    { type: 'constant_features',label: 'Constant Features',desc: 'All ncf_* values replaced with their per-feature mean.' },
+  ];
+  const opts = { permutations: 500, seed: 42, alpha: 0.05 };
+  const results = [];
+
+  for (let i = 0; i < controls.length; i++) {
+    const c = controls[i];
+    const pct = 20 + i * 10;
+    setProgress(pct, `Step 3: Negative control — ${c.label}…`);
+    await tick();
+    const r = MOP.msdRunPhase7cNegativeControl(_ncRows.rows, _frozenSpace, c.type, opts);
+    results.push({ ...c, result: r });
+  }
+
+  const allZero = results.every(r => r.result.discoveryCount === 0);
+  setBadge('s3-badge', allZero ? 'pass' : 'fail', allZero ? 'PASS — 0 false discoveries' : 'FAIL');
+
+  const rows = results.map(r => {
+    const pass = r.result.discoveryCount === 0;
+    return `<tr>
+      <td>${r.label}</td>
+      <td class="muted">${r.desc}</td>
+      <td class="num">${r.result.enumeratedCount}</td>
+      <td class="num">${r.result.evaluatedOkCount}</td>
+      <td class="num ${pass?'green':'red'}">${r.result.discoveryCount}</td>
+      <td>${pass ? badge('pass','0 discoveries ✓') : badge('fail',r.result.discoveryCount+' FOUND')}</td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = `<table><thead><tr>
+    <th>Control Type</th><th>Description</th><th>Enumerated</th><th>Evaluated</th><th>Discoveries</th><th>Result</th>
+  </tr></thead><tbody>${rows}</tbody></table>`;
+  return { pass: allZero, results };
+}
+
+// ── Step 4: Positive control ──────────────────────────────────────────────
+async function runStep4() {
+  setProgress(52, 'Step 4: Positive control — injecting synthetic signal…');
+  await tick();
+  const opts = { permutations: 500, seed: 42, signalStrength: 1.5 };
+  const r    = MOP.msdRunPhase7cPositiveControl(_ncRows.rows, _frozenSpace, opts);
+  const pass = r.detectedSignal === true;
+  const el   = document.getElementById('s4-content');
+
+  setBadge('s4-badge', pass ? 'pass' : 'fail', pass ? 'DETECTED ✓' : 'NOT DETECTED ✗');
+
+  el.innerHTML = `
+    <div class="kv">
+      <span class="k">Synthetic feature</span><span class="v">${r.syntheticFeatureName}</span>
+      <span class="k">Signal strength (μ)</span><span class="v">${r.signalStrength} nats mean shift for positive outcomes; 0 for negatives</span>
+      <span class="k">Noise σ</span><span class="v">0.5 (Box-Muller, seeded)</span>
+      <span class="k">Sample size</span><span class="v">${r.sampleSize}</span>
+      <span class="k">Positive outcomes</span><span class="v">${r.positiveCount}</span>
+      <span class="k">Observed MI</span><span class="v">${nFmt(r.effectSize)} nats</span>
+      <span class="k">Raw p-value</span><span class="v">${pFmt(r.rawPValue)}</span>
+      <span class="k">Adjusted p-value (BH)</span><span class="v">${pFmt(r.adjustedPValue)}</span>
+      <span class="k">Signal detected?</span><span class="v">${r.detectedSignal ? badge('pass','YES ✓') : badge('fail','NO ✗')}</span>
+    </div>
+    <p class="muted" style="margin-top:10px">The mock search space (1 synthetic feature × 1 lead time = 1 candidate) was never recorded to the Discovery Ledger. The synthetic feature was injected into in-memory row copies only.</p>`;
+  return { pass, r };
+}
+
+// ── Step 5: Sensitivity analysis ──────────────────────────────────────────
+async function runStep5() {
+  const permCounts = [500, 1000, 2000];
+  const seed = 42;
+  const runs  = [];
+  for (let pi = 0; pi < permCounts.length; pi++) {
+    const pct = 55 + pi * 6;
+    setProgress(pct, `Step 5: Sensitivity — ${permCounts[pi]} permutations…`);
+    await tick();
+    const r = MOP.msdRunPhase7cControlPipeline(_ncRows.rows, _frozenSpace, { permutations: permCounts[pi], seed, alpha: 0.05 });
+    runs.push({ perms: permCounts[pi], result: r });
+  }
+  // Build ranking comparison
+  // Reference order: sort by adjustedPValue at 1000 permutations
+  const ref = runs[1].result.hypothesisSummaries.slice().sort((a,b)=>(a.adjustedPValue||1)-(b.adjustedPValue||1));
+  const hashToRank500  = new Map(runs[0].result.hypothesisSummaries.slice().sort((a,b)=>(a.adjustedPValue||1)-(b.adjustedPValue||1)).map((h,i)=>[h.candidateHash,i+1]));
+  const hashToRank1000 = new Map(ref.map((h,i)=>[h.candidateHash,i+1]));
+  const hashToRank2000 = new Map(runs[2].result.hypothesisSummaries.slice().sort((a,b)=>(a.adjustedPValue||1)-(b.adjustedPValue||1)).map((h,i)=>[h.candidateHash,i+1]));
+
+  // Kendall rank correlation between 500↔2000 (subset of top-20 for display)
+  const discCounts  = runs.map(r => r.result.significantCount);
+  const allSame     = discCounts.every(c => c === discCounts[0]);
+  setBadge('s5-badge', allSame ? 'pass' : 'warn', allSame ? 'STABLE' : 'VARIES');
+
+  const top20 = ref.slice(0, 20);
+  const el    = document.getElementById('s5-content');
+  const rows  = top20.map((h, i) => {
+    const r500  = runs[0].result.hypothesisSummaries.find(x=>x.candidateHash===h.candidateHash);
+    const r1000 = h;
+    const r2000 = runs[2].result.hypothesisSummaries.find(x=>x.candidateHash===h.candidateHash);
+    return `<tr>
+      <td>${h.feature}@lt${h.leadTime}</td>
+      <td class="num">${pFmt(r500?.adjustedPValue)}</td>
+      <td class="num">${pFmt(r1000.adjustedPValue)}</td>
+      <td class="num">${pFmt(r2000?.adjustedPValue)}</td>
+      <td class="num">${hashToRank500.get(h.candidateHash)||'?'}</td>
+      <td class="num">${hashToRank1000.get(h.candidateHash)||'?'}</td>
+      <td class="num">${hashToRank2000.get(h.candidateHash)||'?'}</td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = `
+    <div class="kv" style="margin-bottom:14px">
+      <span class="k">Discoveries at 500 perms</span><span class="v">${discCounts[0]} ${discCounts[0]===discCounts[1]?badge('pass','=1000'):badge('warn','≠1000')}</span>
+      <span class="k">Discoveries at 1000 perms</span><span class="v">${discCounts[1]}</span>
+      <span class="k">Discoveries at 2000 perms</span><span class="v">${discCounts[2]} ${discCounts[2]===discCounts[1]?badge('pass','=1000'):badge('warn','≠1000')}</span>
+    </div>
+    <h3>Top 20 by adjusted p-value (1000 perms)</h3>
+    <div style="overflow-x:auto;margin-top:8px">
+    <table><thead><tr>
+      <th>Candidate</th>
+      <th class="num">adj-p (500)</th><th class="num">adj-p (1000)</th><th class="num">adj-p (2000)</th>
+      <th class="num">rank (500)</th><th class="num">rank (1000)</th><th class="num">rank (2000)</th>
+    </tr></thead><tbody>${rows}</tbody></table></div>`;
+  return { pass: allSame, runs, discCounts };
+}
+
+// ── Step 6: Seed stability ────────────────────────────────────────────────
+async function runStep6() {
+  const seeds = [42, 123, 999];
+  const perms = 1000;
+  const runs  = [];
+  for (let si = 0; si < seeds.length; si++) {
+    const pct = 70 + si * 4;
+    setProgress(pct, `Step 6: Seed stability — seed=${seeds[si]}…`);
+    await tick();
+    const r = MOP.msdRunPhase7cControlPipeline(_ncRows.rows, _frozenSpace, { permutations: perms, seed: seeds[si], alpha: 0.05 });
+    runs.push({ seed: seeds[si], result: r });
+  }
+  const discCounts = runs.map(r => r.result.significantCount);
+  const allSame    = discCounts.every(c => c === discCounts[0]);
+  setBadge('s6-badge', allSame ? 'pass' : 'warn', allSame ? 'STABLE' : 'VARIES');
+
+  const ref    = runs[0].result.hypothesisSummaries.slice().sort((a,b)=>(a.adjustedPValue||1)-(b.adjustedPValue||1));
+  const top20  = ref.slice(0, 20);
+  const el     = document.getElementById('s6-content');
+  const rows   = top20.map(h => {
+    const r42  = h;
+    const r123 = runs[1].result.hypothesisSummaries.find(x=>x.candidateHash===h.candidateHash);
+    const r999 = runs[2].result.hypothesisSummaries.find(x=>x.candidateHash===h.candidateHash);
+    const maxDelta = Math.max(
+      Math.abs((r42.adjustedPValue||0)-(r123?.adjustedPValue||0)),
+      Math.abs((r42.adjustedPValue||0)-(r999?.adjustedPValue||0))
+    );
+    return `<tr>
+      <td>${h.feature}@lt${h.leadTime}</td>
+      <td class="num">${pFmt(r42.adjustedPValue)}</td>
+      <td class="num">${pFmt(r123?.adjustedPValue)}</td>
+      <td class="num">${pFmt(r999?.adjustedPValue)}</td>
+      <td class="num ${maxDelta < 0.05 ? 'green':'yellow'}">${maxDelta.toFixed(4)}</td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = `
+    <div class="kv" style="margin-bottom:14px">
+      <span class="k">Discoveries (seed=42)</span><span class="v">${discCounts[0]}</span>
+      <span class="k">Discoveries (seed=123)</span><span class="v">${discCounts[1]} ${discCounts[1]===discCounts[0]?badge('pass','=seed42'):badge('warn','≠seed42')}</span>
+      <span class="k">Discoveries (seed=999)</span><span class="v">${discCounts[2]} ${discCounts[2]===discCounts[0]?badge('pass','=seed42'):badge('warn','≠seed42')}</span>
+    </div>
+    <h3>Top 20 by adjusted p-value (seed=42)</h3>
+    <div style="overflow-x:auto;margin-top:8px">
+    <table><thead><tr>
+      <th>Candidate</th>
+      <th class="num">adj-p (s=42)</th><th class="num">adj-p (s=123)</th><th class="num">adj-p (s=999)</th>
+      <th class="num">max Δ</th>
+    </tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="muted" style="margin-top:8px">max Δ = largest absolute difference in adjusted p-value across seeds for that candidate. &lt; 0.05 shown green.</p>`;
+  return { pass: allSame, runs, discCounts };
+}
+
+// ── Step 7: Feature diagnostics ───────────────────────────────────────────
+async function runStep7() {
+  setProgress(84, 'Step 7: Feature diagnostics…');
+  await tick();
+  const featureKeys = Array.from(MOP.MSD_PHASE7B_INDIVIDUAL_FEATURES);
+  const diag = MOP.msdComputePhase7cFeatureDiagnostics(_ncRows.rows, featureKeys);
+  setBadge('s7-badge', 'pass', 'COMPLETE');
+
+  const el = document.getElementById('s7-content');
+
+  // Per-feature stats table
+  const statRows = featureKeys.map(k => {
+    const s = diag.perFeature[k];
+    if (!s || s.n === 0) return `<tr><td class="mono">${k}</td><td colspan="8" class="muted">no data</td></tr>`;
+    return `<tr>
+      <td class="mono">${k.replace('ncf_','')}</td>
+      <td class="num">${s.n}</td>
+      <td class="num">${nFmt(s.mean,4)}</td>
+      <td class="num">${nFmt(s.std,4)}</td>
+      <td class="num">${nFmt(s.min,4)}</td>
+      <td class="num">${nFmt(s.max,4)}</td>
+      <td class="num">${nFmt(s.skewness,2)}</td>
+      <td class="num">${nFmt(s.kurtosis,2)}</td>
+      <td class="num ${s.missingRate>0?'yellow':'green'}">${(s.missingRate*100).toFixed(1)}%</td>
+    </tr>`;
+  }).join('');
+
+  // Pearson heatmap (abbreviated labels)
+  function heatColor(r) {
+    if (r == null) return '#1a1d27';
+    const a = Math.abs(r);
+    const hi = r > 0 ? [59,130,246] : [239,68,68];
+    return `rgb(${hi.map(c=>Math.round(20+(c-20)*a)).join(',')})`;
+  }
+  const shortLabels = featureKeys.map(k => k.replace('ncf_','').slice(0,8));
+  const pearsonHeader = `<tr><th class="row-label">↓ A / B →</th>${shortLabels.map(l=>`<th>${l}</th>`).join('')}</tr>`;
+  const pearsonRows = featureKeys.map((ki, ri) => {
+    const cells = featureKeys.map((kj) => {
+      const v = diag.pearsonMatrix[ki][kj];
+      const bg = heatColor(v);
+      const txt = ki===kj ? '1.00' : (v==null?'—':v.toFixed(2));
+      return `<td style="background:${bg}">${txt}</td>`;
+    }).join('');
+    return `<tr><th class="row-label">${shortLabels[ri]}</th>${cells}</tr>`;
+  }).join('');
+
+  // MI heatmap
+  const miRows = featureKeys.map((ki, ri) => {
+    const cells = featureKeys.map((kj) => {
+      const v = ki===kj ? null : diag.miMatrix[ki][kj];
+      const bg = v==null ? '#1a1d27' : heatColor(Math.min(v/1, 1) * 0.8);
+      const txt = v==null ? (ki===kj?'—':'—') : v.toFixed(3);
+      return `<td style="background:${bg}">${txt}</td>`;
+    }).join('');
+    return `<tr><th class="row-label">${shortLabels[ri]}</th>${cells}</tr>`;
+  }).join('');
+
+  el.innerHTML = `
+    <h3>Descriptive Statistics (${_ncRows.rows.length} rows)</h3>
+    <div style="overflow-x:auto;margin-top:8px">
+    <table><thead><tr>
+      <th>Feature</th><th class="num">n</th><th class="num">mean</th><th class="num">std</th>
+      <th class="num">min</th><th class="num">max</th><th class="num">skew</th><th class="num">kurt</th><th class="num">miss%</th>
+    </tr></thead><tbody>${statRows}</tbody></table></div>
+
+    <h3 style="margin-top:18px">Pearson Correlation Matrix (r)</h3>
+    <p class="muted">Blue = positive correlation, Red = negative. Values in [−1, 1].</p>
+    <div class="heatmap-wrap"><table class="heatmap">
+      <thead>${pearsonHeader}</thead><tbody>${pearsonRows}</tbody>
+    </table></div>
+
+    <h3 style="margin-top:18px">Mutual Information Matrix (bits, 8 bins)</h3>
+    <p class="muted">Higher = more shared information. Diagonal undefined (H(X) would need entropy estimate).</p>
+    <div class="heatmap-wrap"><table class="heatmap">
+      <thead>${pearsonHeader.replace('↓ A / B →','MI (bits)')}</thead><tbody>${miRows}</tbody>
+    </table></div>`;
+
+  return { pass: true, diag };
+}
+
+// ── Step 8: Manifest ──────────────────────────────────────────────────────
+function runStep8(s1Data, s2Data, s5Data, s6Data, s7Data) {
+  setProgress(88, 'Step 8: Generating manifest…');
+  const ref     = s1Data.run1;
+  const positiveCount = _ncRows.rows.filter(r=>r.event_outcome==='positive').length;
+  _manifest = MOP.msdGeneratePhase7cManifest({
+    searchSpaceId:      _frozenSpace.searchSpaceId,
+    searchSpaceHash:    _frozenSpace.searchSpaceHash,
+    searchSpaceVersion: _frozenSpace.searchSpaceVersion,
+    datasetSnapshotId:  'phase7c_verification_not_recorded',
+    permutations:       1000,
+    seed:               42,
+    alpha:              0.05,
+    symbol:             MOP.MSD_PHASE7B_SYMBOL,
+    candidateCount:     ref.enumeratedCount,
+    hypothesisCount:    ref.hypothesisSummaries.length,
+    sampleSize:         _ncRows.rows.length,
+    positiveCount,
+    negativeCount:      _ncRows.rows.length - positiveCount,
+    ncFeatureCount:     MOP.MSD_PHASE7B_INDIVIDUAL_FEATURES.length,
+    executionTimestamp: new Date().toISOString(),
+    executionDurationMs: _startTs ? (Date.now() - _startTs) : null,
+    uncertaintyPolicy:  'filterCertainOnly',
+  });
+  setBadge('s8-badge', 'pass', 'GENERATED');
+  const el = document.getElementById('s8-content');
+  el.innerHTML = `<pre>${JSON.stringify(_manifest, null, 2)}</pre>
+    <button class="sm" onclick="navigator.clipboard.writeText(JSON.stringify(_manifest,null,2))">Copy JSON</button>`;
+  return { pass: true };
+}
+
+// ── Step 9: Readiness decision ────────────────────────────────────────────
+function runStep9(results) {
+  const failures = [];
+  if (!results.s1.pass) failures.push('Pipeline is NOT reproducible (Step 1).');
+  if (!results.s2.pass) failures.push('Candidate completeness violated — not all 80 candidates present (Step 2).');
+  if (!results.s3.pass) failures.push('Negative controls produced false discoveries (Step 3).');
+  if (!results.s4.pass) failures.push('Positive control: synthetic signal NOT detected (Step 4).');
+
+  const ready = failures.length === 0;
+  const el    = document.getElementById('s9-content');
+  setBadge('s9-badge', ready ? 'pass' : 'fail', ready ? 'READY' : 'NOT READY');
+
+  let sensitivity_note = '';
+  if (!results.s5.allSame || !results.s6.allSame) {
+    sensitivity_note = `<p class="yellow" style="margin-top:10px">⚠ Discovery count varies across permutation counts (Step 5) or seeds (Step 6). Conclusions near α=0.05 should be interpreted with caution.</p>`;
+  }
+
+  if (ready) {
+    el.innerHTML = `
+      <div class="verdict-box verdict-ready">READY_FOR_PHASE8_DISCOVERY</div>
+      <div class="card success">
+        <p class="green" style="font-weight:600">The MSD discovery platform has passed engineering and scientific verification.</p>
+        <ul style="margin:10px 0 0 20px;line-height:1.9;color:var(--text)">
+          <li>Pipeline is <strong>deterministically reproducible</strong> (bit-identical with fixed seed).</li>
+          <li>All <strong>80 candidates enumerated, evaluated, and summarised</strong> without loss.</li>
+          <li>All <strong>3 negative controls produced 0 false discoveries</strong> (family-wise error controlled).</li>
+          <li>Positive control with synthetic signal <strong>detected at α=0.05</strong>.</li>
+          <li>Feature diagnostics computed for all 16 NC features.</li>
+          <li>Machine-readable manifest generated and available for reproduction.</li>
+        </ul>
+        ${sensitivity_note}
+        <p class="muted" style="margin-top:12px">Phase 7B discovery results may now be interpreted as scientific evidence under the governance framework established in Phases 1–7B.</p>
+      </div>`;
+  } else {
+    el.innerHTML = `
+      <div class="verdict-box verdict-fail">NOT_READY</div>
+      <div class="card danger">
+        <p class="red" style="font-weight:600">Blocking issues:</p>
+        <ul style="margin:10px 0 0 20px;line-height:1.9;color:var(--text)">
+          ${failures.map(f=>`<li>${f}</li>`).join('')}
+        </ul>
+        <p class="muted" style="margin-top:12px">Resolve all blocking issues before interpreting Phase 7B results as research evidence.</p>
+      </div>`;
+  }
+  return { ready, failures };
+}
+
+// ─── Master run ────────────────────────────────────────────────────────────
+async function runVerification() {
+  const btn = document.getElementById('run-btn');
+  btn.disabled = true;
+  showProgress();
+  document.getElementById('all-steps').style.display = '';
+  _startTs = Date.now();
+
+  try {
+    setProgress(1, 'Initialising…');
+    await tick();
+
+    const s1 = await runStep1();
+    await tick();
+
+    setProgress(22, 'Step 2: Candidate completeness…');
+    const s2 = runStep2(s1.run1);
+    await tick();
+
+    const s3 = await runStep3();
+    await tick();
+
+    const s4 = await runStep4();
+    await tick();
+
+    const s5 = await runStep5();
+    await tick();
+
+    const s6 = await runStep6();
+    await tick();
+
+    const s7 = await runStep7();
+    await tick();
+
+    setProgress(87, 'Step 8: Generating manifest…');
+    const s8 = runStep8(s1, s2, s5, s6, s7);
+    await tick();
+
+    setProgress(95, 'Step 9: Readiness decision…');
+    const s9 = runStep9({
+      s1: { pass: s1.pass },
+      s2: { pass: s2.pass },
+      s3: { pass: s3.pass },
+      s4: { pass: s4.pass },
+      s5: { allSame: s5.pass },
+      s6: { allSame: s6.pass },
+    });
+    await tick();
+
+    setProgress(100, 'Complete — ' + (Date.now() - _startTs) + ' ms');
+    btn.textContent = 'Verification Complete';
+    btn.disabled = false;
+
+  } catch (e) {
+    document.getElementById('run-status').innerHTML = `<span class="red">Error: ${e.message}</span>`;
+    console.error('[Phase 7C]', e);
+    btn.disabled = false;
+  }
+}
+
+// ─── Boot ──────────────────────────────────────────────────────────────────
+init().catch(e => {
+  document.getElementById('prereq-status').innerHTML = badge('fail','ERROR') + ' ' + e.message;
+  console.error('[Phase 7C init]', e);
+});
+</script>
+</body>
+</html>
