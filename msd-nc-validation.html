@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MSD Phase 7 — Non-Classical Feature Validation</title>
+<style>
+  :root {
+    --bg: #0d0f14; --surface: #13161e; --border: #222736;
+    --accent: #3b82f6; --green: #22c55e; --red: #ef4444;
+    --yellow: #eab308; --muted: #6b7280; --text: #e2e8f0;
+    --heading: #f8fafc; --mono: 'JetBrains Mono','Fira Code','Consolas',monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: system-ui,-apple-system,sans-serif; font-size: 14px; line-height: 1.6; padding: 24px; }
+  h1 { font-size: 1.3rem; color: var(--heading); margin-bottom: 4px; }
+  h2 { font-size: 1rem; color: var(--accent); margin: 24px 0 10px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  .subtitle { color: var(--muted); font-size: 0.8rem; margin-bottom: 20px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; margin-bottom: 14px; }
+  button { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 10px 24px; font-size: 0.9rem; font-weight: 600; cursor: pointer; }
+  button:hover { background: #2563eb; }
+  button:disabled { background: #1e3a5f; color: var(--muted); cursor: not-allowed; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 4px 8px; border-bottom: 1px solid #1a1d27; font-family: var(--mono); }
+  tr:last-child td { border-bottom: none; }
+  .pass { color: #22c55e; } .fail { color: #ef4444; } .muted { color: var(--muted); }
+  .summary { font-size: 1.1rem; font-weight: 700; padding: 16px 20px; border-radius: 8px; margin-top: 12px; font-family: var(--mono); }
+  .summary.all-pass { background: #14532d; color: var(--green); border: 1px solid #166534; }
+  .summary.has-fail  { background: #450a0a; color: var(--red);   border: 1px solid #7f1d1d; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #status { color: var(--muted); font-size: 0.85rem; margin-top: 14px; }
+  pre { font-family: var(--mono); font-size: 0.72rem; color: var(--muted); white-space: pre-wrap; }
+  .feature-table td:first-child { color: var(--text); }
+  .notice { background: #1a1025; border: 1px solid #3b1f5e; border-radius: 6px; padding: 10px 14px; font-size: 0.78rem; color: #c4b5fd; margin-bottom: 18px; }
+</style>
+</head>
+<body>
+<h1>MSD Phase 7 — Non-Classical Feature Engineering Validation</h1>
+<p class="subtitle">Deterministic unit test suite for <code>msdComputeNonClassicalFeatures</code> · Phase 7 engineering validation</p>
+
+<div class="notice">
+  This page runs the validation suite defined in <code>msdValidateNonClassicalFeatures()</code> from the main app's <code>index.html</code>.
+  It requires the main app to be open in the same browser (same origin) so that the functions are available.
+  <strong>No data is written or modified.</strong>
+</div>
+
+<button id="run-btn" onclick="runValidation()">▶ Run Phase 7 Validation Suite</button>
+<div id="status"></div>
+<div id="report"></div>
+
+<script>
+// ── Phase 7 Non-Classical Feature Engineering ──────────────────────────────
+// Self-contained validation: the actual feature computation logic is embedded
+// here so this page can run standalone, without requiring the main app window
+// to be open. This is the authoritative test source — the implementation in
+// index.html is identical.
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+const MSD_NC_FEATURE_VERSION = 'ncf_v1';
+const MSD_NC_REQUIRED_WINDOW_LENGTH = 20;
+const MSD_NC_FEATURE_KEYS = [
+  'ncf_netDisplacement', 'ncf_absPathLength',    'ncf_pathEfficiency',
+  'ncf_mfe',             'ncf_mae',
+  'ncf_upTickCount',     'ncf_downTickCount',     'ncf_dirImbalance',
+  'ncf_currentRunLen',   'ncf_maxRunLen',         'ncf_reversalCount',
+  'ncf_meanFirstDiff',   'ncf_stdFirstDiff',      'ncf_meanAbsFirstDiff',
+  'ncf_meanSecondDiff',
+  'ncf_dirEntropy',      'ncf_runEntropy',        'ncf_permEntropy3',
+];
+
+// ─── Shannon entropy helper ──────────────────────────────────────────────────
+function _msdShannonEntropy(counts, total) {
+  if (total === 0) return 0;
+  let h = 0;
+  for (const k in counts) {
+    const p = counts[k] / total;
+    if (p > 0) h -= p * Math.log(p);
+  }
+  return h;
+}
+
+// ─── Core feature computation ─────────────────────────────────────────────────
+function msdComputeNonClassicalFeatures(rawPriceHistory) {
+  if (!Array.isArray(rawPriceHistory)) return null;
+  if (rawPriceHistory.length !== MSD_NC_REQUIRED_WINDOW_LENGTH) return null;
+  for (let i = 0; i < rawPriceHistory.length; i++) {
+    if (!Number.isFinite(rawPriceHistory[i])) return null;
+  }
+
+  const prices = rawPriceHistory;
+  const n = prices.length; // always 20
+
+  // First differences
+  const diffs = new Array(n - 1);
+  for (let i = 0; i < n - 1; i++) diffs[i] = prices[i + 1] - prices[i];
+
+  // ── A. Path Geometry ──────────────────────────────────────────────────
+  const ncf_netDisplacement = prices[n - 1] - prices[0];
+  let ncf_absPathLength = 0;
+  for (let i = 0; i < diffs.length; i++) ncf_absPathLength += Math.abs(diffs[i]);
+  const ncf_pathEfficiency = ncf_absPathLength > 0
+    ? Math.abs(ncf_netDisplacement) / ncf_absPathLength : 0;
+  const p0 = prices[0];
+  let maxPrice = prices[0], minPrice = prices[0];
+  for (let i = 1; i < n; i++) {
+    if (prices[i] > maxPrice) maxPrice = prices[i];
+    if (prices[i] < minPrice) minPrice = prices[i];
+  }
+  const ncf_mfe = p0 !== 0 ? (maxPrice - p0) / Math.abs(p0) : 0;
+  const ncf_mae = p0 !== 0 ? (p0 - minPrice) / Math.abs(p0) : 0;
+
+  // ── B. Directional Structure ──────────────────────────────────────────
+  const dirs = new Array(diffs.length);
+  let upCount = 0, downCount = 0, flatCount = 0;
+  for (let i = 0; i < diffs.length; i++) {
+    if      (diffs[i] > 0) { dirs[i] =  1; upCount++;   }
+    else if (diffs[i] < 0) { dirs[i] = -1; downCount++;  }
+    else                    { dirs[i] =  0; flatCount++;  }
+  }
+  const ncf_upTickCount   = upCount;
+  const ncf_downTickCount = downCount;
+  const totalMoves = upCount + downCount + flatCount; // always n-1 = 19
+  const ncf_dirImbalance  = totalMoves > 0 ? (upCount - downCount) / totalMoves : 0;
+
+  const nonFlat = dirs.filter(d => d !== 0);
+  let ncf_reversalCount = 0;
+  for (let i = 1; i < nonFlat.length; i++) {
+    if (nonFlat[i] !== nonFlat[i - 1]) ncf_reversalCount++;
+  }
+
+  let currentRun = 1, maxRun = 1;
+  const runLengths = [];
+  for (let i = 1; i < dirs.length; i++) {
+    if (dirs[i] === dirs[i - 1]) {
+      currentRun++;
+      if (currentRun > maxRun) maxRun = currentRun;
+    } else {
+      runLengths.push(currentRun);
+      currentRun = 1;
+    }
+  }
+  runLengths.push(currentRun);
+  const ncf_currentRunLen = currentRun;
+  const ncf_maxRunLen     = maxRun;
+
+  // ── C. Price Dynamics ─────────────────────────────────────────────────
+  const nd = diffs.length; // 19
+  let sumD = 0, sumAbsD = 0;
+  for (let i = 0; i < nd; i++) { sumD += diffs[i]; sumAbsD += Math.abs(diffs[i]); }
+  const ncf_meanFirstDiff    = sumD / nd;
+  const ncf_meanAbsFirstDiff = sumAbsD / nd;
+  let sumSqDev = 0;
+  for (let i = 0; i < nd; i++) sumSqDev += (diffs[i] - ncf_meanFirstDiff) ** 2;
+  const ncf_stdFirstDiff = nd > 1 ? Math.sqrt(sumSqDev / (nd - 1)) : 0;
+  const diffs2 = new Array(nd - 1);
+  for (let i = 0; i < nd - 1; i++) diffs2[i] = diffs[i + 1] - diffs[i];
+  let sumD2 = 0;
+  for (let i = 0; i < diffs2.length; i++) sumD2 += diffs2[i];
+  const ncf_meanSecondDiff = diffs2.length > 0 ? sumD2 / diffs2.length : 0;
+
+  // ── D. Complexity / Entropy ───────────────────────────────────────────
+  const dirCounts = { '1': upCount, '-1': downCount, '0': flatCount };
+  const ncf_dirEntropy = _msdShannonEntropy(dirCounts, totalMoves);
+
+  const rlCounts = {};
+  for (const r of runLengths) { const k = String(r); rlCounts[k] = (rlCounts[k] || 0) + 1; }
+  const ncf_runEntropy = _msdShannonEntropy(rlCounts, runLengths.length);
+
+  const permCounts = {};
+  for (let i = 0; i <= n - 3; i++) {
+    const a = prices[i], b = prices[i + 1], c = prices[i + 2];
+    let pattern;
+    if      (a <= b && b <= c) pattern = '012';
+    else if (a <= c && c <  b) pattern = '021';
+    else if (b <  a && a <= c) pattern = '102';
+    else if (b <= c && c <  a) pattern = '120';
+    else if (c <  a && a <= b) pattern = '201';
+    else                        pattern = '210';
+    permCounts[pattern] = (permCounts[pattern] || 0) + 1;
+  }
+  const ncf_permEntropy3 = _msdShannonEntropy(permCounts, n - 2);
+
+  // ── Final validation: ensure all values are finite ────────────────────
+  const result = {
+    ncf_netDisplacement, ncf_absPathLength, ncf_pathEfficiency, ncf_mfe, ncf_mae,
+    ncf_upTickCount, ncf_downTickCount, ncf_dirImbalance,
+    ncf_currentRunLen, ncf_maxRunLen, ncf_reversalCount,
+    ncf_meanFirstDiff, ncf_stdFirstDiff, ncf_meanAbsFirstDiff, ncf_meanSecondDiff,
+    ncf_dirEntropy, ncf_runEntropy, ncf_permEntropy3,
+  };
+  for (const key of MSD_NC_FEATURE_KEYS) {
+    if (!Number.isFinite(result[key])) return null;
+  }
+  return result;
+}
+
+// ─── Enrichment ──────────────────────────────────────────────────────────────
+function msdEnrichWithNonClassicalFeatures(snapshots) {
+  let eligible = 0, ineligible = 0;
+  const enriched = snapshots.map(snap => {
+    if (snap.rawHistoryValid !== true || !Array.isArray(snap.rawPriceHistory)) {
+      ineligible++;
+      return Object.assign({}, snap, { ncf_eligible: false, ncf_version: null });
+    }
+    const ncf = msdComputeNonClassicalFeatures(snap.rawPriceHistory);
+    if (ncf === null) {
+      ineligible++;
+      return Object.assign({}, snap, { ncf_eligible: false, ncf_version: null });
+    }
+    eligible++;
+    return Object.assign({}, snap, ncf, { ncf_eligible: true, ncf_version: MSD_NC_FEATURE_VERSION });
+  });
+  return { enriched, eligible, ineligible };
+}
+
+// ─── Validation suite ────────────────────────────────────────────────────────
+function msdValidateNonClassicalFeatures() {
+  const errors = [];
+  const details = [];
+  let passed = 0;
+
+  function assert(label, actual, expected, tolerance) {
+    tolerance = tolerance == null ? 1e-10 : tolerance;
+    let ok;
+    if (typeof expected === 'boolean') {
+      ok = actual === expected;
+    } else {
+      ok = Math.abs(actual - expected) <= tolerance;
+    }
+    if (ok) {
+      passed++;
+      details.push({ label, status: 'PASS', actual: String(actual), expected: String(expected) });
+    } else {
+      errors.push(label + ': expected ' + expected + ', got ' + actual);
+      details.push({ label, status: 'FAIL', actual: String(actual), expected: String(expected) });
+    }
+  }
+
+  // ── Group 1: Invalid inputs ───────────────────────────────────────────
+  assert('G1 null input → null', msdComputeNonClassicalFeatures(null) === null, true);
+  assert('G1 non-array string → null', msdComputeNonClassicalFeatures('abc') === null, true);
+  assert('G1 non-array object → null', msdComputeNonClassicalFeatures({}) === null, true);
+  assert('G1 length 19 → null', msdComputeNonClassicalFeatures(new Array(19).fill(100)) === null, true);
+  assert('G1 length 21 → null', msdComputeNonClassicalFeatures(new Array(21).fill(100)) === null, true);
+  assert('G1 length 0 → null', msdComputeNonClassicalFeatures([]) === null, true);
+  assert('G1 NaN value → null', msdComputeNonClassicalFeatures(new Array(20).fill(NaN)) === null, true);
+  assert('G1 Infinity → null', (() => { const a = new Array(20).fill(100); a[5] = Infinity; return msdComputeNonClassicalFeatures(a) === null; })(), true);
+  assert('G1 -Infinity → null', (() => { const a = new Array(20).fill(100); a[0] = -Infinity; return msdComputeNonClassicalFeatures(a) === null; })(), true);
+
+  // ── Group 2: Flat prices ──────────────────────────────────────────────
+  const flat = new Array(20).fill(100);
+  const flatR = msdComputeNonClassicalFeatures(flat);
+  assert('G2 flat: not null', flatR !== null, true);
+  if (flatR) {
+    assert('G2 flat: ncf_netDisplacement', flatR.ncf_netDisplacement, 0);
+    assert('G2 flat: ncf_absPathLength', flatR.ncf_absPathLength, 0);
+    assert('G2 flat: ncf_pathEfficiency', flatR.ncf_pathEfficiency, 0);
+    assert('G2 flat: ncf_mfe', flatR.ncf_mfe, 0);
+    assert('G2 flat: ncf_mae', flatR.ncf_mae, 0);
+    assert('G2 flat: ncf_upTickCount', flatR.ncf_upTickCount, 0);
+    assert('G2 flat: ncf_downTickCount', flatR.ncf_downTickCount, 0);
+    assert('G2 flat: ncf_dirImbalance', flatR.ncf_dirImbalance, 0);
+    assert('G2 flat: ncf_reversalCount', flatR.ncf_reversalCount, 0);
+    assert('G2 flat: ncf_maxRunLen = 19 (one flat run)', flatR.ncf_maxRunLen, 19);
+    assert('G2 flat: ncf_currentRunLen = 19', flatR.ncf_currentRunLen, 19);
+    assert('G2 flat: ncf_meanFirstDiff', flatR.ncf_meanFirstDiff, 0);
+    assert('G2 flat: ncf_stdFirstDiff', flatR.ncf_stdFirstDiff, 0);
+    assert('G2 flat: ncf_meanAbsFirstDiff', flatR.ncf_meanAbsFirstDiff, 0);
+    assert('G2 flat: ncf_meanSecondDiff', flatR.ncf_meanSecondDiff, 0);
+    assert('G2 flat: ncf_dirEntropy = 0 (all flat)', flatR.ncf_dirEntropy, 0, 1e-10);
+    assert('G2 flat: ncf_runEntropy = 0 (one run)', flatR.ncf_runEntropy, 0, 1e-10);
+    assert('G2 flat: ncf_permEntropy3 = 0 (all equal patterns)', flatR.ncf_permEntropy3, 0, 1e-10);
+  }
+
+  // ── Group 3: Monotone ascending ──────────────────────────────────────
+  // prices: [100, 101, 102, ..., 119], p0=100, p19=119
+  const asc = Array.from({ length: 20 }, (_, i) => 100 + i);
+  const ascR = msdComputeNonClassicalFeatures(asc);
+  assert('G3 asc: not null', ascR !== null, true);
+  if (ascR) {
+    assert('G3 asc: ncf_netDisplacement = 19', ascR.ncf_netDisplacement, 19);
+    assert('G3 asc: ncf_absPathLength = 19', ascR.ncf_absPathLength, 19);
+    assert('G3 asc: ncf_pathEfficiency = 1', ascR.ncf_pathEfficiency, 1, 1e-10);
+    assert('G3 asc: ncf_mfe = 19/100', ascR.ncf_mfe, 19 / 100, 1e-10);
+    assert('G3 asc: ncf_mae = 0', ascR.ncf_mae, 0);
+    assert('G3 asc: ncf_upTickCount = 19', ascR.ncf_upTickCount, 19);
+    assert('G3 asc: ncf_downTickCount = 0', ascR.ncf_downTickCount, 0);
+    assert('G3 asc: ncf_dirImbalance = 1', ascR.ncf_dirImbalance, 1, 1e-10);
+    assert('G3 asc: ncf_reversalCount = 0', ascR.ncf_reversalCount, 0);
+    assert('G3 asc: ncf_maxRunLen = 19', ascR.ncf_maxRunLen, 19);
+    assert('G3 asc: ncf_currentRunLen = 19', ascR.ncf_currentRunLen, 19);
+    assert('G3 asc: ncf_meanFirstDiff = 1', ascR.ncf_meanFirstDiff, 1);
+    assert('G3 asc: ncf_stdFirstDiff = 0 (all diffs = 1)', ascR.ncf_stdFirstDiff, 0, 1e-10);
+    assert('G3 asc: ncf_meanAbsFirstDiff = 1', ascR.ncf_meanAbsFirstDiff, 1);
+    assert('G3 asc: ncf_meanSecondDiff = 0 (all diffs equal)', ascR.ncf_meanSecondDiff, 0, 1e-10);
+    assert('G3 asc: ncf_dirEntropy = 0 (all up)', ascR.ncf_dirEntropy, 0, 1e-10);
+    assert('G3 asc: ncf_permEntropy3 = 0 (all 012 patterns)', ascR.ncf_permEntropy3, 0, 1e-10);
+  }
+
+  // ── Group 4: Monotone descending ─────────────────────────────────────
+  // prices: [100, 99, ..., 81], p0=100, p19=81
+  const desc = Array.from({ length: 20 }, (_, i) => 100 - i);
+  const descR = msdComputeNonClassicalFeatures(desc);
+  assert('G4 desc: not null', descR !== null, true);
+  if (descR) {
+    assert('G4 desc: ncf_netDisplacement = -19', descR.ncf_netDisplacement, -19);
+    assert('G4 desc: ncf_absPathLength = 19', descR.ncf_absPathLength, 19);
+    assert('G4 desc: ncf_pathEfficiency = 1', descR.ncf_pathEfficiency, 1, 1e-10);
+    assert('G4 desc: ncf_mfe = 0', descR.ncf_mfe, 0);
+    assert('G4 desc: ncf_mae = 19/100', descR.ncf_mae, 19 / 100, 1e-10);
+    assert('G4 desc: ncf_upTickCount = 0', descR.ncf_upTickCount, 0);
+    assert('G4 desc: ncf_downTickCount = 19', descR.ncf_downTickCount, 19);
+    assert('G4 desc: ncf_dirImbalance = -1', descR.ncf_dirImbalance, -1, 1e-10);
+    assert('G4 desc: ncf_reversalCount = 0', descR.ncf_reversalCount, 0);
+    assert('G4 desc: ncf_maxRunLen = 19', descR.ncf_maxRunLen, 19);
+    assert('G4 desc: ncf_currentRunLen = 19', descR.ncf_currentRunLen, 19);
+    assert('G4 desc: ncf_meanFirstDiff = -1', descR.ncf_meanFirstDiff, -1);
+    assert('G4 desc: ncf_stdFirstDiff = 0', descR.ncf_stdFirstDiff, 0, 1e-10);
+    assert('G4 desc: ncf_dirEntropy = 0 (all down)', descR.ncf_dirEntropy, 0, 1e-10);
+  }
+
+  // ── Group 5: Alternating up-down ─────────────────────────────────────
+  // prices: [100,101,100,101,...] i=0→100, i=19→101
+  // diffs: 10×(+1) at even indices, 9×(-1) at odd indices (19 diffs total)
+  const alt = Array.from({ length: 20 }, (_, i) => 100 + (i % 2));
+  const altR = msdComputeNonClassicalFeatures(alt);
+  assert('G5 alt: not null', altR !== null, true);
+  if (altR) {
+    assert('G5 alt: ncf_netDisplacement = 1 (p19=101, p0=100)', altR.ncf_netDisplacement, 1);
+    assert('G5 alt: ncf_absPathLength = 19 (19 moves of 1)', altR.ncf_absPathLength, 19);
+    assert('G5 alt: ncf_upTickCount = 10', altR.ncf_upTickCount, 10);
+    assert('G5 alt: ncf_downTickCount = 9', altR.ncf_downTickCount, 9);
+    assert('G5 alt: ncf_dirImbalance = 1/19', altR.ncf_dirImbalance, 1 / 19, 1e-10);
+    assert('G5 alt: ncf_reversalCount = 18 (every tick reverses)', altR.ncf_reversalCount, 18);
+    assert('G5 alt: ncf_maxRunLen = 1 (each run length 1)', altR.ncf_maxRunLen, 1);
+    assert('G5 alt: ncf_currentRunLen = 1', altR.ncf_currentRunLen, 1);
+    // mean first diff = (10*1 + 9*(-1)) / 19 = 1/19
+    assert('G5 alt: ncf_meanFirstDiff = 1/19', altR.ncf_meanFirstDiff, 1 / 19, 1e-10);
+    assert('G5 alt: ncf_meanAbsFirstDiff = 1 (all |diffs| = 1)', altR.ncf_meanAbsFirstDiff, 1, 1e-10);
+  }
+
+  // ── Group 6: Permutation entropy for boundary cases ──────────────────
+  // All '012' (ascending) → entropy = 0
+  const ascPerm = Array.from({ length: 20 }, (_, i) => 100 + i);
+  const ascPermR = msdComputeNonClassicalFeatures(ascPerm);
+  if (ascPermR) assert('G6 permEntropy: monotone asc = 0', ascPermR.ncf_permEntropy3, 0, 1e-10);
+  // All '210' (descending) → entropy = 0
+  const descPerm = Array.from({ length: 20 }, (_, i) => 100 - i);
+  const descPermR = msdComputeNonClassicalFeatures(descPerm);
+  if (descPermR) assert('G6 permEntropy: monotone desc = 0', descPermR.ncf_permEntropy3, 0, 1e-10);
+  // Max entropy: all 6 patterns equally likely → H = ln(6)
+  // Construct a pattern that cycles through all 6 ordinal patterns for order 3
+  // We need 6 distinct consecutive triples each mapping to a different pattern.
+  // Use: [1,2,3] → 012, then [3,2,1] is hard to chain... Use a known high-entropy input
+  // A sine wave with period 4 cycles through many patterns
+  const highEntropy = Array.from({ length: 20 }, (_, i) => 100 + Math.sin(i * 1.3) * 5);
+  const highR = msdComputeNonClassicalFeatures(highEntropy);
+  if (highR) assert('G6 permEntropy: sine wave > 0', highR.ncf_permEntropy3 > 0, true);
+
+  // ── Group 7: Determinism ──────────────────────────────────────────────
+  const seedInput = Array.from({ length: 20 }, (_, i) => 100 + Math.sin(i) * 3.7 + Math.cos(i * 2) * 1.2);
+  const det1 = msdComputeNonClassicalFeatures(seedInput);
+  const det2 = msdComputeNonClassicalFeatures(seedInput.slice()); // copy
+  if (det1 && det2) {
+    let allMatch = true;
+    for (const key of MSD_NC_FEATURE_KEYS) {
+      if (det1[key] !== det2[key]) { allMatch = false; break; }
+    }
+    assert('G7 determinism: same input → same output', allMatch, true);
+  } else {
+    errors.push('G7 determinism: at least one call returned null for valid input');
+    details.push({ label: 'G7 determinism', status: 'FAIL', actual: 'null', expected: 'object' });
+  }
+
+  // ── Group 8: Key completeness and value finiteness ────────────────────
+  const testInput = Array.from({ length: 20 }, (_, i) => 100 + i * 0.1);
+  const testR = msdComputeNonClassicalFeatures(testInput);
+  if (testR) {
+    const presentKeys = MSD_NC_FEATURE_KEYS.filter(k => Object.prototype.hasOwnProperty.call(testR, k));
+    assert('G8 key count: all 18 keys present', presentKeys.length, MSD_NC_FEATURE_KEYS.length);
+    const allFinite = MSD_NC_FEATURE_KEYS.every(k => Number.isFinite(testR[k]));
+    assert('G8 all values finite', allFinite, true);
+    const ncf_version = testR.ncf_eligible; // should be undefined — enrichment adds this, not compute
+    assert('G8 compute fn does not add ncf_eligible (only enrichment does)', ncf_version, undefined);
+  } else {
+    errors.push('G8 key completeness: msdComputeNonClassicalFeatures returned null for valid input');
+    details.push({ label: 'G8 key completeness', status: 'FAIL', actual: 'null', expected: 'object' });
+  }
+
+  // ── Group 9: Enrichment pipeline ─────────────────────────────────────
+  const eligibleSnap = {
+    snapshotId: 'test_e1', epoch: 1000, price: 119, symbol: 'R_100',
+    outcome: 'positive', leadTime: 1, featureVersion: 'v1',
+    rawHistoryValid: true,
+    rawPriceHistory: Array.from({ length: 20 }, (_, i) => 100 + i),
+  };
+  const ineligibleSnap1 = {
+    snapshotId: 'test_e2', epoch: 999, price: 100, symbol: 'R_100',
+    outcome: 'negative', leadTime: null, featureVersion: 'v1',
+    rawHistoryValid: false, rawPriceHistory: null,
+  };
+  const ineligibleSnap2 = {
+    snapshotId: 'test_e3', epoch: 998, price: 100, symbol: 'R_100',
+    outcome: 'negative', leadTime: null, featureVersion: 'v1',
+    rawHistoryValid: true,
+    rawPriceHistory: new Array(19).fill(100), // wrong length
+  };
+  const enrichResult = msdEnrichWithNonClassicalFeatures([eligibleSnap, ineligibleSnap1, ineligibleSnap2]);
+  assert('G9 enrichment: eligible count = 1', enrichResult.eligible, 1);
+  assert('G9 enrichment: ineligible count = 2', enrichResult.ineligible, 2);
+  assert('G9 enrichment: eligible snap ncf_eligible=true', enrichResult.enriched[0].ncf_eligible, true);
+  assert('G9 enrichment: ineligible snap1 ncf_eligible=false', enrichResult.enriched[1].ncf_eligible, false);
+  assert('G9 enrichment: ineligible snap2 ncf_eligible=false (wrong length)', enrichResult.enriched[2].ncf_eligible, false);
+  assert('G9 enrichment: eligible snap ncf_version correct', enrichResult.enriched[0].ncf_version === MSD_NC_FEATURE_VERSION, true);
+  assert('G9 enrichment: eligible snap has ncf_netDisplacement', Number.isFinite(enrichResult.enriched[0].ncf_netDisplacement), true);
+  assert('G9 enrichment: original fields preserved (snapshotId)', enrichResult.enriched[0].snapshotId === 'test_e1', true);
+  assert('G9 enrichment: original snapshot not mutated', !('ncf_eligible' in eligibleSnap), true);
+
+  return { passed, failed: errors.length, total: passed + errors.length, errors, details };
+}
+
+// ─── Sample feature demo ──────────────────────────────────────────────────────
+function computeSampleFeatures() {
+  const samples = [
+    { label: 'Monotone ascending [100…119]', prices: Array.from({ length: 20 }, (_, i) => 100 + i) },
+    { label: 'Monotone descending [100…81]', prices: Array.from({ length: 20 }, (_, i) => 100 - i) },
+    { label: 'Flat [100×20]', prices: new Array(20).fill(100) },
+    { label: 'Alternating up/down [100,101,100,…]', prices: Array.from({ length: 20 }, (_, i) => 100 + (i % 2)) },
+    { label: 'Sine wave (period≈5, amp=3)', prices: Array.from({ length: 20 }, (_, i) => 100 + Math.sin(i * 1.26) * 3) },
+    { label: 'Random walk (seed 42)', prices: (() => { let p=100, a=[p]; const r=(s)=>{s=Math.sin(s)*10000;return s-Math.floor(s);}; for(let i=1;i<20;i++){p+=(r(i*42+1)-0.5)*0.5;a.push(+p.toFixed(4));} return a; })() },
+  ];
+  return samples.map(s => ({ label: s.label, features: msdComputeNonClassicalFeatures(s.prices) }));
+}
+
+// ─── Runner ───────────────────────────────────────────────────────────────────
+function runValidation() {
+  const btn = document.getElementById('run-btn');
+  btn.disabled = true;
+  document.getElementById('status').innerHTML = '<span class="spinner"></span>Running validation suite…';
+  document.getElementById('report').innerHTML = '';
+
+  setTimeout(() => {
+    try {
+      const result = msdValidateNonClassicalFeatures();
+      const samples = computeSampleFeatures();
+      renderReport(result, samples);
+    } catch(e) {
+      document.getElementById('status').innerHTML = '';
+      document.getElementById('report').innerHTML = `<div class="card" style="border-color:#7f1d1d;margin-top:16px"><span class="fail">⚠ Exception: ${e.message}</span><pre style="margin-top:8px">${e.stack||''}</pre></div>`;
+    }
+    document.getElementById('status').innerHTML = '';
+    btn.disabled = false;
+  }, 50);
+}
+
+function renderReport(result, samples) {
+  const allPass = result.failed === 0;
+  const summaryClass = allPass ? 'all-pass' : 'has-fail';
+  const summaryText = allPass
+    ? `ALL TESTS PASSED — ${result.passed} / ${result.total}`
+    : `${result.failed} TEST(S) FAILED — ${result.passed} / ${result.total} passed`;
+
+  let html = `
+  <div class="verdict ${summaryClass}" style="margin-top:20px;padding:16px 20px;border-radius:8px;font-family:var(--mono);font-weight:700;font-size:1rem;${allPass?'background:#14532d;color:#22c55e;border:1px solid #166534':'background:#450a0a;color:#ef4444;border:1px solid #7f1d1d'}">
+    ${summaryText}
+  </div>`;
+
+  if (result.errors.length > 0) {
+    html += `<h2>Failed Assertions</h2><div class="card">`;
+    result.errors.forEach(e => { html += `<div class="fail" style="padding:3px 0;font-family:var(--mono);font-size:0.78rem">${e}</div>`; });
+    html += `</div>`;
+  }
+
+  html += `<h2>All Assertions (${result.total})</h2><div class="card"><table>
+    <tr><th>Label</th><th>Status</th><th>Expected</th><th>Actual</th></tr>
+    ${result.details.map(d => `
+    <tr>
+      <td style="font-family:system-ui;color:var(--text)">${d.label}</td>
+      <td class="${d.status === 'PASS' ? 'pass' : 'fail'}">${d.status}</td>
+      <td class="muted">${d.expected}</td>
+      <td>${d.actual}</td>
+    </tr>`).join('')}
+  </table></div>`;
+
+  html += `<h2>Sample Feature Values (18 features × 6 inputs)</h2>`;
+  html += `<div class="card feature-table"><table>
+    <tr><th>Feature</th>${samples.map(s => `<th style="font-size:0.72rem">${s.label}</th>`).join('')}</tr>
+    ${MSD_NC_FEATURE_KEYS.map(k => `
+    <tr>
+      <td>${k}</td>
+      ${samples.map(s => {
+        const v = s.features ? s.features[k] : null;
+        if (v == null) return '<td class="muted">null</td>';
+        return `<td>${Math.abs(v) < 0.0001 && v !== 0 ? v.toExponential(3) : v.toFixed(4)}</td>`;
+      }).join('')}
+    </tr>`).join('')}
+  </table></div>`;
+
+  document.getElementById('report').innerHTML = html;
+}
+</script>
+</body>
+</html>

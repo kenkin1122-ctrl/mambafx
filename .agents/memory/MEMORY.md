@@ -1,0 +1,1 @@
+- [Phase 7 NC Feature Engineering](phase7-nc-features.md) — 18 ncf_v1 features derived from rawPriceHistory at dataset-build time; enrichment layer, not stored in IndexedDB.

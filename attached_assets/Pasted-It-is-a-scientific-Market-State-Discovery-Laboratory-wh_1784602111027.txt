@@ -1,0 +1,242 @@
+It is a scientific Market State Discovery Laboratory whose objective is to discover, validate and eventually exploit market states that consistently precede the beginning of a 5 consecutive tick Rise (and later Fall) on Deriv Synthetic Indices.
+
+The project follows the scientific method:
+
+Form hypotheses
+Freeze protocols before execution
+Test on real data
+Correct for multiple testing
+Reject unsupported hypotheses
+Never assume existing indicators are useful
+Never modify historical data
+Never introduce look-ahead bias
+Never bypass governance
+
+A null result is considered a successful scientific outcome.
+
+Current Status
+
+The following phases are already complete and should not be reimplemented.
+
+Phase 1
+
+Completed
+
+Scientific governance
+Event definition
+Market state definition
+Labeling framework
+Phase 2
+
+Completed
+
+Permanent append-only MarketState database
+Live tick capture
+Positive event capture
+Negative sampling
+Dataset snapshot system
+Phase 3
+
+Completed
+
+Classical indicator computation
+Feature versioning
+Dataset builder
+ML infrastructure
+Model evaluation framework
+Phase 4
+
+Completed
+
+Scientific infrastructure including:
+
+Frozen search spaces
+Search-space hashing
+Dataset freezing
+Candidate identity
+Candidate enumeration
+Cardinality calculator
+Hypothesis records
+Circular-shift null model
+Mutual Information testing
+Benjamini-Hochberg correction
+Family-size verification
+Governance framework
+Reproducibility framework
+
+All of these have already been validated.
+
+Phase 5
+
+Completed
+
+The classical indicator family has already been scientifically evaluated.
+
+Research completed:
+
+Pilot discovery
+Expansion A
+45-candidate protocol
+Lead times 1–5
+Multiple-testing correction
+Real-data execution
+
+Scientific conclusion:
+
+No practically meaningful discoveries were found for the tested classical indicators.
+
+This is a valid scientific null result.
+
+Do NOT repeat these experiments.
+
+Phase 6A
+
+Completed
+
+Architecture audit concluded:
+
+Current MarketState records do not contain sufficient sequence information for non-classical representations.
+
+Phase 6B
+
+Completed
+
+Engineering completed:
+
+Symmetric raw-history capture
+Prospective raw-price persistence
+Versioned schema
+Raw-history storage
+Causality validation
+Symmetry validation
+Engineering test suite
+
+Raw history is now being captured prospectively for both positive and negative samples.
+
+No historical records were modified.
+
+Current Phase
+
+We are now entering Phase 7 – Non-Classical Feature Engineering.
+
+The goal is to build mathematically defined representations from the newly captured prospective raw-history.
+
+Examples include (but are not limited to):
+
+Path efficiency
+Directional persistence
+Run-length statistics
+Reversal rate
+Price acceleration
+Compression / expansion
+Entropy
+Complexity
+State-transition features
+Information-theoretic features
+Signal-processing features
+
+These are examples only.
+
+Do not assume they are useful.
+
+Every feature must become a falsifiable scientific hypothesis.
+
+Working Method
+
+Every phase must follow the same disciplined workflow.
+
+Step 1
+
+Inspect the existing codebase.
+
+Determine:
+
+what already exists
+what is reusable
+what should remain untouched
+
+Reuse existing architecture wherever possible.
+
+Avoid duplication.
+
+Step 2
+
+Produce a scientific design audit.
+
+Before implementing anything:
+
+identify dependencies
+identify risks
+identify reusable infrastructure
+identify missing components
+
+No implementation before the audit.
+
+Step 3
+
+Implement only the approved scope.
+
+Changes must be:
+
+additive
+deterministic
+versioned
+reproducible
+append-only
+
+Never modify historical MarketStates.
+
+Never invalidate previous discoveries.
+
+Step 4
+
+Validate the implementation.
+
+Produce engineering evidence including:
+
+unit tests
+causality tests
+symmetry tests
+determinism tests
+compatibility tests
+governance verification
+
+Do not claim success without evidence.
+
+Step 5
+
+Only after implementation passes validation should the next scientific phase begin.
+
+General Rules
+
+Always:
+
+preserve scientific reproducibility
+preserve governance
+preserve frozen protocols
+preserve append-only storage
+preserve causal timing
+preserve deterministic execution
+
+Never:
+
+redesign working architecture unnecessarily
+duplicate existing systems
+silently change statistical methodology
+silently change schemas
+weaken governance
+introduce look-ahead bias
+overwrite historical records
+Deliverables
+
+For every phase produce:
+
+Architecture Audit
+Scientific Design Decision
+Implementation
+Validation Report
+Execution Readiness Report
+
+Only after those five steps are complete should we proceed to the next phase.
+
+Treat this as a long-term scientific research laboratory rather than a software project. Every change must strengthen reproducibility, scientific rigor, and future discoverability.

@@ -7073,6 +7073,512 @@ function msdBuildResearchDataset(){ throw new Error('Research Dataset builder is
 function msdBuildClusterDataset(){ throw new Error('Cluster Dataset builder is not yet implemented — defined as a stub for a future phase.'); }
 function msdBuildFeatureAnalysisDataset(){ throw new Error('Feature-Analysis Dataset builder is not yet implemented — defined as a stub for a future phase.'); }
 
+// ══════════════════════════════════════════════════════════════════════
+// Market State Discovery Engine — Phase 7: Non-Classical Feature Engineering
+// ══════════════════════════════════════════════════════════════════════
+// Pure, deterministic feature extraction from the rawPriceHistory array
+// captured by Phase 6B. Eighteen features across four families:
+//   A. Path Geometry       (5)
+//   B. Directional Structure (6)
+//   C. Price Dynamics       (4)
+//   D. Complexity / Entropy  (3)
+//
+// Architectural decision (see MSD_PHASE7_DESIGN_AUDIT.md):
+// Features are computed as a DERIVED ENRICHMENT LAYER at dataset-build
+// time, not at capture time, and are NEVER written to IndexedDB.
+// This preserves append-only integrity and uses existing post-6B records
+// immediately without waiting for new data accumulation.
+//
+// Causal validity: rawPriceHistory was captured causally by Phase 6B
+// (backward-only slice of indHistory ending at the snapshot tick).
+// Derived features inherit that causal validity — they depend only on
+// prices observed at or before the snapshot tick.
+//
+// Version string: 'ncf_v1'
+// Note: 'nc_v1' already names the null-calibration feature version.
+// 'ncf_v1' (with 'f') is deliberately distinct.
+// ══════════════════════════════════════════════════════════════════════
+
+const MSD_NC_FEATURE_VERSION = 'ncf_v1';
+
+// Expected raw-history window length — must equal MSD_RAW_HISTORY_WINDOW_LENGTH.
+// Stated as a separate constant so msdComputeNonClassicalFeatures can be
+// unit-tested without access to that Phase 6B constant.
+const MSD_NC_REQUIRED_WINDOW_LENGTH = 20;
+
+// Canonical key list for ncf_v1 — NEVER modified after definition.
+// Introducing new features or changing a formula requires a new version
+// string (ncf_v2, etc.), not a modification of this array.
+const MSD_NC_FEATURE_KEYS = [
+  // A. Path Geometry (5)
+  'ncf_netDisplacement',   // signed price change over the window
+  'ncf_absPathLength',     // sum of |tick-to-tick| moves
+  'ncf_pathEfficiency',    // |net| / total path; 0 if flat
+  'ncf_mfe',               // maximum favorable excursion, fraction of p₀
+  'ncf_mae',               // maximum adverse excursion, fraction of p₀
+  // B. Directional Structure (6)
+  'ncf_upTickCount',       // # ticks where price rose
+  'ncf_downTickCount',     // # ticks where price fell
+  'ncf_dirImbalance',      // (up − down) / 19 ∈ [−1, +1]
+  'ncf_currentRunLen',     // length of final monotone run
+  'ncf_maxRunLen',         // length of longest monotone run
+  'ncf_reversalCount',     // direction changes in non-flat sequence
+  // C. Price Dynamics (4)
+  'ncf_meanFirstDiff',     // mean of first differences
+  'ncf_stdFirstDiff',      // std dev of first differences (Bessel-corrected)
+  'ncf_meanAbsFirstDiff',  // mean |first diff| (volatility proxy)
+  'ncf_meanSecondDiff',    // mean of second differences (acceleration proxy)
+  // D. Complexity / Entropy (3) — all values in natural units (nats)
+  'ncf_dirEntropy',        // Shannon H of {up, down, flat} distribution
+  'ncf_runEntropy',        // Shannon H of run-length distribution
+  'ncf_permEntropy3',      // Permutation entropy, order 3 (18 consecutive triples)
+];
+
+/**
+ * Internal helper: Shannon entropy H = −Σ p·ln(p) from a frequency-
+ * count object. Returns 0 for an empty or single-category distribution.
+ * Pure, no side effects.
+ * @param {{[key:string]: number}} counts  — category → frequency
+ * @param {number}                 total   — sum of all frequencies
+ * @returns {number} entropy in nats
+ */
+function _msdShannonEntropy(counts, total){
+  if (total === 0) return 0;
+  let h = 0;
+  for (const k in counts){
+    const p = counts[k] / total;
+    if (p > 0) h -= p * Math.log(p);
+  }
+  return h;
+}
+
+/**
+ * Pure, deterministic computation of all 18 Phase 7 non-classical
+ * features from a rawPriceHistory array.
+ *
+ * CONTRACT:
+ * • rawPriceHistory must be an Array of exactly MSD_NC_REQUIRED_WINDOW_LENGTH
+ *   finite numeric values, ordered oldest → newest.
+ * • Returns null if any precondition fails — caller must handle null.
+ * • Produces no side effects; reads no global state.
+ * • Deterministic: identical input → identical output, always.
+ *
+ * @param {number[]} rawPriceHistory
+ * @returns {object|null}
+ */
+function msdComputeNonClassicalFeatures(rawPriceHistory){
+  // ── Guard ─────────────────────────────────────────────────────────────
+  if (!Array.isArray(rawPriceHistory)) return null;
+  if (rawPriceHistory.length !== MSD_NC_REQUIRED_WINDOW_LENGTH) return null;
+  for (let i = 0; i < rawPriceHistory.length; i++){
+    if (!Number.isFinite(rawPriceHistory[i])) return null;
+  }
+
+  const prices = rawPriceHistory;
+  const n      = prices.length; // always 20
+
+  // ── First differences (19 values) ────────────────────────────────────
+  const diffs = new Array(n - 1);
+  for (let i = 0; i < n - 1; i++) diffs[i] = prices[i + 1] - prices[i];
+
+  // ────────────────────────────────────────────────────────────────────
+  // A. PATH GEOMETRY
+  // ────────────────────────────────────────────────────────────────────
+
+  // Net displacement: signed price change over the window
+  const ncf_netDisplacement = prices[n - 1] - prices[0];
+
+  // Absolute path length: sum of absolute tick-to-tick moves
+  let ncf_absPathLength = 0;
+  for (let i = 0; i < diffs.length; i++) ncf_absPathLength += Math.abs(diffs[i]);
+
+  // Path efficiency: |net| / total path (1 = perfectly directional, 0 = flat)
+  const ncf_pathEfficiency = ncf_absPathLength > 0
+    ? Math.abs(ncf_netDisplacement) / ncf_absPathLength
+    : 0;
+
+  // MFE / MAE: fractional deviations from starting price
+  const p0 = prices[0];
+  let maxPrice = prices[0], minPrice = prices[0];
+  for (let i = 1; i < n; i++){
+    if (prices[i] > maxPrice) maxPrice = prices[i];
+    if (prices[i] < minPrice) minPrice = prices[i];
+  }
+  const ncf_mfe = p0 !== 0 ? (maxPrice - p0) / Math.abs(p0) : 0; // how high above start
+  const ncf_mae = p0 !== 0 ? (p0 - minPrice) / Math.abs(p0) : 0; // how far below start
+
+  // ────────────────────────────────────────────────────────────────────
+  // B. DIRECTIONAL STRUCTURE
+  // ────────────────────────────────────────────────────────────────────
+
+  // Direction sequence: +1 up, −1 down, 0 flat
+  const dirs = new Array(diffs.length);
+  let upCount = 0, downCount = 0, flatCount = 0;
+  for (let i = 0; i < diffs.length; i++){
+    if      (diffs[i] > 0){ dirs[i] =  1; upCount++;   }
+    else if (diffs[i] < 0){ dirs[i] = -1; downCount++;  }
+    else                   { dirs[i] =  0; flatCount++;  }
+  }
+
+  const ncf_upTickCount   = upCount;
+  const ncf_downTickCount = downCount;
+  const totalMoves        = upCount + downCount + flatCount; // always n−1 = 19
+  const ncf_dirImbalance  = totalMoves > 0 ? (upCount - downCount) / totalMoves : 0;
+
+  // Reversal count: direction changes in non-flat sub-sequence
+  const nonFlat = dirs.filter(d => d !== 0);
+  let ncf_reversalCount = 0;
+  for (let i = 1; i < nonFlat.length; i++){
+    if (nonFlat[i] !== nonFlat[i - 1]) ncf_reversalCount++;
+  }
+
+  // Run-length analysis on the full direction sequence (including flats)
+  let currentRun = 1, maxRun = 1;
+  const runLengths = [];
+  for (let i = 1; i < dirs.length; i++){
+    if (dirs[i] === dirs[i - 1]){
+      currentRun++;
+      if (currentRun > maxRun) maxRun = currentRun;
+    } else {
+      runLengths.push(currentRun);
+      currentRun = 1;
+    }
+  }
+  runLengths.push(currentRun); // push final run
+
+  const ncf_currentRunLen = currentRun; // length of run ending at final tick
+  const ncf_maxRunLen     = maxRun;
+
+  // ────────────────────────────────────────────────────────────────────
+  // C. PRICE DYNAMICS
+  // ────────────────────────────────────────────────────────────────────
+
+  const nd = diffs.length; // 19
+  let sumD = 0, sumAbsD = 0;
+  for (let i = 0; i < nd; i++){ sumD += diffs[i]; sumAbsD += Math.abs(diffs[i]); }
+
+  const ncf_meanFirstDiff    = sumD / nd;
+  const ncf_meanAbsFirstDiff = sumAbsD / nd;
+
+  // Standard deviation of first differences (Bessel-corrected, n−1)
+  let sumSqDev = 0;
+  for (let i = 0; i < nd; i++) sumSqDev += (diffs[i] - ncf_meanFirstDiff) ** 2;
+  const ncf_stdFirstDiff = nd > 1 ? Math.sqrt(sumSqDev / (nd - 1)) : 0;
+
+  // Second differences (acceleration proxy): nd−1 = 18 values
+  const diffs2 = new Array(nd - 1);
+  for (let i = 0; i < nd - 1; i++) diffs2[i] = diffs[i + 1] - diffs[i];
+  let sumD2 = 0;
+  for (let i = 0; i < diffs2.length; i++) sumD2 += diffs2[i];
+  const ncf_meanSecondDiff = diffs2.length > 0 ? sumD2 / diffs2.length : 0;
+
+  // ────────────────────────────────────────────────────────────────────
+  // D. COMPLEXITY / ENTROPY
+  // ────────────────────────────────────────────────────────────────────
+
+  // Directional entropy: H of {up, down, flat} counts
+  const ncf_dirEntropy = _msdShannonEntropy(
+    { '1': upCount, '-1': downCount, '0': flatCount }, totalMoves);
+
+  // Run-length entropy: H of run-length distribution
+  const rlCounts = {};
+  for (const r of runLengths){ const k = String(r); rlCounts[k] = (rlCounts[k] || 0) + 1; }
+  const ncf_runEntropy = _msdShannonEntropy(rlCounts, runLengths.length);
+
+  // Permutation entropy, order 3:
+  // For each consecutive triple (pᵢ, pᵢ₊₁, pᵢ₊₂), assign one of 6
+  // ordinal patterns ('012','021','102','120','201','210'), then compute
+  // H over the resulting 18-pattern distribution.
+  const permCounts = {};
+  for (let i = 0; i <= n - 3; i++){
+    const a = prices[i], b = prices[i + 1], c = prices[i + 2];
+    let pattern;
+    if      (a <= b && b <= c) pattern = '012';
+    else if (a <= c && c <  b) pattern = '021';
+    else if (b <  a && a <= c) pattern = '102';
+    else if (b <= c && c <  a) pattern = '120';
+    else if (c <  a && a <= b) pattern = '201';
+    else                        pattern = '210';
+    permCounts[pattern] = (permCounts[pattern] || 0) + 1;
+  }
+  const ncf_permEntropy3 = _msdShannonEntropy(permCounts, n - 2); // 18 triples
+
+  // ── Final: collect and validate all 18 values ─────────────────────
+  const result = {
+    ncf_netDisplacement, ncf_absPathLength, ncf_pathEfficiency,
+    ncf_mfe,             ncf_mae,
+    ncf_upTickCount,     ncf_downTickCount, ncf_dirImbalance,
+    ncf_currentRunLen,   ncf_maxRunLen,     ncf_reversalCount,
+    ncf_meanFirstDiff,   ncf_stdFirstDiff,  ncf_meanAbsFirstDiff, ncf_meanSecondDiff,
+    ncf_dirEntropy,      ncf_runEntropy,    ncf_permEntropy3,
+  };
+
+  // Safety net: any non-finite value from valid input is a bug — return null
+  // rather than silently propagating NaN/Infinity into a dataset.
+  for (const key of MSD_NC_FEATURE_KEYS){
+    if (!Number.isFinite(result[key])) return null;
+  }
+
+  return result;
+}
+
+/**
+ * Enriches a batch of MarketState snapshots with the 18 Phase 7
+ * non-classical features computed from their stored rawPriceHistory.
+ *
+ * IMPORTANT: does NOT modify any stored IndexedDB record. Returns new
+ * plain objects (Object.assign copies) that carry all original fields
+ * PLUS the ncf_* features. The originals remain completely untouched.
+ *
+ * Eligibility: rawHistoryValid === true AND rawPriceHistory is a valid
+ * 20-element finite array. Ineligible snapshots get ncf_eligible=false
+ * and null ncf features, so callers can exclude them deterministically.
+ *
+ * @param {object[]} snapshots — MarketState records from msdGetAllMarketStates()
+ * @returns {{ enriched: object[], eligible: number, ineligible: number }}
+ */
+function msdEnrichWithNonClassicalFeatures(snapshots){
+  let eligible = 0, ineligible = 0;
+  const enriched = snapshots.map(snap => {
+    if (snap.rawHistoryValid !== true || !Array.isArray(snap.rawPriceHistory)){
+      ineligible++;
+      return Object.assign({}, snap, { ncf_eligible: false, ncf_version: null });
+    }
+    const ncf = msdComputeNonClassicalFeatures(snap.rawPriceHistory);
+    if (ncf === null){
+      ineligible++;
+      return Object.assign({}, snap, { ncf_eligible: false, ncf_version: null });
+    }
+    eligible++;
+    return Object.assign({}, snap, ncf, { ncf_eligible: true, ncf_version: MSD_NC_FEATURE_VERSION });
+  });
+  return { enriched, eligible, ineligible };
+}
+
+/**
+ * Builds an enriched experiment dataset for Phase 7 non-classical
+ * feature discovery. This is the ONLY intended entry point for
+ * experiments that use ncf_* features.
+ *
+ * Pipeline:
+ *   1. Enrich all records with ncf_* features from rawPriceHistory.
+ *   2. Exclude records where ncf_eligible === false.
+ *   3. Pass the filtered enriched set to the UNMODIFIED
+ *      msdBuildExperimentDataset — which applies holdout partitioning,
+ *      deduplication, segmentation, boundary purging, and chronological
+ *      train/val/test splitting exactly as it always has.
+ *
+ * Zero new statistical methodology is introduced. The existing
+ * experiment governance (search space freezing, pre-registration,
+ * mutual information, BH correction, circular-shift null model) applies
+ * without change.
+ *
+ * @param {object[]} allStates — from msdGetAllMarketStates()
+ * @param {object}   config    — same config shape msdBuildExperimentDataset accepts
+ * @returns {object}           — same shape as msdBuildExperimentDataset return value,
+ *                               plus ncEnrichmentReport
+ */
+function msdBuildNcExperimentDataset(allStates, config){
+  const { enriched, eligible, ineligible } = msdEnrichWithNonClassicalFeatures(allStates);
+  const eligibleOnly = enriched.filter(s => s.ncf_eligible === true);
+  const dataset = msdBuildExperimentDataset(eligibleOnly, config);
+  dataset.ncEnrichmentReport = { totalInput: allStates.length, eligible, ineligible };
+  return dataset;
+}
+
+/**
+ * Deterministic validation suite for the Phase 7 feature engine.
+ * Uses only hand-computed expected values — never the function's own
+ * output as a reference for itself.
+ *
+ * 9 test groups, 50+ assertions covering:
+ *   • Invalid inputs (null, wrong type, wrong length, NaN, ±Infinity)
+ *   • Flat prices (all values analytically derivable)
+ *   • Monotone ascending (netDisp=19, pathEff=1, upTicks=19, stdDiff=0, permH=0)
+ *   • Monotone descending (dirImbalance=−1, mae=19/100)
+ *   • Alternating up/down (reversalCount=18, maxRunLen=1, meanDiff=1/19)
+ *   • Permutation entropy boundary cases
+ *   • Determinism (same input → identical output)
+ *   • Key completeness and value finiteness
+ *   • Enrichment pipeline (eligible/ineligible counts, flag propagation, immutability)
+ *
+ * @returns {{ passed: number, failed: number, total: number, errors: string[] }}
+ */
+function msdValidateNonClassicalFeatures(){
+  const errors  = [];
+  let   passed  = 0;
+
+  function assert(label, actual, expected, tolerance){
+    tolerance = (tolerance == null) ? 1e-10 : tolerance;
+    let ok;
+    if (typeof expected === 'boolean') ok = (actual === expected);
+    else                               ok = (Math.abs(actual - expected) <= tolerance);
+    if (ok){ passed++; }
+    else   { errors.push(label + ': expected ' + expected + ', got ' + actual + (typeof expected === 'boolean' ? '' : ' (Δ=' + Math.abs(actual - expected) + ')')); }
+  }
+
+  // ── Group 1: Invalid inputs ───────────────────────────────────────────
+  assert('G1 null → null',                    msdComputeNonClassicalFeatures(null)                           === null, true);
+  assert('G1 string → null',                  msdComputeNonClassicalFeatures('abc')                          === null, true);
+  assert('G1 object → null',                  msdComputeNonClassicalFeatures({})                             === null, true);
+  assert('G1 length 19 → null',               msdComputeNonClassicalFeatures(new Array(19).fill(100))        === null, true);
+  assert('G1 length 21 → null',               msdComputeNonClassicalFeatures(new Array(21).fill(100))        === null, true);
+  assert('G1 length 0 → null',                msdComputeNonClassicalFeatures([])                             === null, true);
+  assert('G1 NaN → null',                     msdComputeNonClassicalFeatures(new Array(20).fill(NaN))        === null, true);
+  assert('G1 Infinity → null',                (() => { const a = new Array(20).fill(100); a[5] = Infinity;  return msdComputeNonClassicalFeatures(a) === null; })(), true);
+  assert('G1 -Infinity → null',               (() => { const a = new Array(20).fill(100); a[0] = -Infinity; return msdComputeNonClassicalFeatures(a) === null; })(), true);
+
+  // ── Group 2: Flat prices [100×20] ───────────────────────────────────
+  const flat  = new Array(20).fill(100);
+  const flatR = msdComputeNonClassicalFeatures(flat);
+  assert('G2 flat: not null',                 flatR !== null, true);
+  if (flatR){
+    assert('G2 flat: ncf_netDisplacement',    flatR.ncf_netDisplacement,  0);
+    assert('G2 flat: ncf_absPathLength',      flatR.ncf_absPathLength,    0);
+    assert('G2 flat: ncf_pathEfficiency',     flatR.ncf_pathEfficiency,   0);
+    assert('G2 flat: ncf_mfe',                flatR.ncf_mfe,              0);
+    assert('G2 flat: ncf_mae',                flatR.ncf_mae,              0);
+    assert('G2 flat: ncf_upTickCount',        flatR.ncf_upTickCount,      0);
+    assert('G2 flat: ncf_downTickCount',      flatR.ncf_downTickCount,    0);
+    assert('G2 flat: ncf_dirImbalance',       flatR.ncf_dirImbalance,     0);
+    assert('G2 flat: ncf_reversalCount',      flatR.ncf_reversalCount,    0);
+    assert('G2 flat: ncf_maxRunLen=19',       flatR.ncf_maxRunLen,        19);
+    assert('G2 flat: ncf_currentRunLen=19',   flatR.ncf_currentRunLen,    19);
+    assert('G2 flat: ncf_meanFirstDiff',      flatR.ncf_meanFirstDiff,    0);
+    assert('G2 flat: ncf_stdFirstDiff',       flatR.ncf_stdFirstDiff,     0);
+    assert('G2 flat: ncf_meanAbsFirstDiff',   flatR.ncf_meanAbsFirstDiff, 0);
+    assert('G2 flat: ncf_meanSecondDiff',     flatR.ncf_meanSecondDiff,   0);
+    assert('G2 flat: ncf_dirEntropy=0',       flatR.ncf_dirEntropy,       0, 1e-10);
+    assert('G2 flat: ncf_runEntropy=0',       flatR.ncf_runEntropy,       0, 1e-10);
+    assert('G2 flat: ncf_permEntropy3=0',     flatR.ncf_permEntropy3,     0, 1e-10);
+  }
+
+  // ── Group 3: Monotone ascending [100…119] ────────────────────────────
+  const asc  = Array.from({ length: 20 }, (_, i) => 100 + i);
+  const ascR = msdComputeNonClassicalFeatures(asc);
+  assert('G3 asc: not null',                  ascR !== null, true);
+  if (ascR){
+    assert('G3 asc: ncf_netDisplacement=19',  ascR.ncf_netDisplacement,  19);
+    assert('G3 asc: ncf_absPathLength=19',    ascR.ncf_absPathLength,    19);
+    assert('G3 asc: ncf_pathEfficiency=1',    ascR.ncf_pathEfficiency,   1,          1e-10);
+    assert('G3 asc: ncf_mfe=19/100',          ascR.ncf_mfe,              19 / 100,   1e-10);
+    assert('G3 asc: ncf_mae=0',               ascR.ncf_mae,              0);
+    assert('G3 asc: ncf_upTickCount=19',      ascR.ncf_upTickCount,      19);
+    assert('G3 asc: ncf_downTickCount=0',     ascR.ncf_downTickCount,    0);
+    assert('G3 asc: ncf_dirImbalance=1',      ascR.ncf_dirImbalance,     1,          1e-10);
+    assert('G3 asc: ncf_reversalCount=0',     ascR.ncf_reversalCount,    0);
+    assert('G3 asc: ncf_maxRunLen=19',        ascR.ncf_maxRunLen,        19);
+    assert('G3 asc: ncf_currentRunLen=19',    ascR.ncf_currentRunLen,    19);
+    assert('G3 asc: ncf_meanFirstDiff=1',     ascR.ncf_meanFirstDiff,    1);
+    assert('G3 asc: ncf_stdFirstDiff=0',      ascR.ncf_stdFirstDiff,     0,          1e-10);
+    assert('G3 asc: ncf_meanAbsFirstDiff=1',  ascR.ncf_meanAbsFirstDiff, 1);
+    assert('G3 asc: ncf_meanSecondDiff=0',    ascR.ncf_meanSecondDiff,   0,          1e-10);
+    assert('G3 asc: ncf_dirEntropy=0',        ascR.ncf_dirEntropy,       0,          1e-10);
+    assert('G3 asc: ncf_permEntropy3=0',      ascR.ncf_permEntropy3,     0,          1e-10);
+  }
+
+  // ── Group 4: Monotone descending [100…81] ────────────────────────────
+  const desc  = Array.from({ length: 20 }, (_, i) => 100 - i);
+  const descR = msdComputeNonClassicalFeatures(desc);
+  assert('G4 desc: not null',                 descR !== null, true);
+  if (descR){
+    assert('G4 desc: ncf_netDisplacement=-19',descR.ncf_netDisplacement, -19);
+    assert('G4 desc: ncf_absPathLength=19',   descR.ncf_absPathLength,    19);
+    assert('G4 desc: ncf_pathEfficiency=1',   descR.ncf_pathEfficiency,   1,         1e-10);
+    assert('G4 desc: ncf_mfe=0',              descR.ncf_mfe,              0);
+    assert('G4 desc: ncf_mae=19/100',         descR.ncf_mae,              19 / 100,  1e-10);
+    assert('G4 desc: ncf_upTickCount=0',      descR.ncf_upTickCount,      0);
+    assert('G4 desc: ncf_downTickCount=19',   descR.ncf_downTickCount,    19);
+    assert('G4 desc: ncf_dirImbalance=-1',    descR.ncf_dirImbalance,     -1,        1e-10);
+    assert('G4 desc: ncf_reversalCount=0',    descR.ncf_reversalCount,    0);
+    assert('G4 desc: ncf_meanFirstDiff=-1',   descR.ncf_meanFirstDiff,    -1);
+    assert('G4 desc: ncf_stdFirstDiff=0',     descR.ncf_stdFirstDiff,     0,         1e-10);
+    assert('G4 desc: ncf_dirEntropy=0',       descR.ncf_dirEntropy,       0,         1e-10);
+  }
+
+  // ── Group 5: Alternating [100,101,100,101,…] (p₀=100, p₁₉=101) ─────
+  // 19 diffs: 10×(+1) at even indices, 9×(−1) at odd indices
+  const alt  = Array.from({ length: 20 }, (_, i) => 100 + (i % 2));
+  const altR = msdComputeNonClassicalFeatures(alt);
+  assert('G5 alt: not null',                  altR !== null, true);
+  if (altR){
+    assert('G5 alt: ncf_netDisplacement=1',   altR.ncf_netDisplacement,  1);
+    assert('G5 alt: ncf_absPathLength=19',    altR.ncf_absPathLength,    19);
+    assert('G5 alt: ncf_upTickCount=10',      altR.ncf_upTickCount,      10);
+    assert('G5 alt: ncf_downTickCount=9',     altR.ncf_downTickCount,    9);
+    assert('G5 alt: ncf_dirImbalance=1/19',   altR.ncf_dirImbalance,     1 / 19,    1e-10);
+    assert('G5 alt: ncf_reversalCount=18',    altR.ncf_reversalCount,    18);
+    assert('G5 alt: ncf_maxRunLen=1',         altR.ncf_maxRunLen,        1);
+    assert('G5 alt: ncf_currentRunLen=1',     altR.ncf_currentRunLen,    1);
+    assert('G5 alt: ncf_meanFirstDiff=1/19',  altR.ncf_meanFirstDiff,    1 / 19,    1e-10);
+    assert('G5 alt: ncf_meanAbsFirstDiff=1',  altR.ncf_meanAbsFirstDiff, 1,         1e-10);
+  }
+
+  // ── Group 6: Permutation entropy boundary cases ──────────────────────
+  const pe_asc  = msdComputeNonClassicalFeatures(Array.from({ length: 20 }, (_, i) => 100 + i));
+  const pe_desc = msdComputeNonClassicalFeatures(Array.from({ length: 20 }, (_, i) => 100 - i));
+  const pe_hi   = msdComputeNonClassicalFeatures(Array.from({ length: 20 }, (_, i) => 100 + Math.sin(i * 1.3) * 5));
+  if (pe_asc)  assert('G6 permEntropy: asc = 0 (all 012)',  pe_asc.ncf_permEntropy3,  0, 1e-10);
+  if (pe_desc) assert('G6 permEntropy: desc = 0 (all 210)', pe_desc.ncf_permEntropy3, 0, 1e-10);
+  if (pe_hi)   assert('G6 permEntropy: sine > 0',           pe_hi.ncf_permEntropy3 > 0, true);
+
+  // ── Group 7: Determinism ─────────────────────────────────────────────
+  const detIn  = Array.from({ length: 20 }, (_, i) => 100 + Math.sin(i) * 3.7 + Math.cos(i * 2) * 1.2);
+  const det1   = msdComputeNonClassicalFeatures(detIn);
+  const det2   = msdComputeNonClassicalFeatures(detIn.slice());
+  if (det1 && det2){
+    const match = MSD_NC_FEATURE_KEYS.every(k => det1[k] === det2[k]);
+    assert('G7 determinism: same input → identical output', match, true);
+  } else {
+    errors.push('G7 determinism: at least one call returned null for valid input');
+  }
+
+  // ── Group 8: Key completeness and value finiteness ───────────────────
+  const g8  = msdComputeNonClassicalFeatures(Array.from({ length: 20 }, (_, i) => 100 + i * 0.1));
+  if (g8){
+    const nKeys = MSD_NC_FEATURE_KEYS.filter(k => Object.prototype.hasOwnProperty.call(g8, k)).length;
+    assert('G8 key count = 18',               nKeys,                         MSD_NC_FEATURE_KEYS.length);
+    const allFin = MSD_NC_FEATURE_KEYS.every(k => Number.isFinite(g8[k]));
+    assert('G8 all 18 values finite',         allFin,                        true);
+    assert('G8 ncf_eligible not set (enrichment-only field)', !('ncf_eligible' in g8), true);
+  } else {
+    errors.push('G8: msdComputeNonClassicalFeatures returned null for valid linear-ramp input');
+  }
+
+  // ── Group 9: Enrichment pipeline ────────────────────────────────────
+  const snap_ok = {
+    snapshotId: 'ut_e1', epoch: 1000, price: 119, symbol: 'R_100',
+    outcome: 'positive', leadTime: 1, featureVersion: 'v1',
+    rawHistoryValid: true,
+    rawPriceHistory: Array.from({ length: 20 }, (_, i) => 100 + i),
+  };
+  const snap_noHist = {
+    snapshotId: 'ut_e2', epoch: 999, price: 100, symbol: 'R_100',
+    outcome: 'negative', leadTime: null, featureVersion: 'v1',
+    rawHistoryValid: false, rawPriceHistory: null,
+  };
+  const snap_badLen = {
+    snapshotId: 'ut_e3', epoch: 998, price: 100, symbol: 'R_100',
+    outcome: 'negative', leadTime: null, featureVersion: 'v1',
+    rawHistoryValid: true,
+    rawPriceHistory: new Array(19).fill(100),
+  };
+  const enrichOut = msdEnrichWithNonClassicalFeatures([snap_ok, snap_noHist, snap_badLen]);
+  assert('G9 eligible count = 1',             enrichOut.eligible,                           1);
+  assert('G9 ineligible count = 2',           enrichOut.ineligible,                         2);
+  assert('G9 snap_ok: ncf_eligible=true',     enrichOut.enriched[0].ncf_eligible,           true);
+  assert('G9 snap_noHist: ncf_eligible=false',enrichOut.enriched[1].ncf_eligible,           false);
+  assert('G9 snap_badLen: ncf_eligible=false',enrichOut.enriched[2].ncf_eligible,           false);
+  assert('G9 snap_ok: ncf_version correct',   enrichOut.enriched[0].ncf_version === MSD_NC_FEATURE_VERSION, true);
+  assert('G9 snap_ok: ncf_netDisplacement finite', Number.isFinite(enrichOut.enriched[0].ncf_netDisplacement), true);
+  assert('G9 original fields preserved',      enrichOut.enriched[0].snapshotId === 'ut_e1', true);
+  assert('G9 original object not mutated',    !('ncf_eligible' in snap_ok),                 true);
+
+  return { passed, failed: errors.length, total: passed + errors.length, errors };
+}
+
+// ── End of Phase 7: Non-Classical Feature Engineering ─────────────────────────
+
 /**
  * Runs one full experiment: builds the dataset, then writes the
  * Research Configuration (plus resulting sample counts) as a permanent
