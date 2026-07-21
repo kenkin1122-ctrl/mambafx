@@ -35130,9 +35130,26 @@ window.ph8RefreshReadiness = async function(){
   }
 };
 
+// ── Phase 8 server base URL ────────────────────────────────────────────────
+// When index.html is served from GitHub Pages the Phase 8 API calls must go
+// to the Replit server (not GitHub's static host, which has no Node.js
+// backend).  Auto-detect by hostname: relative URLs ('') work on every
+// Replit origin; the absolute URL is used on GitHub Pages.
+// Update the absolute URL below if the Replit deployment URL ever changes.
+const PHASE8_SERVER_BASE = (function(){
+  try {
+    const h = window.location.hostname;
+    if (h === 'localhost' || h === '127.0.0.1' || h.endsWith('.replit.dev') || h.endsWith('.repl.co')) {
+      return ''; // served from Replit — relative URLs work fine
+    }
+    // Any other origin (e.g. kenkin1122-ctrl.github.io) → use the Replit server
+    return 'https://mambafx-kenkin1122.replit.app';
+  } catch(e) { return ''; }
+})();
+
 // ── Load Seal ──────────────────────────────────────────────────────────────
 async function ph8LoadSeal(){
-  const r    = await fetch('/api/phase8/seal');
+  const r    = await fetch(PHASE8_SERVER_BASE + '/api/phase8/seal');
   const body = await r.json();
   if(!body.ok) throw new Error(body.error||'Seal fetch failed');
   ph8Seal = body.seal;
@@ -35228,7 +35245,7 @@ window.ph8Execute = async function(){
     ph8Pill('ph8-pill-3','ph8-pr');
     ph8Prog(8,`Executing 80-candidate discovery pipeline (${states.length} states)…`);
 
-    const resp = await fetch('/api/phase8/run',{
+    const resp = await fetch(PHASE8_SERVER_BASE + '/api/phase8/run',{
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({states}),
     });
