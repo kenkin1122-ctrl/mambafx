@@ -25738,7 +25738,7 @@ function showPage(which){
     adxPageInit();
   }
   if (which === "aggression"){
-    aggPageInit();
+    if (typeof aggPageInit === "function") aggPageInit();
   }
   if (which === "mtf"){
     if (typeof window.mtfPageInit === "function") window.mtfPageInit();
@@ -28357,7 +28357,26 @@ function gridStartLogin(){
 
 // ── Step 2: check session and load accounts ───────────────────────────
 async function gridCheckSession(){
-  
+  try {
+    const resp = await fetch(BACKEND_URL + "/me/session", { credentials: "include" });
+    const body = await resp.json().catch(()=>null);
+    gridLoggedIn = !!(body && body.logged_in);
+  } catch(e){
+    gridLoggedIn = false;
+    if (e instanceof TypeError)
+      gridDiag(`<b>Cannot reach backend.</b> <code>${BACKEND_URL}/me/session</code> — check Worker is deployed.`, true);
+    return;
+  }
+  if (gridLoggedIn){
+    gridDiag(null);
+    await gridLoadAccounts();
+  } else {
+    const pickBlock = $("gridAcctPickBlock"), loginBlock = $("gridLoginBlock");
+    if (pickBlock) pickBlock.style.display = "none";
+    if (loginBlock) loginBlock.style.display = "block";
+  }
+}
+
 // =====================================================================
 // AGGRESSION BOT — buy/sell aggression within the live 1-min candle
 // Uses the real tick-rule classification already computed per tick (dir),
@@ -28498,26 +28517,6 @@ function aggRenderAll(){
 function aggManualTrade(dir){
   if (typeof gridPlaceTrade === "function") gridPlaceTrade(dir, "manual-agg");
   else alert("Connect on the Trading Grid page first.");
-}
-
-try {
-    const resp = await fetch(BACKEND_URL + "/me/session", { credentials: "include" });
-    const body = await resp.json().catch(()=>null);
-    gridLoggedIn = !!(body && body.logged_in);
-  } catch(e){
-    gridLoggedIn = false;
-    if (e instanceof TypeError)
-      gridDiag(`<b>Cannot reach backend.</b> <code>${BACKEND_URL}/me/session</code> — check Worker is deployed.`, true);
-    return;
-  }
-  if (gridLoggedIn){
-    gridDiag(null);
-    await gridLoadAccounts();
-  } else {
-    const pickBlock = $("gridAcctPickBlock"), loginBlock = $("gridLoginBlock");
-    if (pickBlock) pickBlock.style.display = "none";
-    if (loginBlock) loginBlock.style.display = "block";
-  }
 }
 
 // On page load, check for ?login_error=... — the backend appends this if
@@ -33805,7 +33804,12 @@ try {
       const s = JSON.parse(sessionStorage.getItem(STORE)||'null');
       if(!s) return;
       if(s.x){ bot.style.left=s.x; bot.style.right='auto'; }
-      if(s.y){ bot.style.top=s.y;  bot.style.bottom='auto'; }
+      if(s.y){
+        const nav=document.querySelector('.pagenav');
+        const minY=nav?(nav.getBoundingClientRect().bottom+8):0;
+        bot.style.top=Math.max(minY,parseFloat(s.y)||0)+'px';
+        bot.style.bottom='auto';
+      }
       if(s.min) setMin(true);
     }catch(_){}
   }
@@ -33831,8 +33835,10 @@ try {
   });
   document.addEventListener('mousemove', e=>{
     if(!dragging) return;
+    const nav=document.querySelector('.pagenav');
+    const minY=nav?(nav.getBoundingClientRect().bottom+8):0;
     const x=Math.max(0,Math.min(e.clientX-ox, window.innerWidth-bot.offsetWidth));
-    const y=Math.max(0,Math.min(e.clientY-oy, window.innerHeight-bot.offsetHeight));
+    const y=Math.max(minY,Math.min(e.clientY-oy, window.innerHeight-bot.offsetHeight));
     bot.style.left=x+'px'; bot.style.top=y+'px';
   });
   document.addEventListener('mouseup', ()=>{ if(!dragging)return; dragging=false; bot.classList.remove('dragging'); savePos(); });
@@ -33848,8 +33854,10 @@ try {
   document.addEventListener('touchmove', e=>{
     if(!dragging) return;
     const t=e.touches[0];
+    const nav=document.querySelector('.pagenav');
+    const minY=nav?(nav.getBoundingClientRect().bottom+8):0;
     const x=Math.max(0,Math.min(t.clientX-ox, window.innerWidth-bot.offsetWidth));
-    const y=Math.max(0,Math.min(t.clientY-oy, window.innerHeight-bot.offsetHeight));
+    const y=Math.max(minY,Math.min(t.clientY-oy, window.innerHeight-bot.offsetHeight));
     bot.style.left=x+'px'; bot.style.top=y+'px';
   },{passive:true});
   document.addEventListener('touchend', ()=>{ if(!dragging)return; dragging=false; savePos(); });
@@ -34541,7 +34549,12 @@ try {
       const s=JSON.parse(sessionStorage.getItem(STORE)||'null');
       if(!s) return;
       if(s.x){bot.style.left=s.x;bot.style.right='auto';}
-      if(s.y){bot.style.top=s.y;bot.style.bottom='auto';}
+      if(s.y){
+        const nav=document.querySelector('.pagenav');
+        const minY=nav?(nav.getBoundingClientRect().bottom+8):0;
+        bot.style.top=Math.max(minY,parseFloat(s.y)||0)+'px';
+        bot.style.bottom='auto';
+      }
       if(s.min) setMin(true);
     }catch(_){}
   }
@@ -34566,8 +34579,10 @@ try {
   });
   document.addEventListener('mousemove',e=>{
     if(!dragging)return;
+    const nav=document.querySelector('.pagenav');
+    const minY=nav?(nav.getBoundingClientRect().bottom+8):0;
     bot.style.left=Math.max(0,Math.min(e.clientX-ox,window.innerWidth-bot.offsetWidth))+'px';
-    bot.style.top=Math.max(0,Math.min(e.clientY-oy,window.innerHeight-bot.offsetHeight))+'px';
+    bot.style.top=Math.max(minY,Math.min(e.clientY-oy,window.innerHeight-bot.offsetHeight))+'px';
   });
   document.addEventListener('mouseup',()=>{if(!dragging)return;dragging=false;bot.classList.remove('dragging');savePos();});
 
@@ -34582,8 +34597,10 @@ try {
   document.addEventListener('touchmove',e=>{
     if(!dragging)return;
     const t=e.touches[0];
+    const nav=document.querySelector('.pagenav');
+    const minY=nav?(nav.getBoundingClientRect().bottom+8):0;
     bot.style.left=Math.max(0,Math.min(t.clientX-ox,window.innerWidth-bot.offsetWidth))+'px';
-    bot.style.top=Math.max(0,Math.min(t.clientY-oy,window.innerHeight-bot.offsetHeight))+'px';
+    bot.style.top=Math.max(minY,Math.min(t.clientY-oy,window.innerHeight-bot.offsetHeight))+'px';
   },{passive:true});
   document.addEventListener('touchend',()=>{if(!dragging)return;dragging=false;savePos();});
 
