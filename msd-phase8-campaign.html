@@ -789,45 +789,137 @@ function renderRecord(r, decisions) {
   const disc = decisions.filter(d=>d.cls==='DISCOVERY_CANDIDATE');
   const hyps = r.hypotheses || [];
 
+  // ── Resolve dataset fingerprint ─────────────────────────────────────────
+  // msdRunPhase7bDiscovery returns the fingerprint either as a top-level field
+  // or nested inside a frozenDatasetSnapshot object. Accept whichever is present.
+  const datasetFingerprint =
+    r.datasetFingerprint ||
+    (r.frozenDatasetSnapshot && r.frozenDatasetSnapshot.datasetFingerprint) ||
+    null;
+
+  // ── Full frozen search-space definition ────────────────────────────────
+  // _seal.discoverySpec is the complete spaceDefinition object returned by
+  // msdBuildPhase7bSearchSpaceDefinition() (plus featureFamilies injection),
+  // already present in the browser from the seal fetch performed before any
+  // data was read. Including it here allows an independent auditor to verify
+  // the searchSpaceHash by running msdSimpleHash(JSON.stringify(discoverySpec)).
+  const frozenSearchSpaceDefinition = (_seal && _seal.discoverySpec) ? _seal.discoverySpec : null;
+
+  // ── Snapshot statistics ────────────────────────────────────────────────
+  // snapshotStats is returned by the server and contains row counts, certainty
+  // counts, and the label-confidence policy applied to the dataset.
+  // Store it verbatim — it is immutable once the campaign returns.
+  const snapshotStats = r.snapshotStats || null;
+
+  // ── Execution log ──────────────────────────────────────────────────────
+  // r.log is the step-by-step provenance log produced by msdRunPhase7bDiscovery.
+  // Each entry records a pipeline step name, a success flag, and any
+  // supporting metadata. Store verbatim.
+  const executionLog = r.log || null;
+
+  // ── Frozen dataset snapshot ────────────────────────────────────────────
+  // The full frozenDatasetSnapshot object if the server returned it.
+  const frozenDatasetSnapshot = r.frozenDatasetSnapshot || null;
+
   _record = {
+    // ── Experiment identity ───────────────────────────────────────────────
     experiment_id:             'phase8_nc_campaign_' + Date.now(),
     timestamp:                 r.executedAt || new Date().toISOString(),
     protocol_version:          'phase8_nc_v1',
-    search_space_id:           r.frozenSearchSpace ? r.frozenSearchSpace.searchSpaceId : (_seal ? _seal.searchSpaceId : null),
-    search_space_hash:         r.frozenSearchSpace ? r.frozenSearchSpace.searchSpaceHash : (_seal ? _seal.searchSpaceHash : null),
-    search_space_version:      r.frozenSearchSpace ? r.frozenSearchSpace.searchSpaceVersion : null,
-    dataset_snapshot_id:       r.datasetSnapshotId || null,
-    feature_version:           'ncf_v1',
-    raw_history_version:       'rawPriceHistory_v1',
+
+    // ── Software & engine versions ────────────────────────────────────────
     software_version:          'mambafx-2026.07-phase7e',
     engine_version:            r.engineVersion || 'phase8-server-engine-v1',
-    random_seed:               r.seed ?? 42,
+    feature_version:           'ncf_v1',
+    raw_history_version:       'rawPriceHistory_v1',
+
+    // ── Search-space provenance (GOVERNANCE CORRECTION 1) ─────────────────
+    // Three-field summary (for quick lookup):
+    search_space_id:           r.frozenSearchSpace ? r.frozenSearchSpace.searchSpaceId   : (_seal ? _seal.searchSpaceId   : null),
+    search_space_hash:         r.frozenSearchSpace ? r.frozenSearchSpace.searchSpaceHash : (_seal ? _seal.searchSpaceHash : null),
+    search_space_version:      r.frozenSearchSpace ? r.frozenSearchSpace.searchSpaceVersion : (_seal ? _seal.searchSpaceVersion : null),
+    // Complete frozen definition — allows independent hash verification:
+    frozen_search_space_definition: frozenSearchSpaceDefinition,
+
+    // ── Dataset provenance (GOVERNANCE CORRECTION 2) ──────────────────────
+    dataset_snapshot_id:       r.datasetSnapshotId || null,
+    dataset_fingerprint:       datasetFingerprint,
+    frozen_dataset_snapshot:   frozenDatasetSnapshot,
+
+    // ── Statistical protocol ──────────────────────────────────────────────
+    random_seed:               r.seed      ?? 42,
     permutation_count:         r.permutations ?? 1000,
-    alpha:                     r.alpha ?? 0.05,
+    alpha:                     r.alpha     ?? 0.05,
     practical_threshold_nats:  PRAC,
     null_model:                'circular_shift_permutation',
     statistical_method:        'mutual_information',
     multiple_testing_correction: 'benjamini_hochberg',
+    discovery_criterion:       'BH adj-p < 0.05 AND MI >= 0.01 nats',
+    uncertainty_policy:        'filter_certain_only',
+    symbol:                    _seal ? _seal.symbol : '1HZ100V',
+    observation_window_ticks:  20,
+
+    // ── Dataset statistics ────────────────────────────────────────────────
+    snapshot_stats:            snapshotStats,
+
+    // ── Candidate set dimensions ──────────────────────────────────────────
     candidate_count:           hyps.length,
     family_size:               hyps.length,
+    candidates_enumerated:     r.enumeratedCount   ?? null,
+    candidates_evaluated:      r.candidatesEvaluated ?? null,
+
+    // ── Execution provenance ──────────────────────────────────────────────
     runtime_ms:                r.serverElapsedMs || null,
+    execution_log:             executionLog,
+
+    // ── Discovery outcome ─────────────────────────────────────────────────
     discovery_candidate_count: disc.length,
     authorization_decision:    disc.length > 0 ? 'PHASE_9_AUTHORIZED' : 'NULL_RESULT',
     scientific_conclusions:    {
-      discovery_candidates:    disc.map(d => ({ feature: d.feature, leadTime: d.leadTime, effectSize: d.effectSize, adjustedPValue: d.adjustedPValue })),
-      stat_sig_only:           decisions.filter(d=>d.cls==='STAT_SIG_ONLY').map(d=>({ feature: d.feature, leadTime: d.leadTime, effectSize: d.effectSize, adjustedPValue: d.adjustedPValue })),
-      not_significant_count:   decisions.filter(d=>d.cls==='NOT_SIGNIFICANT').length,
+      discovery_candidates: disc.map(d => ({
+        feature: d.feature, leadTime: d.leadTime,
+        effectSize: d.effectSize, adjustedPValue: d.adjustedPValue,
+        contentHash: d.contentHash || null,
+      })),
+      stat_sig_only: decisions.filter(d=>d.cls==='STAT_SIG_ONLY').map(d => ({
+        feature: d.feature, leadTime: d.leadTime,
+        effectSize: d.effectSize, adjustedPValue: d.adjustedPValue,
+        contentHash: d.contentHash || null,
+      })),
+      prac_sig_only_count:   decisions.filter(d=>d.cls==='PRAC_SIG_ONLY').length,
+      not_significant_count: decisions.filter(d=>d.cls==='NOT_SIGNIFICANT').length,
     },
+
+    // ── Complete candidate table (GOVERNANCE CORRECTION 3 + enhancements) ─
+    // Each row preserves contentHash so an auditor can independently verify
+    // that the reported p-values and effect sizes correspond to the hypothesis
+    // records frozen by msdFreezeHypothesisRecord().
     candidate_table: hyps.map(h => ({
       feature:        h.feature,
-      family:         FF[h.feature]||'',
+      family:         FF[h.feature] || '',
       leadTime:       h.leadTime,
+      candidateHash:  h.candidateHash  || null,   // candidate definition hash
+      contentHash:    h.contentHash    || null,   // frozen record integrity hash (CORRECTION 3)
+      hypothesis_id:  h.hypothesis_id  || null,
+      candidate_id:   h.candidate_id   || null,
       effectSize:     h.effectSize,
       rawPValue:      h.rawPValue,
       adjustedPValue: h.adjustedPValue,
       sampleSize:     h.sampleSize,
-      classification: decisions.find(d=>d.feature===h.feature&&d.leadTime===h.leadTime)?.cls || '—',
-    })).sort((a,b)=>(a.adjustedPValue||1)-(b.adjustedPValue||1)),
+      isSignificant:  h.isSignificant  ?? null,
+      classification: decisions.find(d => d.feature === h.feature && d.leadTime === h.leadTime)?.cls || '—',
+    })).sort((a,b) => (a.adjustedPValue||1) - (b.adjustedPValue||1)),
+
+    // ── Full frozen hypothesis records ─────────────────────────────────────
+    // The complete array of frozen hypothesis records as returned by the server,
+    // before any field mapping or omission. Provides the full scientific provenance
+    // chain including all fields set by msdFreezeHypothesisRecord().
+    hypothesis_records: hyps,
+
+    // ── Protocol seal snapshot ─────────────────────────────────────────────
+    // The complete seal object fetched before any data was read. Captures the
+    // pre-registered protocol state as of the moment the seal was displayed.
+    protocol_seal: _seal || null,
   };
 
   document.getElementById('record-content').innerHTML = `<pre>${JSON.stringify(_record, null, 2)}</pre>`;
