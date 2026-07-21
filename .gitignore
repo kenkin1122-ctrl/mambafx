@@ -1,0 +1,10 @@
+node_modules/
+.cache/
+.local/
+.agents/
+attached_assets/
+snapshots/
+discovery_log.json
+*.log
+.env
+.env.*

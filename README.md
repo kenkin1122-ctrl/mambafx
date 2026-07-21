@@ -1,154 +1,157 @@
-# Mamba FX — Deriv OAuth backend (Cloudflare Worker)
+# Market State Discovery Laboratory
+### Mamba FX — Scientific Trading Research Platform
 
-This is the minimal backend Deriv's support told you is required. The
-browser can't exchange an OAuth code for an access token, and can't call
-Deriv's `accounts` / `otp` REST endpoints directly — CORS blocks both, by
-Deriv's own design. This Worker does those three calls on your behalf and
-returns only what the browser needs.
+A zero-build-step, single-file web application for live Deriv market tick analysis, automated trading bots, and statistical discovery of significant market states.
 
-It does **not** do anything else — no trading logic, no storage, no
-database. Mamba FX (`v100-tracker.html`) does everything else: PKCE
-generation, the OAuth redirect *and* the redirect return, the WebSocket
-trading connection, signals, charts — all on one page.
+---
 
-## Architecture (single page, no popup, no separate callback file)
+## What This Is
 
-```
-v100-tracker.html  (hosted on GitHub Pages — this IS the redirect_uri)
-    │
-    │ Login with Deriv → same-tab redirect to auth.deriv.com
-    ▼
-Deriv login page
-    │
-    │ Deriv redirects back to v100-tracker.html?code=...&state=...
-    ▼
-v100-tracker.html (same page, reloaded)
-    │  detects ?code= on load, verifies state,
-    │  POSTs {code, code_verifier} to this Worker
-    ▼
-this Worker  (/api/token → /api/accounts → /api/otp/{id})
-    │  does the three Deriv calls that require a server
-    ▼
-v100-tracker.html
-    │  receives the access token, account list, then the OTP WebSocket URL
-    ▼
-new WebSocket(otpUrl)   ← opened directly by the browser, same as before
-```
+The Market State Discovery (MSD) Laboratory is a scientific platform for:
 
-There is no `callback.html` in this flow anymore. An old version of this
-project used a popup window + separate callback page; that's been replaced
-because it required cross-origin `sessionStorage` access that browsers
-don't allow. The dashboard is now its own OAuth redirect target.
+1. **Live tick monitoring** — Real-time Deriv WebSocket feed with indicator computation (MACD, BB, CCI, Choppiness, ADX, RSI, ATR, Stochastic, EMA, ROC)
+2. **Automated bots** — Multiple configurable trading bots with different strategies
+3. **Market State capture** — Captures labeled market snapshots into browser IndexedDB at event detection moments
+4. **Statistical discovery** — Permutation-based hypothesis testing across 80 Non-Classical feature × lead-time combinations
+5. **Phase 8 Campaign** — First official NC discovery protocol: tests whether path-dependent tick features predict 5-tick run outcomes
 
-**This means `v100-tracker.html` must be hosted at a real HTTPS URL** (e.g.
-GitHub Pages) — Deriv cannot redirect to a local `file://` path. Opening the
-file locally will not let login complete.
+---
 
-## What this Worker exposes
+## Quick Start
 
-| Route                  | Method | Purpose                                            |
-|-------------------------|--------|-----------------------------------------------------|
-| `/api/token`             | POST   | Exchange `{code, code_verifier}` for an access token |
-| `/api/accounts`          | GET    | List accounts for the logged-in user (needs `Authorization: Bearer <token>`) |
-| `/api/otp/{accountId}`   | POST   | Get the one-time trading WebSocket URL for an account (needs `Authorization: Bearer <token>`) |
-
-## 1. Install Wrangler (Cloudflare's CLI)
+### Development (Replit / local)
 
 ```bash
-npm install -g wrangler
-wrangler login
+node server.js
+# App available at http://localhost:5000
 ```
 
-This opens a browser to authorize Wrangler against your Cloudflare account
-(free, no card required for the Workers free tier).
+No npm install required. Server uses Node.js built-in modules only.
 
-## 2. Set the required secrets
+### Production
 
-From inside this folder:
+- **Frontend**: hosted on GitHub Pages (`https://kenkin1122-ctrl.github.io/mambafx/`)
+- **Backend**: Cloudflare Worker (`https://mambafx-backend.kenkin1122.workers.dev`)
+
+---
+
+## Application Structure
+
+All pages are in `index.html` (~36K lines). Navigation uses a single-page show/hide pattern.
+
+### Trading Pages
+| Page | Key | Description |
+|------|-----|-------------|
+| Live Tick Feed | `live` | Real-time V100 1s tick stream with 5-in-a-row run detection |
+| Candle Charts | `candles` | Real-time candlestick chart with indicators |
+| 5-Tick Engine | `engine` | Pattern-match run prediction engine |
+| Trading Grid | `grid` | Authenticated Deriv trading interface |
+| Analysis Tool | `analysis` | Technical analysis dashboard |
+| Indicator Charts | `charts` | MACD, BB, CCI, Choppiness, ADX indicator charts |
+| MTF Structure | `mtf` | Multi-timeframe structure analysis |
+| Njanja Analysis | `njanja` | Multi-timeframe dashboard (11 timeframes) |
+
+### Bot Pages
+| Page | Key | Description |
+|------|-----|-------------|
+| Only Ups/Downs Bot | `oubot` | Multi-filter Rise/Fall bot |
+| Rise/Fall Autobot | `rfabot` | ADX-pattern Rise/Fall automation |
+| ADX Bot | `adxbot` | ADX + DI direction bot |
+| Aggression Bot | `aggression` | High-frequency consecutive signal bot |
+| Mamba FX Bot | `mfxbot` | Floating panel trading bot |
+
+### MSD Laboratory Pages
+| Page | Key | Description |
+|------|-----|-------------|
+| Positive Event Browser | `msdexplorer` | Browse and inspect captured market events |
+| Snapshot Inspector | `msdinspector` | Detailed view of individual state snapshots |
+| Feature Distribution | `msddistribution` | Statistical distributions of all features |
+| Correlation Matrix | `msdcorrelation` | Feature correlation heatmap |
+| Search / Filter | `msdsearch` | Query states by feature ranges |
+| Experiment Runner | `msdexperiment` | Run parameterized discovery experiments |
+| Knowledge Base | `msdknowledge` | Confirmed hypothesis registry |
+| Research Validation Suite | `msdvalidation` | 20-point integrity checklist |
+| Workbench | `msdworkbench` | Free-form analysis workspace |
+| **Phase 8 Campaign** | `msdphase8` | **Official NC discovery campaign** |
+
+---
+
+## Phase 8 Campaign
+
+The Phase 8 Campaign tests 80 hypotheses (16 Non-Classical features × 5 lead times) using 1,000-permutation Mann-Whitney tests.
+
+### Running a Campaign
+
+1. Open the app and go to **Phase 8 Campaign**
+2. Wait for the Pre-flight Checklist to pass (≥20 checks)
+3. Accumulate NC-eligible MarketStates (leave Live Tick Feed open)
+4. Click **Run Campaign** when the checklist shows readiness
+5. Results are ranked by p-value; significant findings are highlighted
+
+### Campaign API (server-side compute)
 
 ```bash
-wrangler secret put DERIV_APP_ID
-# paste: 33BoT5hHIzs1muGu7qhww
+# Get frozen search space seal
+GET http://localhost:5000/api/phase8/seal
 
-wrangler secret put DERIV_REDIRECT_URI
-# paste the exact URL where you host v100-tracker.html, e.g.:
-# https://kenkin1122-ctrl.github.io/mambafx/v100-tracker.html
+# Run campaign with state array
+POST http://localhost:5000/api/phase8/run
+Content-Type: application/json
+{"states": [...MarketState records from IndexedDB...]}
 ```
 
-This **must match exactly** — scheme, host, path, and trailing slash — both
-here and in:
-- Deriv's dashboard (Application manager → your app → redirect URL)
-- the `DERIV_REDIRECT_URI` constant near the top of the
-  `// DERIV TRADE EXECUTION` section inside `v100-tracker.html`
+---
 
-**Only if** Deriv's dashboard issued your `mambafx` app a `client_secret`
-(check Dashboard → Applications → Application manager → your app):
+## Key Files
 
-```bash
-wrangler secret put DERIV_CLIENT_SECRET
-# paste the secret, if you have one
-```
+| File | Purpose |
+|------|---------|
+| `index.html` | Entire application frontend |
+| `server.js` | Static file server + Phase 8 API |
+| `phase8-engine.js` | Node.js Phase 8 discovery engine |
+| `mtf/src/index.js` | MTF ES module entry point |
+| `src/index.js` | Cloudflare Worker OAuth backend |
+| `wrangler.jsonc` | Cloudflare deployment config |
 
-If your app is public/PKCE-only (no secret shown in the dashboard), skip
-this — the Worker works fine without it.
+---
 
-## 3. Lock down CORS once the dashboard is hosted
+## Documentation
 
-Edit `wrangler.jsonc` and set `ALLOWED_ORIGIN` to the exact origin
-`v100-tracker.html` is served from, e.g.:
+| Document | Contents |
+|----------|----------|
+| `PROJECT_STRUCTURE.md` | Full file tree with descriptions |
+| `SYSTEM_ARCHITECTURE.md` | Architecture diagrams, data flow |
+| `ENGINE_MAP.md` | All engines, functions, constants |
+| `MODULE_DEPENDENCIES.md` | Import graph, dependency tree |
+| `DATABASE_SCHEMA.md` | IndexedDB schema, all field definitions |
+| `PHASE8_PROTOCOL.md` | Phase 8 campaign protocol, API, statistics |
+| `SCIENTIFIC_PIPELINE.md` | End-to-end data → discovery pipeline |
+| `DISCOVERY_PIPELINE.md` | Discovery engine internals, experiment system |
+| `FEATURE_REGISTRY.md` | All 22 classical + 18 NC features |
+| `CLAUDE_HANDOFF.md` | Developer handoff for continued development |
+| `BACKEND.md` | Cloudflare Worker backend documentation |
+| `RESEARCH_ROADMAP.md` | Future research directions |
+| `RESEARCH_DEBT_REGISTER.md` | Outstanding scientific debt items |
 
-```json
-"vars": { "ALLOWED_ORIGIN": "https://kenkin1122-ctrl.github.io" }
-```
+---
 
-`"*"` works for initial testing but should be tightened once you know the
-real origin, since this Worker holds the only path to your access token.
+## Audit & Standalone Tools
 
-## 4. Deploy
+| File | Purpose |
+|------|---------|
+| `msd-phase7-audit.html` | Data sufficiency audit (read-only) |
+| `msd-phase7b-discovery.html` | Phase 7B discovery runner |
+| `msd-phase7c-verification.html` | Mathematical verification tool |
+| `msd-nc-validation.html` | NC feature validation |
+| `msd-phase8-campaign.html` | Campaign report viewer |
 
-```bash
-wrangler deploy
-```
+---
 
-Wrangler prints your Worker's URL, something like:
+## Architecture Notes
 
-```
-https://mamba-fx-deriv-backend.<your-subdomain>.workers.dev
-```
-
-Copy that URL — paste it into `v100-tracker.html`'s Trading Grid page, in
-the **Backend URL** field, before clicking "Login with Deriv". The dashboard
-saves it in `localStorage` so you only need to enter it once per browser.
-
-## 5. Test the Worker directly (optional, before wiring up the dashboard)
-
-```bash
-curl https://mamba-fx-deriv-backend.<your-subdomain>.workers.dev/api/health
-# {"ok":true,"service":"mamba-fx-deriv-backend"}
-```
-
-A `404`/CORS error here means the Worker isn't deployed correctly; a
-`{"ok":true,...}` response means it's live and ready for the dashboard to
-use.
-
-## Deploying v100-tracker.html itself
-
-Push it to the same GitHub Pages repo as the redirect target, e.g.
-`mambafx/v100-tracker.html`, so it's reachable at
-`https://kenkin1122-ctrl.github.io/mambafx/v100-tracker.html` — the exact
-URL set as `DERIV_REDIRECT_URI` above and inside the file. `callback.html`
-is no longer required; you can leave it in the repo (it now just shows a
-short notice if anyone lands on it) or delete it once Deriv's dashboard
-redirect URL is updated to point at `v100-tracker.html` instead.
-
-## Security notes
-
-- Access tokens pass through this Worker in transit but are never logged,
-  stored, or written to any database — there is no database. Restarting or
-  redeploying the Worker has no effect on any in-flight session.
-- `DERIV_CLIENT_SECRET`, if you set one, lives only as a Cloudflare Worker
-  secret (encrypted at rest, never visible in the dashboard UI after
-  creation, never present in source control).
-- The `code_verifier` (PKCE) is generated and held in the browser's
-  `sessionStorage` only, for the same tab/origin that started the login —
-  this Worker just relays it to Deriv in the token request body over HTTPS.
+- **No bundler, no transpiler, no framework** — runs directly in any modern browser
+- **Zero npm dependencies** in production server code
+- **Single-file design** — `index.html` is the application; add features by extending it
+- **IndexedDB** stores all scientific data locally in the browser
+- **GitHub Pages** compatible — all static assets, no server-side rendering
+- **Cloudflare Worker** handles OAuth (session, token exchange) separately
