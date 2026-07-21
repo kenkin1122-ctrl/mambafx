@@ -56,13 +56,22 @@ const EXPORT_IIFE = `
 function buildContext() {
   if (_ctx) return _ctx;
 
-  // ── Extract lines 3170–11287 (all MSD functions + constants) ───────────────
-  // Cut point 11287 is the last clean balanced-block boundary before non-ASCII
-  // decorative characters (U+2550, U+2014) appear in JSDoc comments at lines
-  // 11443+. The vm parser rejects those characters even inside comments.
-  // All needed MSD functions and constants are defined before line 11000.
+  // ── Extract MSD function library ─────────────────────────────────────────
+  // Line 4361 (1-based, 0-idx 4360) is the first MSD identifier (msdEventSeq).
+  // Lines 3388–4360 are the "Developer AI Mode" instrumentation block that was
+  // added after the engine was authored — it must be excluded because it carries
+  // non-ASCII box-drawing chars (U+2550, U+2014) in its section headers, which
+  // the Node.js vm parser rejects even inside comments.
+  // Upper bound 12000 (1-based inclusive) matches the original design intent:
+  // "all MSD functions + constants before DOM-dependent UI code at ~12001+".
+  // An additional .replace() blanks any stray non-ASCII that appears inside
+  // JSDoc comment decorators elsewhere in the range.
   const htmlLines = fs.readFileSync(pathMod.join(__dirname, 'index.html'), 'utf8').split('\n');
-  const scriptSrc = htmlLines.slice(3169, 11287).join('\n') + EXPORT_IIFE;
+  // 4360 (0-idx) = 1-based line 4361 — first MSD identifier (msdEventSeq).
+  // 12460 (0-idx exclusive) is the last balanced-block boundary confirmed by
+  // binary search; all 13 needed exports are present and vm.runInContext passes.
+  const rawSrc    = htmlLines.slice(4360, 12460).join('\n').replace(/[^\x00-\x7F]/g, ' ');
+  const scriptSrc = rawSrc + EXPORT_IIFE;
 
   // ── Browser stubs ────────────────────────────────────────────────────────
   const cryptoStub = {
