@@ -35149,7 +35149,27 @@ const PHASE8_SERVER_BASE = (function(){
 
 // ── Load Seal ──────────────────────────────────────────────────────────────
 async function ph8LoadSeal(){
-  const r    = await fetch(PHASE8_SERVER_BASE + '/api/phase8/seal');
+  const sealUrl = PHASE8_SERVER_BASE + '/api/phase8/seal';
+  let r;
+  try {
+    r = await fetch(sealUrl);
+  } catch(netErr) {
+    // TypeError: Failed to fetch — almost always a CORS block caused by the
+    // Replit server not being published yet (the "not live yet" placeholder
+    // page Replit shows for unpublished deployments does not include
+    // Access-Control-Allow-Origin, so the browser rejects the response).
+    throw new Error(
+      'Phase 8 server unreachable — the Replit server must be published. ' +
+      'In the Replit workspace click the \u25b6 Deploy button to publish ' +
+      'https://mambafx-kenkin1122.replit.app, then reload this page.'
+    );
+  }
+  if(!r.ok){
+    // HTTP-level error (e.g. 404, 500) — parse body if possible
+    let errMsg = `Server returned HTTP ${r.status}`;
+    try { const eb = await r.json(); errMsg = eb.error || errMsg; } catch(_){}
+    throw new Error(errMsg);
+  }
   const body = await r.json();
   if(!body.ok) throw new Error(body.error||'Seal fetch failed');
   ph8Seal = body.seal;
@@ -35878,7 +35898,7 @@ async function ph8RunChecklist(){
     !!seal,
     seal
       ? `Seal verified: ${seal.totalCardinality} candidates · hash ${seal.searchSpaceHash} · version ${seal.searchSpaceVersion} · symbol ${seal.symbol}`
-      : 'SEAL NOT LOADED from /api/phase8/seal — engine may be unavailable',
+      : 'SEAL NOT LOADED — publish the Replit server at https://mambafx-kenkin1122.replit.app then reload',
     !seal ? 'The Phase 8 engine must be running. Verify the workflow is active and reload the page.' : null);
 
   const passCount = checks.filter(c => c.pass).length;
