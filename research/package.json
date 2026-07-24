@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "type": "module",
+  "description": "Marker file ONLY — signals to Node's module loader that .js files under research/ are ES modules, so `node --test` can execute the Phase 1+ unit/integration tests without a build step. This file introduces zero dependencies and has no effect whatsoever on the browser runtime: browsers determine module-ness from the <script type=\"module\"> attribute (already used for mtf/src/index.js), never from package.json. This is a test-tooling-only addition — see the Phase 1 Implementation Report's 'Smallest Additive Amendments' section."
+}
