@@ -3491,7 +3491,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
 })();
 
 // ── Config ───────────────────────────────────────────────────────────
-const APP_ID = "33BoT5hHIzs1muGu7qhww"; // Deriv app id
+const APP_ID = 1089;                 // Deriv numeric app id (used by trading grid auth flow)
 // All 10 standard Volatility indices (continuous + 1-second variants)
 const MARKETS = {
   "R_10":    "Volatility 10",
@@ -3590,9 +3590,9 @@ function restoreState(data){
 // Deriv exposes the same feed on two hosts. Some networks block one but
 // not the other, so we alternate endpoints on each retry and use a
 // connection timeout to avoid hanging forever on "Connecting…".
+// Public market-data endpoint — no app_id required, supports all synthetic indices
 const WS_ENDPOINTS = [
-  `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`,
-  `wss://ws.binaryws.com/websockets/v3?app_id=${APP_ID}`,
+  'wss://api.derivws.com/trading/v1/options/ws/public',
 ];
 let _endpointIdx = 0;
 let _connectTimeout = null;
@@ -26160,7 +26160,7 @@ let rfaReconnectTimer = null;
 
 function rfaConnect(){
   if (rfaWs && (rfaWs.readyState === 0 || rfaWs.readyState === 1)) return; // already connecting/open
-  try { rfaWs = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`); }
+  try { rfaWs = new WebSocket('wss://api.derivws.com/trading/v1/options/ws/public'); }
   catch(e){ rfaScheduleReconnect(); return; }
   rfaWs.onopen = () => {
     rfaConnected = true;
