@@ -149,6 +149,16 @@ export function buildGovernanceUpgradeHandler() {
     if (oldVersion < 8) {
       createStoreIfMissing(db, stores.RANDOMNESS_AUDIT_RESULTS);
     }
+    // v9 (Live Integration phase, Phase 2 -- Positive Control
+    // Calibration): additive — PositiveControlCalibrationRuns only.
+    if (oldVersion < 9) {
+      createStoreIfMissing(db, stores.POSITIVE_CONTROL_CALIBRATION_RUNS);
+    }
+    // v10 (Phase 9 -- Adaptive Scientific Discovery Engine): additive —
+    // RngForensicsResults only.
+    if (oldVersion < 10) {
+      createStoreIfMissing(db, stores.RNG_FORENSICS_RESULTS);
+    }
   };
 }
 
@@ -289,6 +299,16 @@ export async function getKnowledgeGraphEdgesAdapter(opts = {}) {
 export async function getRandomnessAuditResultsAdapter(opts = {}) {
   await openResearchGovernanceDb(opts);
   return createAppendOnlyAdapter({ getDb: () => openResearchGovernanceDb(opts), storeName: DB.RESEARCH_GOVERNANCE.stores.RANDOMNESS_AUDIT_RESULTS });
+}
+
+export async function getPositiveControlCalibrationRunsAdapter(opts = {}) {
+  await openResearchGovernanceDb(opts);
+  return createAppendOnlyAdapter({ getDb: () => openResearchGovernanceDb(opts), storeName: DB.RESEARCH_GOVERNANCE.stores.POSITIVE_CONTROL_CALIBRATION_RUNS });
+}
+
+export async function getRngForensicsResultsAdapter(opts = {}) {
+  await openResearchGovernanceDb(opts);
+  return createAppendOnlyAdapter({ getDb: () => openResearchGovernanceDb(opts), storeName: DB.RESEARCH_GOVERNANCE.stores.RNG_FORENSICS_RESULTS });
 }
 
 /** Test-only: reset the memoized connection cache between test cases. */
