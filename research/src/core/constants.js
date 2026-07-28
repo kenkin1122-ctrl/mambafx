@@ -174,9 +174,19 @@ export const DB = Object.freeze({
   // append-only store implementing the Randomness Audit
   // (governance/randomnessAudit.js), the final missing scientific
   // subsystem. No existing store touched.
+  // Version bumped 8 -> 9 (Live Integration phase, Phase 2 -- Positive
+  // Control Calibration): additive-only -- PositiveControlCalibrationRuns
+  // is a new append-only store implementing the scheduled Positive
+  // Control calibration process (randomnessAudit.js's
+  // runScheduledPositiveControlCalibration), permanently recording each
+  // periodic "inject a known recoverable signal and confirm the pipeline
+  // still detects it" run together with the same Family's Empirical FDR
+  // Calibration Canary divergence check at that moment -- the two real,
+  // already-governed signals the brief's "online FDR remains calibrated"
+  // criterion actually maps to. No existing store touched.
   RESEARCH_GOVERNANCE: Object.freeze({
     name: 'mfx_research_governance',
-    version: 8,
+    version: 10,
     stores: Object.freeze({
       HYPOTHESIS_REGISTRY: 'HypothesisRegistry',
       LIFECYCLE_TRANSITIONS: 'LifecycleTransitions',
@@ -190,6 +200,12 @@ export const DB = Object.freeze({
       KNOWLEDGE_GRAPH_NODES: 'KnowledgeGraphNodes',
       KNOWLEDGE_GRAPH_EDGES: 'KnowledgeGraphEdges',
       RANDOMNESS_AUDIT_RESULTS: 'RandomnessAuditResults',
+      POSITIVE_CONTROL_CALIBRATION_RUNS: 'PositiveControlCalibrationRuns',
+      // v10 (Phase 9 -- Adaptive Scientific Discovery Engine): RNG
+      // Forensics results only. Runs strictly after a hypothesis's
+      // Randomness Audit verdict is GenuinePredictiveStructure; classifies
+      // evidence, never re-decides it (see governance/rngForensics.js).
+      RNG_FORENSICS_RESULTS: 'RngForensicsResults',
     }),
   }),
 });

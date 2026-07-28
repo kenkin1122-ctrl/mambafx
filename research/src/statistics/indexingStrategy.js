@@ -210,6 +210,28 @@ export const INDEX_SPECS = Object.freeze({
       { name: 'by_hypothesis_seq', keyPath: ['hypothesisId', 'seq'], unique: true },
     ],
   },
+  // Live Integration phase, Phase 2 (Positive Control Calibration): one
+  // append-only row per scheduled calibration run for a Family --
+  // by_family_seq mirrors CalibrationCanaryRuns' own exact index shape
+  // (same reasoning: a Family is calibrated repeatedly over time, each
+  // run its own permanent fact).
+  PositiveControlCalibrationRuns: {
+    keyPath: 'id',
+    indexes: [
+      { name: 'by_family_seq', keyPath: ['familyKey', 'seq'], unique: true },
+    ],
+  },
+  // Phase 9 (Adaptive Scientific Discovery Engine): one append-only row per
+  // RNG Forensics classification run for a hypothesis -- by_hypothesis_seq
+  // mirrors RandomnessAuditResults' own exact index shape (a hypothesis may
+  // legitimately be re-examined as more forensic evidence accumulates;
+  // each run is its own permanent fact, never a mutation of a prior one).
+  RngForensicsResults: {
+    keyPath: 'id',
+    indexes: [
+      { name: 'by_hypothesis_seq', keyPath: ['hypothesisId', 'seq'], unique: true },
+    ],
+  },
 });
 
 /**
