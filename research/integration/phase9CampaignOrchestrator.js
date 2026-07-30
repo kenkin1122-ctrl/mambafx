@@ -401,6 +401,16 @@ export async function runPhase9Campaign(allStates, { onProgress = () => {} } = {
   const { familyId, searchSpaceVersionId, campaignId } = await bootstrapKnowledgeGraph();
   progress('bootstrap', 'Knowledge Graph ready.');
 
+  // ── Step 1b: Prime mfx_msd_experiments to version 2 ─────────────────
+  // Round 4 needs Lockbox (which lives in mfx_msd_experiments v2).
+  // openExistingDbExtended() throws LegacyVersionCoordinationRequiredError if
+  // the DB is still at v1 when it probes.  msdOpenExperimentDatabase() (now
+  // at MSD_EXPERIMENT_DB_VERSION=2) performs the coordinated upgrade — if the
+  // DB is already at v2 this is a memoized no-op.
+  if (typeof window.msdOpenExperimentDatabase === 'function') {
+    await window.msdOpenExperimentDatabase();
+  }
+
   // ── Step 2: Build NC-eligible certain-label dataset ───────────────────
   progress('dataset', 'Building NC snapshot rows from captured MarketStates…');
   const snapshotResult = window.msdBuildNcSnapshotRows(allStates, { filterCertainOnly: true });

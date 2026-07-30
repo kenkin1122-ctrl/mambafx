@@ -5970,7 +5970,7 @@ function msdSearchMarketStates(allStates, allEvents, conditions, exampleLimit){
 // information" principle this whole engine is built around forbids.
 
 const MSD_EXPERIMENT_DB_NAME    = 'mfx_msd_experiments';
-const MSD_EXPERIMENT_DB_VERSION = 1;
+const MSD_EXPERIMENT_DB_VERSION = 2; // bumped 1→2: adds PowerAnalyses, Decisions, Lockbox stores
 const MSD_EXPERIMENT_STORE      = 'Experiments';
 
 let _msdExperimentDbPromise = null;
@@ -5983,8 +5983,34 @@ function msdOpenExperimentDatabase(){
     const req = indexedDB.open(MSD_EXPERIMENT_DB_NAME, MSD_EXPERIMENT_DB_VERSION);
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
-      if (!db.objectStoreNames.contains(MSD_EXPERIMENT_STORE)) {
-        db.createObjectStore(MSD_EXPERIMENT_STORE, { keyPath: 'experimentId' });
+      const oldVersion = e.oldVersion;
+      // ── v0 → v1: original Experiments store ─────────────────────────────
+      if (oldVersion < 1) {
+        if (!db.objectStoreNames.contains(MSD_EXPERIMENT_STORE)) {
+          db.createObjectStore(MSD_EXPERIMENT_STORE, { keyPath: 'experimentId' });
+        }
+      }
+      // ── v1 → v2: PowerAnalyses, Decisions, Lockbox (Section 5.1 v10.1) ──
+      // Coordinated with research/src/storage/existingDbExtensions.js which
+      // uses the same database.  Indexes are inlined here (matching
+      // research/src/statistics/indexingStrategy.js INDEX_SPECS exactly)
+      // because this is a classic script and cannot import ES modules.
+      // The if(!contains) guards make this idempotent with buildUpgradeHandler.
+      if (oldVersion < 2) {
+        if (!db.objectStoreNames.contains('PowerAnalyses')) {
+          const pa = db.createObjectStore('PowerAnalyses', { keyPath: 'id' });
+          pa.createIndex('by_discoveryResult_engineVersion', ['discoveryResultId', 'engineVersion'], { unique: true });
+          pa.createIndex('by_discoveryResult_createdAt',     ['discoveryResultId', 'createdAt'],     { unique: false });
+        }
+        if (!db.objectStoreNames.contains('Decisions')) {
+          const dec = db.createObjectStore('Decisions', { keyPath: 'id' });
+          dec.createIndex('by_discoveryResult_inputHash',  ['discoveryResultId', 'decisionInputHash'], { unique: true });
+          dec.createIndex('by_discoveryResult_createdAt',  ['discoveryResultId', 'createdAt'],         { unique: false });
+        }
+        if (!db.objectStoreNames.contains('Lockbox')) {
+          const lbx = db.createObjectStore('Lockbox', { keyPath: 'id' });
+          lbx.createIndex('by_featureKey_generation', ['featureKey', 'generation'], { unique: true });
+        }
       }
     };
     req.onsuccess = (e) => resolve(e.target.result);
