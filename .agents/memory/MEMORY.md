@@ -7,3 +7,4 @@
 - [Phase 8 Engine VM Range](phase8-engine-vm-range.md) — correct slice is [4360,12460) 0-idx; start at msdEventSeq, strip non-ASCII, binary-search end on every index.html growth.
 - [Phase 8 Checklist featureVersion](phase8-checklist-featureversion.md) — check #6 verifies consistency not ncf_v1 equality; stored records keep v1, ncf_v1 is enriched at query time.
 - [Phase 9 Implementation](phase9-implementation.md) — 4-round funnel orchestrator; 112 candidates; KG bootstrap; full page UI; auto-boot pattern identical to Phase 8.
+- [Phase 11 Phase A](phase11-phase-a.md) — candidate + governance foundation; class-field gotcha in subclasses; actual API signatures; fingerprint design; 344/344 pass.
