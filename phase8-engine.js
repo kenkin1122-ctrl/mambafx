@@ -57,20 +57,21 @@ function buildContext() {
   if (_ctx) return _ctx;
 
   // ── Extract MSD function library ─────────────────────────────────────────
-  // Line 4361 (1-based, 0-idx 4360) is the first MSD identifier (msdEventSeq).
-  // Lines 3388–4360 are the "Developer AI Mode" instrumentation block that was
-  // added after the engine was authored — it must be excluded because it carries
-  // non-ASCII box-drawing chars (U+2550, U+2014) in its section headers, which
-  // the Node.js vm parser rejects even inside comments.
-  // Upper bound 12000 (1-based inclusive) matches the original design intent:
-  // "all MSD functions + constants before DOM-dependent UI code at ~12001+".
+  // Phase R0 (marker-based extraction): the sealed region is bounded by
+  // the sentinel comments MSD-PHASE8-SEAL-START and MSD-PHASE8-SEAL-END
+  // embedded in index.html.  Using markers rather than hardcoded line numbers
+  // makes the extraction immune to any future insertions/deletions above or
+  // below the sealed region — the correct slice is always
+  //   lines[startMarkerIdx + 1 .. endMarkerIdx)
   // An additional .replace() blanks any stray non-ASCII that appears inside
-  // JSDoc comment decorators elsewhere in the range.
+  // JSDoc comment decorators or block-drawing chars anywhere in the range.
   const htmlLines = fs.readFileSync(pathMod.join(__dirname, 'index.html'), 'utf8').split('\n');
-  // 4360 (0-idx) = 1-based line 4361 — first MSD identifier (msdEventSeq).
-  // 12460 (0-idx exclusive) is the last balanced-block boundary confirmed by
-  // binary search; all 13 needed exports are present and vm.runInContext passes.
-  const rawSrc    = htmlLines.slice(4360, 12460).join('\n').replace(/[^\x00-\x7F]/g, ' ');
+  const sealStartIdx = htmlLines.findIndex(l => l.includes('MSD-PHASE8-SEAL-START'));
+  const sealEndIdx   = htmlLines.findIndex(l => l.includes('MSD-PHASE8-SEAL-END'));
+  if (sealStartIdx === -1 || sealEndIdx === -1 || sealStartIdx >= sealEndIdx) {
+    throw new Error('[phase8-engine] MSD-PHASE8-SEAL-START / MSD-PHASE8-SEAL-END markers missing or misordered in index.html');
+  }
+  const rawSrc    = htmlLines.slice(sealStartIdx + 1, sealEndIdx).join('\n').replace(/[^\x00-\x7F]/g, ' ');
   const scriptSrc = rawSrc + EXPORT_IIFE;
 
   // ── Browser stubs ────────────────────────────────────────────────────────
