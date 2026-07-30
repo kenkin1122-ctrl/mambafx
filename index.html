@@ -32040,7 +32040,17 @@ try {
   { const mxEl = $("martingaleXInput"); if (mxEl) mxEl.value = MARTINGALE_X.toFixed(2); }
 
   // If Deriv just redirected back here with ?code=&state=, finish the login.
-  gridHandleRedirectReturn();
+  // gridSessionAuth.js is a <script type="module"> loaded after this classic
+  // inline script, so window.gridHandleRedirectReturn may not be set yet when
+  // this line runs during HTML parsing. Guard: call immediately if available,
+  // otherwise defer to DOMContentLoaded (which fires after all modules execute).
+  if (typeof window.gridHandleRedirectReturn === 'function') {
+    window.gridHandleRedirectReturn();
+  } else {
+    document.addEventListener('DOMContentLoaded', function() {
+      if (typeof window.gridHandleRedirectReturn === 'function') window.gridHandleRedirectReturn();
+    }, { once: true });
+  }
   // Refresh accounts page session state on load
   setTimeout(() => { if (typeof acctRefreshSession === 'function') acctRefreshSession(); }, 500);
 } catch (err) {

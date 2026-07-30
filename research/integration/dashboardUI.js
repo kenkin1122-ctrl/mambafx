@@ -368,3 +368,8 @@ export function renderDisabledNotice() {
 
 // Test-only export so integration tests can render without a full boot.
 export { render as _renderForTesting };
+
+// Re-renders the full dashboard (including the Scheduler panel) after any
+// scheduler control action. Called by bootstrap.js's window.mfxScheduler*
+// wrappers via .then(() => refreshSchedulerPanel()).
+export { render as refreshSchedulerPanel };
