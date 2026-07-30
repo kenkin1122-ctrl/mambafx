@@ -33894,6 +33894,19 @@ window.ph8Boot = async function(){
   ]).catch(e => console.warn('[ph8-integrity]', e));
 };
 
+// ── Auto-boot ────────────────────────────────────────────────────────────────
+// showPage('msdphase8') is called from restoreState() inside the main boot
+// block (a classic <script> that runs during HTML parsing, before this IIFE's
+// <script> block is reached). At that point window.ph8Boot is not yet defined,
+// so the `typeof ph8Boot === "function"` guard in showPage silently skips the
+// call and the status banner stays at "Contacting Phase 8 engine…" forever.
+//
+// Kicking ph8Boot here — immediately after the BOOT EXTENSION finishes wiring
+// window.ph8Boot — guarantees the seal is built and the status banner is
+// populated on every page load, regardless of which page was shown first.
+// ph8Inited prevents any double-initialisation on a subsequent showPage call.
+window.ph8Boot();
+
 })(); // end Phase 8 Integrity Module
 </script>
 </body>
