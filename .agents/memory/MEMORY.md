@@ -6,3 +6,4 @@
 - [Phase 8 Capture Pipeline Repair](phase8-capture-pipeline-repair.md) — msdBuildLabeledSnapshot was silently dropping 4 raw* fields from meta; fix + 20-check integrity checklist architecture.
 - [Phase 8 Engine VM Range](phase8-engine-vm-range.md) — correct slice is [4360,12460) 0-idx; start at msdEventSeq, strip non-ASCII, binary-search end on every index.html growth.
 - [Phase 8 Checklist featureVersion](phase8-checklist-featureversion.md) — check #6 verifies consistency not ncf_v1 equality; stored records keep v1, ncf_v1 is enriched at query time.
+- [Phase 9 Implementation](phase9-implementation.md) — 4-round funnel orchestrator; 112 candidates; KG bootstrap; full page UI; auto-boot pattern identical to Phase 8.
