@@ -29,6 +29,8 @@ import {
   NODE_TYPES,
 } from '../src/governance/knowledgeGraph.js';
 
+import { countGenerationsInLineage } from '../src/governance/hypothesisRegistry.js';
+
 import {
   runRoundOneScreening,
   runRoundTwoValidation,
@@ -271,15 +273,29 @@ function makeIntermediateTestFn(rows) {
 function makeBuildRegistrationSpec(runTimestamp) {
   return async function buildRegistrationSpec(candidate) {
     const hypothesisId = `ph9_${runTimestamp}_${candidate.candidateKey}`;
+    // Each candidate is its own independent research lineage (distinct feature ×
+    // variant combination). The by_lineage_generation index has a unique constraint
+    // on [lineageId, generationId]:
+    //   - lineageId is scoped to the candidateKey so no two candidates in the same
+    //     batch ever share a lineage.
+    //   - generationId = (existing generation count) + 1, so re-running the campaign
+    //     on the same candidate simply registers a new generation in that lineage
+    //     rather than colliding with the first run's record.
+    const lineageId = `ph9_ncf_v1_lineage__${candidate.candidateKey}`;
+    const existingGenerations = await countGenerationsInLineage(lineageId);
+    const generationId = existingGenerations + 1;
     return {
       hypothesisId,
-      lineageId:            `ph9_ncf_v1_lineage_gen${PH9_GENERATION}`,
-      generationId:         PH9_GENERATION,
+      lineageId,
+      generationId,
       parentIds:            [],
       familyKey:            PH9_FAMILY_KEY,
       lineageDeclaration:
-        'Phase 9 Adaptive Scientific Discovery — ncf_v1 feature space, ' +
-        `generation ${PH9_GENERATION}, Sequential Elimination Funnel.`,
+        `Phase 9 Adaptive Scientific Discovery — ncf_v1 feature space, ` +
+        `candidate lineage for ${candidate.candidateKey} (featureKey=${candidate.featureKey}, ` +
+        `testType=${candidate.testType}). ` +
+        `Generation ${generationId}: each re-run of the campaign produces a new generation ` +
+        `in this lineage, enabling longitudinal tracking of evidence accumulation.`,
       dataAccessAttestation: {
         attested:    true,
         attestedBy:  'ph9_campaign_orchestrator_v1',
