@@ -32826,49 +32826,43 @@ window.ph8RefreshReadiness = async function(){
   }
 };
 
-// ── Phase 8 server base URL ────────────────────────────────────────────────
-// When index.html is served from GitHub Pages the Phase 8 API calls must go
-// to the Replit server (not GitHub's static host, which has no Node.js
-// backend).  Auto-detect by hostname: relative URLs ('') work on every
-// Replit origin; the absolute URL is used on GitHub Pages.
-// Update the absolute URL below if the Replit deployment URL ever changes.
-const PHASE8_SERVER_BASE = (function(){
-  try {
-    const h = window.location.hostname;
-    if (h === 'localhost' || h === '127.0.0.1' || h.endsWith('.replit.dev') || h.endsWith('.repl.co')) {
-      return ''; // served from Replit — relative URLs work fine
-    }
-    // Any other origin (e.g. kenkin1122-ctrl.github.io) → use the Replit server
-    return 'https://mambafx.replit.app';
-  } catch(e) { return ''; }
-})();
-
-// ── Load Seal ──────────────────────────────────────────────────────────────
+// ── Load Seal (browser-native — no server required) ────────────────────────
+// All MSD functions are already defined in this page's global scope.
+// Build the seal directly without any network round-trip so the Campaign
+// page works on every origin (Replit dev, GitHub Pages, etc.) with zero
+// dependency on the Replit deployment being reachable.
 async function ph8LoadSeal(){
-  const sealUrl = PHASE8_SERVER_BASE + '/api/phase8/seal';
-  let r;
   try {
-    r = await fetch(sealUrl);
-  } catch(netErr) {
-    // TypeError: Failed to fetch — almost always a CORS block caused by the
-    // Replit server not being published yet (the "not live yet" placeholder
-    // page Replit shows for unpublished deployments does not include
-    // Access-Control-Allow-Origin, so the browser rejects the response).
-    throw new Error(
-      'Phase 8 server unreachable — the Replit server must be published. ' +
-      'In the Replit workspace click the \u25b6 Deploy button to publish ' +
-      'https://mambafx.replit.app, then reload this page.'
-    );
+    // Mirror the featureFamilies patch the server-side engine applies
+    const spaceDef = (function(){
+      const def = msdBuildPhase7bSearchSpaceDefinition();
+      if (!def.featureFamilies) def.featureFamilies = ['non_classical'];
+      return def;
+    })();
+    const frozen      = msdFreezeSearchSpace(spaceDef, 'phase8_campaign',
+                          { schemaVersion: MSD_SEARCH_SPACE_SPEC_VERSION_V2 });
+    const cardinality = msdComputeSearchSpaceCardinality(frozen);
+    const features    = Array.from(MSD_PHASE7B_INDIVIDUAL_FEATURES);
+    ph8Seal = {
+      searchSpaceId:      frozen.searchSpaceId,
+      searchSpaceHash:    frozen.searchSpaceHash,
+      searchSpaceVersion: frozen.searchSpaceVersion,
+      totalCardinality:   cardinality.totalCardinality,
+      symbol:             MSD_PHASE7B_SYMBOL,
+      featureVersion:     MSD_NC_FEATURE_VERSION,
+      features,
+      leadTimes:          spaceDef.leadTimes,
+      permutations:       1000,
+      seed:               42,
+      alpha:              0.05,
+      practicalThreshold: 0.01,
+      nullModel:          'circular_shift_permutation',
+      correctionMethod:   'benjamini_hochberg',
+      discoverySpec:      spaceDef,
+    };
+  } catch(e) {
+    throw new Error('Failed to build Phase 8 seal: ' + e.message);
   }
-  if(!r.ok){
-    // HTTP-level error (e.g. 404, 500) — parse body if possible
-    let errMsg = `Server returned HTTP ${r.status}`;
-    try { const eb = await r.json(); errMsg = eb.error || errMsg; } catch(_){}
-    throw new Error(errMsg);
-  }
-  const body = await r.json();
-  if(!body.ok) throw new Error(body.error||'Seal fetch failed');
-  ph8Seal = body.seal;
 
   const families = [...new Set(ph8Seal.features.map(f => ph8FF[f]||f))];
   ph8H('ph8-seal-kv', [
@@ -32909,7 +32903,7 @@ window.ph8Boot = async function(){
   const msg = ph8G('ph8-server-msg');
   try {
     await ph8LoadSeal();
-    if(msg) msg.innerHTML = ph8Bdg('ph8-b-pass','ONLINE') + ' &nbsp;Phase 8 engine ready · seal loaded';
+    if(msg) msg.innerHTML = ph8Bdg('ph8-b-pass','ONLINE') + ' &nbsp;Phase 8 engine ready · running in-browser';
     const btn = ph8G('ph8-launch-btn');
     if(btn) btn.onclick = ph8Execute;
     await ph8RefreshReadiness();
@@ -32957,7 +32951,7 @@ window.ph8Execute = async function(){
     // needs to run msdRunPhase7bDiscovery.
     const snapshotRows = msdBuildNcSnapshotRows(allStates, { filterCertainOnly: true });
     const states = snapshotRows.rows;
-    ph8Prog(6,`Loaded ${allStates.length.toLocaleString()} total · ${states.length.toLocaleString()} usable rows. Sending to server…`);
+    ph8Prog(6,`Loaded ${allStates.length.toLocaleString()} total · ${states.length.toLocaleString()} usable rows. Running discovery in browser…`);
 
     if(states.length===0){
       ph8Prog(100,'No usable rows found — need NC-eligible states with certain labels. Capture more data first.');
@@ -32969,13 +32963,34 @@ window.ph8Execute = async function(){
     ph8Pill('ph8-pill-3','ph8-pr');
     ph8Prog(8,`Executing 80-candidate discovery pipeline (${states.length.toLocaleString()} usable rows)…`);
 
-    const resp = await fetch(PHASE8_SERVER_BASE + '/api/phase8/run',{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({states}),
+    // Run entirely in the browser — all MSD functions are in global scope.
+    // Avoids the autoscale gateway's ~60-second proxy timeout that kills any
+    // long-running POST before the computation can complete and respond.
+    const _t0 = Date.now();
+    const _spaceDef = (function(){
+      const def = msdBuildPhase7bSearchSpaceDefinition();
+      if (!def.featureFamilies) def.featureFamilies = ['non_classical'];
+      return def;
+    })();
+    const _frozenSpace = msdFreezeSearchSpace(_spaceDef, 'phase8_campaign',
+      { schemaVersion: MSD_SEARCH_SPACE_SPEC_VERSION_V2 });
+    const _result = await msdRunPhase7bDiscovery(states, _frozenSpace, {
+      permutations:        1000,
+      seed:                42,
+      alpha:               0.05,
+      parentRunId:         'phase8_official_nc_campaign_v1',
+      uncertaintyHandling: { filterCertainOnly: true },
     });
-    const body = await resp.json();
-    if(!body.ok) throw new Error(body.error||'Server campaign failed');
-    const r = body.result;
+    const r = Object.assign({}, _result, {
+      serverElapsedMs: Date.now() - _t0,
+      frozenSearchSpace: {
+        searchSpaceId:      _frozenSpace.searchSpaceId,
+        searchSpaceHash:    _frozenSpace.searchSpaceHash,
+        searchSpaceVersion: _frozenSpace.searchSpaceVersion,
+      },
+      executedAt:    new Date().toISOString(),
+      engineVersion: 'phase8-browser-engine-v1',
+    });
 
     if(!r.ok){
       ph8Prog(100,'Campaign returned error: '+(r.error||'unknown'));
