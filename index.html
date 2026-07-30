@@ -32839,7 +32839,7 @@ const PHASE8_SERVER_BASE = (function(){
       return ''; // served from Replit — relative URLs work fine
     }
     // Any other origin (e.g. kenkin1122-ctrl.github.io) → use the Replit server
-    return 'https://mambafx-kenkin1122.replit.app';
+    return 'https://mambafx.replit.app';
   } catch(e) { return ''; }
 })();
 
@@ -32857,7 +32857,7 @@ async function ph8LoadSeal(){
     throw new Error(
       'Phase 8 server unreachable — the Replit server must be published. ' +
       'In the Replit workspace click the \u25b6 Deploy button to publish ' +
-      'https://mambafx-kenkin1122.replit.app, then reload this page.'
+      'https://mambafx.replit.app, then reload this page.'
     );
   }
   if(!r.ok){
@@ -33594,7 +33594,7 @@ async function ph8RunChecklist(){
     !!seal,
     seal
       ? `Seal verified: ${seal.totalCardinality} candidates · hash ${seal.searchSpaceHash} · version ${seal.searchSpaceVersion} · symbol ${seal.symbol}`
-      : 'SEAL NOT LOADED — publish the Replit server at https://mambafx-kenkin1122.replit.app then reload',
+      : 'SEAL NOT LOADED — publish the Replit server at https://mambafx.replit.app then reload',
     !seal ? 'The Phase 8 engine must be running. Verify the workflow is active and reload the page.' : null);
 
   const passCount = checks.filter(c => c.pass).length;
