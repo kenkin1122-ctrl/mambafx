@@ -27781,7 +27781,6 @@ function drawTfCandles(g){
 }
 
 // =====================================================================
-<script type="module" src="src/trading/fiveTickSignalEngine.js"></script>
 
 // =====================================================================
 // PAGE 4 — TRADING GRID
@@ -27911,7 +27910,6 @@ let gridTrades = [];
 let gridReqId = 9000;
 const gridPending = {};
 
-<script type="module" src="src/trading/multiplierHelpers.js"></script>
 let gridArmed = false;
 let gridAutoCount = 0;
 let gridLastAutoAt = 0;
@@ -27920,13 +27918,9 @@ let gridConnecting = false;
 let gridLoggedIn = false;          // session state, from /me/session — no token held client-side
 let gridAccounts = [];             // [{account_id, account_type, currency, ...}]
 
-<script type="module" src="src/trading/gridSetHelper.js"></script>
-<script type="module" src="src/trading/gridStatusUi.js"></script>
 
-<script type="module" src="src/trading/gridSessionAuth.js"></script>
 
 // =====================================================================
-<script type="module" src="src/trading/aggressionBot.js"></script>
 
 
 // ── Step 4: get WS credentials, open WS, authorize, subscribe ────────
@@ -28738,7 +28732,6 @@ function engHandleSignal(dir, price, epoch){
 
 // Lays the indicators out as rows and the tick positions as columns:
 // =====================================================================
-<script type="module" src="src/features/featureEngineering.js"></script>
 
 //   before-3 … before-1 | P1(start) P2 P3 P4 P5 | after-1 … after-4
 // for one chosen run, or averaged across all/rise/fall runs. Reads the
@@ -32423,6 +32416,13 @@ try {
   </div>
 </div>
 
+<script type="module" src="src/trading/fiveTickSignalEngine.js"></script>
+<script type="module" src="src/trading/multiplierHelpers.js"></script>
+<script type="module" src="src/trading/gridSetHelper.js"></script>
+<script type="module" src="src/trading/gridStatusUi.js"></script>
+<script type="module" src="src/trading/gridSessionAuth.js"></script>
+<script type="module" src="src/trading/aggressionBot.js"></script>
+<script type="module" src="src/features/featureEngineering.js"></script>
 <script type="module" src="src/ui/widgets/mfxBot.js"></script>
 
 <!-- ══════════════════════════════════════════════════════════════════
