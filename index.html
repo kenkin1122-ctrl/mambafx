@@ -3491,7 +3491,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
 })();
 
 // ── Config ───────────────────────────────────────────────────────────
-const APP_ID = 1089;                 // Deriv numeric app id (used by trading grid auth flow)
+const APP_ID = 1089;                 // Deriv public app id (read-only tick data)
 // All 10 standard Volatility indices (continuous + 1-second variants)
 const MARKETS = {
   "R_10":    "Volatility 10",
@@ -3590,9 +3590,9 @@ function restoreState(data){
 // Deriv exposes the same feed on two hosts. Some networks block one but
 // not the other, so we alternate endpoints on each retry and use a
 // connection timeout to avoid hanging forever on "Connecting…".
-// Public market-data endpoint — no app_id required, supports all synthetic indices
 const WS_ENDPOINTS = [
-  'wss://api.derivws.com/trading/v1/options/ws/public',
+  `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`,
+  `wss://ws.binaryws.com/websockets/v3?app_id=${APP_ID}`,
 ];
 let _endpointIdx = 0;
 let _connectTimeout = null;
@@ -4358,6 +4358,7 @@ let signalRecords = [];          // newest first — B-window (before) only
 let msdRunState = { anchorEpoch: null, anchorPrice: null, count: 0, lastPrice: null, peakReached: false, qualifiedEventId: null };
 let msdQualifiedQueue = []; // fires the INSTANT a run reaches 5 — downstream consumers (e.g. the future Retrospective Labeler) can start work immediately, since the lookback window they care about is entirely in the PAST relative to Run Start and doesn't depend on how long the run keeps extending
 let msdEventQueue = [];     // Temporary Queue — the FINAL, immutable record, only pushed once the run actually ends. This is what ever reaches EventDatabase.
+// MSD-PHASE8-SEAL-START — DO NOT EDIT OR MOVE THIS LINE. Marks the exact start of the frozen Phase 8 search-space definition region (see phase8-engine.js buildContext()).
 let msdEventSeq = 0;        // per-session ordinal, kept for human-readable ordering/debugging — NOT the sole source of uniqueness (see msdSessionId below)
 
 // A bare incrementing counter resets to 0 on every page reload — combined
@@ -12458,6 +12459,7 @@ const MSD_ASSESSMENT_MIN_DISCOVERIES_FOR_ASSESSMENT = 1; // fewer than this and 
 const MSD_ASSESSMENT_MARKET_COVERAGE_TARGET = 3;  // the original objective explicitly asks for "multiple market conditions" — 3 is a reasonable target, not proof of completeness at exactly 3
 const MSD_ASSESSMENT_REGIME_COVERAGE_TARGET = 5;  // Strong Trend / Weak Trend / Range / Compression / Expansion is a reasonable spread of the label vocabulary already in use (Phase 5)
 const MSD_ASSESSMENT_EXPERIMENT_COUNT_TARGET = 50; // a log-capped target for "enough total experiments to speak with real confidence," not a hard requirement
+// MSD-PHASE8-SEAL-END — DO NOT EDIT OR MOVE THIS LINE. Marks the exact end of the frozen Phase 8 search-space definition region (see phase8-engine.js buildContext()).
 
 /** Classifies one discovery's cross-market transferability into the three requested tiers, from its already-computed transferabilityScore (Phase 4) — no new computation. */
 function msdClassifyTransferabilityTier(summary){
@@ -25003,6 +25005,42 @@ function makeSnap(epoch, price){
   };
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// Phase 10 Integration Hook — Research Engine Visibility (purely additive)
+// ══════════════════════════════════════════════════════════════════════
+// Fires once per msdProcessLabeledSnapshots() batch, AFTER the existing
+// QA Engine -> Version Validator -> write pipeline has fully completed,
+// using only that pipeline's own unmodified return value (same precedent
+// as msdRecordRejectionStats() immediately above this call site). This
+// does not read, write, or alter any MarketState, does not call any
+// discovery/statistical function, and has no effect whatsoever if no
+// listener is attached (window.dispatchEvent is a no-op with zero
+// listeners). Mirrors the existing 'mambafx:tradeOpened' /
+// 'mambafx:tradeClosed' CustomEvent precedent used elsewhere in this
+// file for cross-module signaling without direct coupling. Deliberately
+// placed outside the Phase 8 seal extraction range (index.html lines
+// [4361,12460]) so it can never change getSeal()'s frozen search-space
+// hash. The Phase 10 research integration layer (research/integration/,
+// loaded only if window.MSD_RESEARCH_ENGINE_ENABLED === true) is the only
+// intended listener; it re-reads fresh data from IndexedDB via the
+// existing bridgeToLegacyMsd read functions rather than trusting a
+// payload here, so this event intentionally carries counts only, not
+// snapshot content.
+function msdDispatchMarketStatesWritten(pipelineResult){
+  try {
+    if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return;
+    window.dispatchEvent(new CustomEvent('mambafx:marketStatesWritten', {
+      detail: {
+        written: (pipelineResult && pipelineResult.written) || 0,
+        qaRejected: (pipelineResult && pipelineResult.qaRejected) || 0,
+        versionRejected: (pipelineResult && pipelineResult.versionRejected) || 0,
+        dbRejected: (pipelineResult && pipelineResult.dbRejected) || 0,
+        ts: Date.now(),
+      }
+    }));
+  } catch (e) { /* never let a signaling failure affect the tick pipeline */ }
+}
+
 function recordIndicatorTick(epoch, price){
   const msdResult = msdOnTick(epoch, price); // Market State Discovery Engine — Phase 2.1 detector, pure observer, no effect on existing pipeline
   if (msdResult.qualified) {
@@ -25022,7 +25060,7 @@ function recordIndicatorTick(epoch, price){
         const negatives = msdSampleNegativeSnapshots(negativeCount, MSD_FEATURE_SCHEMA_VERSION);
         if (negatives.length) {
           msdProcessLabeledSnapshots(negatives)
-            .then(result => msdRecordRejectionStats(result))
+            .then(result => { msdRecordRejectionStats(result); msdDispatchMarketStatesWritten(result); })
             .catch(() => {});
         }
       }
@@ -25040,7 +25078,7 @@ function recordIndicatorTick(epoch, price){
     const finalizedSnapshots = msdFinalizeLabelsForCompletedEvent(msdResult.completed); // Phase 2.3 — fills in the true Actual Run Length once known
     if (finalizedSnapshots && finalizedSnapshots.length) {
       msdProcessLabeledSnapshots(finalizedSnapshots)
-        .then(result => msdRecordRejectionStats(result))
+        .then(result => { msdRecordRejectionStats(result); msdDispatchMarketStatesWritten(result); })
         .catch(() => {});
     }
   }
@@ -26160,7 +26198,7 @@ let rfaReconnectTimer = null;
 
 function rfaConnect(){
   if (rfaWs && (rfaWs.readyState === 0 || rfaWs.readyState === 1)) return; // already connecting/open
-  try { rfaWs = new WebSocket('wss://api.derivws.com/trading/v1/options/ws/public'); }
+  try { rfaWs = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`); }
   catch(e){ rfaScheduleReconnect(); return; }
   rfaWs.onopen = () => {
     rfaConnected = true;
@@ -27743,434 +27781,7 @@ function drawTfCandles(g){
 }
 
 // =====================================================================
-// ── 5-TICK SIGNAL ENGINE ─────────────────────────────────────────────
-// Decides whether there is enough micro-imbalance to statistically
-// sustain the next 3–5 ticks in one direction before firing.
-// =====================================================================
-const ENG = {
-  W: 14,            // rolling window for tick delta
-  TH: 35,           // |TD%| threshold to break (early-burst trigger)
-  EC: 55,           // exhaustion ceiling (0–100); above this, never fire
-  K: 8,             // ticks per tick-candle
-  HORIZON: 5,       // a "win" = a sustained 5-tick directional run
-  RUN_CAP: 8,       // run length that counts as "fully stretched"
-  MAXT: 600,        // tick buffer cap
-  FRESH: 3,         // "just" window: condition must have flipped within this many ticks
-  CLUST_MAX: 6,     // cluster must still be young (run ≤ this) to count as "early"
-  ACCEL_EPS: 0.02,  // accel (aligned) must exceed this to count as "turned positive"
-  TREND_W: 30,      // trend/drift window — fire only WITH the prevailing drift
-  MAG_MIN: 0.85,    // magnitude-expansion floor (recent vs prior avg |tick|)
-  NOISE: 0.20,      // win-eval noise floor: opposite ticks smaller than NOISE × avg|tick|
-                    //   are treated as neutral (not a real reversal). 0 = strict.
-  MARKOV_W: 60,     // window for online estimation of the reversible Markov chain
-                    //   (short enough to register bursts, long enough for stable a,b)
-  PHI_MIN: 0.03,    // min persistence (lag-1 autocorr) — only fire in momentum regimes
-  PRUN_MIN: 8       // min model P(5-run) %, on the conservative lower bound, to fire
-};
-// Random base rate of a clean 5-consecutive run, GIVEN the directional fire tick:
-// the 4 follow-up ticks must each repeat → 0.5^4 = 6.25%. This is the honest
-// yardstick for "edge", not 50% (the bid-ask bounce makes runs rarer, not 50/50).
-const ENG_BASE = 6.25;
-let engTicks = [];          // { price, dir, mag, epoch }  dir uses zero-tick carry
-let engCarryDir = 0;        // last non-zero direction (zero-tick rule)
-let engPending = null;      // { dir, prices:[…], dirs:[…], left, prob }
-let engStats = { fired:0, hits:0, ticksInDir:0, resolved:0 };
-let engLog = [];            // { time, dir, prob, prices:[…], dirs:[…], result }
-let engPageReady = false;
-// early-burst freshness trackers
-let engPrevTDabove = false, engPrevAccelPos = false;
-let engTDbrokeAge = 999, engAccelPosAge = 999;
-
-// Tick rule: +1 up-tick (buy-initiated), −1 down-tick (sell-initiated),
-// flat ticks inherit the previous direction (Lee-Ready zero-tick rule).
-function engineOnTick(price, epoch, rawDir){
-  let dir = rawDir;
-  if (dir === 0) dir = engCarryDir;        // zero-tick carry
-  else engCarryDir = dir;
-  const prev = engTicks.length ? engTicks[engTicks.length-1].price : price;
-  const mag = Math.abs(price - prev);
-  engTicks.push({ price, dir, mag, epoch });
-  if (engTicks.length > ENG.MAXT) engTicks.shift();
-
-  // ── Resolve an open prediction. A WIN = a sustained 5-tick run in the fired
-  // direction: no MEANINGFUL reversal (flats and sub-noise ticks are tolerated)
-  // AND net price progress in the fired direction over the 5 ticks. This is the
-  // honest fix for runs that were broken only by a flat or a 1-cent noise tick.
-  if (engPending){
-    engPending.prices.push(price);
-    engPending.dirs.push(rawDir);
-    engPending.mags.push(Math.abs(price - prev));
-    engPending.left--;
-    if (engLog[0] && engLog[0].result === 'pend') engLog[0].prices = engPending.prices.slice();
-    if (engPending.left <= 0){
-      const d = engPending.dir;
-      const dirs = engPending.dirs.slice(0, ENG.HORIZON);
-      const mags = engPending.mags.slice(0, ENG.HORIZON);
-      const avgMag = mags.reduce((a,b)=>a+b,0)/mags.length || 1e-9;
-      const noiseFloor = ENG.NOISE * avgMag;
-      // a tick is a "real reversal" only if it opposes d AND is bigger than the noise floor
-      const realReversal = dirs.some((x,i) => x === -d && mags[i] > noiseFloor);
-      const net = engPending.prices[Math.min(ENG.HORIZON, engPending.prices.length)-1] - engPending.prices[0];
-      const win = !realReversal && Math.sign(net) === d;
-      const inDir = dirs.filter(x => x === d).length;
-      engStats.resolved++;
-      if (win) engStats.hits++;
-      engStats.ticksInDir += inDir;
-      if (engLog[0] && engLog[0].result === 'pend'){
-        engLog[0].result = win ? 'win' : 'loss';
-        engLog[0].prices = engPending.prices.slice(0, ENG.HORIZON);
-        engLog[0].dirs   = dirs;
-      }
-      engPending = null;
-    }
-  }
-
-  const m = engineMetrics();
-  const d = Math.sign(m.td);
-
-  // ── Track freshness of the two "just turned" conditions ──────────────
-  const tdAbove = Math.abs(m.tdPct) >= ENG.TH;
-  if (tdAbove && !engPrevTDabove) engTDbrokeAge = 0;
-  else if (tdAbove) engTDbrokeAge++;
-  else engTDbrokeAge = 999;
-  const accelPos = m.accelAligned > ENG.ACCEL_EPS;
-  if (accelPos && !engPrevAccelPos) engAccelPosAge = 0;
-  else if (accelPos) engAccelPosAge++;
-  else engAccelPosAge = 999;
-  engPrevTDabove = tdAbove; engPrevAccelPos = accelPos;
-
-  // ── EARLY BURST PHASE trigger (upgraded to avoid firing into reversals) ──
-  //   1) acceleration just turned positive   (fresh aligned-accel cross)
-  //   2) TD% just broke threshold            (fresh imbalance cross)
-  //   3) exhaustion still low                 (≤ ceiling — fresh move, no fatigue)
-  //   4) first clustering appears             (a nascent run of 2–CLUST_MAX ticks)
-  //   5) TREND ALIGNMENT  — drift over TREND_W agrees with d (don't fight the tape)
-  //   6) PERSISTENCE REGIME — the reversible Markov chain is in a momentum regime
-  //      (lag-1 autocorrelation φ ≥ PHI_MIN), NOT a bid-ask-bounce regime
-  //   7) MODEL PROBABILITY — the chain's conservative P(5-run) clears PRUN_MIN
-  const burstAccel = accelPos && engAccelPosAge <= ENG.FRESH;
-  const burstTD    = tdAbove  && engTDbrokeAge  <= ENG.FRESH;
-  const burstExh   = m.exhaustion <= ENG.EC;
-  const burstClust = m.runDir === d && m.run >= 2 && m.run <= ENG.CLUST_MAX;
-  const trendOK    = m.drift === d;
-  const persistOK  = m.persistence >= ENG.PHI_MIN;
-  const probOK     = (m.modelPLcb * 100) >= ENG.PRUN_MIN;
-  const earlyBurst = d !== 0 && !engPending &&
-                     burstAccel && burstTD && burstExh && burstClust && trendOK && persistOK && probOK;
-  const conditionsMet = [burstTD, burstAccel, burstExh, burstClust, trendOK, persistOK, probOK].filter(Boolean).length;
-
-  if (earlyBurst){
-    engStats.fired++;
-    engPending = { dir: d, prices: [price], dirs: [rawDir], mags: [mag], left: ENG.HORIZON - 1, prob: m.prob };
-    engLog.unshift({ time: epoch, dir: d, prob: m.prob, prices: [price], dirs: [rawDir], result: 'pend' });
-    if (engLog.length > 40) engLog.pop();
-  }
-
-  if (engPageReady && document.getElementById("page-engine").classList.contains("active")){
-    renderEngine(m, { earlyBurst, conditionsMet, burstAccel, burstTD, burstExh, burstClust, trendOK, persistOK, probOK });
-  }
-}
-
-// Compute all engine metrics from the tick buffer.
-function engineMetrics(){
-  const n = engTicks.length;
-  const W = Math.min(ENG.W, n);
-  const out = { td:0, tdPct:0, up:0, down:0, accel:0, accelAligned:0, exhaustion:0,
-                run:0, runDir:0, vel:0, flowPct:0, prob:50,
-                tdShortPct:0, drift:0, driftMag:0, magRatio:1,
-                pUp:0.5, pDown:0.5, persistence:0, samples:0,
-                pRunUp:0.0625, pRunDown:0.0625, pRunUpLcb:0, pRunDownLcb:0, modelP:0.0625, modelPLcb:0 };
-  if (n < 4) return out;
-  const win = engTicks.slice(n - W);
-  // tick delta (count) + magnitude-weighted flow
-  let td=0, flow=0, magSum=0;
-  win.forEach(t => { td += t.dir; flow += t.dir * t.mag; magSum += t.mag; out[t.dir>0?'up':'down']++; });
-  out.td = td;
-  out.tdPct = (td / W) * 100;
-  out.flowPct = magSum > 0 ? (flow / magSum) * 100 : 0;
-
-  // short-window imbalance (for dual-window agreement — filters one-off spikes)
-  const sw = Math.max(3, Math.round(W/3));
-  const swin = engTicks.slice(n - Math.min(sw, n));
-  let sTd = 0; swin.forEach(t => sTd += t.dir);
-  out.tdShortPct = (sTd / swin.length) * 100;
-
-  // medium-term DRIFT (trend regime): net displacement over the trend window.
-  // Tick momentum only persists when there is a prevailing drift; firing against
-  // it is what produced the immediate-reversal losses.
-  const tw = Math.min(ENG.TREND_W, n);
-  const driftRaw = engTicks[n-1].price - engTicks[n-tw].price;
-  out.drift = Math.sign(driftRaw);
-  out.driftMag = Math.abs(driftRaw);
-
-  // magnitude expansion: recent avg |tick| vs prior avg |tick| (burst expanding?).
-  // A genuine burst grows; a dying micro-move shrinks (and reverts).
-  const me = Math.max(2, Math.round(W/3));
-  const recM = engTicks.slice(n-me).reduce((a,t)=>a+t.mag,0)/me;
-  const priM = engTicks.slice(Math.max(0,n-2*me), n-me).reduce((a,t)=>a+t.mag,0)/me || 1e-9;
-  out.magRatio = recM / priM;
-
-  // velocity (signed Δprice per tick) and acceleration (recent − prior)
-  const k = Math.max(2, Math.floor(W/2));
-  const seg = engTicks.slice(n - 2*k >= 0 ? n - 2*k : 0);
-  const half = Math.floor(seg.length/2) || 1;
-  const dpr = (a) => a.length>1 ? (a[a.length-1].price - a[0].price)/(a.length-1) : 0;
-  const vRecent = dpr(seg.slice(half));
-  const vPrev   = dpr(seg.slice(0, half));
-  out.vel = vRecent;
-  out.accel = vRecent - vPrev;
-  const avgMag = magSum / W || 1e-9;
-  out.accelAligned = (out.accel * Math.sign(td)) / avgMag; // >0 building in delta dir
-
-  // current run length / direction
-  let run=0, rd=0;
-  for (let i=n-1; i>=0; i--){ const d=engTicks[i].dir; if (rd===0 && d!==0){ rd=d; run=1; } else if (d===rd && d!==0){ run++; } else break; }
-  out.run = run; out.runDir = rd;
-
-  // ── Exhaustion (0–100): run-stretch + magnitude decay + extension-failure
-  const rs = Math.min(1, run / ENG.RUN_CAP);
-  // magnitude decay across the current run (shrinking ticks = fatigue)
-  let md = 0;
-  if (run >= 4){
-    const r = engTicks.slice(n - run).map(t => t.mag);
-    const h = Math.floor(r.length/2);
-    const a1 = r.slice(0,h).reduce((a,b)=>a+b,0)/h || 1e-9;
-    const a2 = r.slice(h).reduce((a,b)=>a+b,0)/(r.length-h) || 0;
-    md = Math.max(0, Math.min(1, (a1 - a2) / a1));
-  }
-  // extension failure: of last few ticks, how many failed to make a new extreme in run dir
-  let ef = 0;
-  if (rd !== 0){
-    const chk = engTicks.slice(Math.max(0, n - 6));
-    let ext = rd>0 ? -Infinity : Infinity, fails=0, tot=0;
-    chk.forEach(t => { tot++; const better = rd>0 ? t.price>ext : t.price<ext; if (better) ext = t.price; else fails++; });
-    ef = tot ? fails/tot : 0;
-  }
-  out.exhaustion = Math.round(100 * (0.34*rs + 0.30*md + 0.36*ef));
-
-  // ── REVERSIBLE 2-STATE MARKOV MODEL of tick direction (up/down) ──────────
-  // Every 2-state chain satisfies detailed balance, so this is a *reversible*
-  // generator: estimating P(up|up)=a and P(down|down)=b fully specifies it, and
-  // the probability of an n-tick run is exact in closed form (a^k / b^k).
-  // We estimate a,b online from the recent stream with a Beta(1,1) (Laplace)
-  // prior, and use a conservative lower credible bound so small samples can't
-  // fool the engine.
-  const mw = Math.min(ENG.MARKOV_W, n);
-  const seq = engTicks.slice(n - mw).map(t => t.dir).filter(x => x !== 0); // strict moves
-  let nuu=0, nud=0, ndu=0, ndd=0;
-  for (let i=1; i<seq.length; i++){
-    const A = seq[i-1], B = seq[i];
-    if (A>0 && B>0) nuu++; else if (A>0 && B<0) nud++;
-    else if (A<0 && B>0) ndu++; else if (A<0 && B<0) ndd++;
-  }
-  const aMean = (nuu + 1) / (nuu + nud + 2);     // P(up | up)
-  const bMean = (ndd + 1) / (ndd + ndu + 2);     // P(down | down)
-  const aSd = Math.sqrt(aMean*(1-aMean) / (nuu+nud+3));
-  const bSd = Math.sqrt(bMean*(1-bMean) / (ndd+ndu+3));
-  const aLcb = Math.max(0, aMean - 1.28*aSd);    // ~10th-percentile credible bound
-  const bLcb = Math.max(0, bMean - 1.28*bSd);
-  out.pUp = aMean; out.pDown = bMean;
-  out.persistence = aMean + bMean - 1;           // = lag-1 autocorrelation of ±1 series
-  const kRun = ENG.HORIZON - 1;                      // follow-ticks needed after the fire tick
-  out.pRunUp   = Math.pow(aMean, kRun);
-  out.pRunDown = Math.pow(bMean, kRun);
-  out.pRunUpLcb   = Math.pow(aLcb, kRun);
-  out.pRunDownLcb = Math.pow(bLcb, kRun);
-  out.samples = seq.length;
-
-  // direction-specific model probability of catching the 5-tick run
-  const dd = Math.sign(out.td);
-  out.modelP    = dd>0 ? out.pRunUp    : dd<0 ? out.pRunDown    : Math.max(out.pRunUp, out.pRunDown);
-  out.modelPLcb = dd>0 ? out.pRunUpLcb : dd<0 ? out.pRunDownLcb : Math.max(out.pRunUpLcb, out.pRunDownLcb);
-  out.prob = Math.round(out.modelP * 100);       // conviction = actual model P(run)
-  return out;
-}
-
-function renderEngine(m, st){
-  st = st || { conditionsMet:0, burstAccel:false, burstTD:false, burstExh:false, burstClust:false };
-  const $id = id => document.getElementById(id);
-  const dir = Math.sign(m.td);
-  const col = dir>0 ? "var(--up)" : dir<0 ? "var(--down)" : "var(--neutral)";
-  const card = $id("engSignalCard");
-  // signal verdict
-  let verdict, state, reason;
-  if (engPending){
-    state = "tracking burst — needs 5 in a row";
-    verdict = (engPending.dir>0?"▲ LONG":"▼ SHORT") + " FIRED";
-    const got = engPending.dirs.filter(x=>x===engPending.dir).length;
-    reason = `Captured ${got}/${engPending.dirs.length} so far in the fired direction. ${engPending.left} tick(s) left — a win needs all ${ENG.HORIZON} consecutive.`;
-  } else if (st.conditionsMet >= 4 && dir !== 0){
-    state = "early-burst forming";
-    verdict = (dir>0?"▲ LONG":"▼ SHORT") + " FORMING";
-    const tags = [];
-    tags.push((st.burstTD?"✓":"·")+" TD% broke");
-    tags.push((st.burstAccel?"✓":"·")+" accel +");
-    tags.push((st.trendOK?"✓":"·")+" trend");
-    tags.push((st.persistOK?"✓":"·")+" persistence");
-    tags.push((st.probOK?"✓":"·")+" P(run)");
-    tags.push((st.burstExh?"✓":"·")+" low exh");
-    tags.push((st.burstClust?"✓":"·")+" cluster");
-    reason = tags.join("   ");
-  } else {
-    state = "scanning micro-structure…";
-    verdict = "— NO SIGNAL";
-    if (m.persistence < ENG.PHI_MIN && Math.abs(m.tdPct) >= ENG.TH) reason = `Imbalance exists but the Markov chain is in a bounce regime (persistence φ=${m.persistence.toFixed(2)} < ${ENG.PHI_MIN}) — ticks are mean-reverting, runs unlikely.`;
-    else if ((m.modelPLcb*100) < ENG.PRUN_MIN && Math.abs(m.tdPct) >= ENG.TH) reason = `Model P(5-run)=${(m.modelP*100).toFixed(0)}% is below the ${ENG.PRUN_MIN}% floor — the measured continuation odds don't justify a fire.`;
-    else if (m.drift !== 0 && m.drift !== dir && Math.abs(m.tdPct) >= ENG.TH) reason = `Imbalance is ${dir>0?'up':'down'} but the ${ENG.TREND_W}-tick drift is ${m.drift>0?'up':'down'} — won't fire against the tape.`;
-    else if (m.exhaustion > ENG.EC) reason = `Exhaustion ${m.exhaustion} is above the ${ENG.EC} ceiling — move is tired, no fresh burst.`;
-    else if (Math.abs(m.tdPct) < ENG.TH) reason = `Imbalance ${m.tdPct.toFixed(0)}% has not broken the ${ENG.TH}% threshold yet.`;
-    else reason = `Waiting for a persistent momentum regime and the first cluster to confirm.`;
-  }
-  const pcol = engPending ? (engPending.dir>0?"var(--up)":"var(--down)") : col;
-  card.style.setProperty("--sig-col", pcol);
-  $id("engState").textContent = state;
-  $id("engVerdict").textContent = verdict;
-  $id("engVerdict").style.color = pcol;
-  $id("engReason").textContent = reason;
-  // burst-conviction bar (model confidence the burst is genuine — NOT the literal odds of a 5-run)
-  $id("engProbPct").textContent = m.prob + "%";
-  $id("engProbFill").style.width = m.prob + "%";
-  $id("engProbFill").style.background = col === "var(--neutral)" ? "var(--accent)" : col;
-
-  // metric cards
-  $id("engTD").textContent = m.tdPct.toFixed(0)+"%";
-  $id("engTD").className = "em-val "+(m.tdPct>0?"up":m.tdPct<0?"down":"neu");
-  $id("engTDraw").textContent = m.up+"↑/"+m.down+"↓";
-  setDivBar("engTDbar", m.tdPct);
-  $id("engAcc").textContent = (m.accelAligned>=0?"+":"")+(m.accelAligned*100).toFixed(0);
-  $id("engAcc").className = "em-val "+(m.accelAligned>0.02?"up":m.accelAligned<-0.02?"down":"neu");
-  setDivBar("engAccBar", Math.max(-100,Math.min(100,m.accelAligned*100)));
-  $id("engExh").textContent = m.exhaustion;
-  $id("engExh").className = "em-val "+(m.exhaustion>ENG.EC?"warn":"neu");
-  { const f=$id("engExhBar"); f.style.left="0"; f.style.width=m.exhaustion+"%"; f.style.background=m.exhaustion>ENG.EC?"#ffc44d":m.exhaustion>40?"var(--accent)":"var(--up)"; }
-  $id("engRun").textContent = m.run;
-  $id("engRun").className = "em-val "+(m.runDir>0?"up":m.runDir<0?"down":"neu");
-  $id("engRunDir").textContent = m.runDir>0?"consecutive up-ticks":m.runDir<0?"consecutive down-ticks":"no active run";
-  $id("engVel").textContent = m.vel.toFixed(decimals);
-  $id("engVel").className = "em-val "+(m.vel>0?"up":m.vel<0?"down":"neu");
-  // Persistence φ (Markov regime)
-  $id("engPhi").textContent = (m.persistence>=0?"+":"")+m.persistence.toFixed(2);
-  $id("engPhi").className = "em-val "+(m.persistence>=ENG.PHI_MIN?"up":m.persistence<0?"down":"neu");
-  $id("engRegime").textContent = m.persistence>=ENG.PHI_MIN ? "momentum" : m.persistence<0 ? "bounce" : "neutral";
-  setDivBar("engPhiBar", Math.max(-100,Math.min(100,m.persistence*100)));
-  $id("engPP").textContent = `P(↑|↑)=${m.pUp.toFixed(2)} · P(↓|↓)=${m.pDown.toFixed(2)} · n=${m.samples}`;
-
-  // accuracy panel — "win" = a clean 5-consecutive run was captured
-  $id("engFired").textContent = engStats.fired;
-  if (engStats.resolved>0){
-    const acc = engStats.hits/engStats.resolved*100;
-    $id("engAccuracy").textContent = acc.toFixed(0)+"%";
-    $id("engAccuracy").className = "em-val "+(acc>ENG_BASE*1.5?"up":acc<ENG_BASE?"down":"neu");
-    const edge = acc-ENG_BASE;                       // vs the true random base rate (6.25%)
-    $id("engEdge").textContent = (edge>=0?"+":"")+edge.toFixed(0)+"%";
-    $id("engEdge").className = "em-val "+(edge>2?"up":edge<-2?"down":"neu");
-    $id("engAvgTicks").textContent = (engStats.ticksInDir/engStats.resolved).toFixed(1)+"/"+ENG.HORIZON;
-    $id("engAvgTicks").className = "em-val neu";
-  }
-
-  renderEngineLog();
-  drawEngLine();
-  drawEngTickCandles();
-}
-
-function setDivBar(id, pct){           // pct in -100..100, bar grows from centre
-  const f = document.getElementById(id); if (!f) return;
-  const p = Math.max(-100, Math.min(100, pct));
-  const half = Math.abs(p)/2;          // half of 100% track width
-  f.style.background = p>0 ? "var(--up)" : p<0 ? "var(--down)" : "var(--neutral)";
-  if (p>=0){ f.style.left="50%"; f.style.width=half+"%"; }
-  else { f.style.left=(50-half)+"%"; f.style.width=half+"%"; }
-}
-
-function renderEngineLog(){
-  const body = document.getElementById("engLogBody");
-  if (!engLog.length){ body.innerHTML = `<div class="empty">No signals fired yet. The engine fires only at an early burst: TD% just broke, acceleration just turned positive, exhaustion still low, first cluster forming.</div>`; return; }
-  body.innerHTML = engLog.map(e => {
-    const t = new Date(e.time*1000).toLocaleTimeString();
-    const dcls = e.dir>0?"up":"down", dtxt = e.dir>0?"▲ LONG":"▼ SHORT";
-    const r = e.result==='win'?'<span class="res win">✓ WIN</span>'
-            : e.result==='loss'?'<span class="res loss">✗ LOSS</span>'
-            : '<span class="res pend">… tracking</span>';
-    // price path P1→P2→P3→P4→P5, each price coloured by that tick's direction vs the fired side
-    const prices = e.prices || [];
-    let path = '<span class="path">';
-    for (let i=0;i<ENG.HORIZON;i++){
-      const has = i < prices.length;
-      const val = has ? prices[i].toFixed(decimals) : '·····';
-      let cls = 'p-pend';
-      if (has && i>0){ const d = Math.sign(prices[i]-prices[i-1]); cls = d===e.dir ? 'p-good' : d===0 ? 'p-pend' : 'p-bad'; }
-      else if (has && i===0){ cls = e.dir>0 ? 'p-good' : 'p-bad'; }
-      path += `<span class="${cls}" title="tick ${i+1}">${val}</span>`;
-      if (i<ENG.HORIZON-1) path += '<span class="p-sep">→</span>';
-    }
-    path += '</span>';
-    return `<div class="row"><span class="t">${t}</span><span class="dir ${dcls}">${dtxt}</span><span class="pconv">c=${e.prob}%</span>${path}${r}</div>`;
-  }).join("");
-}
-
-// Continuous tick line, segments recoloured on a run of RUN_LENGTH ticks
-function drawEngLine(){
-  const svg = document.getElementById("engLine"); if (!svg) return;
-  const W=1000,H=300,padX=12,padY=20;
-  const data = engTicks.slice(-Math.min(engTicks.length, 180));
-  if (data.length < 2){ svg.innerHTML = `<text x="${W/2}" y="${H/2}" fill="#475569" font-size="13" text-anchor="middle" font-family="monospace">collecting ticks…</text>`; return; }
-  const prices = data.map(t=>t.price);
-  let min=msdSafeMin(prices), max=msdSafeMax(prices); if(min===max){min-=1;max+=1;}
-  const rng=max-min, stepX=(W-padX*2)/(data.length-1);
-  const x=i=>padX+i*stepX, y=p=>padY+(H-padY*2)*(1-(p-min)/rng);
-  // flag points inside a run of RUN_LENGTH
-  const colorAt=new Array(data.length).fill(0); let len=0,d=0;
-  for(let i=0;i<data.length;i++){ const td=data[i].dir;
-    if(td!==0&&td===d)len++; else if(td!==0){d=td;len=1;} else {d=0;len=0;}
-    if(len>=RUN_LENGTH){ for(let k=0;k<RUN_LENGTH&&i-k>=0;k++) colorAt[i-k]=d; } }
-  let out="";
-  // gridlines + axis
-  for(let i=0;i<=3;i++){ const gy=padY+(H-padY*2)/3*i, gp=max-rng/3*i;
-    out+=`<line x1="${padX}" y1="${gy.toFixed(1)}" x2="${W-padX}" y2="${gy.toFixed(1)}" stroke="#161d2b" stroke-width="1"/>`;
-    out+=`<text x="${W-padX-2}" y="${(gy-3).toFixed(1)}" fill="#475569" font-size="9" text-anchor="end" font-family="monospace">${gp.toFixed(decimals)}</text>`; }
-  const colName=c=>c===1?"var(--up)":c===-1?"var(--down)":"var(--neutral)";
-  for(let i=1;i<data.length;i++){
-    const c = (colorAt[i]!==0 && (colorAt[i]===colorAt[i-1])) ? colorAt[i] : 0;
-    out+=`<line x1="${x(i-1).toFixed(1)}" y1="${y(data[i-1].price).toFixed(1)}" x2="${x(i).toFixed(1)}" y2="${y(data[i].price).toFixed(1)}" stroke="${colName(c)}" stroke-width="${c?2:1.3}" stroke-linecap="round" opacity="${c?1:0.75}"/>`;
-  }
-  // last price dot
-  const li=data.length-1;
-  out+=`<circle cx="${x(li).toFixed(1)}" cy="${y(data[li].price).toFixed(1)}" r="3" fill="${colName(colorAt[li])}"/>`;
-  svg.innerHTML=out;
-}
-
-// Tick candles: aggregate every K ticks into one OHLC candle
-function drawEngTickCandles(){
-  const svg = document.getElementById("engTickCandles"); if (!svg) return;
-  const W=1000,H=300,padT=12,padB=12,padL=8,padR=58;
-  const K=ENG.K;
-  const candles=[];
-  for(let i=0;i<engTicks.length;i+=K){
-    const slice=engTicks.slice(i,i+K); if(slice.length<2&&candles.length) break;
-    const ps=slice.map(t=>t.price);
-    candles.push({ o:ps[0], h:msdSafeMax(ps), l:msdSafeMin(ps), c:ps[ps.length-1], n:slice.length });
-  }
-  const vis=candles.slice(-Math.min(candles.length,60));
-  if(vis.length<2){ svg.innerHTML=`<text x="${W/2}" y="${H/2}" fill="#475569" font-size="13" text-anchor="middle" font-family="monospace">building tick candles…</text>`; return; }
-  let hi=msdSafeMax(vis.map(c=>c.h)), lo=msdSafeMin(vis.map(c=>c.l)); if(hi===lo){hi+=1;lo-=1;}
-  const pd=(hi-lo)*0.08; hi+=pd; lo-=pd; const rng=hi-lo;
-  const y=p=>padT+(H-padT-padB)*(1-(p-lo)/rng);
-  const slot=(W-padL-padR)/vis.length, bw=Math.max(1.5,Math.min(slot*0.66,16));
-  let out="";
-  for(let i=0;i<=4;i++){ const gy=padT+(H-padT-padB)/4*i, gp=hi-rng/4*i;
-    out+=`<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${W-padR}" y2="${gy.toFixed(1)}" stroke="#161d2b" stroke-width="1"/>`;
-    out+=`<text x="${W-padR+4}" y="${(gy+3).toFixed(1)}" fill="#475569" font-size="9" font-family="monospace">${gp.toFixed(decimals)}</text>`; }
-  vis.forEach((c,i)=>{
-    const cx=padL+slot*i+slot/2, up=c.c>=c.o, col=up?"var(--up)":"var(--down)";
-    out+=`<line x1="${cx.toFixed(1)}" y1="${y(c.h).toFixed(1)}" x2="${cx.toFixed(1)}" y2="${y(c.l).toFixed(1)}" stroke="${col}" stroke-width="1"/>`;
-    const yo=y(c.o), yc=y(c.c), top=Math.min(yo,yc), bh=Math.max(1,Math.abs(yc-yo));
-    out+=`<rect x="${(cx-bw/2).toFixed(1)}" y="${top.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="${col}" opacity="0.92"/>`;
-  });
-  // live price dash
-  const last=vis[vis.length-1];
-  out+=`<line x1="${padL}" y1="${y(last.c).toFixed(1)}" x2="${W-padR}" y2="${y(last.c).toFixed(1)}" stroke="#f97316" stroke-width="1" stroke-dasharray="4,3" opacity="0.7"/>`;
-  svg.innerHTML=out;
-}
+<script type="module" src="src/trading/fiveTickSignalEngine.js"></script>
 
 // =====================================================================
 // PAGE 4 — TRADING GRID
@@ -28300,15 +27911,7 @@ let gridTrades = [];
 let gridReqId = 9000;
 const gridPending = {};
 
-// One multiplier instance per bot — created lazily after DOM is ready
-// (makeMultiplier is defined just before the try{} boot block)
-let _gridMult = null, _digMult = null, _engMult = null;
-function gridMult(){ return _gridMult||(_gridMult=makeMultiplier(()=>$("gridStake"))); }
-function digMult(){  return _digMult ||(_digMult =makeMultiplier(()=>$("digStake"))); }
-function engMult(){  return _engMult ||(_engMult =makeMultiplier(()=>$("engStake"))); }
-function gridMultStrat(){ const s=$("gridMultiplier"); return s?s.value:'flat'; }
-function digMultStrat(){  const s=$("digMultiplier");  return s?s.value:'flat'; }
-function engMultStrat(){  const s=$("engMultiplier");  return s?s.value:'flat'; }
+<script type="module" src="src/trading/multiplierHelpers.js"></script>
 let gridArmed = false;
 let gridAutoCount = 0;
 let gridLastAutoAt = 0;
@@ -28317,346 +27920,14 @@ let gridConnecting = false;
 let gridLoggedIn = false;          // session state, from /me/session — no token held client-side
 let gridAccounts = [];             // [{account_id, account_type, currency, ...}]
 
-function gridSet(id, txt){ const e = $(id); if (e) e.textContent = txt; }
-function gridConnState(state){
-  const dot = $("gridDot"), txt = $("gridConnText");
-  if (dot) dot.className = "d" + (state==="on"?" on":state==="off"?" off":"");
-  if (txt) txt.textContent = state==="on" ? "authorized" : state==="connecting" ? "connecting…" : "not connected";
-  const connBtn = $("gridConnectBtn"), disBtn = $("gridDisconnectBtn");
-  const tradeBtns = ["gridRiseBtn","gridFallBtn"];
-  const ok = state === "on";
-  if (connBtn) connBtn.disabled = ok || state==="connecting" || !gridLoggedIn;
-  if (disBtn)  disBtn.disabled  = !ok && state!=="connecting";
-  tradeBtns.forEach(b => { const el = $(b); if (el) el.disabled = !ok; });
-}
-// Surface connection problems IN THE PAGE, not just an alert — CORS/network
-// failures from a third-party host often give no useful alert() text.
-function gridDiag(html, isError){
-  const box = $("gridDiag");
-  if (!box) return;
-  if (!html){ box.style.display = "none"; box.innerHTML = ""; return; }
-  box.style.display = "block";
-  box.innerHTML = html;
-}
+<script type="module" src="src/trading/gridSetHelper.js"></script>
+<script type="module" src="src/trading/gridStatusUi.js"></script>
 
-function gridPageInit(){
-  gridSet("gridMarketName", MARKETS[SYMBOL] || SYMBOL);
-  renderSignalTable();
-  renderGridTrades();
-  if (gridPageInited) return;
-  gridPageInited = true;
-  gridCheckSession();
-}
-
-// ── Step 1: send the browser to the backend to start login. The backend
-// does PKCE + the Deriv redirect + the code exchange entirely server-side;
-// this page never generates a verifier or sees an authorization code.
-function gridStartLogin(){
-  window.location.assign(BACKEND_URL + "/auth/start");
-}
-
-// ── Step 2: check session and load accounts ───────────────────────────
-async function gridCheckSession(){
-  try {
-    const resp = await fetch(BACKEND_URL + "/me/session", { credentials: "include" });
-    const body = await resp.json().catch(()=>null);
-    gridLoggedIn = !!(body && body.logged_in);
-  } catch(e){
-    gridLoggedIn = false;
-    if (e instanceof TypeError)
-      gridDiag(`<b>Cannot reach backend.</b> <code>${BACKEND_URL}/me/session</code> — check Worker is deployed.`, true);
-    return;
-  }
-  if (gridLoggedIn){
-    gridDiag(null);
-    await gridLoadAccounts();
-  } else {
-    const pickBlock = $("gridAcctPickBlock"), loginBlock = $("gridLoginBlock");
-    if (pickBlock) pickBlock.style.display = "none";
-    if (loginBlock) loginBlock.style.display = "block";
-  }
-}
+<script type="module" src="src/trading/gridSessionAuth.js"></script>
 
 // =====================================================================
-// AGGRESSION BOT — buy/sell aggression within the live 1-min candle
-// Uses the real tick-rule classification already computed per tick (dir),
-// weighted by the magnitude of each tick's price move, so a burst of large
-// fast moves in one direction scores higher than the same tick-count of
-// tiny wiggles. Score is signed: +100 = maximum buy aggression this
-// candle, -100 = maximum sell aggression. Intensity compares this
-// candle's total tick movement against the rolling average of the last
-// 10 completed candles, to separate "genuinely forceful" from "just
-// directional but quiet."
-// =====================================================================
-const AGG_TF = 60;         // 1-min candles
-const AGG_HIST_MAX = 60;
-const AGG_ROLL_N = 10;     // rolling window for intensity baseline
-let aggCur = null, aggHistory = [], aggLastPrice = null, aggPageReady = false, aggAlerts = [];
+<script type="module" src="src/trading/aggressionBot.js"></script>
 
-function aggNewCandle(bucket, price){
-  return { start:bucket, open:price, high:price, low:price, close:price,
-           upTicks:0, downTicks:0, upMag:0, downMag:0, ticks:0 };
-}
-
-function aggOnTick(price, epoch, dir){
-  const bucket = Math.floor(epoch / AGG_TF) * AGG_TF;
-  const mag = aggLastPrice != null ? Math.abs(price - aggLastPrice) : 0;
-  if (!aggCur){
-    aggCur = aggNewCandle(bucket, price);
-  } else if (bucket > aggCur.start){
-    aggFinalizeCandle(aggCur);
-    aggCur = aggNewCandle(bucket, price);
-  }
-  aggCur.high = Math.max(aggCur.high, price);
-  aggCur.low  = Math.min(aggCur.low, price);
-  aggCur.close = price;
-  aggCur.ticks++;
-  if (dir === 1){ aggCur.upTicks++; aggCur.upMag += mag; }
-  else if (dir === -1){ aggCur.downTicks++; aggCur.downMag += mag; }
-  aggLastPrice = price;
-
-  if (aggPageReady && document.getElementById("page-aggression") &&
-      document.getElementById("page-aggression").classList.contains("active")){
-    aggRenderAll();
-  }
-}
-
-function aggScoreOf(c){
-  const totalTicks = c.upTicks + c.downTicks, totalMag = c.upMag + c.downMag;
-  if (totalTicks === 0) return { score:0, tickImb:0, magImb:0, intensity:0, verdict:"NEUTRAL", dir:0 };
-  const tickImb = (c.upTicks - c.downTicks) / totalTicks;
-  const magImb  = totalMag > 0 ? (c.upMag - c.downMag) / totalMag : 0;
-  const score = Math.round((0.4*tickImb + 0.6*magImb) * 100);
-  const recent = aggHistory.slice(-AGG_ROLL_N);
-  const avgMag = recent.length ? recent.reduce((a,h)=>a+(h.upMag+h.downMag),0)/recent.length : (totalMag || 1e-9);
-  const intensity = avgMag > 0 ? totalMag / avgMag : 1;
-  const dir = score > 0 ? 1 : score < 0 ? -1 : 0;
-  let verdict = "NEUTRAL";
-  if (Math.abs(score) >= 60 && intensity >= 1.3) verdict = dir===1 ? "STRONG BUY AGGRESSION" : "STRONG SELL AGGRESSION";
-  else if (Math.abs(score) >= 35) verdict = dir===1 ? "MODERATE BUY PRESSURE" : "MODERATE SELL PRESSURE";
-  else if (Math.abs(score) >= 15) verdict = dir===1 ? "MILD BUY BIAS" : "MILD SELL BIAS";
-  return { score, tickImb, magImb, intensity, verdict, dir };
-}
-
-function aggFinalizeCandle(c){
-  const m = aggScoreOf(c);
-  aggHistory.push(Object.assign({}, c, m));
-  if (aggHistory.length > AGG_HIST_MAX) aggHistory.shift();
-  if (Math.abs(m.score) >= 60 && m.intensity >= 1.3){
-    aggAlerts.unshift({ time: c.start, verdict: m.verdict, score: m.score });
-    if (aggAlerts.length > 30) aggAlerts.pop();
-  }
-}
-
-function aggPageInit(){ aggPageReady = true; aggRenderAll(); }
-
-function aggRenderAll(){
-  if (!aggCur) return;
-  const live = aggScoreOf(aggCur);
-  const $id = id => document.getElementById(id);
-  const dirCol = live.dir===1 ? "var(--up)" : live.dir===-1 ? "var(--down)" : "var(--neutral)";
-  const card = $id("aggCard"); if (card) card.style.setProperty("--sig-col", dirCol);
-  const vEl = $id("aggVerdict");
-  if (vEl){ vEl.textContent = (live.dir===1?"▲ ":live.dir===-1?"▼ ":"— ") + live.verdict; vEl.style.color = dirCol; }
-  const stateEl = $id("aggState");
-  if (stateEl) stateEl.textContent = `Live 1-min candle — ${aggCur.ticks} ticks so far`;
-
-  const fill = $id("aggGaugeFill");
-  if (fill){
-    const pct = Math.max(-100, Math.min(100, live.score)), half = Math.abs(pct)/2;
-    fill.style.background = pct >= 0 ? "var(--up)" : "var(--down)";
-    if (pct >= 0){ fill.style.left = "50%"; fill.style.width = half + "%"; }
-    else { fill.style.left = (50-half) + "%"; fill.style.width = half + "%"; }
-  }
-  const pctLab = $id("aggGaugePct"); if (pctLab) pctLab.textContent = (live.score>=0?"+":"") + live.score;
-
-  const set = (id, txt, cls) => { const e=$id(id); if (e){ e.textContent = txt; if (cls) e.className = "em-val " + cls; } };
-  set("aggBuyTicks", aggCur.upTicks);
-  set("aggSellTicks", aggCur.downTicks);
-  set("aggBuyMag", aggCur.upMag.toFixed(decimals));
-  set("aggSellMag", aggCur.downMag.toFixed(decimals));
-  set("aggIntensity", live.intensity.toFixed(2) + "\u00d7", live.intensity>=1.3?"warn":"neu");
-  set("aggTickImb", (live.tickImb*100).toFixed(0)+"%", live.tickImb>0?"up":live.tickImb<0?"down":"neu");
-
-  const chartCandles = aggHistory.slice(-40).map(c => ({ open:c.open, high:c.high, low:c.low, close:c.close, ticks:c.ticks }));
-  const forming = { open:aggCur.open, high:aggCur.high, low:aggCur.low, close:aggCur.close, ticks:aggCur.ticks };
-  if (typeof drawCandleChart === "function") drawCandleChart("aggCandleSvg", chartCandles, forming, { maxCandles:40 });
-
-  const body = $id("aggHistBody");
-  if (body){
-    const rows = aggHistory.slice(-25).reverse();
-    body.innerHTML = !rows.length
-      ? '<tr><td colspan="7" class="sig-empty">No completed candles yet.</td></tr>'
-      : rows.map(r => {
-          const t = new Date(r.start*1000).toLocaleTimeString();
-          const badgeCls = Math.abs(r.score)>=60 ? (r.dir===1?"b-up":"b-down") : Math.abs(r.score)>=35 ? "b-warn" : "b-neutral";
-          return `<tr>
-            <td class="l">${t}</td>
-            <td>${r.open.toFixed(decimals)}</td>
-            <td>${r.close.toFixed(decimals)}</td>
-            <td class="${r.upTicks>r.downTicks?'cell-pos':'cell-mut'}">${r.upTicks}</td>
-            <td class="${r.downTicks>r.upTicks?'cell-neg':'cell-mut'}">${r.downTicks}</td>
-            <td class="${r.score>=0?'cell-pos':'cell-neg'}">${r.score>=0?'+':''}${r.score}</td>
-            <td class="l"><span class="badge ${badgeCls}">${r.verdict}</span></td>
-          </tr>`;
-        }).join("");
-  }
-
-  const logBody = $id("aggAlertBody");
-  if (logBody){
-    logBody.innerHTML = !aggAlerts.length
-      ? '<div class="empty">No strong-aggression candles yet.</div>'
-      : aggAlerts.map(a => {
-          const t = new Date(a.time*1000).toLocaleTimeString();
-          const cls = a.score>=0 ? "up" : "down";
-          return `<div class="row"><span class="t">${t}</span><span class="dir ${cls}">${a.verdict}</span><span class="pconv">score ${a.score>=0?'+':''}${a.score}</span></div>`;
-        }).join("");
-  }
-}
-
-function aggManualTrade(dir){
-  if (typeof gridPlaceTrade === "function") gridPlaceTrade(dir, "manual-agg");
-  else alert("Connect on the Trading Grid page first.");
-}
-
-// On page load, check for ?login_error=... — the backend appends this if
-// /auth/callback failed, then redirects here anyway so the error is visible.
-function gridHandleRedirectReturn(){
-  const params = new URLSearchParams(window.location.search);
-  const err = params.get("login_error");
-  const justLoggedIn = params.has("code") || document.referrer.includes("auth.deriv.com") || window.location.search.length === 0;
-  if (err){
-    showPage("grid");
-    gridDiag(`<b>Login failed.</b> ${err}`, true);
-    try {
-      const clean = window.location.origin + window.location.pathname;
-      window.history.replaceState({}, document.title, clean);
-    } catch(_){}
-    gridCheckSession();
-    return;
-  }
-  // Right after landing back from Deriv, /me/session can briefly return
-  // logged_in:false even though the login succeeded — the Worker's session
-  // KV write hasn't finished propagating to every Cloudflare edge node yet
-  // (KV is eventually-consistent, not instant, across edges). Retry with
-  // backoff for a few seconds before accepting a "not logged in" result;
-  // a normal (non-redirect) page load just checks once as before.
-  gridCheckSessionWithRetry();
-}
-
-async function gridCheckSessionWithRetry(maxTries=5){
-  const delays = [400, 800, 1500, 2500, 4000];
-  for (let i = 0; i < maxTries; i++){
-    await gridCheckSession();
-    if (gridLoggedIn) return;
-    if (i < delays.length) await new Promise(r => setTimeout(r, delays[i]));
-  }
-  // Exhausted retries — leave whatever gridCheckSession last determined
-  // (its own UI/diag handling already ran on the final attempt).
-}
-
-// ── Step 3: fetch all accounts for this session ──────────────────────
-// Backend uses Deriv WS authorize to get account_list (real + virtual).
-async function gridLoadAccounts(){
-  gridSet("gridConnText", "fetching accounts…");
-  let raw = [];
-  try {
-    const resp = await fetch(BACKEND_URL + "/me/accounts", { credentials: "include" });
-    const body = await resp.json().catch(()=>null);
-    if (!resp.ok) throw new Error((body && body.message) || `HTTP ${resp.status}`);
-    if (body && body.error && body.error !== "no_accounts")
-      throw new Error(body.message || "Account error — log out and back in.");
-    raw = (body && body.data) || [];
-    if (!raw.length) throw new Error("No accounts returned — log out and log back in.");
-  } catch(e){
-    gridDiag(`<b>Could not list accounts.</b> ${
-      e instanceof TypeError
-        ? `Cannot reach <code>${BACKEND_URL}/me/accounts</code>.`
-        : `Backend: <b>${e.message||"unknown"}</b>.`
-    }`, true);
-    gridConnState("off");
-    return;
-  }
-
-  // Normalise accounts from the backend. The backend now trusts Deriv's own
-  // account_type field ("demo"/"virtual" vs "real") as authoritative, with
-  // is_virtual as a secondary confirmation — no more guessing from the
-  // loginid prefix here. Balance comes straight from /me/accounts, so the
-  // Accounts page can show it immediately without waiting on a WS connect.
-  gridAccounts = raw.map(a => {
-    const demo =
-      a.account_type === "demo"    ||
-      a.account_type === "virtual" ||
-      a.is_virtual === true        ||
-      a.is_virtual === 1;
-    return {
-      account_id:   String(a.account_id || a.loginid || ""),
-      account_type: demo ? "virtual" : "real",
-      currency:     String(a.currency || "USD"),
-      is_virtual:   demo ? 1 : 0,
-      balance:      a.balance != null ? Number(a.balance) : null,
-    };
-  }).filter(a => a.account_id);
-
-  // Pre-populate _acctData with balances from the REST response
-  // so the Accounts page shows balances immediately before WS connects
-  gridAccounts.forEach(a => {
-    if (a.balance != null && !(_acctData[a.account_id]?.balance != null)){
-      if (!_acctData[a.account_id]) _acctData[a.account_id] = { pnl:0, trades:0 };
-      _acctData[a.account_id].balance  = a.balance;
-      _acctData[a.account_id].currency = a.currency;
-    }
-  });
-
-  gridBuildPicker();
-}
-
-// Build (or rebuild) the account picker. Real accounts first, then demo.
-function gridBuildPicker(){
-  const pickBlock = $("gridAcctPickBlock"), loginBlock = $("gridLoginBlock");
-  if (loginBlock) loginBlock.style.display = "none";
-  if (pickBlock)  pickBlock.style.display  = "block";
-
-  const sel = $("gridAcctPick");
-  if (!sel) return;
-
-  const demoAccts = gridAccounts.filter(a => a.is_virtual === 1);
-  const realAccts = gridAccounts.filter(a => a.is_virtual !== 1);
-  const prev = sel.value;
-  const optRow = a => `<option value="${a.account_id}">${a.account_id} · ${a.currency}${a.balance!=null?` · ${a.balance.toFixed(2)}`:''}</option>`;
-  sel.innerHTML =
-    (demoAccts.length ? `<optgroup label="🟢 Demo Accounts">${demoAccts.map(optRow).join("")}</optgroup>` : "") +
-    (realAccts.length ? `<optgroup label="🔴 Real Accounts">${realAccts.map(optRow).join("")}</optgroup>` : "");
-
-  // Restore previous / saved selection
-  try {
-    const saved = localStorage.getItem(ACCTID_KEY);
-    if      (saved && gridAccounts.some(a => a.account_id === saved)) sel.value = saved;
-    else if (prev  && gridAccounts.some(a => a.account_id === prev))  sel.value = prev;
-  } catch(_){}
-
-  const connBtn = $("gridConnectBtn"); if (connBtn) connBtn.disabled = false;
-  gridConnState("off");
-}
-
-// Merge accounts that arrive at runtime. Only adds new ones and rebuilds.
-function gridMergeAccounts(newList){
-  if (!newList || !newList.length) return;
-  let changed = false;
-  newList.forEach(na => {
-    const id = String(na.account_id || na.loginid || "");
-    if (!id || gridAccounts.some(a => a.account_id === id)) return;
-    const virt = na.is_virtual === 1 || na.is_virtual === true || /^VR/i.test(id);
-    gridAccounts.push({ account_id: id, account_type: virt ? "virtual" : "trading", currency: String(na.currency || "USD"), is_virtual: virt ? 1 : 0 });
-    changed = true;
-  });
-  if (changed) gridBuildPicker();
-}
-
-function gridSelectAccountFromPicker(){
-  const sel = $("gridAcctPick");
-  if (sel && sel.value){ try { localStorage.setItem(ACCTID_KEY, sel.value); } catch(_){} }
-}
 
 // ── Step 4: get WS credentials, open WS, authorize, subscribe ────────
 // POST /ws/otp → { url, token }
@@ -29467,718 +28738,7 @@ function engHandleSignal(dir, price, epoch){
 
 // Lays the indicators out as rows and the tick positions as columns:
 // =====================================================================
-// ML FEATURE ENGINEERING ENGINE
-// Generates 150+ derived features from the 12-column indicator window
-// (B-3…B-1, P1…P5, A-1…A-4) for every signal record, then ranks them
-// using in-browser mutual information, Random Forest importance (CART
-// approximation), and SHAP values (TreeExplainer linear approximation).
-// =====================================================================
-
-// ── Feature definitions ─────────────────────────────────────────────
-// Each feature: { id, label, family, phase:'B'|'P'|'A'|'all', fn(snaps) }
-// snaps = array of 12 snapshots (index 0=B-3, 3=P1, 8=A-1); may contain nulls.
-// fn returns a single number or null.
-
-const _FEAT_DEFS = (function(){
-  // ── Helpers ───────────────────────────────────────────────────────────
-  // Safe get — returns null if snapshot missing or field NaN/null
-  const g  = (s,k)=>(s&&s[k]!=null&&!isNaN(s[k]))?s[k]:null;
-  // Slope: null if either endpoint missing
-  const sl = (a,b)=>(a!=null&&b!=null)?(b-a):null;
-  // Acceleration = second derivative
-  const ac = (p,a,b)=>{ const s1=sl(p,a),s2=sl(a,b); return(s1!=null&&s2!=null)?s2-s1:null; };
-  // Mean of array, null-safe
-  const mn = arr=>{ const v=arr.filter(x=>x!=null); return v.length?v.reduce((a,b)=>a+b,0)/v.length:null; };
-  // Sign
-  const sg = v=>v==null?null:v>0?1:v<0?-1:0;
-  // Clamp ratio to [-3,3] for stability
-  const ratio = (a,b)=>(a!=null&&b!=null&&Math.abs(b)>1e-9)?Math.max(-3,Math.min(3,a/b)):null;
-
-  // Column indices — B-window only (indices 0,1,2)
-  const B3=0,B2=1,B1=2;
-  const bCols=[0,1,2];
-
-  const defs=[]; let id=0;
-  const add=(label,family,phase,fn)=>defs.push({id:id++,label,family,phase,fn});
-
-  // ═════════════════════════════════════════════════════════════════════
-  // FAMILY 1: SLOPE — signed continuous (captures direction naturally)
-  // 15 indicators × 3 transitions = 45 features
-  // ═════════════════════════════════════════════════════════════════════
-  const SLOPE_IND=[
-    ['macd','MACD'],['signal','Signal'],['hist','Hist'],
-    ['chop','Chop'],['cci','CCI'],['bbPctB','BB%B'],
-    ['pdi','+DI'],['ndi','-DI'],['adx','ADX'],
-    ['rsi','RSI'],['atr','ATR'],['stochK','Stoch%K'],['roc','ROC'],
-    ['ema5','EMA5'],['ema20','EMA20'],
-  ];
-  SLOPE_IND.forEach(([k,lbl])=>{
-    add(`${lbl} sl B3→B2`,'Slope','B',s=>sl(g(s[B3],k),g(s[B2],k)));
-    add(`${lbl} sl B2→B1`,'Slope','B',s=>sl(g(s[B2],k),g(s[B1],k)));
-    add(`${lbl} sl B3→B1`,'Slope','B',s=>sl(g(s[B3],k),g(s[B1],k)));
-  });
-
-  // ═════════════════════════════════════════════════════════════════════
-  // FAMILY 2: ACCELERATION — 2nd derivative (curvature / regime change)
-  // 6 indicators × 1 = 6 features
-  // ═════════════════════════════════════════════════════════════════════
-  [['macd','MACD'],['hist','Hist'],['cci','CCI'],
-   ['rsi','RSI'],['adx','ADX'],['stochK','Stoch%K']].forEach(([k,lbl])=>{
-    add(`${lbl} accel B`,'Accel','B',s=>ac(g(s[B3],k),g(s[B2],k),g(s[B1],k)));
-  });
-
-  // ═════════════════════════════════════════════════════════════════════
-  // FAMILY 3: LEVEL — signed distance, not binary flags
-  // Binary flags caused prediction bias; signed distance is symmetric
-  // ═════════════════════════════════════════════════════════════════════
-  add('RSI-50 B1',   'Level','B',s=>{ const v=g(s[B1],'rsi'); return v!=null?v-50:null; });
-  add('RSI-50 B2',   'Level','B',s=>{ const v=g(s[B2],'rsi'); return v!=null?v-50:null; });
-  add('RSI-50 B3',   'Level','B',s=>{ const v=g(s[B3],'rsi'); return v!=null?v-50:null; });
-  add('CCI/100 B1',  'Level','B',s=>{ const v=g(s[B1],'cci'); return v!=null?v/100:null; });
-  add('CCI/100 B2',  'Level','B',s=>{ const v=g(s[B2],'cci'); return v!=null?v/100:null; });
-  add('Stoch-50 B1', 'Level','B',s=>{ const v=g(s[B1],'stochK'); return v!=null?v-50:null; });
-  add('Stoch-50 B2', 'Level','B',s=>{ const v=g(s[B2],'stochK'); return v!=null?v-50:null; });
-  add('DI spread B1','Level','B',s=>{ const p=g(s[B1],'pdi'),n=g(s[B1],'ndi'); return(p!=null&&n!=null)?p-n:null; });
-  add('DI spread B2','Level','B',s=>{ const p=g(s[B2],'pdi'),n=g(s[B2],'ndi'); return(p!=null&&n!=null)?p-n:null; });
-  add('DI spread B3','Level','B',s=>{ const p=g(s[B3],'pdi'),n=g(s[B3],'ndi'); return(p!=null&&n!=null)?p-n:null; });
-  add('ADX B1',      'Level','B',s=>g(s[B1],'adx'));
-  add('ADX B2',      'Level','B',s=>g(s[B2],'adx'));
-  add('BB%B-0.5 B1', 'Level','B',s=>{ const v=g(s[B1],'bbPctB'); return v!=null?v-0.5:null; }); // symmetric: + near upper, - near lower
-  add('BB%B-0.5 B2', 'Level','B',s=>{ const v=g(s[B2],'bbPctB'); return v!=null?v-0.5:null; });
-  add('ROC B1',      'Level','B',s=>g(s[B1],'roc'));
-  add('ROC B2',      'Level','B',s=>g(s[B2],'roc'));
-  add('MACD B1',     'Level','B',s=>g(s[B1],'macd'));
-  add('Hist B1',     'Level','B',s=>g(s[B1],'hist'));
-  add('Hist B2',     'Level','B',s=>g(s[B2],'hist'));
-  add('Chop-50 B1',  'Level','B',s=>{ const v=g(s[B1],'chop'); return v!=null?v-50:null; }); // negative = trending, positive = choppy
-  add('EMA5-EMA20 B1','Level','B',s=>{ const a=g(s[B1],'ema5'),b=g(s[B1],'ema20'); return(a!=null&&b!=null)?a-b:null; });
-  add('EMA5-EMA20 B2','Level','B',s=>{ const a=g(s[B2],'ema5'),b=g(s[B2],'ema20'); return(a!=null&&b!=null)?a-b:null; });
-  add('EMA5-EMA10 B1','Level','B',s=>{ const a=g(s[B1],'ema5'),b=g(s[B1],'ema10'); return(a!=null&&b!=null)?a-b:null; });
-
-  // ═════════════════════════════════════════════════════════════════════
-  // FAMILY 4: HISTOGRAM BEHAVIOUR
-  // ═════════════════════════════════════════════════════════════════════
-  add('Hist mean B',    'Hist','B',s=>mn(bCols.map(i=>g(s[i],'hist'))));
-  add('Hist cumsum B',  'Hist','B',s=>{ const v=bCols.map(i=>g(s[i],'hist')).filter(x=>x!=null); return v.length?v.reduce((a,b)=>a+b,0):null; });
-  add('Hist accel B',   'Hist','B',s=>ac(g(s[B3],'hist'),g(s[B2],'hist'),g(s[B1],'hist')));
-  add('Hist sign flips B','Hist','B',s=>{
-    const v=bCols.map(i=>sg(g(s[i],'hist'))).filter(x=>x!=null);
-    let c=0; for(let i=1;i<v.length;i++) if(v[i]!==v[i-1]) c++;
-    return v.length>1?c:null;
-  });
-  add('Hist all pos B', 'Hist','B',s=>+(bCols.every(i=>{ const v=g(s[i],'hist'); return v!=null&&v>0; })));
-  add('Hist all neg B', 'Hist','B',s=>+(bCols.every(i=>{ const v=g(s[i],'hist'); return v!=null&&v<0; })));
-  // Histogram momentum: B1 vs mean(B3,B2) — captures late acceleration
-  add('Hist late accel','Hist','B',s=>{
-    const avg=mn([g(s[B3],'hist'),g(s[B2],'hist')]),b1=g(s[B1],'hist');
-    return(avg!=null&&b1!=null)?b1-avg:null;
-  });
-
-  // ═════════════════════════════════════════════════════════════════════
-  // FAMILY 5: CHOPPINESS BEHAVIOUR
-  // ═════════════════════════════════════════════════════════════════════
-  add('Chop mean B',    'Chop','B',s=>mn(bCols.map(i=>g(s[i],'chop'))));
-  add('Chop delta B',   'Chop','B',s=>sl(g(s[B3],'chop'),g(s[B1],'chop')));
-  add('Chop range B',   'Chop','B',s=>{ const v=bCols.map(i=>g(s[i],'chop')).filter(x=>x!=null); return v.length?msdSafeMax(v)-msdSafeMin(v):null; });
-  add('Chop accel B',   'Chop','B',s=>ac(g(s[B3],'chop'),g(s[B2],'chop'),g(s[B1],'chop')));
-  // Chop falling = trending emerging (key pre-run signal)
-  add('Chop falling B', 'Chop','B',s=>{ const d=sl(g(s[B3],'chop'),g(s[B1],'chop')); return d!=null?+(d<0):null; });
-  add('Chop late drop', 'Chop','B',s=>sl(g(s[B2],'chop'),g(s[B1],'chop'))); // final tick drop most predictive
-
-  // ═════════════════════════════════════════════════════════════════════
-  // FAMILY 6: CCI BEHAVIOUR
-  // ═════════════════════════════════════════════════════════════════════
-  add('CCI mean B',     'CCI','B',s=>mn(bCols.map(i=>g(s[i],'cci'))));
-  add('CCI delta B',    'CCI','B',s=>sl(g(s[B3],'cci'),g(s[B1],'cci')));
-  add('CCI accel B',    'CCI','B',s=>ac(g(s[B3],'cci'),g(s[B2],'cci'),g(s[B1],'cci')));
-  add('CCI abs max B',  'CCI','B',s=>{ const v=bCols.map(i=>g(s[i],'cci')).filter(x=>x!=null); return v.length?msdSafeMax(v.map(Math.abs)):null; });
-  add('CCI monotone B', 'CCI','B',s=>{
-    const v=bCols.map(i=>g(s[i],'cci')).filter(x=>x!=null);
-    if(v.length<2) return null;
-    return+(v.every((x,i)=>i===0||x>=v[i-1])||v.every((x,i)=>i===0||x<=v[i-1]));
-  });
-  // CCI signed momentum: direction of move weighted by magnitude
-  add('CCI momentum B', 'CCI','B',s=>{ const d=sl(g(s[B2],'cci'),g(s[B1],'cci')); const mag=g(s[B1],'cci'); return(d!=null&&mag!=null)?d*Math.sign(mag):null; });
-
-  // ═════════════════════════════════════════════════════════════════════
-  // FAMILY 7: BOLLINGER — width, squeeze, distance, expansion rate
-  // ═════════════════════════════════════════════════════════════════════
-  // Raw width (not normalised — absolute band spread)
-  const bbW=(s,ci)=>{ const u=g(s[ci],'bbUpper'),l=g(s[ci],'bbLower'); return(u!=null&&l!=null)?u-l:null; };
-  add('BB width B1',    'BB','B',s=>bbW(s,B1));
-  add('BB width B2',    'BB','B',s=>bbW(s,B2));
-  add('BB width B3',    'BB','B',s=>bbW(s,B3));
-  // Width contraction — negative = bands narrowing (compression before burst)
-  add('BB width delta B','BB','B',s=>sl(bbW(s,B3),bbW(s,B1)));
-  add('BB width accel B','BB','B',s=>ac(bbW(s,B3),bbW(s,B2),bbW(s,B1)));
-  // Normalised width = width/mid (bandwidth%)
-  add('BB norm width B1','BB','B',s=>{ const w=bbW(s,B1),m=g(s[B1],'bbMid'); return(w!=null&&m!=null&&m>0)?w/m*100:null; });
-  add('BB norm width B2','BB','B',s=>{ const w=bbW(s,B2),m=g(s[B2],'bbMid'); return(w!=null&&m!=null&&m>0)?w/m*100:null; });
-  // Squeeze: normalised width < 0.05% (very tight bands)
-  add('BB squeeze B1',  'BB','B',s=>{ const nw=bbW(s,B1)!=null&&g(s[B1],'bbMid')!=null?bbW(s,B1)/g(s[B1],'bbMid')*100:null; return nw!=null?+(nw<0.05):null; });
-  // BB%B signed (symmetric around 0.5)
-  add('BB%B-0.5 B3',   'BB','B',s=>{ const v=g(s[B3],'bbPctB'); return v!=null?v-0.5:null; });
-  add('BB%B slope B3→B1','BB','B',s=>sl(g(s[B3],'bbPctB'),g(s[B1],'bbPctB')));
-  add('BB%B slope B2→B1','BB','B',s=>sl(g(s[B2],'bbPctB'),g(s[B1],'bbPctB')));
-  add('BB%B accel B',   'BB','B',s=>ac(g(s[B3],'bbPctB'),g(s[B2],'bbPctB'),g(s[B1],'bbPctB')));
-  // Distance from middle band (signed: + = above mid, - = below)
-  add('Price-BBmid B1', 'BB','B',s=>{ const p=g(s[B1],'price'),m=g(s[B1],'bbMid'); return(p!=null&&m!=null)?p-m:null; });
-  add('Price-BBmid B2', 'BB','B',s=>{ const p=g(s[B2],'price'),m=g(s[B2],'bbMid'); return(p!=null&&m!=null)?p-m:null; });
-  // Normalised distance from mid (scale-independent)
-  add('Price-BBmid/W B1','BB','B',s=>{ const p=g(s[B1],'price'),m=g(s[B1],'bbMid'),w=bbW(s,B1); return(p!=null&&m!=null&&w!=null&&w>0)?(p-m)/w:null; });
-
-  // ═════════════════════════════════════════════════════════════════════
-  // FAMILY 8: MACD SIGNAL GAP & MOMENTUM
-  // ═════════════════════════════════════════════════════════════════════
-  add('MACD-Sig gap B1','MACD','B',s=>{ const m=g(s[B1],'macd'),sg2=g(s[B1],'signal'); return(m!=null&&sg2!=null)?m-sg2:null; });
-  add('MACD-Sig gap B2','MACD','B',s=>{ const m=g(s[B2],'macd'),sg2=g(s[B2],'signal'); return(m!=null&&sg2!=null)?m-sg2:null; });
-  add('MACD-Sig gap B3','MACD','B',s=>{ const m=g(s[B3],'macd'),sg2=g(s[B3],'signal'); return(m!=null&&sg2!=null)?m-sg2:null; });
-  // Gap expanding (crossover momentum)
-  add('MACD gap expanding','MACD','B',s=>{
-    const g1=(g(s[B2],'macd')!=null&&g(s[B2],'signal')!=null)?g(s[B2],'macd')-g(s[B2],'signal'):null;
-    const g2=(g(s[B1],'macd')!=null&&g(s[B1],'signal')!=null)?g(s[B1],'macd')-g(s[B1],'signal'):null;
-    return(g1!=null&&g2!=null)?+(Math.abs(g2)>Math.abs(g1)):null;
-  });
-  add('MACD cross B',  'MACD','B',s=>{
-    for(let i=1;i<bCols.length;i++){
-      const m0=g(s[bCols[i-1]],'macd'),s0=g(s[bCols[i-1]],'signal');
-      const m1=g(s[bCols[i]],'macd'),  s1=g(s[bCols[i]],'signal');
-      if(m0!=null&&s0!=null&&m1!=null&&s1!=null&&Math.sign(m0-s0)!==Math.sign(m1-s1)) return 1;
-    }
-    return 0;
-  });
-  add('MACD mean B',   'MACD','B',s=>mn(bCols.map(i=>g(s[i],'macd'))));
-  add('MACD accel B',  'MACD','B',s=>ac(g(s[B3],'macd'),g(s[B2],'macd'),g(s[B1],'macd')));
-
-  // ═════════════════════════════════════════════════════════════════════
-  // FAMILY 9: PRICE & VOLATILITY — scale-independent where possible
-  // ═════════════════════════════════════════════════════════════════════
-  add('PriceVel B3→B1','Price','B',s=>sl(g(s[B3],'price'),g(s[B1],'price')));
-  add('PriceVel B2→B1','Price','B',s=>sl(g(s[B2],'price'),g(s[B1],'price')));
-  add('Price accel B',  'Price','B',s=>ac(g(s[B3],'price'),g(s[B2],'price'),g(s[B1],'price')));
-  add('Price range B',  'Price','B',s=>{ const v=bCols.map(i=>g(s[i],'price')).filter(x=>x!=null); return v.length?msdSafeMax(v)-msdSafeMin(v):null; });
-  // ATR
-  add('ATR B1',         'Price','B',s=>g(s[B1],'atr'));
-  add('ATR B2',         'Price','B',s=>g(s[B2],'atr'));
-  add('ATR delta B',    'Price','B',s=>sl(g(s[B3],'atr'),g(s[B1],'atr'))); // ATR expansion rate
-  add('ATR accel B',    'Price','B',s=>ac(g(s[B3],'atr'),g(s[B2],'atr'),g(s[B1],'atr')));
-  // Price velocity normalised by ATR (scale-independent momentum)
-  add('PriceVel/ATR B', 'Price','B',s=>ratio(sl(g(s[B3],'price'),g(s[B1],'price')),g(s[B1],'atr')));
-  // EMA deviations (signed, normalised by ATR)
-  add('P-EMA5 B1',      'Price','B',s=>{ const p=g(s[B1],'price'),e=g(s[B1],'ema5'); return(p!=null&&e!=null)?p-e:null; });
-  add('P-EMA20 B1',     'Price','B',s=>{ const p=g(s[B1],'price'),e=g(s[B1],'ema20'); return(p!=null&&e!=null)?p-e:null; });
-  add('P-EMA5/ATR B1',  'Price','B',s=>ratio(g(s[B1],'price')!=null&&g(s[B1],'ema5')!=null?g(s[B1],'price')-g(s[B1],'ema5'):null,g(s[B1],'atr')));
-  add('P-EMA20/ATR B1', 'Price','B',s=>ratio(g(s[B1],'price')!=null&&g(s[B1],'ema20')!=null?g(s[B1],'price')-g(s[B1],'ema20'):null,g(s[B1],'atr')));
-  add('EMA5-EMA20 B1',  'Price','B',s=>{ const a=g(s[B1],'ema5'),b=g(s[B1],'ema20'); return(a!=null&&b!=null)?a-b:null; });
-  add('EMA5-EMA10 B1',  'Price','B',s=>{ const a=g(s[B1],'ema5'),b=g(s[B1],'ema10'); return(a!=null&&b!=null)?a-b:null; });
-  add('EMA10-EMA20 B1', 'Price','B',s=>{ const a=g(s[B1],'ema10'),b=g(s[B1],'ema20'); return(a!=null&&b!=null)?a-b:null; });
-  add('ROC B1',         'Price','B',s=>g(s[B1],'roc'));
-  add('ROC B2',         'Price','B',s=>g(s[B2],'roc'));
-  add('ROC accel B',    'Price','B',s=>ac(g(s[B3],'roc'),g(s[B2],'roc'),g(s[B1],'roc')));
-  // Rolling volatility ratio: ATR B1 / ATR B3 (>1 = expanding volatility = regime change)
-  add('ATR ratio B1/B3','Price','B',s=>ratio(g(s[B1],'atr'),g(s[B3],'atr')));
-
-  // ═════════════════════════════════════════════════════════════════════
-  // FAMILY 10: RSI BEHAVIOUR
-  // ═════════════════════════════════════════════════════════════════════
-  add('RSI mean B',    'RSI','B',s=>mn(bCols.map(i=>g(s[i],'rsi'))));
-  add('RSI accel B',   'RSI','B',s=>ac(g(s[B3],'rsi'),g(s[B2],'rsi'),g(s[B1],'rsi')));
-  add('RSI late sl',   'RSI','B',s=>sl(g(s[B2],'rsi'),g(s[B1],'rsi')));
-  add('RSI early sl',  'RSI','B',s=>sl(g(s[B3],'rsi'),g(s[B2],'rsi')));
-  // Mean reversion distance: how far RSI is from 50 (extreme = overextended)
-  add('RSI |dev| B1',  'RSI','B',s=>{ const v=g(s[B1],'rsi'); return v!=null?Math.abs(v-50):null; });
-  // RSI momentum: direction × magnitude
-  add('RSI dir×mag B1','RSI','B',s=>{ const v=g(s[B1],'rsi'),d=sl(g(s[B2],'rsi'),g(s[B1],'rsi')); return(v!=null&&d!=null)?d*Math.sign(v-50):null; });
-
-  // ═════════════════════════════════════════════════════════════════════
-  // FAMILY 11: STOCHASTIC & DMI
-  // ═════════════════════════════════════════════════════════════════════
-  add('Stoch%K-D B1',  'Stoch','B',s=>{ const k=g(s[B1],'stochK'),d=g(s[B1],'stochD'); return(k!=null&&d!=null)?k-d:null; });
-  add('Stoch%K-D B2',  'Stoch','B',s=>{ const k=g(s[B2],'stochK'),d=g(s[B2],'stochD'); return(k!=null&&d!=null)?k-d:null; });
-  add('Stoch K accel', 'Stoch','B',s=>ac(g(s[B3],'stochK'),g(s[B2],'stochK'),g(s[B1],'stochK')));
-  add('ADX mean B',    'DMI','B',s=>mn(bCols.map(i=>g(s[i],'adx'))));
-  add('ADX accel B',   'DMI','B',s=>ac(g(s[B3],'adx'),g(s[B2],'adx'),g(s[B1],'adx')));
-  // DI divergence trend (is bullish/bearish bias growing?)
-  add('DI spread accel B','DMI','B',s=>{
-    const sp=(ci)=>{ const p=g(s[ci],'pdi'),n=g(s[ci],'ndi'); return(p!=null&&n!=null)?p-n:null; };
-    return ac(sp(B3),sp(B2),sp(B1));
-  });
-
-  // ═════════════════════════════════════════════════════════════════════
-  // FAMILY 12: NEW VOLATILITY & REGIME FEATURES (as requested)
-  // ═════════════════════════════════════════════════════════════════════
-  // 12a. BB width contraction index (negative = contracting = compression before burst)
-  add('BB contraction B','Regime','B',s=>{
-    const w1=bbW(s,B1),w2=bbW(s,B2),w3=bbW(s,B3);
-    if(w1==null||w2==null||w3==null) return null;
-    // Slope of slope: negative = accelerating contraction
-    return ac(w3,w2,w1);
-  });
-  // 12b. ATR expansion rate (>0 = energy building)
-  add('ATR exp rate B', 'Regime','B',s=>sl(g(s[B3],'atr'),g(s[B1],'atr')));
-  add('ATR exp/ATR B1', 'Regime','B',s=>ratio(sl(g(s[B3],'atr'),g(s[B1],'atr')),g(s[B1],'atr')));
-  // 12c. Volatility ratio: recent ATR vs earlier (regime shift)
-  add('Vol ratio late/early','Regime','B',s=>ratio(g(s[B1],'atr'),g(s[B3],'atr')));
-  // 12d. Approximate entropy over 3 B-ticks (low entropy = persistent move)
-  add('Price entropy B','Regime','B',s=>{
-    const v=[g(s[B3],'price'),g(s[B2],'price'),g(s[B1],'price')].filter(x=>x!=null);
-    if(v.length<2) return null;
-    // Simplified entropy: variance of first differences (low = persistent, high = noisy)
-    const diffs=v.slice(1).map((x,i)=>x-v[i]);
-    const mu=diffs.reduce((a,b)=>a+b,0)/diffs.length;
-    const va=diffs.reduce((a,d)=>a+(d-mu)**2,0)/diffs.length;
-    return va; // low = ordered (trending), high = chaotic
-  });
-  // 12e. Persistence score: do all 3 B-ticks move the same way?
-  add('Persist score B','Regime','B',s=>{
-    const p=[g(s[B3],'price'),g(s[B2],'price'),g(s[B1],'price')];
-    if(p.some(x=>x==null)) return null;
-    const dirs=p.slice(1).map((x,i)=>Math.sign(x-p[i]));
-    // +1=all same direction, 0=mixed, -1=reversal
-    if(dirs.every(d=>d===1)) return 1;
-    if(dirs.every(d=>d===-1)) return -1;
-    return 0;
-  });
-  // 12f. Mean reversion distance: |price - EMA20| / ATR (how stretched?)
-  add('MeanRev dist B1','Regime','B',s=>{ const p=g(s[B1],'price'),e=g(s[B1],'ema20'),a=g(s[B1],'atr'); return(p!=null&&e!=null&&a!=null&&a>0)?Math.abs(p-e)/a:null; });
-  add('MeanRev signed B1','Regime','B',s=>{ const p=g(s[B1],'price'),e=g(s[B1],'ema20'),a=g(s[B1],'atr'); return(p!=null&&e!=null&&a!=null&&a>0)?(p-e)/a:null; });
-  // 12g. Number of indicator crossovers in B-window (0,1,2,3 = transition density)
-  add('Crossovers B',  'Regime','B',s=>{
-    let crosses=0;
-    // MACD/Signal cross
-    for(let i=1;i<bCols.length;i++){
-      const m0=g(s[bCols[i-1]],'macd'),s0=g(s[bCols[i-1]],'signal'),m1=g(s[bCols[i]],'macd'),s1=g(s[bCols[i]],'signal');
-      if(m0!=null&&s0!=null&&m1!=null&&s1!=null&&Math.sign(m0-s0)!==Math.sign(m1-s1)) crosses++;
-    }
-    // Stoch%K cross above/below 50
-    for(let i=1;i<bCols.length;i++){
-      const k0=g(s[bCols[i-1]],'stochK'),k1=g(s[bCols[i]],'stochK');
-      if(k0!=null&&k1!=null&&Math.sign(k0-50)!==Math.sign(k1-50)) crosses++;
-    }
-    // RSI cross above/below 50
-    for(let i=1;i<bCols.length;i++){
-      const r0=g(s[bCols[i-1]],'rsi'),r1=g(s[bCols[i]],'rsi');
-      if(r0!=null&&r1!=null&&Math.sign(r0-50)!==Math.sign(r1-50)) crosses++;
-    }
-    // DI cross (+DI/-DI flip)
-    for(let i=1;i<bCols.length;i++){
-      const d0=(g(s[bCols[i-1]],'pdi')!=null&&g(s[bCols[i-1]],'ndi')!=null)?g(s[bCols[i-1]],'pdi')-g(s[bCols[i-1]],'ndi'):null;
-      const d1=(g(s[bCols[i]],'pdi')!=null&&g(s[bCols[i]],'ndi')!=null)?g(s[bCols[i]],'pdi')-g(s[bCols[i]],'ndi'):null;
-      if(d0!=null&&d1!=null&&Math.sign(d0)!==Math.sign(d1)) crosses++;
-    }
-    return crosses;
-  });
-  // 12h. Local trend curvature = price acceleration normalised by ATR
-  add('Price curv/ATR B','Regime','B',s=>ratio(ac(g(s[B3],'price'),g(s[B2],'price'),g(s[B1],'price')),g(s[B1],'atr')));
-  add('MACD curv B',   'Regime','B',s=>ac(g(s[B3],'macd'),g(s[B2],'macd'),g(s[B1],'macd')));
-  add('BB curv/ATR B', 'Regime','B',s=>ratio(ac(bbW(s,B3),bbW(s,B2),bbW(s,B1)),g(s[B1],'atr')));
-
-  // ═════════════════════════════════════════════════════════════════════
-  // FAMILY 13: INTERACTION — meaningful cross-terms only
-  // (reduced from before; quality > quantity for cross-terms)
-  // ═════════════════════════════════════════════════════════════════════
-  // ADX × DI spread: strong trend in a direction
-  add('ADX×DIspread B1','Interact','B',s=>{
-    const sp=(g(s[B1],'pdi')!=null&&g(s[B1],'ndi')!=null)?g(s[B1],'pdi')-g(s[B1],'ndi'):null;
-    const adx=g(s[B1],'adx');
-    return(sp!=null&&adx!=null)?sp*adx/100:null;  // divided by 100 to keep scale manageable
-  });
-  // Chop × |Hist|: is histogram moving in a trending market?
-  add('Chop×|Hist| B1', 'Interact','B',s=>{ const ch=g(s[B1],'chop'),h=g(s[B1],'hist'); return(ch!=null&&h!=null)?(50-ch)*h:null; });
-  // RSI × Hist sign: RSI direction agrees with histogram
-  add('RSI×Hist B1',    'Interact','B',s=>{ const r=g(s[B1],'rsi'),h=g(s[B1],'hist'); return(r!=null&&h!=null)?(r-50)*h:null; });
-  // BB%B × CCI: both at extremes (breakout setup)
-  add('BB%B×CCI B1',    'Interact','B',s=>{ const b=g(s[B1],'bbPctB'),c=g(s[B1],'cci'); return(b!=null&&c!=null)?(b-0.5)*c:null; });
-  // PriceVel/ATR × DI spread: momentum with directional conviction
-  add('Vel/ATR×DI B1',  'Interact','B',s=>{
-    const pv=sl(g(s[B3],'price'),g(s[B1],'price')),at=g(s[B1],'atr');
-    const sp=(g(s[B1],'pdi')!=null&&g(s[B1],'ndi')!=null)?g(s[B1],'pdi')-g(s[B1],'ndi'):null;
-    return(pv!=null&&at!=null&&at>0&&sp!=null)?(pv/at)*sp/100:null;
-  });
-  // EMA alignment × MACD
-  add('EMAalign×MACD B1','Interact','B',s=>{
-    const e5=g(s[B1],'ema5'),e10=g(s[B1],'ema10'),e20=g(s[B1],'ema20'),m=g(s[B1],'macd');
-    if(e5==null||e10==null||e20==null||m==null) return null;
-    // +1 = bullish stack (5>10>20), -1 = bearish stack, 0 = mixed
-    const align=e5>e10&&e10>e20?1:e5<e10&&e10<e20?-1:0;
-    return align*m;
-  });
-  // Hist accel × CCI (late histogram push with CCI support)
-  add('HAccel×CCI B1', 'Interact','B',s=>{
-    const ha=ac(g(s[B3],'hist'),g(s[B2],'hist'),g(s[B1],'hist'));
-    return(ha!=null&&g(s[B1],'cci')!=null)?ha*g(s[B1],'cci')/100:null;
-  });
-  // Contraction × ROC: squeeze with momentum building
-  add('BBcont×ROC B',  'Interact','B',s=>{
-    const w1=bbW(s,B1),w3=bbW(s,B3),roc=g(s[B1],'roc');
-    if(w1==null||w3==null||w3===0||roc==null) return null;
-    const cont=1-(w1/w3);  // positive = contracting
-    return cont*roc;
-  });
-  // Stoch-50 × RSI-50: both indicators agree on direction
-  add('Stoch×RSI dir B1','Interact','B',s=>{
-    const st=g(s[B1],'stochK'),rs=g(s[B1],'rsi');
-    return(st!=null&&rs!=null)?(st-50)*(rs-50)/2500:null;  // normalised product
-  });
-  // ADX × BB contraction: trending into a squeeze = high probability burst
-  add('ADX×BBcont B',  'Interact','B',s=>{
-    const w1=bbW(s,B1),w3=bbW(s,B3),adx=g(s[B1],'adx');
-    if(w1==null||w3==null||w3===0||adx==null) return null;
-    const cont=1-(w1/w3);
-    return cont*adx/100;
-  });
-
-  // ═════════════════════════════════════════════════════════════════════
-  // FAMILY 14: INDICATOR AGREEMENT — directional consensus scoring
-  // Symmetric: score > 0 = bullish agreement, < 0 = bearish agreement
-  // ═════════════════════════════════════════════════════════════════════
-  // Signed consensus at B1: each indicator votes +1 (bullish), -1 (bearish), 0 (neutral)
-  add('Consensus signed B1','Agreement','B',s=>{
-    const votes=[
-      g(s[B1],'rsi')!=null?Math.sign(g(s[B1],'rsi')-50):null,
-      g(s[B1],'hist')!=null?Math.sign(g(s[B1],'hist')):null,
-      (g(s[B1],'pdi')!=null&&g(s[B1],'ndi')!=null)?Math.sign(g(s[B1],'pdi')-g(s[B1],'ndi')):null,
-      g(s[B1],'bbPctB')!=null?Math.sign(g(s[B1],'bbPctB')-0.5):null,
-      g(s[B1],'roc')!=null?Math.sign(g(s[B1],'roc')):null,
-      g(s[B1],'macd')!=null?Math.sign(g(s[B1],'macd')):null,
-      (g(s[B1],'stochK')!=null&&g(s[B1],'stochD')!=null)?Math.sign(g(s[B1],'stochK')-g(s[B1],'stochD')):null,
-    ].filter(x=>x!=null);
-    return votes.length?votes.reduce((a,b)=>a+b,0)/votes.length:null;  // range [-1,+1]
-  });
-  add('Consensus signed B2','Agreement','B',s=>{
-    const votes=[
-      g(s[B2],'rsi')!=null?Math.sign(g(s[B2],'rsi')-50):null,
-      g(s[B2],'hist')!=null?Math.sign(g(s[B2],'hist')):null,
-      (g(s[B2],'pdi')!=null&&g(s[B2],'ndi')!=null)?Math.sign(g(s[B2],'pdi')-g(s[B2],'ndi')):null,
-      g(s[B2],'roc')!=null?Math.sign(g(s[B2],'roc')):null,
-      g(s[B2],'macd')!=null?Math.sign(g(s[B2],'macd')):null,
-    ].filter(x=>x!=null);
-    return votes.length?votes.reduce((a,b)=>a+b,0)/votes.length:null;
-  });
-  // Consensus agreement score (how many of 7 indicators agree — unsigned count)
-  add('Agreement count B1','Agreement','B',s=>{
-    const votes=[
-      g(s[B1],'rsi')!=null?Math.sign(g(s[B1],'rsi')-50):null,
-      g(s[B1],'hist')!=null?Math.sign(g(s[B1],'hist')):null,
-      (g(s[B1],'pdi')!=null&&g(s[B1],'ndi')!=null)?Math.sign(g(s[B1],'pdi')-g(s[B1],'ndi')):null,
-      g(s[B1],'bbPctB')!=null?Math.sign(g(s[B1],'bbPctB')-0.5):null,
-      g(s[B1],'roc')!=null?Math.sign(g(s[B1],'roc')):null,
-      g(s[B1],'macd')!=null?Math.sign(g(s[B1],'macd')):null,
-    ].filter(x=>x!=null);
-    if(!votes.length) return null;
-    const pos=votes.filter(v=>v>0).length, neg=votes.filter(v=>v<0).length;
-    return Math.max(pos,neg)/votes.length;  // 1.0 = unanimous, 0.5 = split
-  });
-  // Consensus change B3→B1 (is agreement improving or deteriorating?)
-  add('Consensus shift B','Agreement','B',s=>{
-    const cs=(ci)=>{
-      const votes=[
-        g(s[ci],'rsi')!=null?Math.sign(g(s[ci],'rsi')-50):null,
-        g(s[ci],'hist')!=null?Math.sign(g(s[ci],'hist')):null,
-        g(s[ci],'roc')!=null?Math.sign(g(s[ci],'roc')):null,
-        g(s[ci],'macd')!=null?Math.sign(g(s[ci],'macd')):null,
-      ].filter(x=>x!=null);
-      return votes.length?votes.reduce((a,b)=>a+b,0)/votes.length:null;
-    };
-    return sl(cs(B3),cs(B1));
-  });
-  // Turning together: count of indicators that changed direction B2→B1
-  add('Inds turning B2→B1','Agreement','B',s=>{
-    const pairs=[
-      [g(s[B2],'hist'),g(s[B1],'hist')],
-      [g(s[B2],'rsi'),g(s[B1],'rsi')],
-      [g(s[B2],'macd'),g(s[B1],'macd')],
-      [g(s[B2],'cci'),g(s[B1],'cci')],
-      [g(s[B2],'roc'),g(s[B1],'roc')],
-    ];
-    let count=0;
-    pairs.forEach(([a,b])=>{ if(a!=null&&b!=null&&Math.sign(b)!==Math.sign(a)) count++; });
-    return count;
-  });
-
-  // ═════════════════════════════════════════════════════════════════════
-  // FAMILY 15: DIVERGENCE PATTERNS
-  // ═════════════════════════════════════════════════════════════════════
-  add('MACD-price div B','Diverge','B',s=>{
-    const ps=sl(g(s[B3],'price'),g(s[B1],'price'));
-    const ms=sl(g(s[B3],'macd'),g(s[B1],'macd'));
-    return(ps!=null&&ms!=null)?+(Math.sign(ps)!==Math.sign(ms)):null;
-  });
-  // Signed divergence: direction of divergence matters
-  add('MACD div signed B','Diverge','B',s=>{
-    const ps=sl(g(s[B3],'price'),g(s[B1],'price'));
-    const ms=sl(g(s[B3],'macd'),g(s[B1],'macd'));
-    if(ps==null||ms==null) return null;
-    // +1 = bullish divergence (price down, MACD up), -1 = bearish, 0 = convergent
-    if(ps<0&&ms>0) return 1;
-    if(ps>0&&ms<0) return -1;
-    return 0;
-  });
-  add('RSI-price div B', 'Diverge','B',s=>{
-    const ps=sl(g(s[B3],'price'),g(s[B1],'price'));
-    const rs=sl(g(s[B3],'rsi'),g(s[B1],'rsi'));
-    if(ps==null||rs==null) return null;
-    if(ps<0&&rs>0) return 1;
-    if(ps>0&&rs<0) return -1;
-    return 0;
-  });
-  add('Stoch-price div B','Diverge','B',s=>{
-    const ps=sl(g(s[B3],'price'),g(s[B1],'price'));
-    const ss=sl(g(s[B3],'stochK'),g(s[B1],'stochK'));
-    if(ps==null||ss==null) return null;
-    if(ps<0&&ss>0) return 1;
-    if(ps>0&&ss<0) return -1;
-    return 0;
-  });
-
-  return defs;
-})();
-
-
-// ── Feature computation engine ───────────────────────────────────────
-let _featCache = null;  // { features:[], rankings:[], computed:Date }
-
-function featComputeAll(){
-  // Build feature matrix: rows = signal records, cols = features
-  // Returns { matrix:[[]], labels:['rise'|'fall'], feats:[def] }
-  if (!signalRecords.length) return null;
-  const cols = anColumns();  // 12 column descriptors
-  const matrix = [], labels = [];
-  signalRecords.forEach(rec => {
-    // Build snaps array indexed 0-11
-    const snaps = cols.map((_, ci) => anSnapAt(rec, ci));
-    const row = _FEAT_DEFS.map(f => {
-      try { return f.fn(snaps); } catch(_){ return null; }
-    });
-    matrix.push(row);
-    labels.push(rec.dir === 1 ? 1 : 0);  // 1=rise, 0=fall
-  });
-  return { matrix, labels, feats:_FEAT_DEFS };
-}
-
-function featMutualInfo(colVals, labels){
-  // Discretise into 10 equal-width bins, compute H(Y) - H(Y|X)
-  const n = colVals.length;
-  const valid = colVals.map((v,i)=>[v,labels[i]]).filter(([v])=>v!=null);
-  if (valid.length < 3) return 0;
-  const vals = valid.map(([v])=>v);
-  const lbs  = valid.map(([,l])=>l);
-  const vmin=msdSafeMin(vals),vmax=msdSafeMax(vals);
-  const rng=vmax-vmin;
-  if (rng===0) return 0;
-  const BINS=8;
-  const bin=v=>Math.min(BINS-1,Math.floor((v-vmin)/rng*BINS));
-  // joint counts
-  const joint=Array.from({length:BINS},()=>[0,0]);
-  lbs.forEach((l,i)=>joint[bin(vals[i])][l]++);
-  const N=valid.length;
-  const py=[lbs.filter(l=>l===0).length/N, lbs.filter(l=>l===1).length/N];
-  let mi=0;
-  for(let b=0;b<BINS;b++){
-    const pb=(joint[b][0]+joint[b][1])/N;
-    if(pb===0)continue;
-    for(let c=0;c<2;c++){
-      const pjt=joint[b][c]/N;
-      if(pjt>0) mi+=pjt*Math.log2(pjt/(pb*py[c]));
-    }
-  }
-  return Math.max(0,mi);
-}
-
-function featRfImportance(colVals, labels){
-  // Approximate: information gain at a single optimal split
-  const valid=colVals.map((v,i)=>[v,labels[i]]).filter(([v])=>v!=null);
-  if(valid.length<4) return 0;
-  const sorted=valid.slice().sort(([a],[b])=>a-b);
-  const n=sorted.length;
-  // Gini of full set
-  const totalPos=sorted.filter(([,l])=>l===1).length;
-  const giniNode=1-(totalPos/n)**2-((n-totalPos)/n)**2;
-  let bestGain=0;
-  // Try every mid-point split
-  for(let i=1;i<n;i++){
-    const lLeft=sorted.slice(0,i),lRight=sorted.slice(i);
-    const lPos=lLeft.filter(([,l])=>l===1).length;
-    const rPos=lRight.filter(([,l])=>l===1).length;
-    const nl=lLeft.length,nr=lRight.length;
-    const gL=1-(lPos/nl)**2-((nl-lPos)/nl)**2;
-    const gR=1-(rPos/nr)**2-((nr-rPos)/nr)**2;
-    const gain=giniNode-(nl/n*gL+nr/n*gR);
-    if(gain>bestGain) bestGain=gain;
-  }
-  return bestGain;
-}
-
-function featShap(colVals, labels){
-  // Linear SHAP approximation: |Pearson r| × std(feature)
-  const valid=colVals.map((v,i)=>[v,labels[i]]).filter(([v])=>v!=null);
-  if(valid.length<3) return 0;
-  const vals=valid.map(([v])=>v);
-  const lbs=valid.map(([,l])=>l);
-  const n=vals.length;
-  const mx=vals.reduce((a,b)=>a+b,0)/n;
-  const my=lbs.reduce((a,b)=>a+b,0)/n;
-  let num=0,dx2=0,dy2=0;
-  vals.forEach((v,i)=>{ const dv=v-mx,dl=lbs[i]-my; num+=dv*dl; dx2+=dv*dv; dy2+=dl*dl; });
-  const r=(dx2>0&&dy2>0)?num/Math.sqrt(dx2*dy2):0;
-  const std=Math.sqrt(dx2/n);
-  return Math.abs(r)*std;
-}
-
-function featPageInit(){
-  const btn=$("featCompBtn");
-  const status=$("featStatus");
-  if(status){
-    if(!signalRecords.length)
-      status.textContent="No signal records yet — wait for 5-tick runs.";
-    else
-      status.textContent=`${signalRecords.length} signal record${signalRecords.length!==1?'s':''} available. Click Compute to rank features.`;
-  }
-  if(btn) btn.disabled=!signalRecords.length;
-}
-
-function featCompute(){
-  const status=$("featStatus");
-  if(!signalRecords.length){ if(status) status.textContent="No signal records."; return; }
-  if(status) status.textContent="Computing…";
-
-  setTimeout(()=>{  // let UI breathe
-    try{
-      const data=featComputeAll();
-      if(!data){ if(status) status.textContent="Failed."; return; }
-      const {matrix,labels,feats}=data;
-      const nFeat=feats.length;
-
-      // Compute all three scores per feature
-      const rankings=feats.map((f,fi)=>{
-        const colVals=matrix.map(row=>row[fi]);
-        const riseVals=colVals.filter((_,i)=>labels[i]===1&&colVals[i]!=null);
-        const fallVals=colVals.filter((_,i)=>labels[i]===0&&colVals[i]!=null);
-        const rise_avg=riseVals.length?riseVals.reduce((a,b)=>a+b,0)/riseVals.length:null;
-        const fall_avg=fallVals.length?fallVals.reduce((a,b)=>a+b,0)/fallVals.length:null;
-        const mi=featMutualInfo(colVals,labels);
-        const rfi=featRfImportance(colVals,labels);
-        const shap=featShap(colVals,labels);
-        const composite=(mi+rfi*2+shap)/4;  // weighted: RFI counts double
-        return {f,fi,mi,rfi,shap,composite,rise_avg,fall_avg,delta:(rise_avg!=null&&fall_avg!=null)?rise_avg-fall_avg:null};
-      });
-
-      // Sort by composite descending
-      rankings.sort((a,b)=>b.composite-a.composite);
-      _featCache={rankings,matrix,labels,feats,computed:new Date()};
-
-      // Render rank table (top 50 B-phase features only)
-      const body=$("featRankBody");
-      if(body){
-        body.innerHTML=rankings.filter(r=>r.f.phase==='B').slice(0,50).map((r,rank)=>{
-          const f2=v=>v!=null?v.toFixed(4):"—";
-          const f3=v=>v!=null?v.toFixed(5):"—";
-          return `<tr>
-            <td class="l cell-mut">${rank+1}</td>
-            <td class="l" style="font-size:11px;font-weight:600">${r.f.label}</td>
-            <td class="l" style="color:#56b6ff;font-weight:700">B</td>
-            <td class="l cell-mut" style="font-size:10px">${r.f.family}</td>
-            <td>${f3(r.mi)}</td>
-            <td>${f3(r.rfi)}</td>
-            <td>${f3(r.shap)}</td>
-            <td style="font-weight:800;color:var(--accent)">${f2(r.composite)}</td>
-            <td style="color:var(--up)">${r.rise_avg!=null?r.rise_avg.toFixed(4):"—"}</td>
-            <td style="color:var(--down)">${r.fall_avg!=null?r.fall_avg.toFixed(4):"—"}</td>
-            <td style="${r.delta!=null?(r.delta>0?'color:var(--up)':'color:var(--down)'):'color:var(--muted)'};font-weight:700">
-              ${r.delta!=null?(r.delta>0?'+':'')+r.delta.toFixed(4):"—"}
-            </td>
-          </tr>`;
-        }).join("");
-      }
-
-      // Family breakdown
-      const familyEl=$("featFamilyGrid");
-      if(familyEl){
-        const familyMap={};
-        rankings.forEach(r=>{ if(!familyMap[r.f.family]) familyMap[r.f.family]=[]; familyMap[r.f.family].push(r); });
-        familyEl.innerHTML=Object.entries(familyMap).sort(([,a],[,b])=>b[0].composite-a[0].composite).map(([fam,rs])=>{
-          const top=rs[0];
-          return `<div class="em-card" style="padding:10px 12px">
-            <div class="em-lab">${fam} (${rs.length} features)</div>
-            <div style="font-size:11px;font-weight:700;color:var(--accent);margin:4px 0">Best: ${top.f.label}</div>
-            <div style="font-size:10px;color:var(--muted)">Composite: ${top.composite.toFixed(4)}</div>
-          </div>`;
-        }).join("");
-      }
-
-      // Deviation bars (top 20 by |delta|)
-      const barsEl=$("featDeviationBars");
-      if(barsEl){
-        const withDelta=rankings.filter(r=>r.delta!=null).sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta)).slice(0,20);
-        const maxD=msdSafeMax(withDelta.map(r=>Math.abs(r.delta)))||1;
-        barsEl.innerHTML=withDelta.map(r=>{
-          const pct=(Math.abs(r.delta)/maxD*100).toFixed(1);
-          const col=r.delta>0?'var(--up)':'var(--down)';
-          return `<div style="display:flex;align-items:center;gap:8px">
-            <div style="width:200px;font-size:10px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.f.label}">${r.f.label}</div>
-            <div style="flex:1;background:#0a0e17;border-radius:3px;overflow:hidden;height:14px">
-              <div style="width:${pct}%;background:${col};height:100%;border-radius:3px;transition:width .4s"></div>
-            </div>
-            <div style="width:70px;font-size:10px;font-variant-numeric:tabular-nums;color:${col};font-weight:700;text-align:right">
-              ${r.delta>0?'+':''}${r.delta.toFixed(4)}
-            </div>
-            <div style="width:20px;font-size:9px;color:var(--muted);font-weight:700">${r.f.phase}</div>
-          </div>`;
-        }).join("");
-      }
-
-      // Enable CSV buttons
-      ['featCsvBBtn'].forEach(id=>{const b=$(id);if(b)b.disabled=false;});
-      if(status) status.textContent=`✅ ${nFeat} features computed · ${rankings.length} ranked · ${signalRecords.length} signal records · computed at ${new Date().toLocaleTimeString()}`;
-
-    } catch(e){
-      console.error('featCompute error:',e);
-      if(status) status.textContent='Error: '+e.message;
-    }
-  }, 20);
-}
-
-function featExportCsv(phase){
-  if(!_featCache){ alert("Compute features first."); return; }
-  const {rankings,matrix,labels,feats}=_featCache;
-  const N=signalRecords.length;
-  const today=new Date().toISOString().slice(0,10);
-
-  // Filter features by phase
-  const phaseFeatIdxs=rankings
-    .filter(r=>r.f.phase===phase)
-    .map(r=>r.fi);
-
-  const phaseFeatDefs=phaseFeatIdxs.map(fi=>feats[fi]);
-
-  // Header: metadata + feature columns (sorted by importance)
-  const header=["signal_no","epoch","datetime","direction",
-    ...phaseFeatDefs.map(f=>f.label.replace(/[,\n]/g,' '))
-  ].join(",");
-
-  const rows=[header];
-  signalRecords.forEach((rec,idx)=>{
-    const sigNo=N-idx;
-    const epoch=rec.epoch||"";
-    const dt=epoch?new Date(epoch*1000).toISOString().replace("T"," ").slice(0,19):"";
-    const dir=rec.dir===1?"rise":"fall";
-    const matRow=matrix[idx];
-    const vals=phaseFeatIdxs.map(fi=>{
-      const v=matRow[fi];
-      return v==null||isNaN(v)?"":Number(v).toFixed(6);
-    });
-    rows.push([sigNo,epoch,dt,dir,...vals].join(","));
-  });
-
-  const csv=rows.join("\r\n");
-  const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement("a");
-  a.href=url;
-  a.download=`mamba_features_${phase}_${SYMBOL}_${today}.csv`;
-  document.body.appendChild(a);a.click();a.remove();
-  setTimeout(()=>URL.revokeObjectURL(url),2000);
-}
+<script type="module" src="src/features/featureEngineering.js"></script>
 
 //   before-3 … before-1 | P1(start) P2 P3 P4 P5 | after-1 … after-4
 // for one chosen run, or averaged across all/rise/fall runs. Reads the
@@ -33497,6 +32057,84 @@ try {
 }
 </script>
 
+<script>
+// ════════════════════════════════════════════════════════════════════════
+// FUTURE PROJECT Phase 1b -- live window.* accessor bridge.
+//
+// Purpose: index.html's main script (above) declares several dozen
+// top-level `let`/`const` bindings (e.g. `let lastPrice`, `let gridWs`).
+// Those bindings are visible, by bare name, to any other CLASSIC
+// (non-module) <script> on this page -- but NOT to <script type="module">,
+// since ES modules do not share that "script scope" record. The mfxBot
+// widget below is being extracted into a real ES module
+// (src/ui/widgets/mfxBot.js) as part of the ES-module refactor
+// (MSD_FUTURE_PROJECT_ESMODULE_REFACTOR_PLAN.md), and its existing code
+// reads several of those bindings by bare name.
+//
+// This block creates a LIVE, two-way bridge for exactly the identifiers
+// mfxBot.js needs, using accessor properties on `window`. Because this is
+// itself a plain classic script, its getter/setter closures have direct
+// lexical access to the real `let`/`const` bindings above -- reading
+// `window.lastPrice` calls the getter, which reads the CURRENT value of
+// the live `lastPrice` binding at the moment of the read (not a one-time
+// snapshot copied at page load). Writes (`window.gridReqId++`, used by
+// mfxBot's proposal/buy flow to keep request IDs unique across the whole
+// app) go through the setter and mutate the real binding, so the main
+// script and the extracted module share one live counter, exactly as
+// before the extraction.
+//
+// Four of these (MARKETS, RUN_LENGTH, ticks, gridPending) are declared
+// `const` and are never reassigned anywhere in mfxBot's code (confirmed
+// by inspection before this change) -- only their contents are read, or
+// (for gridPending) individual properties are set on the same object
+// reference -- so they get a getter only. The rest are `let` and get both
+// accessors.
+//
+// This is a pure ADDITION: no existing line above is modified. Nothing
+// in this block computes, ranks, or decides anything -- it only exposes
+// already-computed live values by another name, identically to how
+// research/integration/'s window.mfx*/window.mfxScheduler* thin
+// pass-throughs already work in this codebase.
+(function(){
+  function bridgeReadOnly(name, getter) {
+    Object.defineProperty(window, name, { get: getter, configurable: true });
+  }
+  function bridgeReadWrite(name, getter, setter) {
+    Object.defineProperty(window, name, { get: getter, set: setter, configurable: true });
+  }
+
+  bridgeReadOnly('MARKETS',    () => MARKETS);
+  bridgeReadOnly('RUN_LENGTH', () => RUN_LENGTH);
+  bridgeReadOnly('ticks',      () => ticks);
+  bridgeReadOnly('gridPending',() => gridPending);
+  bridgeReadOnly('gridOpenContracts', () => gridOpenContracts);
+  bridgeReadOnly('$',            () => $);
+  bridgeReadOnly('signalRecords', () => signalRecords);
+  bridgeReadWrite('gridLoggedIn', () => gridLoggedIn, v => { gridLoggedIn = v; });
+  bridgeReadWrite('gridAccounts',   () => gridAccounts,   v => { gridAccounts = v; });
+  bridgeReadWrite('gridPageInited', () => gridPageInited, v => { gridPageInited = v; });
+  bridgeReadOnly('BACKEND_URL',  () => BACKEND_URL);
+  bridgeReadOnly('ACCTID_KEY',   () => ACCTID_KEY);
+  bridgeReadOnly('_acctData',    () => _acctData);
+
+  bridgeReadWrite('SYMBOL',        () => SYMBOL,        v => { SYMBOL = v; });
+  bridgeReadWrite('lastPrice',     () => lastPrice,     v => { lastPrice = v; });
+  bridgeReadWrite('runDir',        () => runDir,        v => { runDir = v; });
+  bridgeReadWrite('runLen',        () => runLen,        v => { runLen = v; });
+  bridgeReadWrite('decimals',      () => decimals,      v => { decimals = v; });
+  bridgeReadWrite('gridConnecting',() => gridConnecting, v => { gridConnecting = v; });
+  bridgeReadWrite('gridWs',        () => gridWs,        v => { gridWs = v; });
+  bridgeReadWrite('gridLoginId',   () => gridLoginId,   v => { gridLoginId = v; });
+  bridgeReadWrite('gridTrades',    () => gridTrades,    v => { gridTrades = v; });
+  bridgeReadWrite('gridReqId',     () => gridReqId,     v => { gridReqId = v; });
+  bridgeReadWrite('digTrades',     () => digTrades,     v => { digTrades = v; });
+  bridgeReadWrite('gridAuthed',    () => gridAuthed,    v => { gridAuthed = v; });
+  bridgeReadWrite('gridBalance',   () => gridBalance,   v => { gridBalance = v; });
+  bridgeReadWrite('gridCurrency',  () => gridCurrency,  v => { gridCurrency = v; });
+  bridgeReadWrite('gridIsVirtual', () => gridIsVirtual, v => { gridIsVirtual = v; });
+})();
+</script>
+
 <!-- ══════════════════════════════════════════════════════════════════
      MAMBA FX FLOATING BOT — Deriv-style overlay widget
      • Draggable across the entire viewport (all pages)
@@ -33785,496 +32423,7 @@ try {
   </div>
 </div>
 
-<script>
-(function(){
-  const bot    = document.getElementById('mfxBot');
-  const head   = document.getElementById('mfxBotHead');
-  const minBtn = document.getElementById('mfxMinBtn');
-  const STORE  = 'mfxBotState_v1';
-
-  /* ── position persistence ────────────────────────────────────── */
-  function savePos(){
-    try{ sessionStorage.setItem(STORE, JSON.stringify({
-      x: bot.style.left, y: bot.style.top,
-      min: bot.classList.contains('minimised')
-    })); }catch(_){}
-  }
-  function loadPos(){
-    try{
-      const s = JSON.parse(sessionStorage.getItem(STORE)||'null');
-      if(!s) return;
-      if(s.x){ bot.style.left=s.x; bot.style.right='auto'; }
-      if(s.y){
-        const nav=document.querySelector('.pagenav');
-        const minY=nav?(nav.getBoundingClientRect().bottom+8):0;
-        bot.style.top=Math.max(minY,parseFloat(s.y)||0)+'px';
-        bot.style.bottom='auto';
-      }
-      if(s.min) setMin(true);
-    }catch(_){}
-  }
-
-  /* ── minimise / restore ──────────────────────────────────────── */
-  function setMin(on){
-    bot.classList.toggle('minimised', on);
-    minBtn.textContent = on ? '▣' : '⟨⟩';
-    minBtn.title = on ? 'Restore' : 'Double-click header or click to minimise';
-    savePos();
-  }
-  minBtn.addEventListener('click', e=>{ e.stopPropagation(); setMin(!bot.classList.contains('minimised')); });
-  head.addEventListener('dblclick', ()=> setMin(!bot.classList.contains('minimised')));
-
-  /* ── drag ────────────────────────────────────────────────────── */
-  let dragging=false, ox=0, oy=0;
-  head.addEventListener('mousedown', e=>{
-    if(e.target===minBtn) return;
-    dragging=true; ox=e.clientX-bot.offsetLeft; oy=e.clientY-bot.offsetTop;
-    bot.style.left=bot.offsetLeft+'px'; bot.style.top=bot.offsetTop+'px';
-    bot.style.right='auto'; bot.style.bottom='auto';
-    bot.classList.add('dragging');
-  });
-  document.addEventListener('mousemove', e=>{
-    if(!dragging) return;
-    const nav=document.querySelector('.pagenav');
-    const minY=nav?(nav.getBoundingClientRect().bottom+8):0;
-    const x=Math.max(0,Math.min(e.clientX-ox, window.innerWidth-bot.offsetWidth));
-    const y=Math.max(minY,Math.min(e.clientY-oy, window.innerHeight-bot.offsetHeight));
-    bot.style.left=x+'px'; bot.style.top=y+'px';
-  });
-  document.addEventListener('mouseup', ()=>{ if(!dragging)return; dragging=false; bot.classList.remove('dragging'); savePos(); });
-
-  /* touch drag */
-  head.addEventListener('touchstart', e=>{
-    if(e.target===minBtn) return;
-    const t=e.touches[0];
-    dragging=true; ox=t.clientX-bot.offsetLeft; oy=t.clientY-bot.offsetTop;
-    bot.style.left=bot.offsetLeft+'px'; bot.style.top=bot.offsetTop+'px';
-    bot.style.right='auto'; bot.style.bottom='auto';
-  },{passive:true});
-  document.addEventListener('touchmove', e=>{
-    if(!dragging) return;
-    const t=e.touches[0];
-    const nav=document.querySelector('.pagenav');
-    const minY=nav?(nav.getBoundingClientRect().bottom+8):0;
-    const x=Math.max(0,Math.min(t.clientX-ox, window.innerWidth-bot.offsetWidth));
-    const y=Math.max(minY,Math.min(t.clientY-oy, window.innerHeight-bot.offsetHeight));
-    bot.style.left=x+'px'; bot.style.top=y+'px';
-  },{passive:true});
-  document.addEventListener('touchend', ()=>{ if(!dragging)return; dragging=false; savePos(); });
-
-  /* ── live data refresh (every tick, ~250 ms) ─────────────────── */
-  function fmt(v,d){ return (v==null||isNaN(v)) ? '—' : Number(v).toFixed(d??2); }
-  function fmtPnl(v){ if(v==null||isNaN(v))return{t:'—',c:''}; return{t:(v>=0?'+':'')+v.toFixed(2),c:v>=0?'pos':'neg'}; }
-
-  function refreshBot(){
-    /* price */
-    const price = typeof lastPrice!=='undefined'?lastPrice:null;
-    const el_price = document.getElementById('mfxPrice');
-    const prev = el_price._prev;
-    el_price.textContent = price!=null?fmt(price,typeof decimals!=='undefined'?decimals:2):'—';
-    if(prev!=null&&price!=null&&price!==prev){
-      el_price.style.color = price>prev?'#16e08b':price<prev?'#ff4d5e':'#e6ebf5';
-    }
-    el_price._prev = price;
-
-    /* market */
-    const sym = typeof SYMBOL!=='undefined'?SYMBOL:'';
-    const mktName = (typeof MARKETS!=='undefined'&&MARKETS[sym])||sym||'—';
-    // abbreviate long names
-    const shortName = mktName.replace('Volatility ','V').replace('(1s)','1s').replace('(','').replace(')','');
-    document.getElementById('mfxMarket').textContent = shortName;
-
-    /* run bar */
-    const rLen = typeof runLen!=='undefined'?runLen:0;
-    const rDir = typeof runDir!=='undefined'?runDir:0;
-    const rMax = typeof RUN_LENGTH!=='undefined'?RUN_LENGTH:5;
-    const pct  = Math.min(100, rLen/rMax*100);
-    const fill = document.getElementById('mfxRunFill');
-    fill.style.width = pct+'%';
-    fill.style.background = rDir===1?'#16e08b':rDir===-1?'#ff4d5e':'#56b6ff';
-    const runText = document.getElementById('mfxRunText');
-    if(rLen>0){
-      runText.textContent = `${rDir===1?'▲ RISE':'▼ FALL'} · ${rLen} / ${rMax} ticks`;
-      runText.style.color = rDir===1?'#16e08b':'#ff4d5e';
-    } else {
-      runText.textContent = '— no active run'; runText.style.color='#475569';
-    }
-
-    /* stats: won / lost / win rate / P/L — split by Demo vs Real */
-    let net=0, won=0, lost=0;
-    let dWon=0,dLost=0,dNet=0, rWon=0,rLost=0,rNet=0;
-    const trades = [...(typeof gridTrades!=='undefined'?gridTrades:[]),
-                    ...(typeof digTrades!=='undefined'?digTrades:[])];
-    trades.forEach(t=>{
-      const demo = t.isVirtual != null ? t.isVirtual : (typeof gridIsVirtual!=='undefined'?gridIsVirtual!==false:true);
-      const pnl = t.pnl != null ? t.pnl : 0;
-      if(t.status==='won'){
-        won++; net+=pnl;
-        if(demo){ dWon++; dNet+=pnl; } else { rWon++; rNet+=pnl; }
-      }
-      if(t.status==='lost'){
-        lost++; net+=pnl;
-        if(demo){ dLost++; dNet+=pnl; } else { rLost++; rNet+=pnl; }
-      }
-    });
-    function mfxRateStr(w,l){ const t=w+l; return t>0?Math.round(w/t*100)+'%':'—'; }
-    function mfxPnlStr(v,any){ return any?(v>=0?'+':'')+v.toFixed(2):'—'; }
-    const total=won+lost, dTotal=dWon+dLost, rTotal=rWon+rLost;
-    // All tab
-    const elWon=document.getElementById('mfxWon'); if(elWon) elWon.textContent=won;
-    const elLost=document.getElementById('mfxLost'); if(elLost) elLost.textContent=lost;
-    const elWr=document.getElementById('mfxWinRate'); if(elWr) elWr.textContent=mfxRateStr(won,lost);
-    const elPnl=document.getElementById('mfxPnL');
-    if(elPnl){ elPnl.textContent=mfxPnlStr(net,total>0); elPnl.style.color=net>=0?'#10b981':'#ef4444'; }
-    // Demo tab
-    const elDW=document.getElementById('mfxWonDemo'); if(elDW) elDW.textContent=dWon;
-    const elDL=document.getElementById('mfxLostDemo'); if(elDL) elDL.textContent=dLost;
-    const elDR=document.getElementById('mfxWinRateDemo'); if(elDR) elDR.textContent=mfxRateStr(dWon,dLost);
-    const elDP=document.getElementById('mfxPnLDemo');
-    if(elDP){ elDP.textContent=mfxPnlStr(dNet,dTotal>0); elDP.style.color=dNet>=0?'#10b981':'#ef4444'; }
-    // Real tab
-    const elRW=document.getElementById('mfxWonReal'); if(elRW) elRW.textContent=rWon;
-    const elRL=document.getElementById('mfxLostReal'); if(elRL) elRL.textContent=rLost;
-    const elRR=document.getElementById('mfxWinRateReal'); if(elRR) elRR.textContent=mfxRateStr(rWon,rLost);
-    const elRP=document.getElementById('mfxPnLReal');
-    if(elRP){ elRP.textContent=mfxPnlStr(rNet,rTotal>0); elRP.style.color=rNet>=0?'#10b981':'#ef4444'; }
-
-    /* keep market selector in sync with active symbol */
-    const mktSel = document.getElementById('mfxMarketSel');
-    if(mktSel && typeof SYMBOL!=='undefined' && mktSel.value !== SYMBOL){
-      mktSel.value = SYMBOL;
-    }
-
-    /* connection */
-    const authed = typeof gridAuthed!=='undefined'&&gridAuthed;
-    const dot = document.getElementById('mfxDot');
-    dot.className = 'd'+(authed?' on':typeof gridConnecting!=='undefined'&&gridConnecting?'':' off');
-    document.getElementById('mfxConnLbl').textContent = authed?'live':typeof gridConnecting!=='undefined'&&gridConnecting?'…':'offline';
-    const ccyEl = document.getElementById('mfxStakeCcy');
-    if(ccyEl && typeof gridCurrency!=='undefined') ccyEl.textContent = gridCurrency;
-
-    /* account row */
-    const acctRow = document.getElementById('mfxAcctRow');
-    if(authed&&typeof gridLoginId!=='undefined'&&gridLoginId){
-      acctRow.style.display='flex';
-      document.getElementById('mfxAcctId').textContent  = gridLoginId;
-      const bal = typeof gridBalance!=='undefined'&&gridBalance!=null?gridBalance.toFixed(2)+' '+(typeof gridCurrency!=='undefined'?gridCurrency:''):'—';
-      document.getElementById('mfxAcctBal').textContent = bal;
-      document.getElementById('mfxAcctType').textContent= typeof gridIsVirtual!=='undefined'?(gridIsVirtual?'DEMO':'REAL'):'—';
-    } else { acctRow.style.display='none'; }
-
-    /* last trade */
-    const lastTradeRow = document.getElementById('mfxLastTradeRow');
-    if(trades.length){
-      const t = trades[0];
-      lastTradeRow.style.display='block';
-      const dirEl=document.getElementById('mfxLastDir');
-      dirEl.textContent  = t.dir===1?'RISE ▲':'FALL ▼';
-      dirEl.className    = 'mfx-trade-dir '+(t.dir===1?'up':'dn');
-      document.getElementById('mfxLastContract').textContent = t.contractType||t.digit!=null?('Digit '+t.digit):'—';
-      document.getElementById('mfxLastStatus').textContent   = t.status||'—';
-      const tp=fmtPnl(t.pnl);
-      const pEl=document.getElementById('mfxLastPnL');
-      pEl.textContent=tp.t; pEl.className='mfx-trade-pnl '+(tp.c||'');
-    } else { lastTradeRow.style.display='none'; }
-
-    /* quick-trade buttons */
-    const canTrade = authed&&typeof gridWs!=='undefined'&&gridWs&&gridWs.readyState===1;
-    document.getElementById('mfxRiseBtn').disabled=!canTrade;
-    document.getElementById('mfxFallBtn').disabled=!canTrade;
-    const runBtn = document.getElementById('mfxRunBtn');
-    if(runBtn){ runBtn.disabled=!canTrade; }
-    /* sync button labels with selected contract type */
-    const ctSel = document.getElementById('mfxContractType');
-    const ct = ctSel ? ctSel.value : 'CALL_PUT';
-    const riseEl = document.getElementById('mfxRiseBtn');
-    const fallEl = document.getElementById('mfxFallBtn');
-    const labels = {
-      CALL_PUT:    ['▲ RISE','▼ FALL'],
-      DIGITEVEN:   ['EVEN','ODD'],
-      DIGITOVER:   ['OVER','UNDER'],
-      CALL_PUT_H:  ['▲ HIGHER','▼ LOWER'],
-      EXPIRYRANGE: ['STAY IN','GOES OUT'],
-      UPORDOWN:    ['ONLY UPS','ONLY DOWNS'],
-    };
-    const [lRise, lFall] = labels[ct]||labels.CALL_PUT;
-    if(riseEl) riseEl.textContent=lRise;
-    if(fallEl) fallEl.textContent=lFall;
-  }
-
-  /* ── contract type change: show/hide tick-duration bar ───────── */
-  let mfxOuDur = 5; // default 5 ticks — matches Deriv's default for Only Ups/Only Downs
-  window.mfxOnContractTypeChange = function(){
-    const ct = (document.getElementById('mfxContractType')||{}).value||'CALL_PUT';
-    const wrap = document.getElementById('mfxOuDurWrap');
-    if(wrap) wrap.style.display = ct==='UPORDOWN' ? 'block' : 'none';
-    refreshBot(); // update button labels
-  };
-  window.mfxSetOuDur = function(n){
-    mfxOuDur = n;
-    [2,3,4,5].forEach(d=>{
-      const btn = document.getElementById('mfxOuDur'+d);
-      if(btn) btn.classList.toggle('active', d===n);
-    });
-  };
-
-  /* ── P/L tab switching (Demo / Real / All) ───────────────────── */
-  let mfxPlTab = 'demo';
-  window.mfxShowPlTab = function(tab){
-    mfxPlTab = tab;
-    ['demo','real','all'].forEach(t=>{
-      const panel = document.getElementById('mfxPl'+t[0].toUpperCase()+t.slice(1));
-      const btn = document.querySelector('.mfx-acct-pl-tab[onclick*="\''+t+'\'"]');
-      if(panel) panel.classList.toggle('visible', t===tab);
-      if(btn) btn.classList.toggle('active', t===tab);
-    });
-  };
-
-  /* ── stake + multiplier ─────────────────────────────────────── */
-  const mfxMult=(typeof makeMultiplier==='function')?makeMultiplier(()=>document.getElementById('mfxStakeInput')):null;
-  function mfxGetStrat(){const s=document.getElementById('mfxMultiplier');return s?s.value:'flat';}
-  function mfxGetStake(){
-    if(mfxMult){mfxMult._strat=mfxGetStrat();return Math.max(0.35,mfxMult.getNext(mfxGetStrat()));}
-    const el=document.getElementById('mfxStakeInput');
-    return Math.max(0.35,parseFloat((el&&el.value)||'1'));
-  }
-  const mfxTradeIds=new Set(); // track IDs of trades placed by this bot
-  window._multRecord=(function(){
-    const prev=window._multRecord;
-    return function(id,stk,won){
-      if(prev) prev(id,stk,won);
-      if(mfxMult&&mfxTradeIds.has(id)){ mfxMult.record(stk,won); mfxTradeIds.delete(id); }
-    };
-  })();
-
-  /* ── quick-trade from the bot ────────────────────────────────── */
-  window.mfxQuickTrade = function(dir){
-    // gridWs and gridAuthed are let-declared in the main script — accessible
-    // by name from any script on the same page, but NOT via window.gridWs
-    // (let at top-level doesn't attach to window, unlike var).
-    if(typeof gridWs==='undefined'||!gridWs||gridWs.readyState!==1||!gridAuthed){
-      alert('Connect on the Trading Grid page first.'); return;
-    }
-    console.log('[MambaFX Bot] trade initiated — ws ready:', gridWs.readyState, 'authed:', gridAuthed);
-    const ct = (document.getElementById('mfxContractType')||{}).value||'CALL_PUT';
-    if(ct==='CALL_PUT'||ct==='CALL_PUT_H'){
-      // Rise/Fall and Higher/Lower: CALL (rise) or PUT (fall)
-      if(typeof gridPlaceTrade==='function') gridPlaceTrade(dir,'bot');
-    } else if(ct==='UPORDOWN'){
-      // Only Ups = RUNHIGH, Only Downs = RUNLOW (Deriv API docs confirmed)
-      // These give the correct ~2953% return for 5 ticks, not the ~81% CALL/PUT return
-      mfxSendOuProposal(dir===1?'RUNHIGH':'RUNLOW', mfxOuDur);
-    } else if(ct==='DIGITEVEN'){
-      if(typeof digPlaceTrade==='function') digPlaceTrade(dir===1?'even':'odd','bot');
-      else mfxSendDigitProposal(dir===1?'DIGITEVEN':'DIGITODD',null);
-    } else if(ct==='DIGITOVER'){
-      mfxSendDigitProposal(dir===1?'DIGITOVER':'DIGITUNDER',5);
-    } else if(ct==='EXPIRYRANGE'){
-      mfxSendBarrierProposal(dir===1?'EXPIRYRANGE':'EXPIRYMISS');
-    } else {
-      if(typeof gridPlaceTrade==='function') gridPlaceTrade(dir,'bot');
-    }
-  };
-
-  function mfxSendOuProposal(contractType, dur){
-    // contractType: 'RUNHIGH' = Only Ups, 'RUNLOW' = Only Downs
-    // Confirmed from Deriv API docs: developers.deriv.com/docs/only-upsonly-downs
-    if(typeof gridWs==='undefined'||!gridWs||gridWs.readyState!==1) return;
-    const stake = mfxGetStake();
-    const reqId = (typeof gridReqId!=='undefined'?++gridReqId:Date.now());
-    const proposalMsg = {
-      proposal: 1,
-      req_id: reqId,
-      amount: stake,
-      basis: 'stake',
-      contract_type: contractType,           // 'RUNHIGH' or 'RUNLOW'
-      currency: typeof gridCurrency!=='undefined'?gridCurrency:'USD',
-      duration: dur,                         // 2, 3, 4, or 5 ticks
-      duration_unit: 't',
-      underlying_symbol: typeof SYMBOL!=='undefined'?SYMBOL:'1HZ100V',
-    };
-    console.log('[MambaFX Bot] Sending OU proposal:', JSON.stringify(proposalMsg));
-
-    function showPreviewError(msg){
-      const prev = document.getElementById('mfxPayoutPreview');
-      if(prev){
-        prev.style.background='#fef2f2'; prev.style.borderColor='#fecaca';
-        prev.style.display='block';
-        const p1=document.getElementById('mfxPreviewPayout');
-        const p2=document.getElementById('mfxPreviewProfit');
-        const p3=document.getElementById('mfxPreviewReturn');
-        if(p1) p1.textContent='Error';
-        if(p2) p2.textContent=msg;
-        if(p3) p3.textContent='—';
-      }
-    }
-
-    if(typeof gridPending!=='undefined'){
-      gridPending[reqId] = (proposal, err) => {
-        if(err){
-          console.error('[MambaFX Bot] OU proposal error:', err.code, err.message, err.details);
-          showPreviewError((err.message||'Proposal rejected')+' ['+( err.details&&err.details.field?err.details.field:err.code||'?')+']');
-          return;
-        }
-        if(!proposal||!proposal.id||proposal.ask_price==null){
-          console.error('[MambaFX Bot] OU proposal missing id/ask_price:', proposal);
-          showPreviewError('Proposal returned no price — check API Diagnostics page');
-          return;
-        }
-        console.log('[MambaFX Bot] OU proposal OK:', JSON.stringify(proposal));
-
-        // Show payout preview panel
-        const payout = Number(proposal.payout||0);
-        const askPrice = Number(proposal.ask_price||stake);
-        const profit = payout - askPrice;
-        const ret = askPrice>0 ? (profit/askPrice*100).toFixed(1) : '—';
-        const prev = document.getElementById('mfxPayoutPreview');
-        const ccy = typeof gridCurrency!=='undefined'?gridCurrency:'USD';
-        if(prev){
-          prev.style.background=''; prev.style.borderColor='';
-          document.getElementById('mfxPreviewPayout').textContent  = payout.toFixed(2)+' '+ccy;
-          document.getElementById('mfxPreviewProfit').textContent  = (profit>=0?'+':'')+profit.toFixed(2)+' '+ccy;
-          document.getElementById('mfxPreviewReturn').textContent  = ret+'%';
-          prev.style.display = 'block';
-        }
-
-        // Buy immediately with the exact proposal.id and ask_price
-        const buyReqId = (typeof gridReqId!=='undefined'?++gridReqId:Date.now()+1);
-        const buyMsg = { buy: proposal.id, price: proposal.ask_price, req_id: buyReqId };
-        console.log('[MambaFX Bot] Sending OU buy:', JSON.stringify(buyMsg));
-        if(typeof gridPending!=='undefined'){
-          gridPending[buyReqId] = (buy, buyErr) => {
-            if(buyErr){
-              console.error('[MambaFX Bot] OU buy error:', buyErr.code, buyErr.message, buyErr.details);
-              showPreviewError('Buy failed: '+(buyErr.message||buyErr.code||'error'));
-              return;
-            }
-            if(buy){
-              console.log('[MambaFX Bot] ✅ Only Ups/Downs contract opened:', buy.contract_id, 'payout:', buy.payout);
-              const prev2 = document.getElementById('mfxPayoutPreview');
-              if(prev2) prev2.style.borderColor='#86efac';
-            }
-          };
-        }
-        gridWs.send(JSON.stringify(buyMsg));
-      };
-    } else {
-      console.error('[MambaFX Bot] gridPending not accessible — cannot register proposal callback');
-    }
-    if(typeof mfxTradeIds!=='undefined') mfxTradeIds.add('pending-'+reqId);
-    gridWs.send(JSON.stringify(proposalMsg));
-  }
-
-  /* ── auto-run ────────────────────────────────────────────────── */
-  let mfxRunning = false;
-  window.mfxToggleRun = function(){
-    mfxRunning = !mfxRunning;
-    const btn = document.getElementById('mfxRunBtn');
-    if(btn){
-      btn.textContent = mfxRunning ? '⏹ STOP AUTO' : '▶ RUN AUTO';
-      btn.classList.toggle('running', mfxRunning);
-    }
-  };
-
-  /* ── digit proposal helper ───────────────────────────────────── */
-  function mfxSendDigitProposal(ctype, barrier){
-    if(typeof gridWs==="undefined"||!gridWs||gridWs.readyState!==1) return;
-    const stake = mfxGetStake();
-    const reqId = (typeof gridReqId!=='undefined'?++gridReqId:Date.now());
-    const msg = {
-      proposal:1, req_id:reqId, amount:stake, basis:'stake',
-      contract_type:ctype, currency:typeof gridCurrency!=='undefined'?gridCurrency:'USD',
-      duration:5, duration_unit:'t', underlying_symbol:typeof SYMBOL!=='undefined'?SYMBOL:'1HZ100V',
-    };
-    if(barrier!==null&&barrier!==undefined) msg.barrier=String(barrier);
-    if(typeof gridPending!=='undefined'){
-      gridPending[reqId]=(proposal,err)=>{
-        if(err||!proposal||!proposal.id) return;
-        const buyReqId=(typeof gridReqId!=='undefined'?++gridReqId:Date.now()+1);
-        if(typeof gridPending!=='undefined') gridPending[buyReqId]=(buy,buyErr)=>{
-          if(!buyErr&&buy) console.log('[MambaFX Bot] digit contract:',buy.contract_id);
-        };
-        gridWs.send(JSON.stringify({buy:proposal.id,price:proposal.ask_price,req_id:buyReqId}));
-      };
-    }
-    gridWs.send(JSON.stringify(msg));
-  }
-
-  /* ── barrier proposal helper (Stay Between / Goes Out) ──────── */
-  function mfxSendBarrierProposal(ctype){
-    if(typeof gridWs==="undefined"||!gridWs||gridWs.readyState!==1) return;
-    const tks = typeof ticks!=='undefined'?ticks:[];
-    if(tks.length<5) return;
-    const prices = tks.slice(-20).map(t=>t.price);
-    const hi=msdSafeMax(prices), lo=msdSafeMin(prices);
-    const dec=typeof decimals!=='undefined'?decimals:2;
-    const rng=hi-lo;
-    const stake=mfxGetStake();
-    const reqId=(typeof gridReqId!=='undefined'?++gridReqId:Date.now());
-    const msg={
-      proposal:1,req_id:reqId,amount:stake,basis:'stake',
-      contract_type:ctype,currency:typeof gridCurrency!=='undefined'?gridCurrency:'USD',
-      duration:5,duration_unit:'t',underlying_symbol:typeof SYMBOL!=='undefined'?SYMBOL:'1HZ100V',
-      high_barrier:(hi+(rng*0.5)).toFixed(dec),
-      low_barrier:(lo-(rng*0.5)).toFixed(dec),
-    };
-    if(typeof gridPending!=='undefined'){
-      gridPending[reqId]=(proposal,err)=>{
-        if(err||!proposal||!proposal.id) return;
-        const buyReqId=(typeof gridReqId!=='undefined'?++gridReqId:Date.now()+1);
-        if(typeof gridPending!=='undefined') gridPending[buyReqId]=(buy,buyErr)=>{
-          if(buyErr) console.warn('[MambaFX Bot] barrier buy error:', buyErr.message);
-          else if(buy) console.log('[MambaFX Bot] barrier contract:',buy.contract_id);
-        };
-        gridWs.send(JSON.stringify({buy:proposal.id,price:proposal.ask_price,req_id:buyReqId}));
-      };
-    }
-    gridWs.send(JSON.stringify(msg));
-  }
-
-  /* ── signal flash + auto-run hook ────────────────────────────── */
-  const _origOnSignalFired = window.onSignalFired;
-  window.onSignalFired = function(dir, price, epoch){
-    const fill = document.getElementById('mfxRunFill');
-    if(fill){ fill.classList.add('mfx-flash'); fill.addEventListener('animationend',()=>fill.classList.remove('mfx-flash'),{once:true}); }
-    /* auto-run: fire a trade in the signal direction when running */
-    if(mfxRunning){
-      const ct=(document.getElementById('mfxContractType')||{}).value||'CALL_PUT';
-      if(ct==='CALL_PUT'||ct==='CALL_PUT_H'){
-        if(typeof gridPlaceTrade==='function') gridPlaceTrade(dir,'bot-auto');
-      } else {
-        window.mfxQuickTrade(dir);
-      }
-    }
-    if(typeof _origOnSignalFired==='function') _origOnSignalFired(dir,price,epoch);
-  };
-
-  /* ── market change from bot selector ─────────────────────────── */
-  window.mfxChangeMarket = function(){
-    const sel = document.getElementById('mfxMarketSel');
-    if(!sel) return;
-    const code = sel.value;
-    if(typeof switchMarket==='function') switchMarket(code);
-  };
-
-  /* ── init ────────────────────────────────────────────────────── */
-  loadPos();
-  // Populate the market selector from the app's own MARKETS constant
-  (function initMarketSel(){
-    const sel = document.getElementById('mfxMarketSel');
-    if(!sel) return;
-    try{
-      if(typeof MARKETS!=='undefined'){
-        sel.innerHTML = Object.entries(MARKETS).map(([k,v])=>
-          `<option value="${k}"${k===SYMBOL?' selected':''}>${v.replace('Volatility ','V').replace(' Index','').replace('(','').replace(')','')}</option>`
-        ).join('');
-      }
-    }catch(_){}
-  })();
-  setInterval(refreshBot, 300);
-  refreshBot();
-})();
-</script>
+<script type="module" src="src/ui/widgets/mfxBot.js"></script>
 
 <!-- ══════════════════════════════════════════════════════════════════
      DERIV AUTO BOT — dark-themed, instant-fire, no analysis,
@@ -34530,382 +32679,18 @@ try {
   </div>
 </div>
 
-<script>
-(function(){
-  const bot  = document.getElementById('dabBot');
-  const head = document.getElementById('dabHead');
-  const minB = document.getElementById('dabMinBtn');
-  const STORE = 'dabBotState_v1';
-
-  /* ── position persistence ────────────────────────────────── */
-  function savePos(){
-    try{ sessionStorage.setItem(STORE, JSON.stringify({
-      x:bot.style.left, y:bot.style.top,
-      min:bot.classList.contains('minimised')
-    }));}catch(_){}
-  }
-  function loadPos(){
-    try{
-      const s=JSON.parse(sessionStorage.getItem(STORE)||'null');
-      if(!s) return;
-      if(s.x){bot.style.left=s.x;bot.style.right='auto';}
-      if(s.y){
-        const nav=document.querySelector('.pagenav');
-        const minY=nav?(nav.getBoundingClientRect().bottom+8):0;
-        bot.style.top=Math.max(minY,parseFloat(s.y)||0)+'px';
-        bot.style.bottom='auto';
-      }
-      if(s.min) setMin(true);
-    }catch(_){}
-  }
-
-  /* ── minimise ─────────────────────────────────────────────── */
-  function setMin(on){
-    bot.classList.toggle('minimised',on);
-    minB.textContent=on?'▣':'⟨⟩';
-    savePos();
-  }
-  minB.addEventListener('click',e=>{e.stopPropagation();setMin(!bot.classList.contains('minimised'));});
-  head.addEventListener('dblclick',()=>setMin(!bot.classList.contains('minimised')));
-
-  /* ── drag (mouse) ─────────────────────────────────────────── */
-  let dragging=false,ox=0,oy=0;
-  head.addEventListener('mousedown',e=>{
-    if(e.target===minB)return;
-    dragging=true;ox=e.clientX-bot.offsetLeft;oy=e.clientY-bot.offsetTop;
-    bot.style.left=bot.offsetLeft+'px';bot.style.top=bot.offsetTop+'px';
-    bot.style.right='auto';bot.style.bottom='auto';
-    bot.classList.add('dragging');
-  });
-  document.addEventListener('mousemove',e=>{
-    if(!dragging)return;
-    const nav=document.querySelector('.pagenav');
-    const minY=nav?(nav.getBoundingClientRect().bottom+8):0;
-    bot.style.left=Math.max(0,Math.min(e.clientX-ox,window.innerWidth-bot.offsetWidth))+'px';
-    bot.style.top=Math.max(minY,Math.min(e.clientY-oy,window.innerHeight-bot.offsetHeight))+'px';
-  });
-  document.addEventListener('mouseup',()=>{if(!dragging)return;dragging=false;bot.classList.remove('dragging');savePos();});
-
-  /* ── drag (touch) ─────────────────────────────────────────── */
-  head.addEventListener('touchstart',e=>{
-    if(e.target===minB)return;
-    const t=e.touches[0];
-    dragging=true;ox=t.clientX-bot.offsetLeft;oy=t.clientY-bot.offsetTop;
-    bot.style.left=bot.offsetLeft+'px';bot.style.top=bot.offsetTop+'px';
-    bot.style.right='auto';bot.style.bottom='auto';
-  },{passive:true});
-  document.addEventListener('touchmove',e=>{
-    if(!dragging)return;
-    const t=e.touches[0];
-    const nav=document.querySelector('.pagenav');
-    const minY=nav?(nav.getBoundingClientRect().bottom+8):0;
-    bot.style.left=Math.max(0,Math.min(t.clientX-ox,window.innerWidth-bot.offsetWidth))+'px';
-    bot.style.top=Math.max(minY,Math.min(t.clientY-oy,window.innerHeight-bot.offsetHeight))+'px';
-  },{passive:true});
-  document.addEventListener('touchend',()=>{if(!dragging)return;dragging=false;savePos();});
-
-  /* ── helpers ──────────────────────────────────────────────── */
-  function dabSet(id,v){const e=document.getElementById(id);if(e)e.textContent=v;}
-  function dabGet(id){const e=document.getElementById(id);return e?e.value:'';}
-  const dabMult=(typeof makeMultiplier==='function')?makeMultiplier(()=>document.getElementById('dabStake')):null;
-  function dabGetStrat(){const s=document.getElementById('dabMultiplier');return s?s.value:'flat';}
-  // Only Ups/Only Downs (RUNHIGH/RUNLOW) pay out roughly 30x the stake at
-  // 5 ticks (Deriv's own quoted ~2953% return). Martingale on a contract
-  // that already pays ~30x will cross Deriv's $10,000 max-payout ceiling
-  // after only ~10-11 consecutive losses -- long before balance is at risk.
-  // Once that happens every further fire hits the exact same rejection
-  // forever, so we cap the stake (and reset Martingale) BEFORE firing.
-  const DAB_PAYOUT_MULT = { UPORDOWN: 30.53 };
-  const DAB_PAYOUT_CAP  = 9500;   // stay safely under Deriv's 10,000 ceiling
-  function dabGetStake(){
-    const base = Math.max(0.35, parseFloat(dabGet('dabStake')||'1'));
-    let stake = dabMult ? (dabMult._strat = dabGetStrat(), Math.max(0.35, dabMult.getNext(dabGetStrat()))) : base;
-    const ct = dabGet('dabContractType');
-    const mult = DAB_PAYOUT_MULT[ct];
-    if (mult && stake * mult > DAB_PAYOUT_CAP){
-      if (dabMult) dabMult.reset();
-      stake = base;
-      dabSet('dabStatus', `⚠ Payout cap reached (would exceed Deriv's $10,000 max payout) — Martingale reset to base stake ${base.toFixed(2)}.`);
-    }
-    return stake;
-  }
-  function dabGetDur(){
-    const ct=dabGet('dabContractType');
-    if(ct==='UPORDOWN') return dabOuDur;
-    return Math.max(1,parseInt(dabGet('dabDuration')||'5',10));
-  }
-
-  /* ── contract type change ─────────────────────────────────── */
-  let dabOuDur=5;
-  window.dabSetOuDur=function(n){
-    dabOuDur=n;
-    [2,3,4,5].forEach(d=>{
-      const b=document.getElementById('dabOuDur'+d);
-      if(b)b.classList.toggle('active',d===n);
-    });
-  };
-  window.dabOnContractChange=function(){
-    const ct=dabGet('dabContractType');
-    const ouWrap=document.getElementById('dabOuDurWrap');
-    const durField=document.getElementById('dabDurField');
-    if(ouWrap) ouWrap.style.display=ct==='UPORDOWN'?'block':'none';
-    if(durField) durField.style.display=ct==='UPORDOWN'?'none':'block';
-    const btnUp=document.getElementById('dabBtnUp');
-    const btnDn=document.getElementById('dabBtnDn');
-    const labels={
-      CALL_PUT:['▲ UP','▼ DOWN'],UPORDOWN:['ONLY UPS','ONLY DOWNS'],
-      DIGITEVEN:['EVEN','ODD'],DIGITOVER:['OVER','UNDER'],
-      EXPIRYRANGE:['STAY IN','GOES OUT']
-    };
-    const [lu,ld]=(labels[ct]||labels.CALL_PUT);
-    if(btnUp)btnUp.textContent=lu;
-    if(btnDn)btnDn.textContent=ld;
-  };
-
-  /* ── trade ledger ─────────────────────────────────────────── */
-  const dabTrades=[];
-  function dabRenderStats(){
-    let won=0,lost=0,net=0,any=false;
-    dabTrades.forEach(t=>{
-      if(t.status==='won'){won++;if(t.pnl!=null){net+=t.pnl;any=true;}}
-      if(t.status==='lost'){lost++;if(t.pnl!=null){net+=t.pnl;any=true;}}
-    });
-    dabSet('dabWon',won); dabSet('dabLost',lost);
-    const tot=won+lost;
-    dabSet('dabWinRate',tot>0?(won/tot*100).toFixed(1)+'%':'—');
-    const ccy=(typeof gridCurrency!=='undefined'?gridCurrency:'USD');
-    const pEl=document.getElementById('dabPnL');
-    if(pEl){
-      pEl.textContent=any?(net>=0?'+':'')+net.toFixed(2)+' '+ccy:'—';
-      pEl.className='val '+(any?(net>=0?'up':'dn'):'');
-    }
-    // last trade
-    if(dabTrades.length){
-      const t=dabTrades[0];
-      document.getElementById('dabLastRow').style.display='block';
-      const dEl=document.getElementById('dabLastDir');
-      dEl.textContent=t.dir===1?'▲ UP':'▼ DOWN';
-      dEl.className='dab-dir '+(t.dir===1?'up':'dn');
-      dabSet('dabLastType',t.contractType||'—');
-      dabSet('dabLastStatus',t.status||'—');
-      const pEl2=document.getElementById('dabLastPnl');
-      if(pEl2){
-        pEl2.textContent=t.pnl!=null?(t.pnl>=0?'+':'')+t.pnl.toFixed(2):'—';
-        pEl2.className='dab-last-pnl '+(t.pnl!=null?(t.pnl>=0?'pos':'neg'):'');
-      }
-    }
-  }
-
-  /* ── connection status ────────────────────────────────────── */
-  function dabRefreshConn(){
-    const ok=typeof gridWs!=='undefined'&&gridWs&&gridWs.readyState===1&&(typeof gridAuthed!=='undefined'&&gridAuthed);
-    const dot=document.getElementById('dabDot');
-    if(dot)dot.className='d'+(ok?' on':' off');
-    dabSet('dabConnLbl',ok?'live':'offline');
-    const ccy=(typeof gridCurrency!=='undefined'?gridCurrency:'USD');
-    const ccyEl=document.getElementById('dabStakeCcy');if(ccyEl)ccyEl.textContent=ccy;
-    ['dabBtnUp','dabBtnDn','dabAutoBtn'].forEach(id=>{
-      const b=document.getElementById(id);if(b)b.disabled=!ok;
-    });
-    if(!ok&&dabAutoRunning) dabStopAuto('disconnected');
-  }
-
-  /* ── core fire function ───────────────────────────────────── */
-  function dabFire(dir,source){
-    if(typeof gridWs==='undefined'||!gridWs||gridWs.readyState!==1||!(typeof gridAuthed!=='undefined'&&gridAuthed)){
-      dabSet('dabStatus','Not connected — connect on Trading Grid first.');return;
-    }
-    const ct=dabGet('dabContractType');
-    const dur=dabGetDur();
-    const stake=dabGetStake();
-    const bust=document.getElementById('dabBust')&&document.getElementById('dabBust').checked;
-
-    // Build the proposal
-    let contractType;
-    if(ct==='CALL_PUT')       contractType=dir===1?'CALL':'PUT';
-    else if(ct==='UPORDOWN')  contractType=dir===1?'RUNHIGH':'RUNLOW';
-    else if(ct==='DIGITEVEN') contractType=dir===1?'DIGITEVEN':'DIGITODD';
-    else if(ct==='DIGITOVER') contractType=dir===1?'DIGITOVER':'DIGITUNDER';
-    else if(ct==='EXPIRYRANGE') contractType=dir===1?'EXPIRYRANGE':'EXPIRYMISS';
-    else contractType=dir===1?'CALL':'PUT';
-
-    const reqId=(typeof gridReqId!=='undefined'?++gridReqId:Date.now());
-    const proposal={
-      proposal:1, req_id:reqId,
-      amount:stake, basis:'stake',
-      contract_type:contractType,
-      currency:(typeof gridCurrency!=='undefined'?gridCurrency:'USD'),
-      duration:dur, duration_unit:'t',
-      underlying_symbol:(typeof SYMBOL!=='undefined'?SYMBOL:'1HZ100V'),
-    };
-    // Barrier for Over/Under digit contracts
-    if(ct==='DIGITOVER'||ct==='DIGITUNDER') proposal.barrier='5';
-    // High/low barriers for Stay Between / Goes Out
-    if(ct==='EXPIRYRANGE'){
-      const tks=typeof ticks!=='undefined'?ticks:[];
-      if(tks.length>=5){
-        const prices=tks.slice(-20).map(t=>t.price);
-        const hi=msdSafeMax(prices),lo=msdSafeMin(prices),rng=hi-lo;
-        const dec=(typeof decimals!=='undefined'?decimals:2);
-        proposal.high_barrier=(hi+rng*0.5).toFixed(dec);
-        proposal.low_barrier=(lo-rng*0.5).toFixed(dec);
-      }
-    }
-
-    const row={
-      id:'pending-'+reqId,dir,source,contractType,stake,
-      currency:(typeof gridCurrency!=='undefined'?gridCurrency:'USD'),
-      isVirtual:typeof gridIsVirtual!=='undefined'?!!gridIsVirtual:true,
-      time:Math.floor(Date.now()/1000),
-      entry:null,exit:null,payout:null,pnl:null,status:'pricing…'
-    };
-    dabTrades.unshift(row);
-    if(dabTrades.length>200)dabTrades.pop();
-    dabRenderStats();
-    dabSet('dabStatus',`Pricing ${contractType}…`);
-
-    // In BUST MODE: we fire and forget — don't wait for the outcome before
-    // allowing the next trade. The contract is tracked for P/L but execution
-    // continues immediately. Without bust mode, the auto-fire interval still
-    // controls timing; bust simply removes the "wait for settlement" gate.
-    if(typeof gridPending!=='undefined'){
-      gridPending[reqId]=(prop,err)=>{
-        if(err){
-          row.status='rejected: '+(err.message||err.code||'error')+(err.details?` [${err.details.field||'?'}]`:'');
-          dabRenderStats();
-          const isPayoutCap = /maximum payout/i.test(err.message||'');
-          if (isPayoutCap && dabMult){
-            dabMult.reset();
-            dabSet('dabStatus', `⚠ Deriv rejected on payout cap — Martingale reset to base stake. (${err.message||''})`);
-          } else {
-            dabSet('dabStatus',row.status);
-          }
-          return;
-        }
-        if(!prop||!prop.id||prop.ask_price==null){
-          row.status='rejected: no price';dabRenderStats();return;
-        }
-        const buyReqId=(typeof gridReqId!=='undefined'?++gridReqId:Date.now()+1);
-        const buyMsg={buy:prop.id,price:prop.ask_price,req_id:buyReqId};
-        row.status='open';dabRenderStats();
-        dabSet('dabStatus',`Contract open — payout if won: ${Number(prop.payout||0).toFixed(2)}`);
-        if(typeof gridPending!=='undefined'){
-          gridPending[buyReqId]=(buy,buyErr)=>{
-            if(buyErr){
-              row.status='buy failed: '+(buyErr.message||buyErr.code||'error');
-              dabRenderStats();dabSet('dabStatus',row.status);return;
-            }
-            if(buy){
-              row.id=String(buy.contract_id);
-              row.buyPrice=buy.buy_price;
-              row.status='open';
-              if(typeof gridOpenContracts!=='undefined') gridOpenContracts[row.id]=row;
-              dabRenderStats();
-              console.log('[Deriv Auto Bot] contract opened:',buy.contract_id,contractType);
-            }
-          };
-        }
-        gridWs.send(JSON.stringify(buyMsg));
-      };
-    }
-    gridWs.send(JSON.stringify(proposal));
-    console.log('[Deriv Auto Bot] proposal sent:',contractType,'dur:',dur,'stake:',stake,'bust:',bust);
-  }
-  // Expose so gridUpdateContract can call engRenderStats equivalent
-  window.dabFire=dabFire;
-
-  // Hook into gridUpdateContract to update dabTrades on settlement
-  const _origUpdate=window.gridUpdateContract;
-  // Patch is done by checking dabTrades inside the existing gridUpdateContract,
-  // not by wrapping (gridUpdateContract already checks dabTrades via reference).
-
-  /* ── AUTO FIRE ────────────────────────────────────────────── */
-  let dabAutoRunning=false,dabAutoTimer=null,dabAutoFired=0;
-
-  window.dabToggleAuto=function(){
-    if(dabAutoRunning){dabStopAuto('stopped by user');}
-    else{dabStartAuto();}
-  };
-
-  function dabStartAuto(){
-    if(typeof gridWs==='undefined'||!gridWs||gridWs.readyState!==1){
-      dabSet('dabStatus','Not connected.');return;
-    }
-    dabAutoRunning=true;dabAutoFired=0;
-    const btn=document.getElementById('dabAutoBtn');
-    if(btn){btn.textContent='⏹ STOP AUTO FIRE';btn.classList.add('firing');}
-    dabSet('dabStatus','Auto fire armed — firing on interval…');
-    dabScheduleNext();
-  }
-
-  function dabStopAuto(reason){
-    dabAutoRunning=false;
-    if(dabAutoTimer){clearTimeout(dabAutoTimer);dabAutoTimer=null;}
-    const btn=document.getElementById('dabAutoBtn');
-    if(btn){btn.textContent='⚡ START AUTO FIRE';btn.classList.remove('firing');}
-    dabSet('dabStatus','Auto fire stopped'+(reason?' ('+reason+')':'')+'.');
-  }
-
-  function dabScheduleNext(){
-    if(!dabAutoRunning)return;
-    const maxN=Math.max(0,parseInt(dabGet('dabAutoMax')||'0',10));
-    if(maxN&&dabAutoFired>=maxN){dabStopAuto('reached '+maxN+' fires');return;}
-    const interval=Math.max(1,parseFloat(dabGet('dabAutoInterval')||'6'))*1000;
-    dabAutoTimer=setTimeout(()=>{
-      if(!dabAutoRunning)return;
-      // Determine direction from auto-dir setting
-      const dir_pref=dabGet('dabAutoDir');
-      let dir;
-      if(dir_pref==='up') dir=1;
-      else if(dir_pref==='down') dir=-1;
-      else dir=(Math.random()>0.5?1:-1); // both: alternate randomly
-      dabFire(dir,'auto');
-      dabAutoFired++;
-      dabSet('dabStatus',`Auto fired #${dabAutoFired}${maxN?' of '+maxN:''} — ${dir===1?'UP':'DOWN'}`);
-      dabScheduleNext();
-    },interval);
-  }
-
-  /* ── refresh loop ─────────────────────────────────────────── */
-  function dabRefresh(){
-    dabRefreshConn();
-    // live price
-    const price=(typeof lastPrice!=='undefined'&&lastPrice!=null)?lastPrice:null;
-    const dec=(typeof decimals!=='undefined'?decimals:2);
-    const prEl=document.getElementById('dabPrice');
-    if(prEl&&price!=null){
-      const prev=prEl._prev;
-      prEl.textContent=Number(price).toFixed(dec);
-      prEl.style.color=prev==null?'#e6ebf5':price>prev?'#16e08b':price<prev?'#ff4d5e':'#e6ebf5';
-      prEl._prev=price;
-    }
-    const dir=(typeof runDir!=='undefined'?runDir:0);
-    const rLen=(typeof runLen!=='undefined'?runLen:0);
-    const sym=(typeof SYMBOL!=='undefined'?SYMBOL:'');
-    const mkts=(typeof MARKETS!=='undefined'?MARKETS:{});
-    const mktName=(mkts[sym]||sym).replace('Volatility ','V').replace(' Index','').replace(/[()]/g,'');
-    dabSet('dabPriceSub',rLen>0?(dir===1?'▲':'▼')+' run '+rLen:mktName);
-  }
-
-  /* ── init ─────────────────────────────────────────────────── */
-  loadPos();
-  setInterval(dabRefresh,300);
-  dabRefresh();
-  dabOnContractChange(); // set initial labels
-
-  // Make dabRenderStats accessible so gridUpdateContract can trigger it
-  window._dabRenderStats=dabRenderStats;
-  window._dabTrades=dabTrades;
-  // Register multiplier record callback
-  const _prevMultRecord=window._multRecord;
-  window._multRecord=function(id,stk,won){
-    if(_prevMultRecord) _prevMultRecord(id,stk,won);
-    if(dabMult&&dabTrades.some(t=>t.id===id)) dabMult.record(stk,won);
-  };
-})();
-</script>
+<script type="module" src="src/ui/widgets/dabBot.js"></script>
 
 <script type="module" src="mtf/src/index.js"></script>
+<script>
+  // Phase 10 Integration — feature flag (default OFF). The research
+  // integration layer is wired but dormant until this is explicitly set
+  // to true, either here or from the browser console, per the approved
+  // MSD_PHASE10_INTEGRATION_ARCHITECTURE_REVIEW.md rollout decision:
+  // ship disabled, enable manually only after integration testing.
+  window.MSD_RESEARCH_ENGINE_ENABLED = false;
+</script>
+<script type="module" src="research/integration/bootstrap.js"></script>
 
 <!-- Developer AI Mode — Debug Panel -->
 <div id="mfxDebugPanel" style="display:none;position:fixed;top:0;right:0;width:380px;height:100vh;background:#0a0e17;border-left:1px solid #1f2937;z-index:99999;overflow-y:auto;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#e8edf4;padding:12px;box-shadow:-8px 0 24px rgba(0,0,0,.4)">
@@ -34917,96 +32702,7 @@ try {
   <div id="mfxDebugPanelBody"></div>
 </div>
 
-<script>
-(function(){
-  function fmt(v){ return (v === null || v === undefined) ? '—' : (typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(4)) : String(v)); }
-  function section(title, html){ return `<div style="margin-bottom:14px"><div style="font-weight:700;color:#56b6ff;margin-bottom:4px;text-transform:uppercase;font-size:9.5px;letter-spacing:.06em">${title}</div>${html}</div>`; }
-  function kv(label, value, color){ return `<div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:#6b7689">${label}</span><span style="${color?'color:'+color+';':''}font-weight:600">${fmt(value)}</span></div>`; }
-
-  window.mfxToggleDebugPanel = function(){
-    const el = document.getElementById('mfxDebugPanel');
-    if (!el) return;
-    el.style.display = el.style.display === 'none' ? 'block' : 'none';
-    if (el.style.display === 'block') window.mfxRenderDebugPanel();
-  };
-
-  window.mfxRenderDebugPanel = function(){
-    const el = document.getElementById('mfxDebugPanel');
-    const body = document.getElementById('mfxDebugPanelBody');
-    if (!el || !body || el.style.display === 'none') return;
-    if (!window.__mfxDebug) { body.innerHTML = '<div style="color:#ff4d6a">window.__mfxDebug not installed yet.</div>'; return; }
-
-    const dbg = window.__mfxDebug;
-    const state = dbg.getState();
-    const socket = dbg.getSocketInfo();
-    const perf = dbg.getPerformance();
-    const errors = dbg.getErrors(8);
-    const signals = dbg.getSignals(5);
-    const recentMsgs = socket.recentMessages.slice(-8);
-
-    let html = '';
-
-    html += section('Connection', 
-      kv('Status', socket.status, socket.status === 'live' ? '#1fdf9b' : '#ff4d6a') +
-      kv('Reconnects', socket.reconnectCount) +
-      kv('Avg Latency', socket.averageLatencyMs != null ? socket.averageLatencyMs + 'ms' : '—') +
-      kv('Pending Requests', socket.pendingRequests)
-    );
-
-    if (state) {
-      html += section('Current Market State',
-        kv('Symbol', state.symbol) +
-        kv('Tick', state.tick) +
-        (state.currentCandle ? kv('Candle O/H/L/C', `${fmt(state.currentCandle.open)} / ${fmt(state.currentCandle.high)} / ${fmt(state.currentCandle.low)} / ${fmt(state.currentCandle.close)}`) : '')
-      );
-      if (state.indicators) {
-        const ind = state.indicators;
-        html += section('Indicators',
-          kv('EMA 5/10/20', `${fmt(ind.ema5)} / ${fmt(ind.ema10)} / ${fmt(ind.ema20)}`) +
-          kv('MACD / Signal', `${fmt(ind.macd)} / ${fmt(ind.macdSignal)}`) +
-          kv('ADX', ind.adx) +
-          kv('+DI / -DI', `${fmt(ind.plusDI)} / ${fmt(ind.minusDI)}`) +
-          kv('RSI', ind.rsi) +
-          kv('ATR', ind.atr)
-        );
-      }
-    } else {
-      html += section('Current Market State', '<div style="color:#6b7689">No state recorded yet.</div>');
-    }
-
-    html += section('Recent Signals', signals.length
-      ? signals.slice().reverse().map(s => `<div style="border-left:2px solid #56b6ff;padding-left:6px;margin-bottom:6px">
-          <div style="font-weight:700">${s.signal || '—'} <span style="color:#6b7689;font-weight:400">(${s.confidence != null ? (s.confidence*100).toFixed(0)+'%' : '—'})</span></div>
-          <div style="color:#6b7689;font-size:9.5px">${s.marketState || ''}</div>
-          ${Array.isArray(s.reasons) ? '<ul style="margin:2px 0 0 14px;padding:0;color:#9aa7bd;font-size:9.5px">' + s.reasons.map(r=>`<li>${r}</li>`).join('') + '</ul>' : ''}
-        </div>`).join('')
-      : '<div style="color:#6b7689">None recorded yet — no signal-generating engine is wired to recordSignal() yet.</div>');
-
-    html += section('Recent WS Messages', recentMsgs.length
-      ? recentMsgs.slice().reverse().map(m => `<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid #1a2233">
-          <span style="color:${m.dir==='out'?'#a78bfa':'#1fdf9b'}">${m.dir==='out'?'↑':'↓'} ${(m.msg && (m.msg.msg_type||Object.keys(m.msg)[0]))||'?'}</span>
-          <span style="color:#6b7689">${m.latencyMs!=null ? m.latencyMs+'ms' : ''}</span>
-        </div>`).join('')
-      : '<div style="color:#6b7689">No messages yet.</div>');
-
-    html += section('Recent Errors', errors.length
-      ? errors.slice().reverse().map(e => `<div style="color:#ff4d6a;padding:2px 0;border-bottom:1px solid #1a2233">[${e.source}] ${e.message}</div>`).join('')
-      : '<div style="color:#1fdf9b">None.</div>');
-
-    html += section('Performance', 
-      kv('Market States Recorded', perf.marketStateCount) +
-      kv('WS Log Entries', perf.wsLogCount) +
-      kv('Errors', perf.errorCount) +
-      kv('Est. Memory', perf.memoryEstimateBytes ? (perf.memoryEstimateBytes/1024).toFixed(1)+' KB' : '—')
-    );
-
-    body.innerHTML = html;
-  };
-
-  window.addEventListener('keydown', e => { if (e.ctrlKey && e.shiftKey && e.key === 'D') { e.preventDefault(); window.mfxToggleDebugPanel(); } });
-  setInterval(() => { if (document.getElementById('mfxDebugPanel').style.display !== 'none') window.mfxRenderDebugPanel(); }, 500);
-})();
-</script>
+<script type="module" src="src/dashboard/debugPanel.js"></script>
 
 <!-- ═══════════════════════════════ PHASE 8 CAMPAIGN — Integrated UI Module ═══ -->
 <script>
@@ -35130,41 +32826,49 @@ window.ph8RefreshReadiness = async function(){
   }
 };
 
-// ── Load Seal (browser-native — no server required) ────────────────────────
-// All MSD functions are already defined in this page's global scope.
-// Build the seal directly without any network round-trip.
-async function ph8LoadSeal(){
+// ── Phase 8 server base URL ────────────────────────────────────────────────
+// When index.html is served from GitHub Pages the Phase 8 API calls must go
+// to the Replit server (not GitHub's static host, which has no Node.js
+// backend).  Auto-detect by hostname: relative URLs ('') work on every
+// Replit origin; the absolute URL is used on GitHub Pages.
+// Update the absolute URL below if the Replit deployment URL ever changes.
+const PHASE8_SERVER_BASE = (function(){
   try {
-    // Mirror the featureFamilies patch that the server-side engine applies
-    const spaceDef = (function(){
-      const def = msdBuildPhase7bSearchSpaceDefinition();
-      if (!def.featureFamilies) def.featureFamilies = ['non_classical'];
-      return def;
-    })();
-    const frozen      = msdFreezeSearchSpace(spaceDef, 'phase8_campaign',
-                          { schemaVersion: MSD_SEARCH_SPACE_SPEC_VERSION_V2 });
-    const cardinality = msdComputeSearchSpaceCardinality(frozen);
-    const features    = Array.from(MSD_PHASE7B_INDIVIDUAL_FEATURES);
-    ph8Seal = {
-      searchSpaceId:      frozen.searchSpaceId,
-      searchSpaceHash:    frozen.searchSpaceHash,
-      searchSpaceVersion: frozen.searchSpaceVersion,
-      totalCardinality:   cardinality.totalCardinality,
-      symbol:             MSD_PHASE7B_SYMBOL,
-      featureVersion:     MSD_NC_FEATURE_VERSION,
-      features,
-      leadTimes:          spaceDef.leadTimes,
-      permutations:       1000,
-      seed:               42,
-      alpha:              0.05,
-      practicalThreshold: 0.01,
-      nullModel:          'circular_shift_permutation',
-      correctionMethod:   'benjamini_hochberg',
-      discoverySpec:      spaceDef,
-    };
-  } catch(e) {
-    throw new Error('Failed to build Phase 8 seal: ' + e.message);
+    const h = window.location.hostname;
+    if (h === 'localhost' || h === '127.0.0.1' || h.endsWith('.replit.dev') || h.endsWith('.repl.co')) {
+      return ''; // served from Replit — relative URLs work fine
+    }
+    // Any other origin (e.g. kenkin1122-ctrl.github.io) → use the Replit server
+    return 'https://mambafx-kenkin1122.replit.app';
+  } catch(e) { return ''; }
+})();
+
+// ── Load Seal ──────────────────────────────────────────────────────────────
+async function ph8LoadSeal(){
+  const sealUrl = PHASE8_SERVER_BASE + '/api/phase8/seal';
+  let r;
+  try {
+    r = await fetch(sealUrl);
+  } catch(netErr) {
+    // TypeError: Failed to fetch — almost always a CORS block caused by the
+    // Replit server not being published yet (the "not live yet" placeholder
+    // page Replit shows for unpublished deployments does not include
+    // Access-Control-Allow-Origin, so the browser rejects the response).
+    throw new Error(
+      'Phase 8 server unreachable — the Replit server must be published. ' +
+      'In the Replit workspace click the \u25b6 Deploy button to publish ' +
+      'https://mambafx-kenkin1122.replit.app, then reload this page.'
+    );
   }
+  if(!r.ok){
+    // HTTP-level error (e.g. 404, 500) — parse body if possible
+    let errMsg = `Server returned HTTP ${r.status}`;
+    try { const eb = await r.json(); errMsg = eb.error || errMsg; } catch(_){}
+    throw new Error(errMsg);
+  }
+  const body = await r.json();
+  if(!body.ok) throw new Error(body.error||'Seal fetch failed');
+  ph8Seal = body.seal;
 
   const families = [...new Set(ph8Seal.features.map(f => ph8FF[f]||f))];
   ph8H('ph8-seal-kv', [
@@ -35205,7 +32909,7 @@ window.ph8Boot = async function(){
   const msg = ph8G('ph8-server-msg');
   try {
     await ph8LoadSeal();
-    if(msg) msg.innerHTML = ph8Bdg('ph8-b-pass','ONLINE') + ' &nbsp;Phase 8 engine ready · running in-browser';
+    if(msg) msg.innerHTML = ph8Bdg('ph8-b-pass','ONLINE') + ' &nbsp;Phase 8 engine ready · seal loaded';
     const btn = ph8G('ph8-launch-btn');
     if(btn) btn.onclick = ph8Execute;
     await ph8RefreshReadiness();
@@ -35245,7 +32949,7 @@ window.ph8Execute = async function(){
 
     // Reuse existing msdGetAllMarketStates — same store the scanner writes to
     const states = await msdGetAllMarketStates();
-    ph8Prog(6,`Loaded ${states.length} MarketStates. Running discovery in browser…`);
+    ph8Prog(6,`Loaded ${states.length} MarketStates. Sending to server…`);
 
     if(states.length===0){
       ph8Prog(100,'No MarketStates found — capture data first.');
@@ -35257,32 +32961,13 @@ window.ph8Execute = async function(){
     ph8Pill('ph8-pill-3','ph8-pr');
     ph8Prog(8,`Executing 80-candidate discovery pipeline (${states.length} states)…`);
 
-    // Run entirely in the browser — all MSD functions are in global scope
-    const _t0 = Date.now();
-    const _spaceDef = (function(){
-      const def = msdBuildPhase7bSearchSpaceDefinition();
-      if (!def.featureFamilies) def.featureFamilies = ['non_classical'];
-      return def;
-    })();
-    const _frozenSpace = msdFreezeSearchSpace(_spaceDef, 'phase8_campaign',
-      { schemaVersion: MSD_SEARCH_SPACE_SPEC_VERSION_V2 });
-    const _result = await msdRunPhase7bDiscovery(states, _frozenSpace, {
-      permutations:        1000,
-      seed:                42,
-      alpha:               0.05,
-      parentRunId:         'phase8_official_nc_campaign_v1',
-      uncertaintyHandling: { filterCertainOnly: true },
+    const resp = await fetch(PHASE8_SERVER_BASE + '/api/phase8/run',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({states}),
     });
-    const r = Object.assign({}, _result, {
-      serverElapsedMs: Date.now() - _t0,
-      frozenSearchSpace: {
-        searchSpaceId:      _frozenSpace.searchSpaceId,
-        searchSpaceHash:    _frozenSpace.searchSpaceHash,
-        searchSpaceVersion: _frozenSpace.searchSpaceVersion,
-      },
-      executedAt:    new Date().toISOString(),
-      engineVersion: 'phase8-browser-engine-v1',
-    });
+    const body = await resp.json();
+    if(!body.ok) throw new Error(body.error||'Server campaign failed');
+    const r = body.result;
 
     if(!r.ok){
       ph8Prog(100,'Campaign returned error: '+(r.error||'unknown'));
@@ -35909,7 +33594,7 @@ async function ph8RunChecklist(){
     !!seal,
     seal
       ? `Seal verified: ${seal.totalCardinality} candidates · hash ${seal.searchSpaceHash} · version ${seal.searchSpaceVersion} · symbol ${seal.symbol}`
-      : 'SEAL NOT LOADED — reload the page to retry browser-native seal build',
+      : 'SEAL NOT LOADED — publish the Replit server at https://mambafx-kenkin1122.replit.app then reload',
     !seal ? 'The Phase 8 engine must be running. Verify the workflow is active and reload the page.' : null);
 
   const passCount = checks.filter(c => c.pass).length;
