@@ -291,6 +291,19 @@ function makeBuildRegistrationSpec(runTimestamp) {
           'that spend zero FDR budget. Round 3 is the sole test that spends Family ' +
           'Online FDR wealth and is the only test that can yield a discovery claim.',
       },
+      missingValueHandlingPolicy:
+        'msdBuildNcSnapshotRows(filterCertainOnly:true) excludes all rows without a ' +
+        'certain-confidence label before candidate generation. ' +
+        'msdMaterializeCandidateFeature(maxMissingRate:0.10) rejects any candidate ' +
+        'whose feature has >10% missing values across the usable rows. ' +
+        'No imputation is performed; rows with a missing feature value for this ' +
+        'candidate are dropped from the paired (featureVal, outcome) array.',
+      outlierHandlingPolicy:
+        'No outlier removal or winsorisation is applied. Raw ncf_v1 feature values ' +
+        'are used as computed by the Phase 7 feature-engineering layer. ' +
+        'Mutual Information is inherently rank-based and is therefore robust to ' +
+        'extreme values; threshold candidates binarise values relative to an ' +
+        'empirical percentile of the same dataset, which is also rank-invariant.',
       analyticalChoiceSet: [
         'mutual_information_permutation_test',
         `feature_transformation_${candidate.transformation || 'raw'}`,
