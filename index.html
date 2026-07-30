@@ -32948,18 +32948,26 @@ window.ph8Execute = async function(){
     ph8Prog(2,'Loading MarketStates from IndexedDB…');
 
     // Reuse existing msdGetAllMarketStates — same store the scanner writes to
-    const states = await msdGetAllMarketStates();
-    ph8Prog(6,`Loaded ${states.length} MarketStates. Sending to server…`);
+    const allStates = await msdGetAllMarketStates();
+    ph8Prog(4,`Loaded ${allStates.length.toLocaleString()} MarketStates. Filtering to NC-eligible certain rows…`);
+
+    // Filter down to the NC-eligible + certain-label subset before serialising.
+    // Sending all 1M+ raw states in a single JSON.stringify() exceeds the JS
+    // engine's maximum string length; the ~38k usable rows are all the server
+    // needs to run msdRunPhase7bDiscovery.
+    const snapshotRows = msdBuildNcSnapshotRows(allStates, { filterCertainOnly: true });
+    const states = snapshotRows.rows;
+    ph8Prog(6,`Loaded ${allStates.length.toLocaleString()} total · ${states.length.toLocaleString()} usable rows. Sending to server…`);
 
     if(states.length===0){
-      ph8Prog(100,'No MarketStates found — capture data first.');
+      ph8Prog(100,'No usable rows found — need NC-eligible states with certain labels. Capture more data first.');
       const pl=ph8G('ph8-plbl'); if(pl) pl.style.color='#eab308';
       if(btn) btn.disabled=false;
       return;
     }
 
     ph8Pill('ph8-pill-3','ph8-pr');
-    ph8Prog(8,`Executing 80-candidate discovery pipeline (${states.length} states)…`);
+    ph8Prog(8,`Executing 80-candidate discovery pipeline (${states.length.toLocaleString()} usable rows)…`);
 
     const resp = await fetch(PHASE8_SERVER_BASE + '/api/phase8/run',{
       method:'POST', headers:{'Content-Type':'application/json'},
