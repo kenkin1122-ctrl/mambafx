@@ -598,6 +598,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button id="navMsdValidation" onclick="showPage('msdvalidation')">✅ Research Validation Suite</button>
     <button id="navMsdWorkbench" onclick="showPage('msdworkbench')">🔬 Research Workbench</button>
     <button id="navMsdPhase8" onclick="showPage('msdphase8')">🧬 Phase 8 Campaign</button>
+    <button id="navMsdPhase9" onclick="showPage('msdphase9')">🔬 Phase 9 Adaptive</button>
   </nav>
 
   <!-- ============ PAGE 1: LIVE TRACKER ============ -->
@@ -3178,6 +3179,233 @@ table.an-table tbody tr:last-child td{border-bottom:none}
 
 </div><!-- /wrapper -->
 </div><!-- /#page-msdphase8 -->
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     PAGE: msdphase9 — Adaptive Scientific Discovery Engine (Phase 9)
+     ═══════════════════════════════════════════════════════════════════════ -->
+<div id="page-msdphase9" class="page">
+<style>
+  /* ── Phase 9 scoped styles ─────────────────────────────────────────────── */
+  #page-msdphase9 { background: #0a0e1a; color: #cdd6f4; min-height: 100vh; }
+  .ph9-wrap { max-width: 1080px; margin: 0 auto; padding: 24px 20px 60px; }
+  .ph9-header { margin-bottom: 28px; }
+  .ph9-header h1 {
+    font-size: 22px; font-weight: 700; color: #cba6f7;
+    margin: 0 0 6px; letter-spacing: .03em;
+  }
+  .ph9-header p { margin: 0; font-size: 13px; color: #6c7086; line-height: 1.6; }
+  /* cards */
+  .ph9-card {
+    background: #11162a; border: 1px solid #1e2d55;
+    border-radius: 10px; padding: 22px 24px; margin-bottom: 20px;
+  }
+  .ph9-card-title {
+    font-size: 13px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .1em; color: #89b4fa; margin: 0 0 16px;
+  }
+  /* readiness stats row */
+  .ph9-stats-row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .ph9-stat-box {
+    flex: 1; min-width: 140px; background: #0d1120;
+    border: 1px solid #1e2d55; border-radius: 8px; padding: 14px 18px;
+  }
+  .ph9-stat-box .ph9-stat-val {
+    font-size: 26px; font-weight: 800; color: #cba6f7; line-height: 1;
+  }
+  .ph9-stat-box .ph9-stat-lbl {
+    font-size: 11px; color: #6c7086; margin-top: 5px; text-transform: uppercase; letter-spacing: .06em;
+  }
+  .ph9-stat-box.ph9-stat-ok   .ph9-stat-val { color: #a6e3a1; }
+  .ph9-stat-box.ph9-stat-warn .ph9-stat-val { color: #f38ba8; }
+  /* funnel diagram */
+  .ph9-funnel { display: flex; gap: 0; align-items: stretch; margin-bottom: 18px; }
+  .ph9-funnel-step {
+    flex: 1; background: #0d1120; border: 1px solid #1e2d55;
+    border-radius: 8px; padding: 14px 12px; text-align: center; position: relative;
+  }
+  .ph9-funnel-step + .ph9-funnel-step { margin-left: 6px; }
+  .ph9-funnel-step .ph9-f-title { font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: #7f849c; }
+  .ph9-funnel-step .ph9-f-in   { font-size: 20px; font-weight: 800; color: #89b4fa; line-height: 1.1; }
+  .ph9-funnel-step .ph9-f-out  { font-size: 11px; color: #6c7086; margin-top: 2px; }
+  .ph9-funnel-step.ph9-f-active .ph9-f-in  { color: #cba6f7; }
+  .ph9-funnel-step.ph9-f-winner .ph9-f-in  { color: #a6e3a1; }
+  .ph9-funnel-step.ph9-f-null   .ph9-f-in  { color: #f38ba8; }
+  /* progress log */
+  .ph9-log {
+    background: #07090f; border: 1px solid #1e2d55; border-radius: 6px;
+    padding: 12px 14px; font-size: 12px; font-family: monospace;
+    max-height: 220px; overflow-y: auto; line-height: 1.6;
+  }
+  .ph9-log-entry { margin: 0; color: #cdd6f4; }
+  .ph9-log-entry.ph9-log-dim  { color: #585b70; }
+  .ph9-log-entry.ph9-log-ok   { color: #a6e3a1; }
+  .ph9-log-entry.ph9-log-warn { color: #fab387; }
+  .ph9-log-entry.ph9-log-err  { color: #f38ba8; }
+  /* run button */
+  .ph9-run-btn {
+    display: inline-block; padding: 12px 32px;
+    background: linear-gradient(135deg, #7c3aed, #6d28d9);
+    color: #fff; font-size: 14px; font-weight: 700; border-radius: 8px;
+    cursor: pointer; border: none; letter-spacing: .04em;
+    transition: opacity .15s; user-select: none;
+  }
+  .ph9-run-btn:hover:not(:disabled) { opacity: .88; }
+  .ph9-run-btn:disabled { opacity: .4; cursor: not-allowed; }
+  /* progress bar */
+  .ph9-progress-bar-wrap { background: #0d1120; border-radius: 4px; height: 6px; margin: 14px 0 0; overflow: hidden; }
+  .ph9-progress-bar      { height: 6px; border-radius: 4px; background: #cba6f7; width: 0%; transition: width .4s; }
+  /* verdict */
+  .ph9-verdict-banner {
+    border-radius: 10px; padding: 18px 24px; margin-bottom: 20px;
+    font-size: 15px; font-weight: 700; text-align: center; letter-spacing: .04em;
+  }
+  .ph9-verdict-discovery { background: #1a2d1a; border: 2px solid #a6e3a1; color: #a6e3a1; }
+  .ph9-verdict-null      { background: #1e1a2d; border: 2px solid #585b70; color: #7f849c; }
+  /* survivors table */
+  .ph9-table-wrap { overflow-x: auto; }
+  table.ph9-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.ph9-table th {
+    background: #0d1120; color: #89b4fa; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .07em;
+    padding: 8px 10px; text-align: left; border-bottom: 1px solid #1e2d55;
+  }
+  table.ph9-table td {
+    padding: 8px 10px; border-bottom: 1px solid #181c2f; color: #cdd6f4; vertical-align: middle;
+  }
+  table.ph9-table tr:hover td { background: #131628; }
+  .ph9-badge-ok   { display: inline-block; background: #1a2d1a; color: #a6e3a1; border-radius: 4px; padding: 2px 7px; font-size: 11px; }
+  .ph9-badge-null { display: inline-block; background: #1e1a2d; color: #7f849c;  border-radius: 4px; padding: 2px 7px; font-size: 11px; }
+  /* hide/show helpers */
+  .ph9-hidden { display: none !important; }
+  /* section sub-header */
+  .ph9-section-header { font-size: 12px; color: #7f849c; font-weight: 600; text-transform: uppercase; letter-spacing: .09em; margin: 0 0 12px; }
+</style>
+
+<div class="ph9-wrap">
+
+  <!-- ── Header ── -->
+  <div class="ph9-header">
+    <h1>🔬 MSD Phase 9 — Adaptive Scientific Discovery Engine</h1>
+    <p>
+      4-round Sequential Elimination Funnel · 112 candidates (16 ncf_v1 features × 7 variants)
+      · Family Online FDR control (Round 3 only) · Lockbox allocation for survivors
+    </p>
+  </div>
+
+  <!-- ── Dataset Readiness ── -->
+  <div class="ph9-card">
+    <div class="ph9-card-title">Dataset Readiness</div>
+    <div class="ph9-stats-row">
+      <div class="ph9-stat-box" id="ph9-stat-total">
+        <div class="ph9-stat-val" id="ph9-stat-total-val">—</div>
+        <div class="ph9-stat-lbl">Total MarketStates</div>
+      </div>
+      <div class="ph9-stat-box" id="ph9-stat-usable">
+        <div class="ph9-stat-val" id="ph9-stat-usable-val">—</div>
+        <div class="ph9-stat-lbl">NC-Eligible &amp; Certain</div>
+      </div>
+      <div class="ph9-stat-box" id="ph9-stat-min">
+        <div class="ph9-stat-val">30</div>
+        <div class="ph9-stat-lbl">Minimum Required</div>
+      </div>
+    </div>
+    <p id="ph9-readiness-msg" style="margin:14px 0 0;font-size:12px;color:#6c7086;">
+      Click Run to check readiness.
+    </p>
+  </div>
+
+  <!-- ── Campaign Control ── -->
+  <div class="ph9-card">
+    <div class="ph9-card-title">Campaign Control</div>
+
+    <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:16px;">
+      <button class="ph9-run-btn" id="ph9-run-btn" onclick="window.ph9RunCampaignUI()">
+        ▶ Run Phase 9 Campaign
+      </button>
+      <span id="ph9-status-label" style="font-size:13px;color:#7f849c;">Idle</span>
+    </div>
+
+    <!-- Funnel progress diagram (hidden until first run starts) -->
+    <div id="ph9-funnel-wrap" class="ph9-hidden">
+      <div class="ph9-section-header">Funnel Progress</div>
+      <div class="ph9-funnel">
+        <div class="ph9-funnel-step" id="ph9-f0">
+          <div class="ph9-f-title">Candidates</div>
+          <div class="ph9-f-in"  id="ph9-f0-in">112</div>
+          <div class="ph9-f-out" id="ph9-f0-out">generated</div>
+        </div>
+        <div class="ph9-funnel-step" id="ph9-f1">
+          <div class="ph9-f-title">R1 MI Screen</div>
+          <div class="ph9-f-in"  id="ph9-f1-in">—</div>
+          <div class="ph9-f-out" id="ph9-f1-out">promoted</div>
+        </div>
+        <div class="ph9-funnel-step" id="ph9-f2">
+          <div class="ph9-f-title">R2 Perm-test</div>
+          <div class="ph9-f-in"  id="ph9-f2-in">—</div>
+          <div class="ph9-f-out" id="ph9-f2-out">registered</div>
+        </div>
+        <div class="ph9-funnel-step" id="ph9-f3">
+          <div class="ph9-f-title">R3 FDR Gate</div>
+          <div class="ph9-f-in"  id="ph9-f3-in">—</div>
+          <div class="ph9-f-out" id="ph9-f3-out">survivors</div>
+        </div>
+        <div class="ph9-funnel-step" id="ph9-f4">
+          <div class="ph9-f-title">R4 Lockbox</div>
+          <div class="ph9-f-in"  id="ph9-f4-in">—</div>
+          <div class="ph9-f-out" id="ph9-f4-out">allocated</div>
+        </div>
+      </div>
+      <!-- Progress bar -->
+      <div class="ph9-progress-bar-wrap">
+        <div class="ph9-progress-bar" id="ph9-progress-bar"></div>
+      </div>
+    </div>
+
+    <!-- Live log -->
+    <div id="ph9-log-wrap" class="ph9-hidden" style="margin-top:18px;">
+      <div class="ph9-section-header">Live Log</div>
+      <div class="ph9-log" id="ph9-log"></div>
+    </div>
+  </div>
+
+  <!-- ── Results (hidden until campaign completes) ── -->
+  <div id="ph9-results-wrap" class="ph9-hidden">
+
+    <!-- Verdict banner -->
+    <div id="ph9-verdict" class="ph9-verdict-banner"></div>
+
+    <!-- Survivors table (shown only if there are survivors) -->
+    <div class="ph9-card" id="ph9-survivors-card" class="ph9-hidden">
+      <div class="ph9-card-title">Round 3 Survivors — Pending Independent Replication</div>
+      <div class="ph9-table-wrap">
+        <table class="ph9-table">
+          <thead>
+            <tr>
+              <th>Candidate</th>
+              <th>Feature</th>
+              <th>Type</th>
+              <th>p-value</th>
+              <th>Effect Size</th>
+              <th>Sample&nbsp;n</th>
+              <th>FDR&nbsp;α spent</th>
+              <th>Lockbox</th>
+            </tr>
+          </thead>
+          <tbody id="ph9-survivors-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Summary card -->
+    <div class="ph9-card">
+      <div class="ph9-card-title">Campaign Summary</div>
+      <pre id="ph9-summary-pre" style="margin:0;font-size:12px;font-family:monospace;color:#cdd6f4;white-space:pre-wrap;word-break:break-all;"></pre>
+    </div>
+
+  </div><!-- /#ph9-results-wrap -->
+
+</div><!-- /.ph9-wrap -->
+</div><!-- /#page-msdphase9 -->
 
 
 <div id="page-njanja" class="page">
@@ -25720,8 +25948,8 @@ function startTfTimers(){
 }
 
 function showPage(which){
-  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot", aggression:"page-aggression", mtf:"page-mtf", njanja:"page-njanja", rfabot:"page-rfabot", msdexplorer:"page-msdexplorer", msdfeatures:"page-msdfeatures", msdevents:"page-msdevents", msdinspector:"page-msdinspector", msddistribution:"page-msddistribution", msdcorrelation:"page-msdcorrelation", msdsearch:"page-msdsearch", msdexperiment:"page-msdexperiment", msdknowledge:"page-msdknowledge", msdvalidation:"page-msdvalidation", msdworkbench:"page-msdworkbench", msdphase8:"page-msdphase8" };
-  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot", aggression:"navAggression", mtf:"navMtf", njanja:"navNjanja", rfabot:"navRfaBot", msdexplorer:"navMsdExplorer", msdfeatures:"navMsdFeatures", msdevents:"navMsdEvents", msdinspector:"navMsdInspector", msddistribution:"navMsdDistribution", msdcorrelation:"navMsdCorrelation", msdsearch:"navMsdSearch", msdexperiment:"navMsdExperiment", msdknowledge:"navMsdKnowledge", msdvalidation:"navMsdValidation", msdworkbench:"navMsdWorkbench", msdphase8:"navMsdPhase8" };
+  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot", aggression:"page-aggression", mtf:"page-mtf", njanja:"page-njanja", rfabot:"page-rfabot", msdexplorer:"page-msdexplorer", msdfeatures:"page-msdfeatures", msdevents:"page-msdevents", msdinspector:"page-msdinspector", msddistribution:"page-msddistribution", msdcorrelation:"page-msdcorrelation", msdsearch:"page-msdsearch", msdexperiment:"page-msdexperiment", msdknowledge:"page-msdknowledge", msdvalidation:"page-msdvalidation", msdworkbench:"page-msdworkbench", msdphase8:"page-msdphase8", msdphase9:"page-msdphase9" };
+  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot", aggression:"navAggression", mtf:"navMtf", njanja:"navNjanja", rfabot:"navRfaBot", msdexplorer:"navMsdExplorer", msdfeatures:"navMsdFeatures", msdevents:"navMsdEvents", msdinspector:"navMsdInspector", msddistribution:"navMsdDistribution", msdcorrelation:"navMsdCorrelation", msdsearch:"navMsdSearch", msdexperiment:"navMsdExperiment", msdknowledge:"navMsdKnowledge", msdvalidation:"navMsdValidation", msdworkbench:"navMsdWorkbench", msdphase8:"navMsdPhase8", msdphase9:"navMsdPhase9" };
   Object.keys(pages).forEach(k => {
     document.getElementById(pages[k]).classList.toggle("active", k===which);
     const nav = document.getElementById(navs[k]); if (nav) nav.classList.toggle("active", k===which);
@@ -25819,6 +26047,9 @@ function showPage(which){
   }
   if (which === "msdphase8"){
     if (typeof ph8Boot === "function") ph8Boot();
+  }
+  if (which === "msdphase9"){
+    if (typeof window.ph9Boot === "function") window.ph9Boot();
   }
 }
 
@@ -33908,6 +34139,273 @@ window.ph8Boot = async function(){
 window.ph8Boot();
 
 })(); // end Phase 8 Integrity Module
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     PHASE 9 — Adaptive Scientific Discovery Engine
+     Module script that wires phase9CampaignOrchestrator.js into the page.
+     Auto-boots on load exactly like Phase 8; boot hook also called from
+     showPage('msdphase9') via window.ph9Boot.
+     ═══════════════════════════════════════════════════════════════════════ -->
+<script type="module">
+import {
+  bootstrapKnowledgeGraph,
+  generateCandidates,
+  runPhase9Campaign,
+} from './research/integration/phase9CampaignOrchestrator.js';
+
+// ── UI helpers ────────────────────────────────────────────────────────────
+
+function ph9El(id)       { return document.getElementById(id); }
+function ph9Show(id)     { const el = ph9El(id); if (el) el.classList.remove('ph9-hidden'); }
+function ph9Hide(id)     { const el = ph9El(id); if (el) el.classList.add('ph9-hidden'); }
+function ph9SetText(id, t) { const el = ph9El(id); if (el) el.textContent = t; }
+function ph9SetHTML(id, h) { const el = ph9El(id); if (el) el.innerHTML = h; }
+
+function ph9AppendLog(message, cls = '') {
+  const log = ph9El('ph9-log');
+  if (!log) return;
+  const p = document.createElement('p');
+  p.className = 'ph9-log-entry' + (cls ? ' ' + cls : '');
+  p.textContent = message;
+  log.appendChild(p);
+  log.scrollTop = log.scrollHeight;
+}
+
+function ph9SetProgress(pct) {
+  const bar = ph9El('ph9-progress-bar');
+  if (bar) bar.style.width = Math.min(100, Math.max(0, pct)) + '%';
+}
+
+function ph9SetStatus(msg) {
+  ph9SetText('ph9-status-label', msg);
+}
+
+function ph9UpdateFunnel(f0, f1, f2, f3, f4) {
+  if (f0 != null) ph9SetText('ph9-f0-in', f0);
+  if (f1 != null) { ph9SetText('ph9-f1-in', f1); ph9El('ph9-f1')?.classList.add('ph9-f-active'); }
+  if (f2 != null) { ph9SetText('ph9-f2-in', f2); ph9El('ph9-f2')?.classList.add('ph9-f-active'); }
+  if (f3 != null) { ph9SetText('ph9-f3-in', f3); ph9El('ph9-f3')?.classList.add('ph9-f-active'); }
+  if (f4 != null) { ph9SetText('ph9-f4-in', f4); ph9El('ph9-f4')?.classList.add('ph9-f-active'); }
+}
+
+// ── Readiness refresh ─────────────────────────────────────────────────────
+
+async function ph9RefreshReadiness() {
+  try {
+    if (typeof window.msdGetAllMarketStates !== 'function') {
+      ph9SetText('ph9-readiness-msg', 'MSD engine not loaded yet — readiness unavailable.');
+      return;
+    }
+    const allStates = await window.msdGetAllMarketStates();
+    ph9SetText('ph9-stat-total-val', (allStates.length || 0).toLocaleString());
+
+    const snap = window.msdBuildNcSnapshotRows(allStates, { filterCertainOnly: true });
+    const usable = snap.rows.length;
+    ph9SetText('ph9-stat-usable-val', usable.toLocaleString());
+
+    const statBox = ph9El('ph9-stat-usable');
+    if (statBox) {
+      statBox.classList.toggle('ph9-stat-ok',   usable >= 30);
+      statBox.classList.toggle('ph9-stat-warn',  usable <  30);
+    }
+
+    if (usable >= 30) {
+      ph9SetText('ph9-readiness-msg', `✓ ${usable.toLocaleString()} NC-eligible certain rows — campaign ready.`);
+      ph9SetHTML('ph9-readiness-msg', `<span style="color:#a6e3a1">✓ ${usable.toLocaleString()} NC-eligible &amp; certain rows — campaign ready.</span>`);
+    } else {
+      ph9SetHTML('ph9-readiness-msg',
+        `<span style="color:#f38ba8">⚠ Only ${usable} usable rows found. ` +
+        'Minimum 30 required. Continue the live scanner to capture more MarketStates.</span>'
+      );
+    }
+  } catch (e) {
+    ph9SetText('ph9-readiness-msg', 'Readiness check failed: ' + (e?.message ?? String(e)));
+  }
+}
+
+// ── Campaign runner ───────────────────────────────────────────────────────
+
+let ph9Running = false;
+
+async function ph9RunCampaignUI() {
+  if (ph9Running) return;
+  ph9Running = true;
+
+  const btn = ph9El('ph9-run-btn');
+  if (btn) btn.disabled = true;
+  ph9SetStatus('Initialising…');
+
+  // Reset UI
+  ph9Show('ph9-funnel-wrap');
+  ph9Show('ph9-log-wrap');
+  ph9Hide('ph9-results-wrap');
+
+  const log = ph9El('ph9-log');
+  if (log) log.innerHTML = '';
+
+  ['ph9-f1','ph9-f2','ph9-f3','ph9-f4'].forEach(id => {
+    ph9El(id)?.classList.remove('ph9-f-active','ph9-f-winner','ph9-f-null');
+  });
+  ['ph9-f1-in','ph9-f2-in','ph9-f3-in','ph9-f4-in'].forEach(id => ph9SetText(id, '—'));
+  ph9SetProgress(0);
+
+  const phaseProgress = {
+    bootstrap:  5,
+    dataset:    15,
+    candidates: 20,
+    round1:     40,
+    round2:     65,
+    round3:     90,
+    round4:     98,
+  };
+
+  try {
+    // Step A: load all states
+    ph9SetStatus('Loading MarketStates from IndexedDB…');
+    ph9AppendLog('Loading MarketStates from IndexedDB…', 'ph9-log-dim');
+    const allStates = await window.msdGetAllMarketStates();
+    ph9AppendLog(`Loaded ${allStates.length.toLocaleString()} MarketStates.`);
+    ph9SetProgress(5);
+
+    // Step B: run the campaign
+    ph9SetStatus('Running Phase 9 campaign…');
+    const result = await runPhase9Campaign(allStates, {
+      onProgress(ev) {
+        const pct = phaseProgress[ev.phase] ?? 0;
+        ph9SetProgress(pct);
+        ph9SetStatus(ev.phase.toUpperCase() + '…');
+        ph9AppendLog(`[${ev.phase}] ${ev.message}`);
+
+        if (ev.phase === 'candidates' && ev.candidateCount != null) {
+          ph9UpdateFunnel(ev.candidateCount, null, null, null, null);
+        }
+        if (ev.phase === 'round1' && ev.promoted != null) {
+          ph9UpdateFunnel(null, ev.promoted, null, null, null);
+        }
+        if (ev.phase === 'round2' && ev.registered != null) {
+          ph9UpdateFunnel(null, null, ev.registered, null, null);
+        }
+        if (ev.phase === 'round3' && ev.survivors != null) {
+          ph9UpdateFunnel(null, null, null, ev.survivors, null);
+          const el = ph9El('ph9-f3');
+          if (el) {
+            el.classList.remove('ph9-f-active');
+            el.classList.add(ev.survivors > 0 ? 'ph9-f-winner' : 'ph9-f-null');
+          }
+        }
+        if (ev.phase === 'round4' && ev.allocated != null) {
+          ph9UpdateFunnel(null, null, null, null, ev.allocated);
+        }
+      },
+    });
+
+    ph9SetProgress(100);
+    ph9SetStatus('Complete.');
+    ph9AppendLog('Campaign complete.', 'ph9-log-ok');
+
+    ph9RenderResult(result);
+
+  } catch (err) {
+    ph9SetProgress(0);
+    ph9SetStatus('Error — see log.');
+    ph9AppendLog('ERROR: ' + (err?.message ?? String(err)), 'ph9-log-err');
+    console.error('[ph9]', err);
+  } finally {
+    ph9Running = false;
+    if (btn) btn.disabled = false;
+    await ph9RefreshReadiness().catch(() => {});
+  }
+}
+
+// ── Result renderer ───────────────────────────────────────────────────────
+
+function ph9RenderResult(result) {
+  ph9Show('ph9-results-wrap');
+
+  // Verdict banner
+  const verdictEl = ph9El('ph9-verdict');
+  if (verdictEl) {
+    const isDiscovery = result.hasDiscovery;
+    verdictEl.className = 'ph9-verdict-banner ' +
+      (isDiscovery ? 'ph9-verdict-discovery' : 'ph9-verdict-null');
+    verdictEl.textContent = isDiscovery
+      ? '🟢 PHASE_9_DISCOVERY_CANDIDATE — Lockbox replication authorised for survivor(s).'
+      : '⬛ NULL_RESULT — No candidates cleared the Family Online FDR gate at Round 3.';
+  }
+
+  // Funnel final counts from result
+  if (result.round1) ph9UpdateFunnel(null, result.round1.promoted, null, null, null);
+  if (result.round2) ph9UpdateFunnel(null, null, result.round2.registered, null, null);
+  if (result.round3) ph9UpdateFunnel(null, null, null, result.round3.survivors, null);
+  if (result.round4) ph9UpdateFunnel(null, null, null, null, result.round4.allocated);
+
+  // Survivors table
+  const card  = ph9El('ph9-survivors-card');
+  const tbody = ph9El('ph9-survivors-tbody');
+  if (result.survivors && result.survivors.length > 0 && card && tbody) {
+    card.classList.remove('ph9-hidden');
+    tbody.innerHTML = result.survivors.map(s => {
+      const thrInfo = s.testType === 'threshold'
+        ? `${s.direction} ${(s.threshold != null ? s.threshold.toFixed(4) : '?')}`
+        : 'raw';
+      const pFmt  = s.pValue  != null ? s.pValue.toExponential(3)  : '?';
+      const efFmt = s.effectSize != null ? s.effectSize.toFixed(4) : '?';
+      const aFmt  = s.alphaSpent != null ? s.alphaSpent.toExponential(3) : '?';
+      const verdict = s.rejected
+        ? '<span class="ph9-badge-ok">SIGNIFICANT</span>'
+        : '<span class="ph9-badge-null">NOT SIG</span>';
+      return `<tr>
+        <td style="font-size:10px;word-break:break-all">${s.candidateKey}</td>
+        <td>${s.featureKey}</td>
+        <td>${thrInfo}</td>
+        <td>${pFmt}</td>
+        <td>${efFmt}</td>
+        <td>${(s.sampleSize ?? '?').toLocaleString()}</td>
+        <td>${aFmt}</td>
+        <td>${verdict}</td>
+      </tr>`;
+    }).join('');
+  } else if (card) {
+    card.classList.add('ph9-hidden');
+  }
+
+  // Summary
+  const summary = {
+    executedAt:      result.executedAt,
+    datasetRows:     result.datasetRows,
+    totalCandidates: result.totalCandidates,
+    round1:          result.round1,
+    round2:          result.round2,
+    round3:          result.round3,
+    round4:          result.round4,
+    verdict:         result.authorizationDecision,
+    survivorCount:   result.survivors?.length ?? 0,
+  };
+  ph9SetText('ph9-summary-pre', JSON.stringify(summary, null, 2));
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────
+
+let ph9Booted = false;
+
+async function ph9Boot() {
+  if (ph9Booted) {
+    // Re-entering page — refresh readiness only
+    await ph9RefreshReadiness().catch(e => console.warn('[ph9]', e));
+    return;
+  }
+  ph9Booted = true;
+  await ph9RefreshReadiness().catch(e => console.warn('[ph9]', e));
+}
+
+// Wire to window (showPage hook + onclick handlers call these directly)
+window.ph9Boot            = ph9Boot;
+window.ph9RunCampaignUI   = ph9RunCampaignUI;
+window.ph9RefreshReadiness = ph9RefreshReadiness;
+
+// Auto-boot: module scripts run after DOMContentLoaded, so the DOM is ready.
+ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
 </script>
 </body>
 </html>
