@@ -41,6 +41,13 @@ import {
 import { PromotionPolicy } from '../governance/PromotionPolicy.js';
 import { DecisionAuditLog } from '../governance/DecisionAuditLog.js';
 import { NegativeEvidenceRegistry } from '../governance/NegativeEvidenceRegistry.js';
+import { ReproducibilityGate } from '../governance/reproducibilityLevels.js';
+import { explainCandidate } from '../interpretation/ExplainabilityEngine.js';
+import { computeDiscoveryStabilityIndex } from '../analysis/DiscoveryStabilityAnalysis.js';
+import {
+  registerPhase11CandidateInKnowledgeGraph,
+  recordPhase11NegativeEvidenceInKnowledgeGraph,
+} from '../governance/phase11KnowledgeGraphBridge.js';
 
 export class NotYetIntegratedError extends Error {
   constructor(message) {
@@ -81,6 +88,10 @@ export class Phase11Orchestrator {
     this.decisionAuditLog = decisionAuditLog;
     this.negativeEvidenceRegistry = negativeEvidenceRegistry;
     this.promotionPolicy = new PromotionPolicy(sap, decisionAuditLog, negativeEvidenceRegistry);
+    /** @type {Map<string, object>} Campaign-scoped candidate registry, id -> latest known candidate instance. */
+    this._candidates = new Map();
+    /** @type {Map<string, object>} candidateId -> its registered Knowledge Graph node record, if synced. */
+    this._knowledgeGraphNodes = new Map();
 
     if (debtLog) {
       recordFunnelIntegrationDebt(debtLog);
@@ -100,7 +111,7 @@ export class Phase11Orchestrator {
   async generate({ candidateType, candidateParamsList, measurementRegistry = null }) {
     const results = [];
     for (const candidateParams of candidateParamsList) {
-      results.push(await generateCandidate({
+      const result = await generateCandidate({
         candidateType,
         candidateParams,
         researchFreeze: this.researchFreeze,
@@ -108,7 +119,9 @@ export class Phase11Orchestrator {
         familyRegistry: this.familyRegistry,
         decisionAuditLog: this.decisionAuditLog,
         measurementRegistry,
-      }));
+      });
+      this._candidates.set(result.candidate.id, result.candidate);
+      results.push(result);
     }
     return results;
   }
@@ -118,10 +131,12 @@ export class Phase11Orchestrator {
    * @see phase11FunnelBridge.runPhase11Screening
    */
   screen({ candidates, scoreFn, promotionQuantile, dataset }) {
-    return runPhase11Screening({
+    const result = runPhase11Screening({
       candidates, scoreFn, promotionPolicy: this.promotionPolicy,
       familyRegistry: this.familyRegistry, promotionQuantile, dataset,
     });
+    for (const c of [...result.promoted, ...result.rejected]) this._candidates.set(c.id, c);
+    return result;
   }
 
   /**
@@ -129,9 +144,162 @@ export class Phase11Orchestrator {
    * @see phase11FunnelBridge.runPhase11Triage
    */
   triage({ candidates, diagnosticsByCandidateId, dataset }) {
-    return runPhase11Triage({
+    const result = runPhase11Triage({
       promotionPolicy: this.promotionPolicy, candidates, diagnosticsByCandidateId, dataset,
     });
+    for (const c of [...result.promoted, ...result.rejected]) this._candidates.set(c.id, c);
+    return result;
+  }
+
+  /** @returns {object[]} All candidates currently known to this orchestrator, insertion order. */
+  listCandidates() {
+    return [...this._candidates.values()];
+  }
+
+  /** @returns {object|undefined} A single tracked candidate by id. */
+  getCandidate(candidateId) {
+    return this._candidates.get(candidateId);
+  }
+
+  /**
+   * Read-only summary for UI dashboards (Part 2 "Dashboard" requirements):
+   * counts by Phase 11 lifecycle stage plus the active research cycle
+   * identifiers. Computed entirely from this orchestrator's own in-memory
+   * registry -- never reads IndexedDB directly.
+   * @returns {object}
+   */
+  getCampaignSummary() {
+    const counts = { Generated: 0, Screened: 0, Triaged: 0, Confirmed: 0, Replicated: 0, Published: 0, Deprecated: 0 };
+    for (const c of this._candidates.values()) {
+      if (counts[c.lifecycle] !== undefined) counts[c.lifecycle]++;
+    }
+    return {
+      researchFreezeId: this.researchFreeze.id,
+      sapId: this.sap.sapId,
+      candidateCount: this._candidates.size,
+      countsByStage: counts,
+      confirmedCount: counts.Confirmed + counts.Replicated + counts.Published,
+      replicationCount: counts.Replicated + counts.Published,
+      publicationCount: counts.Published,
+    };
+  }
+
+  /**
+   * Syncs a candidate (and, on later calls, its rejections) into the
+   * Knowledge Graph via phase11KnowledgeGraphBridge -- Part 1 §1/§6
+   * integration. This is an explicit, caller-invoked sync step (not
+   * automatic on every generate/screen/triage call) so campaigns that
+   * never touch IndexedDB (e.g. pure in-memory unit tests) are not forced
+   * to pay for it.
+   *
+   * @param {object} candidate
+   * @param {object} [links] - @see phase11KnowledgeGraphBridge.registerPhase11CandidateInKnowledgeGraph
+   * @returns {Promise<object>} The registered Knowledge Graph node.
+   */
+  async syncKnowledgeGraph(candidate, links = {}) {
+    const node = await registerPhase11CandidateInKnowledgeGraph(candidate, links);
+    this._knowledgeGraphNodes.set(candidate.id, node);
+    return node;
+  }
+
+  /**
+   * Records a candidate's negative-evidence rejections into the Knowledge
+   * Graph, linked to its already-synced node (call syncKnowledgeGraph
+   * first). Part 1 §6: "must be available to the Knowledge Graph."
+   * @param {string} candidateId
+   * @returns {Promise<object[]>} The registered negative-evidence nodes.
+   */
+  async syncNegativeEvidenceToKnowledgeGraph(candidateId) {
+    const candidateNode = this._knowledgeGraphNodes.get(candidateId);
+    const candidate = this._candidates.get(candidateId);
+    const fingerprint = candidate?.fingerprint;
+    const entries = fingerprint ? this.negativeEvidenceRegistry.byFingerprint(fingerprint) : [];
+    const nodes = [];
+    for (const entry of entries) {
+      nodes.push(await recordPhase11NegativeEvidenceInKnowledgeGraph(candidateNode, entry));
+    }
+    return nodes;
+  }
+
+  /**
+   * Computes the Discovery Stability Index for a candidate from
+   * caller-supplied per-partition effect sizes -- Part 1 §5, delegates
+   * entirely to analysis/DiscoveryStabilityAnalysis.js.
+   * @see DiscoveryStabilityAnalysis.computeDiscoveryStabilityIndex
+   */
+  computeStability(partitionEffectSizes, pooledEffectSize) {
+    return computeDiscoveryStabilityIndex(partitionEffectSizes, pooledEffectSize);
+  }
+
+  /**
+   * Assembles the full ExplainabilityEngine explanation for a candidate --
+   * Part 1 §2. Pulls the candidate's own evidence tier/implementation
+   * maturity fields, its DecisionAuditLog trail, and (if a debtLog was
+   * supplied at construction) any open ScientificDebtLog items -- wiring
+   * these already-built pieces together without duplicating their logic.
+   *
+   * @param {object} candidate
+   * @param {object} explainInputs - Passed straight through to
+   *   ExplainabilityEngine.explainCandidate (plainEnglishSummary,
+   *   mathDefinition, contextDescription, interpretation, knownLimitations,
+   *   uncertainty, scientificImportance, tradingImportance,
+   *   discoveryStabilityIndex, operationalTradingNote).
+   * @returns {object} The full explanation record.
+   */
+  explain(candidate, explainInputs) {
+    const decisionAuditTrailRef = this.decisionAuditLog.forCandidate(candidate.id).map(e => e.toJSON());
+    return explainCandidate({ candidate, ...explainInputs, decisionAuditTrailRef });
+  }
+
+  /**
+   * Checks whether a candidate is eligible for publication -- Part 1 §4.
+   * Composes the existing ReproducibilityGate.check() (config/ontology/
+   * generator/proxy-version/fingerprint matching, already built in Phase A)
+   * with the additional checks the directive requires that the base gate
+   * does not itself cover: the candidate's own researchFreezeId/sapId
+   * match the currently active freeze/SAP, and (if supplied) the dataset
+   * manifest and context-version maps match. Returns the union of all
+   * failures in the same { passed, failures } shape as ReproducibilityGate
+   * for a consistent caller experience. Never spends alpha, never touches
+   * onlineFdr.js/discoveryDecision.js -- this is a reproducibility/
+   * bookkeeping check, not a statistical decision.
+   *
+   * @param {object} candidate
+   * @param {import('../config/ResearchConfiguration.js').ResearchConfiguration} publishTimeConfig
+   * @param {object} [options]
+   * @param {string|null} [options.currentDatasetSnapshotId=null]
+   * @param {{datasetId: string}|null} [options.datasetManifest=null] - Compared
+   *   against this.researchFreeze.datasetSnapshotId if both are present.
+   * @param {Object.<string,string>|null} [options.expectedContextVersions=null]
+   * @param {Object.<string,string>|null} [options.actualContextVersions=null]
+   * @returns {{ passed: boolean, failures: string[] }}
+   */
+  checkPublicationEligibility(candidate, publishTimeConfig, {
+    currentDatasetSnapshotId = null, datasetManifest = null,
+    expectedContextVersions = null, actualContextVersions = null,
+  } = {}) {
+    const base = ReproducibilityGate.check(candidate, publishTimeConfig, this.researchFreeze, { currentDatasetSnapshotId });
+    const failures = [...base.failures];
+
+    if (candidate.researchFreezeId !== this.researchFreeze.id) {
+      failures.push(`researchFreezeId mismatch: candidate="${candidate.researchFreezeId}", active="${this.researchFreeze.id}"`);
+    }
+    if (candidate.sapId !== this.sap.sapId) {
+      failures.push(`sapId mismatch: candidate="${candidate.sapId}", active="${this.sap.sapId}"`);
+    }
+    if (datasetManifest && this.researchFreeze.datasetSnapshotId && datasetManifest.datasetId !== this.researchFreeze.datasetSnapshotId) {
+      failures.push(`datasetManifest mismatch: manifest="${datasetManifest.datasetId}", frozen="${this.researchFreeze.datasetSnapshotId}"`);
+    }
+    if (expectedContextVersions && actualContextVersions) {
+      const keys = new Set([...Object.keys(expectedContextVersions), ...Object.keys(actualContextVersions)]);
+      for (const key of keys) {
+        if (expectedContextVersions[key] !== actualContextVersions[key]) {
+          failures.push(`contextVersions["${key}"] mismatch: expected="${expectedContextVersions[key]}", actual="${actualContextVersions[key]}"`);
+        }
+      }
+    }
+
+    return { passed: failures.length === 0, failures };
   }
 
   /**

@@ -34433,5 +34433,16 @@ window.ph9RefreshReadiness = ph9RefreshReadiness;
 // Auto-boot: module scripts run after DOMContentLoaded, so the DOM is ready.
 ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
 </script>
+
+<!-- Phase 11 MSD Lab: isolated UI mount point. All logic lives in research/src/ui/ -->
+<div id="phase11-root"></div>
+<script type="module">
+  import { mountPhase11 } from "./research/src/ui/Phase11Application.js";
+  try {
+    mountPhase11(document.getElementById("phase11-root"));
+  } catch (e) {
+    console.warn("[phase11]", e);
+  }
+</script>
 </body>
 </html>

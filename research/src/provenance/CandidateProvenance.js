@@ -72,6 +72,9 @@ function mergeInto(target, source) {
  * @param {string}   [params.researchFreezeId]         - Defaults to candidate.researchFreezeId.
  * @param {string}   [params.sapId]                    - Defaults to candidate.sapId.
  * @param {string}   [params.generatorVersion]         - Defaults to candidate.generatorVersion.
+ * @param {string}   [params.datasetManifestId=null]   - DatasetManifest.datasetId this candidate was built from.
+ * @param {Object.<string,string>} [params.contextVersions={}] - contextId -> version, attached as node metadata.
+ * @param {Object.<string,string>} [params.proxyVersions={}]   - proxyId -> version, attached as node metadata.
  * @param {Object.<string, ProvenanceDAG>} [params.componentProvenance={}]
  *   For CompositeCandidate only: map of componentId → that component's own
  *   ProvenanceDAG (if already built), merged in wholesale so lineage traces
@@ -88,6 +91,9 @@ export function buildCandidateProvenance(candidate, {
   researchFreezeId = candidate?.researchFreezeId,
   sapId = candidate?.sapId,
   generatorVersion = candidate?.generatorVersion,
+  datasetManifestId = null,
+  contextVersions = {},
+  proxyVersions = {},
   componentProvenance = {},
 } = {}) {
   if (!candidate || !candidate.id) {
@@ -119,14 +125,20 @@ export function buildCandidateProvenance(candidate, {
 
   // ── Contexts ──────────────────────────────────────────────────────────
   for (const contextId of contextIds) {
-    dag.addNode(contextId, { type: NODE_TYPES.CONTEXT, label: contextId });
+    dag.addNode(contextId, { type: NODE_TYPES.CONTEXT, label: contextId, metadata: { version: contextVersions[contextId] ?? null } });
     dag.addEdge(candidate.id, contextId);
   }
 
   // ── Proxies ───────────────────────────────────────────────────────────
   for (const proxyId of proxyIds) {
-    dag.addNode(proxyId, { type: NODE_TYPES.PROXY, label: proxyId });
+    dag.addNode(proxyId, { type: NODE_TYPES.PROXY, label: proxyId, metadata: { version: proxyVersions[proxyId] ?? null } });
     dag.addEdge(candidate.id, proxyId);
+  }
+
+  // ── Dataset manifest ──────────────────────────────────────────────────
+  if (datasetManifestId) {
+    dag.addNode(datasetManifestId, { type: NODE_TYPES.DATASET_MANIFEST, label: datasetManifestId });
+    dag.addEdge(candidate.id, datasetManifestId);
   }
 
   // ── Governance objects ───────────────────────────────────────────────

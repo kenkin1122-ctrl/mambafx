@@ -53,6 +53,7 @@ export const NODE_TYPES = Object.freeze({
   RESEARCH_CONFIGURATION: 'RESEARCH_CONFIGURATION',
   RESEARCH_FREEZE:        'RESEARCH_FREEZE',
   STATISTICAL_ANALYSIS_PLAN: 'STATISTICAL_ANALYSIS_PLAN',
+  DATASET_MANIFEST:       'DATASET_MANIFEST',
   GENERATOR:              'GENERATOR',               // generator/grammar version marker
 });
 
