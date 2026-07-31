@@ -50,7 +50,7 @@ export const PHASE11_CSS = Object.freeze({
 const STYLE_MARKER_ATTR = 'data-phase11-styles';
 
 const CSS_TEXT = `
-.${PHASE11_CSS.ROOT} { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1a1a1a; font-size: 14px; }
+.${PHASE11_CSS.ROOT} { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1a1a1a; font-size: 14px; background: #f7f8fa; border-radius: 8px; padding: 8px; }
 .${PHASE11_CSS.PANEL} { border: 1px solid #d8dce1; border-radius: 8px; margin: 8px 0; background: #fff; }
 .${PHASE11_CSS.PANEL_TITLE} { font-weight: 600; font-size: 13px; padding: 10px 12px; border-bottom: 1px solid #eef0f2; background: #f7f8fa; border-radius: 8px 8px 0 0; }
 .${PHASE11_CSS.PANEL_BODY} { padding: 10px 12px; }
@@ -58,9 +58,9 @@ const CSS_TEXT = `
 .${PHASE11_CSS.BUTTON_PRIMARY} { background: #2b6cb0; color: #fff; border-color: #2b6cb0; }
 .${PHASE11_CSS.TABLE} { width: 100%; border-collapse: collapse; font-size: 13px; }
 .${PHASE11_CSS.TABLE} th, .${PHASE11_CSS.TABLE} td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eef0f2; }
-.${PHASE11_CSS.TAB_BAR} { display: flex; gap: 4px; border-bottom: 1px solid #d8dce1; padding: 0 4px; }
-.${PHASE11_CSS.TAB} { padding: 8px 12px; cursor: pointer; border-bottom: 2px solid transparent; font-size: 13px; }
-.${PHASE11_CSS.TAB_ACTIVE} { border-bottom-color: #2b6cb0; font-weight: 600; }
+.${PHASE11_CSS.TAB_BAR} { display: flex; gap: 4px; border-bottom: 1px solid #d8dce1; padding: 8px 4px 0; background: #fff; border-radius: 8px 8px 0 0; }
+.${PHASE11_CSS.TAB} { padding: 8px 12px; cursor: pointer; border-bottom: 2px solid transparent; font-size: 13px; color: #4b5563; }
+.${PHASE11_CSS.TAB_ACTIVE} { border-bottom-color: #2b6cb0; font-weight: 600; color: #1a1a1a; }
 .${PHASE11_CSS.TAB_PANEL_HIDDEN} { display: none; }
 .${PHASE11_CSS.BADGE} { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; background: #eef0f2; }
 .${PHASE11_CSS.BADGE_WARN} { background: #fdf3d4; color: #92620a; }
