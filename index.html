@@ -26233,7 +26233,7 @@ function requestAllTimeframes(){
     tfData[tf.g] = [];
     const st = $("tf-status-" + tf.g); if (st) st.textContent = "loading…";
     tfWs.send(JSON.stringify({
-      ticks_history: SYMBOL, end: "latest", count: TF_COUNT,
+      ticks_history: _tickSubscriptionSymbol, end: "latest", count: TF_COUNT,
       style: "candles", granularity: tf.g, subscribe: 1, req_id: reqId
     }));
   });
@@ -26528,7 +26528,7 @@ let rfaReconnectTimer = null;
 
 function rfaConnect(){
   if (rfaWs && (rfaWs.readyState === 0 || rfaWs.readyState === 1)) return; // already connecting/open
-  try { rfaWs = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`); }
+  try { rfaWs = new WebSocket(`wss://api.derivws.com/trading/v1/options/ws/public`); }
   catch(e){ rfaScheduleReconnect(); return; }
   rfaWs.onopen = () => {
     rfaConnected = true;
