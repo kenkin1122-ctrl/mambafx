@@ -166,6 +166,20 @@ export class Phase11Orchestrator {
   }
 
   /**
+   * Updates a tracked candidate's registry entry to a new instance (e.g.
+   * after externally rebuilding a ResearchFreeze to include a candidate's
+   * fingerprint, and patching the candidate's researchFreezeId to match --
+   * see startPhase11Campaign.js). Does not itself decide or validate
+   * anything; it's a plain registry write, matching the internal pattern
+   * generate()/screen()/triage()/confirm()/replicate()/publish() already
+   * use on themselves.
+   * @param {object} candidate - Must have the same .id as an existing entry.
+   */
+  updateCandidate(candidate) {
+    this._candidates.set(candidate.id, candidate);
+  }
+
+  /**
    * Read-only summary for UI dashboards (Part 2 "Dashboard" requirements):
    * counts by Phase 11 lifecycle stage plus the active research cycle
    * identifiers. Computed entirely from this orchestrator's own in-memory

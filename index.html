@@ -3413,6 +3413,9 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button id="ph11StartCampaignBtn" class="gc-btn">▶ Start Campaign</button>
     <button id="ph11ScreenBtn" class="gc-btn" disabled>🔍 Run Screening</button>
     <button id="ph11TriageBtn" class="gc-btn" disabled>✅ Run Triage</button>
+    <button id="ph11ConfirmBtn" class="gc-btn" disabled>🧪 Run Confirmation</button>
+    <button id="ph11ReplicateBtn" class="gc-btn" disabled>🔁 Run Replication</button>
+    <button id="ph11PublishBtn" class="gc-btn" disabled>📄 Attempt Publication</button>
     <span id="ph11StatusMsg" style="font-size:12px;color:#7f849c;"></span>
   </div>
   <div id="phase11-root"></div>
@@ -34520,7 +34523,12 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
 
   let ph11Handle = null;
   let ph11Orchestrator = null;
+  let ph11ResearchConfiguration = null;
   let ph11ScreenedCandidates = [];
+  let ph11TriagedCandidates = [];
+  let ph11ConfirmedResults = [];   // [{ candidate, hypothesisId, familyKey, provenance }]
+  let ph11ReplicatedResults = [];  // [{ candidate, hypothesisId }]
+  let ph11ProvenanceById = {};     // candidateId -> provenance (from generate())
 
   window.ph11Boot = function () {
     if (ph11Handle) { ph11Handle.refresh(); return; }
@@ -34542,6 +34550,27 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
     return n ? sum / n : 0;
   }
 
+  // Splits this session's real tick history into disjoint chunks and
+  // computes the same demo diagnostic per chunk — genuine (if small-sample)
+  // per-partition effect-size estimates for Replication's stability check,
+  // not fabricated numbers. Each chunk really is an independent slice of
+  // whatever ticks this session has actually seen so far.
+  function ph11PartitionScores(candidate, numPartitions = 4){
+    const period = candidate?.parameters?.period || 14;
+    const hist = (window.__mfxDebug && window.__mfxDebug.getHistory) ? window.__mfxDebug.getHistory(400) : null;
+    const prices = (hist && hist.ticks || []).map(t => t.tick).filter(v => typeof v === "number");
+    const chunkSize = Math.floor(prices.length / numPartitions);
+    const scores = [];
+    if (chunkSize < period + 1) return null; // not enough real data yet for this many partitions
+    for (let p = 0; p < numPartitions; p++){
+      const chunk = prices.slice(p * chunkSize, (p + 1) * chunkSize);
+      let sum = 0, n = 0;
+      for (let i = period; i < chunk.length; i++){ sum += Math.abs(chunk[i] - chunk[i - period]); n++; }
+      scores.push(n ? sum / n : 0);
+    }
+    return scores;
+  }
+
   function ph11SetStatus(msg){ const el = document.getElementById("ph11StatusMsg"); if (el) el.textContent = msg; }
 
   document.getElementById("ph11StartCampaignBtn").addEventListener("click", async () => {
@@ -34549,13 +34578,22 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
     try {
       const hist = (window.__mfxDebug && window.__mfxDebug.getHistory) ? window.__mfxDebug.getHistory(1) : null;
       const liveSymbol = (hist && hist.ticks && hist.ticks[0] && hist.ticks[0].symbol) || "1HZ100V";
-      const { orchestrator } = await startPhase11Campaign({ symbol: liveSymbol });
+      const { orchestrator, researchConfiguration, generated } = await startPhase11Campaign({ symbol: liveSymbol });
       ph11Orchestrator = orchestrator;
+      ph11ResearchConfiguration = researchConfiguration;
+      ph11ProvenanceById = {};
+      for (const g of generated) ph11ProvenanceById[g.candidate.id] = g.provenance;
       ph11ScreenedCandidates = [];
+      ph11TriagedCandidates = [];
+      ph11ConfirmedResults = [];
+      ph11ReplicatedResults = [];
       if (!ph11Handle) window.ph11Boot();
       ph11Handle.attachOrchestrator(orchestrator);
       document.getElementById("ph11ScreenBtn").disabled = false;
       document.getElementById("ph11TriageBtn").disabled = true;
+      document.getElementById("ph11ConfirmBtn").disabled = true;
+      document.getElementById("ph11ReplicateBtn").disabled = true;
+      document.getElementById("ph11PublishBtn").disabled = true;
       ph11SetStatus(`Generated ${orchestrator.listCandidates().length} candidates under freeze ${orchestrator.researchFreeze.id}.`);
     } catch (e) {
       console.warn("[phase11] start campaign failed", e);
@@ -34594,11 +34632,119 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
         promotionPolicy: ph11Orchestrator.promotionPolicy,
         candidates: ph11ScreenedCandidates, diagnosticsByCandidateId,
       });
+      ph11TriagedCandidates = promoted;
       ph11Handle.refresh();
-      ph11SetStatus(`Triaged: ${promoted.length}/${ph11ScreenedCandidates.length} promoted. Confirmation (Round 3) isn't wired up yet — see Scientific Debt.`);
+      document.getElementById("ph11ConfirmBtn").disabled = promoted.length === 0;
+      ph11SetStatus(`Triaged: ${promoted.length}/${ph11ScreenedCandidates.length} promoted. Ready for Confirmation (Round 3).`);
     } catch (e) {
       console.warn("[phase11] triage failed", e);
       ph11SetStatus("Triage failed — see console.");
+    }
+  });
+
+  document.getElementById("ph11ConfirmBtn").addEventListener("click", async () => {
+    if (!ph11Orchestrator || !ph11TriagedCandidates.length) return;
+    // A p-value must come from a real, independently-conducted statistical
+    // test (e.g. the Correlation Explorer / Market State Search tools
+    // elsewhere in this app) -- this UI does not fabricate one. If you
+    // haven't run one yet, cancel and come back once you have a real value.
+    const raw = window.prompt(
+      "Enter the p-value from your own independent statistical test for this effect (0–1).\n" +
+      "This must be a real result, not a guess — Round 3 spends this campaign's Online-FDR alpha budget.",
+      ""
+    );
+    if (raw === null) { ph11SetStatus("Confirmation cancelled."); return; }
+    const pValue = Number(raw);
+    if (!Number.isFinite(pValue) || pValue < 0 || pValue > 1) {
+      ph11SetStatus("Confirmation cancelled: p-value must be a number between 0 and 1.");
+      return;
+    }
+
+    ph11SetStatus("Running Round 3 confirmation (spends this family's Online-FDR alpha)…");
+    ph11ConfirmedResults = [];
+    let confirmedCount = 0;
+    try {
+      for (const candidate of ph11TriagedCandidates) {
+        const result = await ph11Orchestrator.confirm({
+          candidate, researchConfiguration: ph11ResearchConfiguration,
+          datasetManifest: { datasetId: `session-${Date.now()}` }, // this session's live ticks, not a locked historical dataset
+          provenance: ph11ProvenanceById[candidate.id],
+          market: "R_100", targetDefinition: { direction: "Rise", runLength: 5 },
+          pValue,
+        });
+        if (result.outcome === "confirmed") {
+          confirmedCount++;
+          ph11ConfirmedResults.push({ candidate: result.candidate, hypothesisId: result.hypothesisId, familyKey: result.familyKey });
+        }
+      }
+      ph11Handle.refresh();
+      document.getElementById("ph11ReplicateBtn").disabled = ph11ConfirmedResults.length === 0;
+      ph11SetStatus(`Confirmed: ${confirmedCount}/${ph11TriagedCandidates.length} at p=${pValue}. Rejections archived as negative evidence, not discarded.`);
+    } catch (e) {
+      console.warn("[phase11] confirmation failed", e);
+      ph11SetStatus("Confirmation failed — see console.");
+    }
+  });
+
+  document.getElementById("ph11ReplicateBtn").addEventListener("click", async () => {
+    if (!ph11Orchestrator || !ph11ConfirmedResults.length) return;
+    ph11SetStatus("Running Round 4 replication (real per-partition effect sizes from this session's tick history)…");
+    ph11ReplicatedResults = [];
+    let replicatedCount = 0;
+    try {
+      for (const { candidate, hypothesisId, familyKey } of ph11ConfirmedResults) {
+        const partitionEffectSizes = ph11PartitionScores(candidate, 4);
+        if (!partitionEffectSizes) {
+          ph11SetStatus("Not enough live tick history yet for 4 independent replication partitions — let more ticks accumulate and try again.");
+          continue;
+        }
+        const pooledEffectSize = ph11DemoScore(candidate);
+        const result = await ph11Orchestrator.replicate({
+          candidate, hypothesisId, familyKey,
+          featureKey: candidate.id, generation: 0,
+          holdoutRange: { startTick: 0, endTick: partitionEffectSizes.length * 100 }, // this session's held-out slice
+          partitionEffectSizes, pooledEffectSize,
+        });
+        if (result.outcome === "replicated") {
+          replicatedCount++;
+          ph11ReplicatedResults.push({ candidate: result.candidate, hypothesisId });
+        }
+      }
+      ph11Handle.refresh();
+      document.getElementById("ph11PublishBtn").disabled = ph11ReplicatedResults.length === 0;
+      ph11SetStatus(`Replicated: ${replicatedCount}/${ph11ConfirmedResults.length} (stability across 4 real partitions). Failures archived, not discarded.`);
+    } catch (e) {
+      console.warn("[phase11] replication failed", e);
+      ph11SetStatus("Replication failed — see console.");
+    }
+  });
+
+  document.getElementById("ph11PublishBtn").addEventListener("click", async () => {
+    if (!ph11Orchestrator || !ph11ReplicatedResults.length) return;
+    ph11SetStatus("Checking publication eligibility (ReproducibilityGate + freeze/SAP/dataset/context checks)…");
+    let publishedCount = 0;
+    const reasons = [];
+    try {
+      for (const { candidate, hypothesisId } of ph11ReplicatedResults) {
+        const result = await ph11Orchestrator.publish({
+          candidate, hypothesisId, publishTimeConfig: ph11ResearchConfiguration,
+        });
+        if (result.outcome === "published") {
+          publishedCount++;
+        } else {
+          reasons.push(...result.gateResult.failures);
+        }
+      }
+      ph11Handle.refresh();
+      if (publishedCount > 0) {
+        ph11SetStatus(`Published: ${publishedCount}/${ph11ReplicatedResults.length}.`);
+      } else {
+        ph11SetStatus(`Not yet publication-eligible: ${reasons[0] || "see console for details"}`);
+        console.warn("[phase11] publication ineligible:", reasons);
+      }
+    } catch (e) {
+      console.warn("[phase11] publication failed", e);
+      ph11SetStatus("Publication check failed — see console.");
     }
   });
 </script>

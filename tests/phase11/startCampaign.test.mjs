@@ -49,6 +49,17 @@ test('startPhase11Campaign: accepts a custom indicator candidate list', async ()
   assert.equal(generated[0].candidate.id, 'rsi-7-close');
 });
 
+test('startPhase11Campaign: rebuilds the freeze to include generated candidates\' fingerprints (ReproducibilityGate precondition)', async () => {
+  const { researchFreeze, generated, orchestrator } = await startPhase11Campaign();
+  for (const { candidate } of generated) {
+    assert.ok(researchFreeze.candidateFingerprints.includes(candidate.fingerprint));
+    assert.equal(candidate.researchFreezeId, researchFreeze.id);
+    // The orchestrator's own registry was updated to match, not left stale.
+    assert.equal(orchestrator.getCandidate(candidate.id).researchFreezeId, researchFreeze.id);
+  }
+  assert.equal(orchestrator.researchFreeze.id, researchFreeze.id);
+});
+
 test('startPhase11Campaign + runPhase11Screening/Triage: full pipeline with a real, caller-supplied scoreFn', async () => {
   const { orchestrator, generated } = await startPhase11Campaign();
   const candidates = generated.map((g) => g.candidate);

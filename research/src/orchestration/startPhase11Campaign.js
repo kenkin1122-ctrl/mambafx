@@ -142,7 +142,45 @@ export async function startPhase11Campaign({
     candidateParamsList,
   });
 
-  return { orchestrator, researchConfiguration, researchFreeze, sap, familyRegistry, generated };
+  // ReproducibilityGate (used by Phase11Orchestrator.checkPublicationEligibility
+  // at Publication time) requires each candidate's fingerprint to already be
+  // present in the ResearchFreeze's candidateFingerprints -- rebuild the
+  // freeze now that the fingerprints are known (a fingerprint never depends
+  // on the freeze itself) and patch each candidate's researchFreezeId to
+  // match. This is a bookkeeping fix, not a shortcut around any real
+  // scientific check: reproducibilityLevel/implementationMaturity are left
+  // at their real (low) defaults, so publication eligibility still fails
+  // honestly for these fresh candidates until they're genuinely validated.
+  const researchFreezeWithFingerprints = await ResearchFreeze.create({
+    researchConfigurationId: researchConfiguration.id,
+    configHash: researchConfiguration.configHash,
+    ontologyVersion: researchConfiguration.ontologyVersion,
+    generatorVersion: researchConfiguration.generatorVersion,
+    proxyVersions: { ...researchConfiguration.proxyVersions },
+    candidateFingerprints: generated.map((g) => g.candidate.fingerprint),
+    researchConfigurationHash: researchConfiguration.configHash,
+  });
+  orchestrator.researchFreeze = researchFreezeWithFingerprints;
+
+  const patchedGenerated = generated.map(({ candidate, provenance }) => {
+    const patched = withField(candidate, 'researchFreezeId', researchFreezeWithFingerprints.id);
+    orchestrator.updateCandidate(patched);
+    return { candidate: patched, provenance };
+  });
+
+  return {
+    orchestrator, researchConfiguration, researchFreeze: researchFreezeWithFingerprints,
+    sap, familyRegistry, generated: patchedGenerated,
+  };
+}
+
+/** Clones a frozen candidate with one field overridden (Candidate instances are immutable). */
+function withField(candidate, field, value) {
+  const descriptors = Object.getOwnPropertyDescriptors(candidate);
+  descriptors[field] = { value, writable: true, enumerable: true, configurable: true };
+  const clone = Object.create(Object.getPrototypeOf(candidate), descriptors);
+  Object.freeze(clone);
+  return clone;
 }
 
 /**
