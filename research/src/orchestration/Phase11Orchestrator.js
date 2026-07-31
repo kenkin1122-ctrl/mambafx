@@ -51,6 +51,7 @@ import {
 import { confirmPhase11Candidate } from '../bridge/Phase11ConfirmationBridge.js';
 import { replicatePhase11Candidate } from '../bridge/Phase11ReplicationBridge.js';
 import { publishPhase11Candidate } from '../bridge/Phase11PublicationBridge.js';
+import { runRngForensicsForCandidate, characterizeConfirmedCandidate } from '../bridge/Phase11ScientificCharacterization.js';
 
 export class NotYetIntegratedError extends Error {
   constructor(message) {
@@ -402,5 +403,30 @@ export class Phase11Orchestrator {
       this._candidates.set(result.candidate.id, result.candidate);
     }
     return result;
+  }
+
+  /**
+   * Runs RNG Forensics for a Confirmed+ candidate -- see
+   * bridge/Phase11ScientificCharacterization.js. Thin wrapper; computes
+   * nothing itself, forwards caller-supplied sub-check results to the
+   * existing discovery/rngForensics.js.
+   * @param {object} candidate
+   * @param {string} hypothesisId
+   * @param {object} subChecks
+   * @returns {Promise<object>} The recorded RngForensicsResults row.
+   */
+  async runRngForensics(candidate, hypothesisId, subChecks) {
+    return runRngForensicsForCandidate(candidate, hypothesisId, subChecks);
+  }
+
+  /**
+   * Composes Discovery Stability Analysis, Importance Scoring, and
+   * Explainability for a Confirmed+ candidate -- see
+   * bridge/Phase11ScientificCharacterization.js.
+   * @param {object} params - See Phase11ScientificCharacterization.characterizeConfirmedCandidate.
+   * @returns {Promise<object>}
+   */
+  async characterize(params = {}) {
+    return characterizeConfirmedCandidate(params);
   }
 }

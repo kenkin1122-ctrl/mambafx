@@ -58,6 +58,7 @@ export const PHASE11_NODE_TYPES = Object.freeze({
   DECISION_AUDIT:            'Phase11DecisionAudit',
   DISCOVERY:                 'Phase11Discovery',
   PUBLICATION:               'Phase11Publication',
+  CHARACTERIZATION:          'Phase11Characterization',
 });
 
 /** Phase 11 edge type strings, additive to knowledgeGraph.js's EDGE_TYPES. */
@@ -71,6 +72,7 @@ export const PHASE11_EDGE_TYPES = Object.freeze({
   FLAGGED_BY:     'phase11_flagged_by',     // Candidate -flaggedBy-> ScientificDebt
   CONFIRMED_AS:   'phase11_confirmed_as',   // Candidate -confirmedAs-> Discovery
   PUBLISHED_AS:   'phase11_published_as',   // Discovery -publishedAs-> Publication
+  CHARACTERIZED_BY: 'phase11_characterized_by', // Discovery -characterizedBy-> Characterization
 });
 
 const CANDIDATE_TYPE_TO_NODE_TYPE = Object.freeze({
@@ -203,6 +205,43 @@ export async function registerPhase11PublicationInKnowledgeGraph(discoveryNode, 
     await registerEdge({ edgeType: PHASE11_EDGE_TYPES.PUBLISHED_AS, fromNodeId: discoveryNode.id, toNodeId: publicationNode.id });
   }
   return publicationNode;
+}
+
+/**
+ * Registers a post-confirmation scientific characterization as a NEW,
+ * append-only Knowledge Graph record linked to the Discovery node --
+ * NOT a mutation of the Discovery node's own metadata. registerNode() is
+ * write-once (returns the existing row unchanged if the same nodeType+
+ * refId is registered again -- confirmed by reading its implementation),
+ * matching this codebase's audit-trail discipline (DecisionAuditLog,
+ * RngForensicsResults, etc. are all append-only histories, not mutable
+ * fields). Every characterization run (e.g. a later re-computation with
+ * more data) therefore gets its own timestamped node, never overwriting
+ * a prior one.
+ *
+ * @param {object} discoveryNode - The record returned by
+ *   registerPhase11DiscoveryInKnowledgeGraph.
+ * @param {object} characterization
+ * @param {number} [characterization.stabilityIndex]
+ * @param {number} [characterization.scientificImportance]
+ * @param {number} [characterization.tradingImportance]
+ * @param {string} [characterization.rngForensicsClassification]
+ * @returns {Promise<object>} The registered Characterization node record.
+ */
+export async function registerPhase11CharacterizationInKnowledgeGraph(discoveryNode, {
+  stabilityIndex = null, scientificImportance = null, tradingImportance = null, rngForensicsClassification = null,
+} = {}) {
+  const refId = `${discoveryNode?.refId ?? 'unknown'}:${Date.now()}`;
+  const characterizationNode = await registerNode({
+    nodeType: PHASE11_NODE_TYPES.CHARACTERIZATION,
+    refId,
+    label: `Characterization: ${refId}`,
+    metadata: { stabilityIndex, scientificImportance, tradingImportance, rngForensicsClassification, computedAt: Date.now() },
+  });
+  if (discoveryNode && discoveryNode.id) {
+    await registerEdge({ edgeType: PHASE11_EDGE_TYPES.CHARACTERIZED_BY, fromNodeId: discoveryNode.id, toNodeId: characterizationNode.id });
+  }
+  return characterizationNode;
 }
 
 /**
