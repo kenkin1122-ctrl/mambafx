@@ -50,28 +50,29 @@ export const PHASE11_CSS = Object.freeze({
 const STYLE_MARKER_ATTR = 'data-phase11-styles';
 
 const CSS_TEXT = `
-.${PHASE11_CSS.ROOT} { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1a1a1a; font-size: 14px; background: #f7f8fa; border-radius: 8px; padding: 8px; }
-.${PHASE11_CSS.PANEL} { border: 1px solid #d8dce1; border-radius: 8px; margin: 8px 0; background: #fff; }
-.${PHASE11_CSS.PANEL_TITLE} { font-weight: 600; font-size: 13px; padding: 10px 12px; border-bottom: 1px solid #eef0f2; background: #f7f8fa; border-radius: 8px 8px 0 0; }
-.${PHASE11_CSS.PANEL_BODY} { padding: 10px 12px; }
-.${PHASE11_CSS.BUTTON} { border: 1px solid #c9ccd1; border-radius: 6px; background: #fff; padding: 6px 12px; cursor: pointer; font-size: 13px; }
-.${PHASE11_CSS.BUTTON_PRIMARY} { background: #2b6cb0; color: #fff; border-color: #2b6cb0; }
-.${PHASE11_CSS.TABLE} { width: 100%; border-collapse: collapse; font-size: 13px; }
-.${PHASE11_CSS.TABLE} th, .${PHASE11_CSS.TABLE} td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eef0f2; }
-.${PHASE11_CSS.TAB_BAR} { display: flex; gap: 4px; border-bottom: 1px solid #d8dce1; padding: 8px 4px 0; background: #fff; border-radius: 8px 8px 0 0; }
-.${PHASE11_CSS.TAB} { padding: 8px 12px; cursor: pointer; border-bottom: 2px solid transparent; font-size: 13px; color: #4b5563; }
-.${PHASE11_CSS.TAB_ACTIVE} { border-bottom-color: #2b6cb0; font-weight: 600; color: #1a1a1a; }
-.${PHASE11_CSS.TAB_PANEL_HIDDEN} { display: none; }
-.${PHASE11_CSS.BADGE} { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; background: #eef0f2; }
-.${PHASE11_CSS.BADGE_WARN} { background: #fdf3d4; color: #92620a; }
-.${PHASE11_CSS.BADGE_OK} { background: #dcf5e3; color: #15703d; }
-.${PHASE11_CSS.BADGE_FAIL} { background: #fbe1e1; color: #a3231f; }
-.${PHASE11_CSS.DISCLAIMER} { font-size: 11px; color: #6b7280; border-top: 1px dashed #d8dce1; margin-top: 8px; padding-top: 6px; }
-.${PHASE11_CSS.EMPTY} { color: #8b909a; font-style: italic; padding: 8px 0; }
-.${PHASE11_CSS.ROW} { display: flex; justify-content: space-between; padding: 3px 0; }
-.${PHASE11_CSS.LABEL} { color: #6b7280; }
-.${PHASE11_CSS.VALUE} { font-weight: 500; }
-.${PHASE11_CSS.GRID} { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.${PHASE11_CSS.ROOT} { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important; color: #cdd6f4 !important; font-size: 14px !important; background: #0a0e1a !important; border-radius: 8px !important; padding: 8px !important; }
+.${PHASE11_CSS.PANEL} { border: 1px solid #1e2d55 !important; border-radius: 10px !important; margin: 8px 0 !important; background: #11162a !important; }
+.${PHASE11_CSS.PANEL_TITLE} { font-weight: 700 !important; font-size: 12px !important; text-transform: uppercase !important; letter-spacing: .05em !important; padding: 10px 12px !important; border-bottom: 1px solid #1e2d55 !important; background: #0d1120 !important; color: #cba6f7 !important; border-radius: 10px 10px 0 0 !important; }
+.${PHASE11_CSS.PANEL_BODY} { padding: 10px 12px !important; color: #cdd6f4 !important; }
+.${PHASE11_CSS.BUTTON} { border: 1px solid #313866 !important; border-radius: 6px !important; background: #0d1120 !important; color: #cdd6f4 !important; padding: 6px 12px !important; cursor: pointer !important; font-size: 13px !important; }
+.${PHASE11_CSS.BUTTON_PRIMARY} { background: #89b4fa !important; color: #0a0e1a !important; border-color: #89b4fa !important; font-weight: 600 !important; }
+.${PHASE11_CSS.TABLE} { width: 100% !important; border-collapse: collapse !important; font-size: 13px !important; color: #cdd6f4 !important; }
+.${PHASE11_CSS.TABLE} th, .${PHASE11_CSS.TABLE} td { text-align: left !important; padding: 6px 8px !important; border-bottom: 1px solid #1e2d55 !important; color: #cdd6f4 !important; }
+.${PHASE11_CSS.TABLE} th { color: #89b4fa !important; font-size: 11px !important; text-transform: uppercase !important; letter-spacing: .05em !important; }
+.${PHASE11_CSS.TAB_BAR} { display: flex !important; gap: 4px !important; border-bottom: 1px solid #1e2d55 !important; padding: 8px 4px 0 !important; background: #0d1120 !important; border-radius: 8px 8px 0 0 !important; }
+.${PHASE11_CSS.TAB} { padding: 8px 12px !important; cursor: pointer !important; border-bottom: 2px solid transparent !important; font-size: 13px !important; color: #7f849c !important; background: transparent !important; }
+.${PHASE11_CSS.TAB_ACTIVE} { border-bottom-color: #cba6f7 !important; font-weight: 700 !important; color: #cba6f7 !important; }
+.${PHASE11_CSS.TAB_PANEL_HIDDEN} { display: none !important; }
+.${PHASE11_CSS.BADGE} { display: inline-block !important; padding: 2px 8px !important; border-radius: 10px !important; font-size: 11px !important; background: #1e2d55 !important; color: #cdd6f4 !important; }
+.${PHASE11_CSS.BADGE_WARN} { background: #45341a !important; color: #f9c96a !important; }
+.${PHASE11_CSS.BADGE_OK} { background: #1c3a2a !important; color: #a6e3a1 !important; }
+.${PHASE11_CSS.BADGE_FAIL} { background: #3a1c22 !important; color: #f38ba8 !important; }
+.${PHASE11_CSS.DISCLAIMER} { font-size: 11px !important; color: #6c7086 !important; border-top: 1px dashed #1e2d55 !important; margin-top: 8px !important; padding-top: 6px !important; }
+.${PHASE11_CSS.EMPTY} { color: #6c7086 !important; font-style: italic !important; padding: 8px 0 !important; }
+.${PHASE11_CSS.ROW} { display: flex !important; justify-content: space-between !important; padding: 3px 0 !important; color: #cdd6f4 !important; }
+.${PHASE11_CSS.LABEL} { color: #7f849c !important; }
+.${PHASE11_CSS.VALUE} { font-weight: 500 !important; color: #cdd6f4 !important; }
+.${PHASE11_CSS.GRID} { display: grid !important; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)) !important; gap: 8px !important; }
 `;
 
 /**
