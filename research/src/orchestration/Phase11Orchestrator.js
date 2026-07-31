@@ -49,6 +49,7 @@ import {
   recordPhase11NegativeEvidenceInKnowledgeGraph,
 } from '../governance/phase11KnowledgeGraphBridge.js';
 import { confirmPhase11Candidate } from '../bridge/Phase11ConfirmationBridge.js';
+import { replicatePhase11Candidate } from '../bridge/Phase11ReplicationBridge.js';
 
 export class NotYetIntegratedError extends Error {
   constructor(message) {
@@ -355,6 +356,30 @@ export class Phase11Orchestrator {
       knowledgeGraphCandidateNode,
     });
 
+    this._candidates.set(result.candidate.id, result.candidate);
+    return result;
+  }
+
+  /**
+   * Bridges a Confirmed candidate through the existing Lockbox replication
+   * framework -- see bridge/Phase11ReplicationBridge.js. Updates this
+   * orchestrator's candidate registry with the resulting Replicated or
+   * Deprecated candidate. Spends no additional alpha; the replication
+   * verdict is computed by analysis/DiscoveryStabilityAnalysis.js.
+   *
+   * @param {object} params - See Phase11ReplicationBridge.replicatePhase11Candidate
+   *   (candidate, hypothesisId, familyKey, featureKey, generation,
+   *   holdoutRange, partitionEffectSizes, pooledEffectSize, minStabilityIndex,
+   *   rangeOverlapsFn, allocatedBy, datasetId).
+   * @returns {Promise<{ outcome: 'replicated'|'failed', candidate: object, hypothesisId: string, stability: object, lockboxAllocation: object, lockboxConsumption: object }>}
+   */
+  async replicate(params = {}) {
+    const result = await replicatePhase11Candidate({
+      ...params,
+      sap: this.sap,
+      decisionAuditLog: this.decisionAuditLog,
+      negativeEvidenceRegistry: this.negativeEvidenceRegistry,
+    });
     this._candidates.set(result.candidate.id, result.candidate);
     return result;
   }
