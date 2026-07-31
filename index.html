@@ -3824,17 +3824,52 @@ function restoreState(data){
 // not the other, so we alternate endpoints on each retry and use a
 // connection timeout to avoid hanging forever on "Connecting…".
 //
-// A third candidate (api.derivws.com's public endpoint) is included per
-// Deriv support's own guidance that the legacy v3 hosts are being phased
-// out for some connections. It's listed alongside, not instead of, the
-// legacy hosts: if it doesn't work for any reason (e.g. it turns out to
-// need a header a browser can't set), the rotation still falls back to
-// the classic endpoints on the next retry rather than getting stuck.
+// The new api.derivws.com public endpoint is tried FIRST per Deriv
+// support's guidance that the legacy v3 hosts are being phased out. It's
+// listed alongside, not instead of, the legacy hosts: if it fails to
+// connect at all, the existing timeout/retry logic falls back to them.
 const WS_ENDPOINTS = [
+  `wss://api.derivws.com/trading/v1/options/ws/public`,
   `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`,
   `wss://ws.binaryws.com/websockets/v3?app_id=${APP_ID}`,
-  `wss://api.derivws.com/trading/v1/options/ws/public`,
 ];
+// The new endpoint doesn't take app_id in the URL — this is how we tell,
+// at runtime, which subscription flow a given open connection needs.
+function _isNewPublicEndpoint(u){ return u.includes("api.derivws.com/trading"); }
+
+// The new endpoint's active_symbols response uses `underlying_symbol`
+// instead of `symbol`/`display_name` isn't guaranteed present either — this
+// normalises both shapes so the rest of the code doesn't care which API
+// answered.
+function _symFields(s){
+  const sym = s.underlying_symbol || s.symbol || "";
+  const dname = s.display_name || s.underlying_symbol || s.symbol || "";
+  return { sym, dname };
+}
+
+// Finds the active_symbols entry that corresponds to our internal MARKETS
+// key (e.g. "1HZ100V" -> "Volatility 100 (1s)"), since the new endpoint may
+// use different symbol codes than the legacy API for the same product.
+// Matches loosely on the volatility number and the "(1s)" tick-speed tag
+// rather than assuming any specific naming scheme.
+function _findDiscoveredSymbol(list, marketKey){
+  const wantedLabel = (MARKETS[marketKey] || "").toLowerCase();
+  const wantedNumber = (wantedLabel.match(/\d+/) || [])[0];
+  const wantsOneSecond = /\(1s\)/.test(wantedLabel);
+  for (const raw of list){
+    const { sym, dname } = _symFields(raw);
+    if (!sym) continue;
+    const lname = (dname || "").toLowerCase();
+    const looksVolatility = lname.includes("volatility") || /^r_/i.test(sym) || /^1hz/i.test(sym);
+    if (!looksVolatility) continue;
+    const hasOneSecond = /1s\b|1-second|1 second/.test(lname) || /^1hz/i.test(sym);
+    if (wantedNumber && lname.includes(wantedNumber) && wantsOneSecond === hasOneSecond) return sym;
+  }
+  return null;
+}
+let _tickSubscriptionSymbol = SYMBOL; // the symbol code we actually subscribed with (may differ from SYMBOL if discovered)
+let _activeSymbolsReqId = 900001;
+
 let _endpointIdx = 0;
 let _connectTimeout = null;
 
@@ -3862,9 +3897,16 @@ function connect(){
     if (_connectTimeout){ clearTimeout(_connectTimeout); _connectTimeout = null; }
     setConn("live");
     console.log("[deriv ws] connected via", url);
-    // forget a tick subscription we might already have, then subscribe fresh
-    ws.send(JSON.stringify({ forget_all: "ticks" }));
-    ws.send(JSON.stringify({ ticks: SYMBOL, subscribe: 1 }));
+    if (_isNewPublicEndpoint(url)){
+      // New endpoint: don't assume the legacy symbol code still applies —
+      // ask Deriv what it's actually called first.
+      console.log("[deriv ws] requesting active_symbols to resolve the real symbol code for", SYMBOL);
+      ws.send(JSON.stringify({ active_symbols: "brief", req_id: _activeSymbolsReqId }));
+    } else {
+      _tickSubscriptionSymbol = SYMBOL;
+      ws.send(JSON.stringify({ forget_all: "ticks" }));
+      ws.send(JSON.stringify({ ticks: SYMBOL, subscribe: 1 }));
+    }
   };
   ws.onmessage = ev => {
     let msg; try { msg = JSON.parse(ev.data); } catch(_) { return; }
@@ -3874,7 +3916,20 @@ function connect(){
       console.warn("Deriv API error:", msg.error.message, "(endpoint:", url, ")");
       return;
     }
-    if (msg.msg_type === "tick" && msg.tick && msg.tick.symbol === SYMBOL){
+    if (msg.msg_type === "active_symbols" && msg.req_id === _activeSymbolsReqId){
+      console.log("[deriv ws] active_symbols returned", (msg.active_symbols || []).length, "entries — raw list:", msg.active_symbols);
+      const discovered = _findDiscoveredSymbol(msg.active_symbols || [], SYMBOL);
+      if (discovered){
+        console.log("[deriv ws] resolved", SYMBOL, "->", discovered, "— subscribing");
+        _tickSubscriptionSymbol = discovered;
+        ws.send(JSON.stringify({ forget_all: "ticks" }));
+        ws.send(JSON.stringify({ ticks: discovered, subscribe: 1 }));
+      } else {
+        console.warn("[deriv ws] could not find a match for", SYMBOL, "in active_symbols — see raw list above to adjust matching");
+      }
+      return;
+    }
+    if (msg.msg_type === "tick" && msg.tick && msg.tick.symbol === _tickSubscriptionSymbol){
       const pip = msg.tick.pip_size;
       if (Number.isInteger(pip)) decimals = pip;
       const epoch = msg.tick.epoch ? Number(msg.tick.epoch) : Math.floor(Date.now()/1000);
