@@ -3823,9 +3823,17 @@ function restoreState(data){
 // Deriv exposes the same feed on two hosts. Some networks block one but
 // not the other, so we alternate endpoints on each retry and use a
 // connection timeout to avoid hanging forever on "Connecting…".
+//
+// A third candidate (api.derivws.com's public endpoint) is included per
+// Deriv support's own guidance that the legacy v3 hosts are being phased
+// out for some connections. It's listed alongside, not instead of, the
+// legacy hosts: if it doesn't work for any reason (e.g. it turns out to
+// need a header a browser can't set), the rotation still falls back to
+// the classic endpoints on the next retry rather than getting stuck.
 const WS_ENDPOINTS = [
   `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`,
   `wss://ws.binaryws.com/websockets/v3?app_id=${APP_ID}`,
+  `wss://api.derivws.com/trading/v1/options/ws/public`,
 ];
 let _endpointIdx = 0;
 let _connectTimeout = null;
@@ -3853,6 +3861,7 @@ function connect(){
   ws.onopen = () => {
     if (_connectTimeout){ clearTimeout(_connectTimeout); _connectTimeout = null; }
     setConn("live");
+    console.log("[deriv ws] connected via", url);
     // forget a tick subscription we might already have, then subscribe fresh
     ws.send(JSON.stringify({ forget_all: "ticks" }));
     ws.send(JSON.stringify({ ticks: SYMBOL, subscribe: 1 }));
@@ -3862,7 +3871,7 @@ function connect(){
     if (msg.error){
       // a symbol-level error shouldn't kill the whole connection
       setConn("live");
-      console.warn("Deriv API error:", msg.error.message);
+      console.warn("Deriv API error:", msg.error.message, "(endpoint:", url, ")");
       return;
     }
     if (msg.msg_type === "tick" && msg.tick && msg.tick.symbol === SYMBOL){
@@ -3872,9 +3881,10 @@ function connect(){
       handleTick(Number(msg.tick.quote), epoch);
     }
   };
-  ws.onerror = () => { setConn("dead"); };
+  ws.onerror = () => { console.warn("[deriv ws] error on", url); setConn("dead"); };
   ws.onclose = () => {
     if (_connectTimeout){ clearTimeout(_connectTimeout); _connectTimeout = null; }
+    console.log("[deriv ws] closed:", url);
     setConn("dead");
     scheduleReconnect();
   };
