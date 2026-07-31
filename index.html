@@ -3420,6 +3420,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <span id="ph11StatusMsg" style="font-size:12px;color:#7f849c;"></span>
   </div>
   <pre id="ph11ConfirmProgress" style="display:none;background:#0d1120;border:1px solid #1e2d55;border-radius:8px;padding:10px 12px;font-size:12px;color:#cdd6f4;white-space:pre-wrap;margin-bottom:8px;"></pre>
+  <div id="ph11ReadinessPanel" style="display:none;background:#0d1120;border:1px solid #1e2d55;border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:12px;color:#cdd6f4;"></div>
   <div id="phase11-root"></div>
 </div><!-- /#page-msdphase11 -->
 
@@ -34533,6 +34534,7 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
 <script type="module">
   import { mountPhase11 } from "./research/src/ui/Phase11Application.js";
   import { startPhase11Campaign, runPhase11Screening, runPhase11Triage } from "./research/src/orchestration/startPhase11Campaign.js";
+  import { computeOverallReadiness } from "./research/src/bridge/Phase11ConfirmationReadiness.js";
 
   let ph11Handle = null;
   let ph11Orchestrator = null;
@@ -34600,6 +34602,8 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
       ph11TriagedCandidates = [];
       ph11ConfirmedResults = [];
       ph11ReplicatedResults = [];
+      if (ph11ReadinessInterval) { clearInterval(ph11ReadinessInterval); ph11ReadinessInterval = null; }
+      ph11RenderReadiness(null);
       if (!ph11Handle) window.ph11Boot();
       ph11Handle.attachOrchestrator(orchestrator);
       document.getElementById("ph11ScreenBtn").disabled = false;
@@ -34635,6 +34639,55 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
     }
   });
 
+  let ph11ReadinessInterval = null;
+
+  function ph11RenderReadiness(overall){
+    const el = document.getElementById("ph11ReadinessPanel");
+    if (!overall || !overall.totalCount){
+      el.style.display = "none";
+      return;
+    }
+    el.style.display = "block";
+    let html = `<div style="margin-bottom:6px;color:#a6adc8;">Confirmation readiness: ${overall.readyCount}/${overall.totalCount} candidates ready (${overall.overallReadinessPercentage.toFixed(0)}% overall)</div>`;
+    for (const r of overall.perCandidate){
+      const pct = Math.max(0, Math.min(100, r.readinessPercentage));
+      const barColor = r.ready ? "#a6e3a1" : "#f9c96a";
+      html += `<div style="margin:6px 0;">`
+        + `<div style="display:flex;justify-content:space-between;font-size:11px;color:#7f849c;">`
+        + `<span>${r.indicatorName}-${r.period} (${r.candidateId})</span>`
+        + `<span>${r.usableObservations}/${r.minAlignedPairsRequired} pairs</span>`
+        + `</div>`
+        + `<div style="background:#1e2d55;border-radius:4px;height:8px;overflow:hidden;">`
+        + `<div style="background:${barColor};height:100%;width:${pct}%;"></div>`
+        + `</div>`
+        + (r.ready ? "" : `<div style="font-size:11px;color:#f9c96a;margin-top:2px;">${r.reason}</div>`)
+        + `</div>`;
+    }
+    el.innerHTML = html;
+  }
+
+  function ph11UpdateReadinessNow(){
+    const confirmBtn = document.getElementById("ph11ConfirmBtn");
+    if (!ph11TriagedCandidates.length){
+      ph11RenderReadiness(null);
+      confirmBtn.disabled = true;
+      return;
+    }
+    const hist = (window.__mfxDebug && window.__mfxDebug.getHistory) ? window.__mfxDebug.getHistory(2000) : null;
+    const prices = (hist && hist.ticks || []).map(t => t.tick).filter(v => typeof v === "number");
+    const overall = computeOverallReadiness({
+      candidates: ph11TriagedCandidates, prices, targetDefinition: { direction: "Rise", runLength: 5 },
+    });
+    ph11RenderReadiness(overall);
+    confirmBtn.disabled = !overall.overallReady;
+  }
+
+  function ph11StartReadinessWatch(){
+    if (ph11ReadinessInterval) clearInterval(ph11ReadinessInterval);
+    ph11UpdateReadinessNow();
+    ph11ReadinessInterval = setInterval(ph11UpdateReadinessNow, 3000);
+  }
+
   document.getElementById("ph11TriageBtn").addEventListener("click", () => {
     if (!ph11Orchestrator || !ph11ScreenedCandidates.length) return;
     ph11SetStatus("Running Round 2 triage…");
@@ -34647,8 +34700,8 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
       });
       ph11TriagedCandidates = promoted;
       ph11Handle.refresh();
-      document.getElementById("ph11ConfirmBtn").disabled = promoted.length === 0;
-      ph11SetStatus(`Triaged: ${promoted.length}/${ph11ScreenedCandidates.length} promoted. Ready for Confirmation (Round 3).`);
+      ph11StartReadinessWatch(); // button is gated on actual data readiness, not just having triaged candidates
+      ph11SetStatus(`Triaged: ${promoted.length}/${ph11ScreenedCandidates.length} promoted. Checking confirmation readiness…`);
     } catch (e) {
       console.warn("[phase11] triage failed", e);
       ph11SetStatus("Triage failed — see console.");

@@ -71,7 +71,7 @@ export class Phase11InsufficientDataError extends Error {
   }
 }
 
-const MIN_ALIGNED_PAIRS = 60; // below this, a permutation test's null is not meaningfully estimable
+export const MIN_ALIGNED_PAIRS = 60; // below this, a permutation test's null is not meaningfully estimable
 
 /**
  * Computes the candidate's indicator reading at every valid index of a
