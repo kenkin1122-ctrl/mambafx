@@ -3418,6 +3418,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button id="ph11PublishBtn" class="gc-btn" disabled>📄 Attempt Publication</button>
     <span id="ph11StatusMsg" style="font-size:12px;color:#7f849c;"></span>
   </div>
+  <pre id="ph11ConfirmProgress" style="display:none;background:#0d1120;border:1px solid #1e2d55;border-radius:8px;padding:10px 12px;font-size:12px;color:#cdd6f4;white-space:pre-wrap;margin-bottom:8px;"></pre>
   <div id="phase11-root"></div>
 </div><!-- /#page-msdphase11 -->
 
@@ -34642,48 +34643,67 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
     }
   });
 
+  function ph11ShowProgress(){
+    const el = document.getElementById("ph11ConfirmProgress");
+    el.style.display = "block"; el.textContent = "";
+    return { log: (line) => { el.textContent += line + "\n"; } };
+  }
+
   document.getElementById("ph11ConfirmBtn").addEventListener("click", async () => {
     if (!ph11Orchestrator || !ph11TriagedCandidates.length) return;
-    // A p-value must come from a real, independently-conducted statistical
-    // test (e.g. the Correlation Explorer / Market State Search tools
-    // elsewhere in this app) -- this UI does not fabricate one. If you
-    // haven't run one yet, cancel and come back once you have a real value.
-    const raw = window.prompt(
-      "Enter the p-value from your own independent statistical test for this effect (0–1).\n" +
-      "This must be a real result, not a guess — Round 3 spends this campaign's Online-FDR alpha budget.",
-      ""
-    );
-    if (raw === null) { ph11SetStatus("Confirmation cancelled."); return; }
-    const pValue = Number(raw);
-    if (!Number.isFinite(pValue) || pValue < 0 || pValue > 1) {
-      ph11SetStatus("Confirmation cancelled: p-value must be a number between 0 and 1.");
-      return;
-    }
+    const progress = ph11ShowProgress();
+    ph11SetStatus("Running Round 3 confirmation (fully automated — computing the p-value, not asking for one)…");
+    progress.log("[1/5] Loading this session's real tick history…");
 
-    ph11SetStatus("Running Round 3 confirmation (spends this family's Online-FDR alpha)…");
+    const hist = (window.__mfxDebug && window.__mfxDebug.getHistory) ? window.__mfxDebug.getHistory(2000) : null;
+    const prices = (hist && hist.ticks || []).map(t => t.tick).filter(v => typeof v === "number");
+    progress.log(`      ${prices.length} ticks available.`);
+
     ph11ConfirmedResults = [];
     let confirmedCount = 0;
-    try {
-      for (const candidate of ph11TriagedCandidates) {
-        const result = await ph11Orchestrator.confirm({
+    const targetDefinition = { direction: "Rise", runLength: 5 };
+
+    for (const candidate of ph11TriagedCandidates) {
+      progress.log(`\n— ${candidate.id} (${candidate.indicatorName}-${candidate.period}) —`);
+      progress.log(`[2/5] Computing ${candidate.indicatorName}-${candidate.period} indicator series from real prices…`);
+      progress.log(`[3/5] Computing forward ${targetDefinition.runLength}-tick ${targetDefinition.direction} outcome series…`);
+      progress.log(`[4/5] Running circular-shift permutation test + paired bootstrap CI (this is the actual statistical procedure — no manual input)…`);
+      try {
+        const result = await ph11Orchestrator.confirmAutomatically({
           candidate, researchConfiguration: ph11ResearchConfiguration,
           datasetManifest: { datasetId: `session-${Date.now()}` }, // this session's live ticks, not a locked historical dataset
           provenance: ph11ProvenanceById[candidate.id],
-          market: "R_100", targetDefinition: { direction: "Rise", runLength: 5 },
-          pValue,
+          market: "R_100", targetDefinition,
+          prices, seed: 42, permutations: 1000, bootstrapResamples: 2000,
         });
+        const r = result.statisticalReport;
+        progress.log(`[5/5] Submitted p=${r.pValue.toFixed(4)} to discoveryDecision.evaluateDiscoveryCandidate()…`);
+        progress.log(
+          `  Observed statistic (|correlation|): ${r.observedStatistic.toFixed(4)}\n` +
+          `  Effect size: ${r.effectSize.toFixed(4)}\n` +
+          `  Standard error: ${r.standardError.toFixed(4)}\n` +
+          `  95% CI: [${r.ci95[0].toFixed(4)}, ${r.ci95[1].toFixed(4)}]\n` +
+          `  p-value: ${r.pValue.toFixed(4)} (${r.nullModel}, ${r.permutations} permutations, seed=${r.seed})\n` +
+          `  Sample size: ${r.sampleSize}\n` +
+          `  RESULT: ${result.outcome === "confirmed" ? "CONFIRMED" : "NOT CONFIRMED (archived as negative evidence)"}`
+        );
         if (result.outcome === "confirmed") {
           confirmedCount++;
           ph11ConfirmedResults.push({ candidate: result.candidate, hypothesisId: result.hypothesisId, familyKey: result.familyKey });
         }
+      } catch (e) {
+        if (e && e.name === "Phase11InsufficientDataError") {
+          progress.log(`  INSUFFICIENT DATA: ${e.message}`);
+        } else {
+          progress.log(`  FAILED: ${e && e.message ? e.message : e}`);
+          console.warn("[phase11] automated confirmation failed", e);
+        }
       }
-      ph11Handle.refresh();
-      document.getElementById("ph11ReplicateBtn").disabled = ph11ConfirmedResults.length === 0;
-      ph11SetStatus(`Confirmed: ${confirmedCount}/${ph11TriagedCandidates.length} at p=${pValue}. Rejections archived as negative evidence, not discarded.`);
-    } catch (e) {
-      console.warn("[phase11] confirmation failed", e);
-      ph11SetStatus("Confirmation failed — see console.");
     }
+
+    ph11Handle.refresh();
+    document.getElementById("ph11ReplicateBtn").disabled = ph11ConfirmedResults.length === 0;
+    ph11SetStatus(`Confirmed: ${confirmedCount}/${ph11TriagedCandidates.length} (fully automated statistical test — see report above).`);
   });
 
   document.getElementById("ph11ReplicateBtn").addEventListener("click", async () => {

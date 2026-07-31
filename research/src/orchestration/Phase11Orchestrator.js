@@ -51,6 +51,7 @@ import {
 import { confirmPhase11Candidate } from '../bridge/Phase11ConfirmationBridge.js';
 import { replicatePhase11Candidate } from '../bridge/Phase11ReplicationBridge.js';
 import { publishPhase11Candidate } from '../bridge/Phase11PublicationBridge.js';
+import { confirmPhase11CandidateAutomatically } from '../bridge/Phase11AutomatedConfirmation.js';
 import { runRngForensicsForCandidate, characterizeConfirmedCandidate } from '../bridge/Phase11ScientificCharacterization.js';
 
 export class NotYetIntegratedError extends Error {
@@ -368,6 +369,52 @@ export class Phase11Orchestrator {
       candidate, researchFreeze: this.researchFreeze, sap: this.sap, researchConfiguration,
       datasetManifest, provenance, familyRegistry: this.familyRegistry,
       market, targetDefinition, pValue, testMethod, testedAt,
+      decisionAuditLog: this.decisionAuditLog, negativeEvidenceRegistry: this.negativeEvidenceRegistry,
+      knowledgeGraphCandidateNode,
+    });
+
+    this._candidates.set(result.candidate.id, result.candidate);
+    return result;
+  }
+
+  /**
+   * The scientifically correct Round 3 entry point: computes the p-value
+   * automatically from the candidate's own mathematical definition applied
+   * to a real price series, instead of accepting one as a parameter -- see
+   * bridge/Phase11AutomatedConfirmation.js for the full statistical
+   * procedure (permutation test + bootstrap CI, both existing/reused
+   * primitives). Never asks for manual input; throws
+   * Phase11InsufficientDataError if the data isn't sufficient for a valid
+   * test, rather than falling back to any placeholder.
+   *
+   * @param {object} params - Same shape as confirm(), except `prices`
+   *   (the confirmation dataset's real price series) replaces `pValue`,
+   *   and `seed` is required (reproducibility discipline -- no hidden
+   *   randomness in the permutation test or bootstrap).
+   * @returns {Promise<object>} Same shape as confirm()'s result, plus
+   *   `statisticalReport` (observedStatistic, effectSize, standardError,
+   *   ci95, pValue, sampleSize, permutations, nullModel, seed).
+   */
+  async confirmAutomatically({
+    candidate, researchConfiguration, datasetManifest, provenance,
+    market, targetDefinition, prices, seed, permutations, bootstrapResamples, testMethod, testedAt,
+  } = {}) {
+    let knowledgeGraphCandidateNode = this._knowledgeGraphNodes.get(candidate?.id) ?? null;
+    if (!knowledgeGraphCandidateNode) {
+      try {
+        knowledgeGraphCandidateNode = await registerPhase11CandidateInKnowledgeGraph(candidate, {
+          datasetManifestId: datasetManifest?.datasetId,
+        });
+        this._knowledgeGraphNodes.set(candidate.id, knowledgeGraphCandidateNode);
+      } catch {
+        knowledgeGraphCandidateNode = null;
+      }
+    }
+
+    const result = await confirmPhase11CandidateAutomatically({
+      candidate, researchFreeze: this.researchFreeze, sap: this.sap, researchConfiguration,
+      datasetManifest, provenance, familyRegistry: this.familyRegistry,
+      market, targetDefinition, prices, seed, permutations, bootstrapResamples, testMethod, testedAt,
       decisionAuditLog: this.decisionAuditLog, negativeEvidenceRegistry: this.negativeEvidenceRegistry,
       knowledgeGraphCandidateNode,
     });
