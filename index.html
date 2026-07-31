@@ -600,6 +600,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button id="navMsdPhase8" onclick="showPage('msdphase8')">🧬 Phase 8 Campaign</button>
     <button id="navMsdPhase9" onclick="showPage('msdphase9')">🔬 Phase 9 Adaptive</button>
     <button id="navMsdPhase11" onclick="showPage('msdphase11')">🧪 Phase 11</button>
+    <button id="navMsdPhase11Validation" onclick="showPage('msdphase11validation')">🧬 Ph11 Validation</button>
   </nav>
 
   <!-- ============ PAGE 1: LIVE TRACKER ============ -->
@@ -3421,6 +3422,14 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   <pre id="ph11ConfirmProgress" style="display:none;background:#0d1120;border:1px solid #1e2d55;border-radius:8px;padding:10px 12px;font-size:12px;color:#cdd6f4;white-space:pre-wrap;margin-bottom:8px;"></pre>
   <div id="phase11-root"></div>
 </div><!-- /#page-msdphase11 -->
+
+<div id="page-msdphase11validation" class="page">
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+    <button id="ph11ValRunBtn" class="gc-btn">▶ Run Validation Suite</button>
+    <span id="ph11ValStatusMsg" style="font-size:12px;color:#7f849c;"></span>
+  </div>
+  <div id="phase11-validation-root"></div>
+</div><!-- /#page-msdphase11validation -->
 
 
 <div id="page-njanja" class="page">
@@ -26054,8 +26063,8 @@ function startTfTimers(){
 }
 
 function showPage(which){
-  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot", aggression:"page-aggression", mtf:"page-mtf", njanja:"page-njanja", rfabot:"page-rfabot", msdexplorer:"page-msdexplorer", msdfeatures:"page-msdfeatures", msdevents:"page-msdevents", msdinspector:"page-msdinspector", msddistribution:"page-msddistribution", msdcorrelation:"page-msdcorrelation", msdsearch:"page-msdsearch", msdexperiment:"page-msdexperiment", msdknowledge:"page-msdknowledge", msdvalidation:"page-msdvalidation", msdworkbench:"page-msdworkbench", msdphase8:"page-msdphase8", msdphase9:"page-msdphase9", msdphase11:"page-msdphase11" };
-  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot", aggression:"navAggression", mtf:"navMtf", njanja:"navNjanja", rfabot:"navRfaBot", msdexplorer:"navMsdExplorer", msdfeatures:"navMsdFeatures", msdevents:"navMsdEvents", msdinspector:"navMsdInspector", msddistribution:"navMsdDistribution", msdcorrelation:"navMsdCorrelation", msdsearch:"navMsdSearch", msdexperiment:"navMsdExperiment", msdknowledge:"navMsdKnowledge", msdvalidation:"navMsdValidation", msdworkbench:"navMsdWorkbench", msdphase8:"navMsdPhase8", msdphase9:"navMsdPhase9", msdphase11:"navMsdPhase11" };
+  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot", aggression:"page-aggression", mtf:"page-mtf", njanja:"page-njanja", rfabot:"page-rfabot", msdexplorer:"page-msdexplorer", msdfeatures:"page-msdfeatures", msdevents:"page-msdevents", msdinspector:"page-msdinspector", msddistribution:"page-msddistribution", msdcorrelation:"page-msdcorrelation", msdsearch:"page-msdsearch", msdexperiment:"page-msdexperiment", msdknowledge:"page-msdknowledge", msdvalidation:"page-msdvalidation", msdworkbench:"page-msdworkbench", msdphase8:"page-msdphase8", msdphase9:"page-msdphase9", msdphase11:"page-msdphase11", msdphase11validation:"page-msdphase11validation" };
+  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot", aggression:"navAggression", mtf:"navMtf", njanja:"navNjanja", rfabot:"navRfaBot", msdexplorer:"navMsdExplorer", msdfeatures:"navMsdFeatures", msdevents:"navMsdEvents", msdinspector:"navMsdInspector", msddistribution:"navMsdDistribution", msdcorrelation:"navMsdCorrelation", msdsearch:"navMsdSearch", msdexperiment:"navMsdExperiment", msdknowledge:"navMsdKnowledge", msdvalidation:"navMsdValidation", msdworkbench:"navMsdWorkbench", msdphase8:"navMsdPhase8", msdphase9:"navMsdPhase9", msdphase11:"navMsdPhase11", msdphase11validation:"navMsdPhase11Validation" };
   Object.keys(pages).forEach(k => {
     document.getElementById(pages[k]).classList.toggle("active", k===which);
     const nav = document.getElementById(navs[k]); if (nav) nav.classList.toggle("active", k===which);
@@ -26159,6 +26168,9 @@ function showPage(which){
   }
   if (which === "msdphase11"){
     if (typeof window.ph11Boot === "function") window.ph11Boot();
+  }
+  if (which === "msdphase11validation"){
+    if (typeof window.ph11ValBoot === "function") window.ph11ValBoot();
   }
 }
 
@@ -34765,6 +34777,65 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
     } catch (e) {
       console.warn("[phase11] publication failed", e);
       ph11SetStatus("Publication check failed — see console.");
+    }
+  });
+</script>
+
+<!-- Phase 11 Validation Dashboard: isolated UI, lazily mounted on first visit -->
+<script type="module">
+  import { mountPhase11Validation } from "./research/src/ui/Phase11ValidationApplication.js";
+  import { runCalibrationBatch } from "./research/src/validation/CalibrationStudy.js";
+  import { runPowerCurve } from "./research/src/validation/PowerStudy.js";
+  import { verifyReproducibility } from "./research/src/validation/ReproducibilityValidator.js";
+  import { buildValidationReport } from "./research/src/validation/ValidationReport.js";
+  import { IndicatorFeature } from "./research/src/candidate/IndicatorFeature.js";
+
+  let ph11ValHandle = null;
+
+  window.ph11ValBoot = function () {
+    if (ph11ValHandle) return;
+    try { ph11ValHandle = mountPhase11Validation(document.getElementById("phase11-validation-root")); }
+    catch (e) { console.warn("[phase11-validation]", e); }
+  };
+
+  function ph11ValSetStatus(msg){ const el = document.getElementById("ph11ValStatusMsg"); if (el) el.textContent = msg; }
+
+  document.getElementById("ph11ValRunBtn").addEventListener("click", async () => {
+    if (!ph11ValHandle) window.ph11ValBoot();
+    ph11ValSetStatus("Running calibration study (independent_prng null, 15 trials)…");
+    try {
+      const calibration = await runCalibrationBatch({
+        datasetType: "independent_prng", trials: 15, seed: 12345, alpha: 0.05,
+        datasetLength: 200, permutations: 400, bootstrapResamples: 400,
+      });
+
+      ph11ValSetStatus("Running power curve (effect sizes 0, 0.2, 0.4)…");
+      const power = runPowerCurve({
+        effectSizes: [0, 0.2, 0.4], trialsPerEffectSize: 8, seed: 999,
+        datasetLength: 200, permutations: 300, bootstrapResamples: 300,
+      });
+
+      ph11ValSetStatus("Running reproducibility check (two independently-built candidates, identical seed)…");
+      const baseFields = {
+        family: "momentum", parameters: { threshold: 0.5 }, description: "validation test candidate",
+        generatorVersion: "11.0.0", grammarVersion: "11.0.0", configHash: "a".repeat(64),
+        researchConfigurationId: "rc-validation", indicatorName: "RSI", period: 14, inputObservables: [],
+      };
+      const candidateA = await IndicatorFeature.create({ ...baseFields, id: "validation-repro-a" });
+      const candidateB = await IndicatorFeature.create({ ...baseFields, id: "validation-repro-b" });
+      const syntheticPrices = [100];
+      for (let i = 0; i < 300; i++) syntheticPrices.push(syntheticPrices[syntheticPrices.length - 1] + (i % 2 === 0 ? 1 : -1));
+      const reproducibility = verifyReproducibility({
+        candidateA, candidateB, prices: syntheticPrices,
+        targetDefinition: { direction: "Rise", runLength: 5 }, seed: 42, permutations: 300, bootstrapResamples: 300,
+      });
+
+      const report = buildValidationReport({ calibration, power, reproducibility, confirmationDiagnostics: calibration.reports });
+      ph11ValHandle.updateReport(report);
+      ph11ValSetStatus(`Validation complete: overall verdict ${report.overallVerdict}.`);
+    } catch (e) {
+      console.warn("[phase11-validation] run failed", e);
+      ph11ValSetStatus("Validation run failed — see console.");
     }
   });
 </script>
