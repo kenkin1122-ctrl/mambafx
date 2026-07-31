@@ -50,6 +50,7 @@ import {
 } from '../governance/phase11KnowledgeGraphBridge.js';
 import { confirmPhase11Candidate } from '../bridge/Phase11ConfirmationBridge.js';
 import { replicatePhase11Candidate } from '../bridge/Phase11ReplicationBridge.js';
+import { publishPhase11Candidate } from '../bridge/Phase11PublicationBridge.js';
 
 export class NotYetIntegratedError extends Error {
   constructor(message) {
@@ -381,6 +382,25 @@ export class Phase11Orchestrator {
       negativeEvidenceRegistry: this.negativeEvidenceRegistry,
     });
     this._candidates.set(result.candidate.id, result.candidate);
+    return result;
+  }
+
+  /**
+   * Bridges a Replicated candidate into the legacy Publication lifecycle
+   * stage -- see bridge/Phase11PublicationBridge.js. Only proceeds if
+   * checkPublicationEligibility() passes; an ineligible result leaves the
+   * candidate at Replicated (not deprecated) and is returned for the
+   * caller to inspect/retry once the gap is fixed.
+   *
+   * @param {object} params - See Phase11PublicationBridge.publishPhase11Candidate
+   *   (candidate, hypothesisId, publishTimeConfig, eligibilityOptions, publicationId).
+   * @returns {Promise<{ outcome: 'published'|'ineligible', candidate: object, hypothesisId: string, publicationId: string|null, gateResult: object }>}
+   */
+  async publish(params = {}) {
+    const result = await publishPhase11Candidate({ ...params, orchestrator: this });
+    if (result.outcome === 'published') {
+      this._candidates.set(result.candidate.id, result.candidate);
+    }
     return result;
   }
 }
