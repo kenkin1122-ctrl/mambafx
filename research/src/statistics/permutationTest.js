@@ -170,11 +170,13 @@ export function computeCircularShiftPermutationTest({
 
   const rng = createSeededRng(seed);
   let countGE = 0;
+  const nullDistribution = new Array(permutations);
   for (let p = 0; p < permutations; p++) {
     const shift = effectiveMinShift + Math.floor(rng() * (n - 2 * effectiveMinShift));
     const shifted = new Array(n);
     for (let i = 0; i < n; i++) shifted[i] = outcomeValues[(i + shift) % n];
     const stat = statisticFn(featureValues, shifted);
+    nullDistribution[p] = stat;
     if (stat != null && stat >= observed) countGE++;
   }
 
@@ -184,5 +186,12 @@ export function computeCircularShiftPermutationTest({
     permutations,
     minShift: effectiveMinShift,
     nullModel: 'circular_shift',
+    // Additive field (backward compatible -- no existing caller reads or
+    // asserts on it): the raw null-statistic distribution collected above,
+    // for diagnostic reporting only (e.g. null mean/variance, Monte Carlo
+    // standard error, calibration checks). The p-value itself is computed
+    // above from countGE exactly as before; this array is never used to
+    // derive a second p-value anywhere in this codebase.
+    nullDistribution: Object.freeze(nullDistribution),
   });
 }

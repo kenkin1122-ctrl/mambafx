@@ -187,15 +187,20 @@ function bootstrapPairedCorrelation(xs, ys, { confidenceLevel = 0.95, numResampl
   replicates.sort((a, b) => a - b);
   const mean = replicates.reduce((a, b) => a + b, 0) / numResamples;
   const variance = replicates.reduce((a, b) => a + (b - mean) ** 2, 0) / (numResamples - 1);
+  const stdDev = Math.sqrt(variance);
+  const skewness = stdDev === 0 ? 0
+    : (replicates.reduce((a, b) => a + (b - mean) ** 3, 0) / numResamples) / (stdDev ** 3);
   const alpha = 1 - confidenceLevel;
   const lowerIdx = Math.floor((alpha / 2) * numResamples);
   const upperIdx = Math.ceil((1 - alpha / 2) * numResamples) - 1;
   return {
     pointEstimate: pearsonCorrelation(xs, ys),
-    standardError: Math.sqrt(variance),
+    standardError: stdDev,
     ciLower: replicates[Math.max(0, lowerIdx)],
     ciUpper: replicates[Math.min(numResamples - 1, upperIdx)],
     confidenceLevel,
+    skewness,
+    replicates,
   };
 }
 
@@ -204,38 +209,59 @@ function bootstrapPairedCorrelation(xs, ys, { confidenceLevel = 0.95, numResampl
  * accepts a p-value as input — computes one.
  *
  * @param {object} params
- * @param {object} params.candidate - Provides indicatorName/period.
- * @param {number[]} params.prices - The confirmation dataset's real price series.
- * @param {{ direction: 'Rise'|'Fall', runLength: number }} params.targetDefinition
+ * @param {object} params.candidate - Provides indicatorName/period. Unused
+ *   if featureValues/outcomeValues are both supplied directly.
+ * @param {number[]} [params.prices] - The confirmation dataset's real price
+ *   series. Required unless featureValues/outcomeValues are both supplied.
+ * @param {number[]} [params.featureValues] - Optional pre-computed indicator
+ *   series (bypasses computeIndicatorSeries) — used by the Validation Suite
+ *   (research/src/validation/) to inject null-hypothesis or synthetic-effect
+ *   data directly without needing a synthetic price series for every case.
+ * @param {number[]} [params.outcomeValues] - Optional pre-computed outcome
+ *   series, paired with featureValues (same requirement as above).
+ * @param {{ direction: 'Rise'|'Fall', runLength: number }} [params.targetDefinition]
+ *   Required unless featureValues/outcomeValues are both supplied.
  * @param {number} params.seed - Required (no hidden randomness).
  * @param {number} [params.permutations=1000]
  * @param {number} [params.bootstrapResamples=2000]
  * @returns {{
  *   observedStatistic: number, effectSize: number, standardError: number,
  *   ci95: [number, number], pValue: number, sampleSize: number,
- *   permutations: number, nullModel: string, seed: number
+ *   permutations: number, nullModel: string, seed: number,
+ *   nullMean: number, nullVariance: number, monteCarloStandardError: number,
+ *   minAttainablePValue: number, bootstrapCiWidth: number,
+ *   bootstrapSkewness: number, instabilityWarning: string|null
  * }}
  */
 export function runAutomatedConfirmationTest({
-  candidate, prices, targetDefinition, seed, permutations = 1000, bootstrapResamples = 2000,
+  candidate, prices, featureValues: injectedFeatureValues, outcomeValues: injectedOutcomeValues,
+  targetDefinition, seed, permutations = 1000, bootstrapResamples = 2000,
 } = {}) {
-  const indicatorSeries = computeIndicatorSeries(candidate.indicatorName, candidate.period, prices);
-  const outcomeSeries = computeOutcomeSeries(prices, targetDefinition);
+  let featureValues, outcomeValues;
 
-  const featureValues = [], outcomeValues = [];
-  for (let i = 0; i < prices.length; i++) {
-    if (Number.isFinite(indicatorSeries[i]) && Number.isFinite(outcomeSeries[i])) {
-      featureValues.push(indicatorSeries[i]);
-      outcomeValues.push(outcomeSeries[i]);
+  if (injectedFeatureValues && injectedOutcomeValues) {
+    if (injectedFeatureValues.length !== injectedOutcomeValues.length) {
+      throw new Phase11InsufficientDataError('runAutomatedConfirmationTest: injected featureValues and outcomeValues must be equal-length arrays');
+    }
+    featureValues = injectedFeatureValues;
+    outcomeValues = injectedOutcomeValues;
+  } else {
+    const indicatorSeries = computeIndicatorSeries(candidate.indicatorName, candidate.period, prices);
+    const outcomeSeries = computeOutcomeSeries(prices, targetDefinition);
+    featureValues = []; outcomeValues = [];
+    for (let i = 0; i < prices.length; i++) {
+      if (Number.isFinite(indicatorSeries[i]) && Number.isFinite(outcomeSeries[i])) {
+        featureValues.push(indicatorSeries[i]);
+        outcomeValues.push(outcomeSeries[i]);
+      }
     }
   }
 
   if (featureValues.length < MIN_ALIGNED_PAIRS) {
     throw new Phase11InsufficientDataError(
-      `runAutomatedConfirmationTest: only ${featureValues.length} valid (indicator, outcome) pairs are available after ` +
-      `aligning the ${candidate.indicatorName}-${candidate.period} series with the ${targetDefinition.runLength}-tick ` +
-      `${targetDefinition.direction} outcome window — at least ${MIN_ALIGNED_PAIRS} are required for a scientifically ` +
-      'meaningful permutation-test null distribution. Let more ticks accumulate and try again.'
+      `runAutomatedConfirmationTest: only ${featureValues.length} valid (indicator, outcome) pairs are available -- ` +
+      `at least ${MIN_ALIGNED_PAIRS} are required for a scientifically meaningful permutation-test null distribution. ` +
+      'Let more ticks accumulate and try again.'
     );
   }
 
@@ -247,6 +273,22 @@ export function runAutomatedConfirmationTest({
 
   const bootstrap = bootstrapPairedCorrelation(featureValues, outcomeValues, { numResamples: bootstrapResamples, seed: seed + 1 });
 
+  // ── Permutation diagnostics (Section 4): derived from the SAME null
+  //    distribution the p-value above was actually computed from — never a
+  //    second, independently-generated null.
+  const nd = permTest.nullDistribution;
+  const nullMean = nd.reduce((a, b) => a + b, 0) / nd.length;
+  const nullVariance = nd.reduce((a, b) => a + (b - nullMean) ** 2, 0) / Math.max(1, nd.length - 1);
+  const monteCarloStandardError = Math.sqrt((permTest.pValue * (1 - permTest.pValue)) / permutations);
+  const minAttainablePValue = 1 / (permutations + 1);
+
+  // ── Bootstrap diagnostics (Section 3).
+  const bootstrapCiWidth = bootstrap.ciUpper - bootstrap.ciLower;
+  const instabilityWarnings = [];
+  if (Math.abs(bootstrap.skewness) > 1) instabilityWarnings.push(`bootstrap distribution is notably skewed (skewness=${bootstrap.skewness.toFixed(3)})`);
+  if (bootstrapCiWidth > 1.5) instabilityWarnings.push(`bootstrap 95% CI is unusually wide (width=${bootstrapCiWidth.toFixed(3)}) for a correlation-bounded [-1,1] statistic`);
+  if (permTest.pValue <= minAttainablePValue) instabilityWarnings.push(`observed p-value equals the minimum attainable value for ${permutations} permutations -- consider increasing permutations for a finer-grained estimate`);
+
   return {
     observedStatistic: permTest.observedStatistic,
     effectSize: bootstrap.pointEstimate,
@@ -257,6 +299,13 @@ export function runAutomatedConfirmationTest({
     permutations: permTest.permutations,
     nullModel: permTest.nullModel,
     seed,
+    nullMean,
+    nullVariance,
+    monteCarloStandardError,
+    minAttainablePValue,
+    bootstrapCiWidth,
+    bootstrapSkewness: bootstrap.skewness,
+    instabilityWarning: instabilityWarnings.length ? instabilityWarnings.join('; ') : null,
   };
 }
 

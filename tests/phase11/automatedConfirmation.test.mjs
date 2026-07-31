@@ -159,6 +159,37 @@ test('runAutomatedConfirmationTest: a genuinely trending series produces a lower
   assert.ok(nullReport.pValue > 0.3, `expected a clearly high p-value for the null-like alternating series, got ${nullReport.pValue}`);
 });
 
+test('runAutomatedConfirmationTest: reports permutation and bootstrap diagnostics derived from the real null distribution', () => {
+  const candidate = { indicatorName: 'RSI', period: 14 };
+  const report = runAutomatedConfirmationTest({
+    candidate, prices: makeTrendingPrices(20, 3),
+    targetDefinition: { direction: 'Rise', runLength: 3 }, seed: 5, permutations: 300, bootstrapResamples: 300,
+  });
+  assert.equal(typeof report.nullMean, 'number');
+  assert.ok(report.nullVariance >= 0);
+  assert.equal(typeof report.monteCarloStandardError, 'number');
+  assert.equal(report.minAttainablePValue, 1 / 301);
+  assert.ok(report.bootstrapCiWidth >= 0);
+  assert.equal(typeof report.bootstrapSkewness, 'number');
+  assert.ok(report.instabilityWarning === null || typeof report.instabilityWarning === 'string');
+});
+
+test('runAutomatedConfirmationTest: accepts pre-computed featureValues/outcomeValues directly, bypassing price-derived computation', () => {
+  const featureValues = Array.from({ length: 100 }, (_, i) => Math.sin(i));
+  const outcomeValues = Array.from({ length: 100 }, (_, i) => (i % 3 === 0 ? 1 : 0));
+  const report = runAutomatedConfirmationTest({
+    featureValues, outcomeValues, seed: 11, permutations: 200,
+  });
+  assert.equal(report.sampleSize, 100);
+  assert.ok(typeof report.pValue === 'number');
+});
+
+test('runAutomatedConfirmationTest: throws for mismatched injected featureValues/outcomeValues lengths', () => {
+  assert.throws(() => runAutomatedConfirmationTest({
+    featureValues: [1, 2, 3], outcomeValues: [1, 0], seed: 1,
+  }), Phase11InsufficientDataError);
+});
+
 test('runAutomatedConfirmationTest: is deterministic for a fixed seed (no hidden randomness)', () => {
   const candidate = { indicatorName: 'RSI', period: 14 };
   const params = {
