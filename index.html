@@ -3409,6 +3409,12 @@ table.an-table tbody tr:last-child td{border-bottom:none}
 </div><!-- /#page-msdphase9 -->
 
 <div id="page-msdphase11" class="page">
+  <div id="phase11-controls" style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+    <button id="ph11StartCampaignBtn" class="gc-btn">▶ Start Campaign</button>
+    <button id="ph11ScreenBtn" class="gc-btn" disabled>🔍 Run Screening</button>
+    <button id="ph11TriageBtn" class="gc-btn" disabled>✅ Run Triage</button>
+    <span id="ph11StatusMsg" style="font-size:12px;color:#7f849c;"></span>
+  </div>
   <div id="phase11-root"></div>
 </div><!-- /#page-msdphase11 -->
 
@@ -34510,12 +34516,91 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
 <!-- Phase 11 MSD Lab: isolated UI, lazily mounted on first visit to the Phase 11 page -->
 <script type="module">
   import { mountPhase11 } from "./research/src/ui/Phase11Application.js";
+  import { startPhase11Campaign, runPhase11Screening, runPhase11Triage } from "./research/src/orchestration/startPhase11Campaign.js";
+
   let ph11Handle = null;
+  let ph11Orchestrator = null;
+  let ph11ScreenedCandidates = [];
+
   window.ph11Boot = function () {
     if (ph11Handle) { ph11Handle.refresh(); return; }
     try { ph11Handle = mountPhase11(document.getElementById("phase11-root")); }
     catch (e) { console.warn("[phase11]", e); }
   };
+
+  // A real (small-sample, demo-scale) diagnostic computed from this
+  // session's actual tick history — NOT a validated statistical test.
+  // Used only to give the Screening/Triage buttons a real number to act
+  // on instead of a placeholder constant.
+  function ph11DemoScore(candidate){
+    const period = candidate?.parameters?.period || 14;
+    const hist = (window.__mfxDebug && window.__mfxDebug.getHistory) ? window.__mfxDebug.getHistory(300) : null;
+    const prices = (hist && hist.ticks || []).map(t => t.tick).filter(v => typeof v === "number");
+    if (prices.length < period + 1) return 0;
+    let sum = 0, n = 0;
+    for (let i = period; i < prices.length; i++){ sum += Math.abs(prices[i] - prices[i - period]); n++; }
+    return n ? sum / n : 0;
+  }
+
+  function ph11SetStatus(msg){ const el = document.getElementById("ph11StatusMsg"); if (el) el.textContent = msg; }
+
+  document.getElementById("ph11StartCampaignBtn").addEventListener("click", async () => {
+    ph11SetStatus("Starting campaign…");
+    try {
+      const hist = (window.__mfxDebug && window.__mfxDebug.getHistory) ? window.__mfxDebug.getHistory(1) : null;
+      const liveSymbol = (hist && hist.ticks && hist.ticks[0] && hist.ticks[0].symbol) || "1HZ100V";
+      const { orchestrator } = await startPhase11Campaign({ symbol: liveSymbol });
+      ph11Orchestrator = orchestrator;
+      ph11ScreenedCandidates = [];
+      if (!ph11Handle) window.ph11Boot();
+      ph11Handle.attachOrchestrator(orchestrator);
+      document.getElementById("ph11ScreenBtn").disabled = false;
+      document.getElementById("ph11TriageBtn").disabled = true;
+      ph11SetStatus(`Generated ${orchestrator.listCandidates().length} candidates under freeze ${orchestrator.researchFreeze.id}.`);
+    } catch (e) {
+      console.warn("[phase11] start campaign failed", e);
+      ph11SetStatus("Failed to start campaign — see console.");
+    }
+  });
+
+  document.getElementById("ph11ScreenBtn").addEventListener("click", () => {
+    if (!ph11Orchestrator) return;
+    ph11SetStatus("Running Round 1 screening (demo scoreFn from live ticks)…");
+    try {
+      const candidates = ph11Orchestrator.listCandidates();
+      const { promoted } = runPhase11Screening({
+        candidates, scoreFn: ph11DemoScore,
+        promotionPolicy: ph11Orchestrator.promotionPolicy,
+        familyRegistry: ph11Orchestrator.familyRegistry,
+        promotionQuantile: 0.67,
+      });
+      ph11ScreenedCandidates = promoted;
+      ph11Handle.refresh();
+      document.getElementById("ph11TriageBtn").disabled = promoted.length === 0;
+      ph11SetStatus(`Screened: ${promoted.length}/${candidates.length} promoted (demo-scale scoreFn, not a validated test).`);
+    } catch (e) {
+      console.warn("[phase11] screening failed", e);
+      ph11SetStatus("Screening failed — see console.");
+    }
+  });
+
+  document.getElementById("ph11TriageBtn").addEventListener("click", () => {
+    if (!ph11Orchestrator || !ph11ScreenedCandidates.length) return;
+    ph11SetStatus("Running Round 2 triage…");
+    try {
+      const diagnosticsByCandidateId = {};
+      for (const c of ph11ScreenedCandidates) diagnosticsByCandidateId[c.id] = { effectSize: ph11DemoScore(c), diagnosticsPassed: [] };
+      const { promoted } = runPhase11Triage({
+        promotionPolicy: ph11Orchestrator.promotionPolicy,
+        candidates: ph11ScreenedCandidates, diagnosticsByCandidateId,
+      });
+      ph11Handle.refresh();
+      ph11SetStatus(`Triaged: ${promoted.length}/${ph11ScreenedCandidates.length} promoted. Confirmation (Round 3) isn't wired up yet — see Scientific Debt.`);
+    } catch (e) {
+      console.warn("[phase11] triage failed", e);
+      ph11SetStatus("Triage failed — see console.");
+    }
+  });
 </script>
 </body>
 </html>
