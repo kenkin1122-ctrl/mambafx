@@ -599,6 +599,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button id="navMsdWorkbench" onclick="showPage('msdworkbench')">🔬 Research Workbench</button>
     <button id="navMsdPhase8" onclick="showPage('msdphase8')">🧬 Phase 8 Campaign</button>
     <button id="navMsdPhase9" onclick="showPage('msdphase9')">🔬 Phase 9 Adaptive</button>
+    <button id="navMsdPhase11" onclick="showPage('msdphase11')">🧪 Phase 11</button>
   </nav>
 
   <!-- ============ PAGE 1: LIVE TRACKER ============ -->
@@ -3406,6 +3407,10 @@ table.an-table tbody tr:last-child td{border-bottom:none}
 
 </div><!-- /.ph9-wrap -->
 </div><!-- /#page-msdphase9 -->
+
+<div id="page-msdphase11" class="page">
+  <div id="phase11-root"></div>
+</div><!-- /#page-msdphase11 -->
 
 
 <div id="page-njanja" class="page">
@@ -25974,8 +25979,8 @@ function startTfTimers(){
 }
 
 function showPage(which){
-  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot", aggression:"page-aggression", mtf:"page-mtf", njanja:"page-njanja", rfabot:"page-rfabot", msdexplorer:"page-msdexplorer", msdfeatures:"page-msdfeatures", msdevents:"page-msdevents", msdinspector:"page-msdinspector", msddistribution:"page-msddistribution", msdcorrelation:"page-msdcorrelation", msdsearch:"page-msdsearch", msdexperiment:"page-msdexperiment", msdknowledge:"page-msdknowledge", msdvalidation:"page-msdvalidation", msdworkbench:"page-msdworkbench", msdphase8:"page-msdphase8", msdphase9:"page-msdphase9" };
-  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot", aggression:"navAggression", mtf:"navMtf", njanja:"navNjanja", rfabot:"navRfaBot", msdexplorer:"navMsdExplorer", msdfeatures:"navMsdFeatures", msdevents:"navMsdEvents", msdinspector:"navMsdInspector", msddistribution:"navMsdDistribution", msdcorrelation:"navMsdCorrelation", msdsearch:"navMsdSearch", msdexperiment:"navMsdExperiment", msdknowledge:"navMsdKnowledge", msdvalidation:"navMsdValidation", msdworkbench:"navMsdWorkbench", msdphase8:"navMsdPhase8", msdphase9:"navMsdPhase9" };
+  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot", aggression:"page-aggression", mtf:"page-mtf", njanja:"page-njanja", rfabot:"page-rfabot", msdexplorer:"page-msdexplorer", msdfeatures:"page-msdfeatures", msdevents:"page-msdevents", msdinspector:"page-msdinspector", msddistribution:"page-msddistribution", msdcorrelation:"page-msdcorrelation", msdsearch:"page-msdsearch", msdexperiment:"page-msdexperiment", msdknowledge:"page-msdknowledge", msdvalidation:"page-msdvalidation", msdworkbench:"page-msdworkbench", msdphase8:"page-msdphase8", msdphase9:"page-msdphase9", msdphase11:"page-msdphase11" };
+  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot", aggression:"navAggression", mtf:"navMtf", njanja:"navNjanja", rfabot:"navRfaBot", msdexplorer:"navMsdExplorer", msdfeatures:"navMsdFeatures", msdevents:"navMsdEvents", msdinspector:"navMsdInspector", msddistribution:"navMsdDistribution", msdcorrelation:"navMsdCorrelation", msdsearch:"navMsdSearch", msdexperiment:"navMsdExperiment", msdknowledge:"navMsdKnowledge", msdvalidation:"navMsdValidation", msdworkbench:"navMsdWorkbench", msdphase8:"navMsdPhase8", msdphase9:"navMsdPhase9", msdphase11:"navMsdPhase11" };
   Object.keys(pages).forEach(k => {
     document.getElementById(pages[k]).classList.toggle("active", k===which);
     const nav = document.getElementById(navs[k]); if (nav) nav.classList.toggle("active", k===which);
@@ -26076,6 +26081,9 @@ function showPage(which){
   }
   if (which === "msdphase9"){
     if (typeof window.ph9Boot === "function") window.ph9Boot();
+  }
+  if (which === "msdphase11"){
+    if (typeof window.ph11Boot === "function") window.ph11Boot();
   }
 }
 
@@ -34434,15 +34442,15 @@ window.ph9RefreshReadiness = ph9RefreshReadiness;
 ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
 </script>
 
-<!-- Phase 11 MSD Lab: isolated UI mount point. All logic lives in research/src/ui/ -->
-<div id="phase11-root"></div>
+<!-- Phase 11 MSD Lab: isolated UI, lazily mounted on first visit to the Phase 11 page -->
 <script type="module">
   import { mountPhase11 } from "./research/src/ui/Phase11Application.js";
-  try {
-    mountPhase11(document.getElementById("phase11-root"));
-  } catch (e) {
-    console.warn("[phase11]", e);
-  }
+  let ph11Handle = null;
+  window.ph11Boot = function () {
+    if (ph11Handle) { ph11Handle.refresh(); return; }
+    try { ph11Handle = mountPhase11(document.getElementById("phase11-root")); }
+    catch (e) { console.warn("[phase11]", e); }
+  };
 </script>
 </body>
 </html>
