@@ -133,11 +133,3 @@ test('Phase11Orchestrator: full pipeline — generate, screen, triage', async ()
   assert.equal(triaged.length, 2);
   for (const c of triaged) assert.equal(c.lifecycle, PHASE11_LIFECYCLE_STAGES.TRIAGED);
 });
-
-test('Phase11Orchestrator.confirm: always throws NotYetIntegratedError', async () => {
-  const rc = await makeRc();
-  const freeze = await makeFreeze(rc);
-  const sap = await makeSap();
-  const orchestrator = new Phase11Orchestrator({ researchFreeze: freeze, sap });
-  assert.throws(() => orchestrator.confirm(), NotYetIntegratedError);
-});

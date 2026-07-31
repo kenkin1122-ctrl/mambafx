@@ -48,6 +48,7 @@ import {
   registerPhase11CandidateInKnowledgeGraph,
   recordPhase11NegativeEvidenceInKnowledgeGraph,
 } from '../governance/phase11KnowledgeGraphBridge.js';
+import { confirmPhase11Candidate } from '../bridge/Phase11ConfirmationBridge.js';
 
 export class NotYetIntegratedError extends Error {
   constructor(message) {
@@ -309,11 +310,52 @@ export class Phase11Orchestrator {
    * Confirmed/Published gets a clear, actionable error rather than
    * silently stopping.
    */
-  confirm() {
-    throw new NotYetIntegratedError(
-      'Phase11Orchestrator.confirm: Round 3 confirmation requires the deferred integration with legacy ' +
-      'runRoundTwoValidation\'s hypothesisRegistry + Knowledge Graph + IndexedDB path (see the ' +
-      '"phase11-funnel-db-integration" ScientificDebtLog item). Not yet available.'
-    );
+  /**
+   * Bridges a Triaged candidate through the existing legacy confirmation
+   * framework (hypothesisRegistry -> discoveryDecision.evaluateDiscoveryCandidate
+   * -> onlineFdr, all unmodified) -- see bridge/Phase11ConfirmationBridge.js
+   * for the full validation/mapping this performs. Updates this
+   * orchestrator's candidate registry with the resulting Confirmed or
+   * Deprecated candidate. Never spends alpha itself; the bridge's single
+   * call into evaluateDiscoveryCandidate is the only place that happens.
+   *
+   * @param {object} params
+   * @param {object} params.candidate - Must be at lifecycle stage Triaged.
+   * @param {object} params.researchConfiguration - Must match candidate.researchConfigurationId.
+   * @param {{datasetId: string}} params.datasetManifest
+   * @param {import('../provenance/ProvenanceDAG.js').ProvenanceDAG} params.provenance
+   * @param {string} params.market
+   * @param {{direction: 'Rise'|'Fall', runLength: number}} params.targetDefinition
+   * @param {number} params.pValue - Already-computed; this method computes nothing.
+   * @param {string} [params.testMethod]
+   * @param {number} [params.testedAt]
+   * @returns {Promise<{ outcome: 'confirmed'|'rejected', candidate: object, hypothesisId: string, familyKey: string, legacyResult: object }>}
+   */
+  async confirm({
+    candidate, researchConfiguration, datasetManifest, provenance,
+    market, targetDefinition, pValue, testMethod, testedAt,
+  } = {}) {
+    let knowledgeGraphCandidateNode = this._knowledgeGraphNodes.get(candidate?.id) ?? null;
+    if (!knowledgeGraphCandidateNode) {
+      try {
+        knowledgeGraphCandidateNode = await registerPhase11CandidateInKnowledgeGraph(candidate, {
+          datasetManifestId: datasetManifest?.datasetId,
+        });
+        this._knowledgeGraphNodes.set(candidate.id, knowledgeGraphCandidateNode);
+      } catch {
+        knowledgeGraphCandidateNode = null; // KG sync is best-effort here; confirmation validity never depends on it
+      }
+    }
+
+    const result = await confirmPhase11Candidate({
+      candidate, researchFreeze: this.researchFreeze, sap: this.sap, researchConfiguration,
+      datasetManifest, provenance, familyRegistry: this.familyRegistry,
+      market, targetDefinition, pValue, testMethod, testedAt,
+      decisionAuditLog: this.decisionAuditLog, negativeEvidenceRegistry: this.negativeEvidenceRegistry,
+      knowledgeGraphCandidateNode,
+    });
+
+    this._candidates.set(result.candidate.id, result.candidate);
+    return result;
   }
 }

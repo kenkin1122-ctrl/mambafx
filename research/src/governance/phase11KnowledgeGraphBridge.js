@@ -149,6 +149,63 @@ export async function registerPhase11ChainLink(featureId, measurementId) {
 }
 
 /**
+ * Registers a confirmed candidate's Discovery relationship in the
+ * Knowledge Graph -- completes the chain Measurement -> Feature -> Context
+ * -> Proxy -> Candidate -> Discovery for a candidate that has just passed
+ * Round 3 confirmation (see bridge/Phase11ConfirmationBridge.js). Evidence
+ * tier and implementation maturity are recorded as metadata on the
+ * Discovery node itself (not as separate node types) -- they describe the
+ * discovery's quality, not a distinct entity in the lineage graph.
+ *
+ * @param {object} candidateNode - The record returned by
+ *   registerPhase11CandidateInKnowledgeGraph (needed for its real `.id`).
+ * @param {object} discoveryInfo
+ * @param {string} discoveryInfo.hypothesisId - The legacy hypothesisRegistry id.
+ * @param {string} discoveryInfo.familyKey - The legacy Online-FDR family key.
+ * @param {string} [discoveryInfo.datasetManifestId]
+ * @param {string} [discoveryInfo.evidenceTier]
+ * @param {string} [discoveryInfo.implementationMaturity]
+ * @returns {Promise<object>} The registered Discovery node record.
+ */
+export async function registerPhase11DiscoveryInKnowledgeGraph(candidateNode, {
+  hypothesisId, familyKey, datasetManifestId = null, evidenceTier = null, implementationMaturity = null,
+} = {}) {
+  const discoveryNode = await registerNode({
+    nodeType: PHASE11_NODE_TYPES.DISCOVERY,
+    refId: hypothesisId,
+    label: `Discovery: ${hypothesisId}`,
+    metadata: { familyKey, datasetManifestId, evidenceTier, implementationMaturity, confirmedAt: Date.now() },
+  });
+  if (candidateNode && candidateNode.id) {
+    await registerEdge({ edgeType: PHASE11_EDGE_TYPES.CONFIRMED_AS, fromNodeId: candidateNode.id, toNodeId: discoveryNode.id });
+  }
+  return discoveryNode;
+}
+
+/**
+ * Registers a Discovery's Publication relationship, once
+ * checkPublicationEligibility() has passed (Stage 2 concern; included here
+ * now since the node/edge types already exist and this is a one-line
+ * extension of the same pattern above).
+ *
+ * @param {object} discoveryNode - The record returned by registerPhase11DiscoveryInKnowledgeGraph.
+ * @param {string} publicationId
+ * @returns {Promise<object>} The registered Publication node record.
+ */
+export async function registerPhase11PublicationInKnowledgeGraph(discoveryNode, publicationId) {
+  const publicationNode = await registerNode({
+    nodeType: PHASE11_NODE_TYPES.PUBLICATION,
+    refId: publicationId,
+    label: `Publication: ${publicationId}`,
+    metadata: { publishedAt: Date.now() },
+  });
+  if (discoveryNode && discoveryNode.id) {
+    await registerEdge({ edgeType: PHASE11_EDGE_TYPES.PUBLISHED_AS, fromNodeId: discoveryNode.id, toNodeId: publicationNode.id });
+  }
+  return publicationNode;
+}
+
+/**
  * Records a rejected candidate's negative evidence entry as a permanent,
  * queryable Knowledge Graph node linked back to the candidate node -- the
  * Knowledge-Graph-availability half of "Negative Findings Are First-Class
