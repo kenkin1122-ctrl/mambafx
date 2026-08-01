@@ -36,17 +36,26 @@
  */
 
 import { computeIndicatorSeries, computeOutcomeSeries, MIN_ALIGNED_PAIRS } from './Phase11AutomatedConfirmation.js';
+import { resolveCandidateFeatureSeries } from './Phase11CandidateFeatureResolver.js';
+import { CANDIDATE_TYPES } from '../candidate/Candidate.js';
 
 /**
  * Computes confirmation readiness for a single candidate against the
  * current (real, live) price series.
  *
  * @param {object} params
- * @param {object} params.candidate - Provides indicatorName/period.
+ * @param {object} params.candidate - Provides indicatorName/period (or,
+ *   for non-indicator candidate types, whatever resolveCandidateFeatureSeries needs).
  * @param {import('../indicator/IndicatorRegistry.js').IndicatorRegistry} params.indicatorRegistry
  *   The canonical Indicator Registry -- resolves indicatorName exactly as
  *   Confirmation itself does, since readiness is a preview of the same
  *   real computation, not a separate approximation of it.
+ * @param {object} [params.registries] - { indicatorRegistry, marketStateRegistry,
+ *   proxyRegistry, contextRegistry } -- required for non-IndicatorFeature
+ *   candidate types (Stage 11 audit fix: readiness previously only ever
+ *   supported IndicatorFeature, unlike Confirmation itself since Stage 6).
+ * @param {Record<string, object>} [params.componentsById] - Required for
+ *   CompositeCandidate/ConditionalHypothesis candidates.
  * @param {number[]} params.prices - The current real price series.
  * @param {{ direction: 'Rise'|'Fall', runLength: number }} params.targetDefinition
  * @returns {{
@@ -57,14 +66,24 @@ import { computeIndicatorSeries, computeOutcomeSeries, MIN_ALIGNED_PAIRS } from 
  *   ready: boolean, reason: string|null
  * }}
  */
-export function computeCandidateReadiness({ candidate, indicatorRegistry, prices, targetDefinition } = {}) {
+export function computeCandidateReadiness({ candidate, indicatorRegistry, registries, componentsById, prices, targetDefinition } = {}) {
   const currentTickCount = Array.isArray(prices) ? prices.length : 0;
   const period = candidate?.period ?? 14;
   const runLength = targetDefinition?.runLength ?? 5;
 
   let usableObservations = 0;
   if (currentTickCount > 0) {
-    const indicatorSeries = computeIndicatorSeries(indicatorRegistry, candidate.indicatorName, period, prices);
+    // Stage 11 audit fix: this used to call computeIndicatorSeries()
+    // unconditionally, meaning Readiness never received the Stage 6
+    // generalization Confirmation itself got -- it would throw for any
+    // non-IndicatorFeature candidate. Same backward-compatible dispatch
+    // now used by runAutomatedConfirmationTest() and
+    // computeQuickIndicatorScore(): indicator candidates (or type-less
+    // test fixtures) keep the original path unchanged; every other real
+    // candidate type routes through the same canonical resolver.
+    const indicatorSeries = (!candidate.type || candidate.type === CANDIDATE_TYPES.INDICATOR_FEATURE)
+      ? computeIndicatorSeries(indicatorRegistry, candidate.indicatorName, period, prices)
+      : resolveCandidateFeatureSeries({ candidate, registries, prices, componentsById });
     const outcomeSeries = computeOutcomeSeries(prices, targetDefinition);
     for (let i = 0; i < prices.length; i++) {
       if (Number.isFinite(indicatorSeries[i]) && Number.isFinite(outcomeSeries[i])) usableObservations++;
@@ -113,9 +132,9 @@ export function computeCandidateReadiness({ candidate, indicatorRegistry, prices
  *   readyCount: number, totalCount: number
  * }}
  */
-export function computeOverallReadiness({ candidates, indicatorRegistry, prices, targetDefinition } = {}) {
+export function computeOverallReadiness({ candidates, indicatorRegistry, registries, componentsById, prices, targetDefinition } = {}) {
   const list = Array.isArray(candidates) ? candidates : [];
-  const perCandidate = list.map((candidate) => computeCandidateReadiness({ candidate, indicatorRegistry, prices, targetDefinition }));
+  const perCandidate = list.map((candidate) => computeCandidateReadiness({ candidate, indicatorRegistry, registries, componentsById, prices, targetDefinition }));
   const readyCount = perCandidate.filter((r) => r.ready).length;
   const overallReadinessPercentage = perCandidate.length
     ? perCandidate.reduce((a, r) => a + r.readinessPercentage, 0) / perCandidate.length

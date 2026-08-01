@@ -304,6 +304,21 @@ test('no special-case confirmation logic was introduced: Phase11AutomatedConfirm
   assert.ok(!/candidate\.type === CANDIDATE_TYPES\.CONDITIONAL_HYPOTHESIS/.test(src));
 });
 
+test('Stage 11 audit fix: computeCandidateReadiness (bridge/Phase11ConfirmationReadiness.js) now also generalizes to non-indicator candidate types, same as Confirmation itself since Stage 6', async () => {
+  const { computeCandidateReadiness } = await import('../../research/src/bridge/Phase11ConfirmationReadiness.js');
+  const { rc, freeze, sap, familyRegistry } = await makeCycle(ALL_FAMILIES);
+  const marketStateRegistry = new MarketStateRegistry(); registerCoreMarketStates(marketStateRegistry);
+  const prices = makeWalkPrices(300);
+
+  let candidate;
+  for await (const { candidate: c } of streamMarketStateCandidates({ marketStateRegistry, researchConfiguration: rc, researchFreeze: freeze, sap, familyRegistry })) {
+    if (c.stateLabel === 'Trend') { candidate = c; break; }
+  }
+  const readiness = computeCandidateReadiness({ candidate, registries: { marketStateRegistry }, prices, targetDefinition: { direction: 'Rise', runLength: 5 } });
+  assert.equal(readiness.ready, true);
+  assert.ok(readiness.usableObservations > 0);
+});
+
 test('never touches onlineFdr.js/discoveryDecision.js/hypothesisRegistry.js directly', async () => {
   const fs = await import('node:fs');
   const src = await fs.promises.readFile(new URL('../../research/src/bridge/Phase11CandidateFeatureResolver.js', import.meta.url), 'utf8');
