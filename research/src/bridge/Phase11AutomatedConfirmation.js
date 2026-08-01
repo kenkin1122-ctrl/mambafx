@@ -202,13 +202,24 @@ function pearsonCorrelation(xs, ys) {
  *   Replication must be able to rank even thin candidates rather than
  *   abort the whole batch.
  */
-export function computeQuickIndicatorScore({ indicatorRegistry, candidate, prices, targetDefinition } = {}) {
-  if (!indicatorRegistry || !candidate?.indicatorName || !Array.isArray(prices) || prices.length === 0) {
+export function computeQuickIndicatorScore({ indicatorRegistry, candidate, prices, targetDefinition, registries, componentsById } = {}) {
+  if (!Array.isArray(prices) || prices.length === 0 || !candidate) {
     return { score: 0, sampleSize: 0 };
   }
   let indicatorSeries, outcomeSeries;
   try {
-    indicatorSeries = computeIndicatorSeries(indicatorRegistry, candidate.indicatorName, candidate.period, prices);
+    if (!candidate.type || candidate.type === CANDIDATE_TYPES.INDICATOR_FEATURE) {
+      if (!indicatorRegistry || !candidate.indicatorName) return { score: 0, sampleSize: 0 };
+      indicatorSeries = computeIndicatorSeries(indicatorRegistry, candidate.indicatorName, candidate.period, prices);
+    } else {
+      // Stage 7 prerequisite: Screening/Triage/Replication must score
+      // every candidate type through the SAME canonical resolver
+      // Confirmation itself uses (Stage 6) -- not silently score
+      // MarketState/ProxyCandidate/CompositeCandidate/ConditionalHypothesis
+      // as 0 just because they lack indicatorName, which would be exactly
+      // the "parallel logic" this whole directive forbids.
+      indicatorSeries = resolveCandidateFeatureSeries({ candidate, registries, prices, componentsById });
+    }
     outcomeSeries = computeOutcomeSeries(prices, targetDefinition);
   } catch {
     return { score: 0, sampleSize: 0 };

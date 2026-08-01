@@ -49,10 +49,27 @@
 import { transitionLifecycleStage, LIFECYCLE_STAGES } from '../governance/hypothesisRegistry.js';
 import { allocateLockboxHoldout, consumeLockboxHoldout } from '../governance/lockbox.js';
 import { computeDiscoveryStabilityIndex } from '../analysis/DiscoveryStabilityAnalysis.js';
+import { computeBootstrapCI } from '../statistics/uncertaintyEstimation.js';
 import { withPhase11Lifecycle } from '../governance/candidateLifecycleTransition.js';
 import { PHASE11_LIFECYCLE_STAGES } from '../governance/phase11LifecycleStates.js';
 import { DECISION_TYPES } from '../governance/DecisionAuditLog.js';
 import { REJECTION_STAGES } from '../governance/NegativeEvidenceRegistry.js';
+
+/**
+ * Derives a deterministic, reproducible RNG seed from a string key --
+ * NOT a cryptographic hash, just a simple, stable, non-random mapping so
+ * computeBootstrapCI's mandatory seed requirement can be satisfied
+ * without every caller inventing its own seed, while remaining fully
+ * reproducible (same hypothesisId+generation always yields the same
+ * seed, hence the same CI, run to run).
+ */
+function deterministicSeedFrom(key) {
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    hash = (Math.imul(31, hash) + key.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash) || 1;
+}
 
 export class Phase11ReplicationValidationError extends Error {
   constructor(message) {
@@ -149,6 +166,22 @@ export async function replicatePhase11Candidate({
   //    Phase 11 stability statistic — not a new ad hoc rule.
   const stability = computeDiscoveryStabilityIndex(partitionEffectSizes, pooledEffectSize);
 
+  // ── Stage 7 requirement: a real confidence interval on the replication
+  //    effect size, not just the scalar stability index. Reuses the
+  //    EXISTING generic computeBootstrapCI (statistics/uncertaintyEstimation.js
+  //    — unmodified) directly over partitionEffectSizes; no new bootstrap
+  //    logic is written here. A deterministic seed is derived from
+  //    hypothesisId+generation (same "no hidden randomness" discipline
+  //    used throughout Phase 11) so this is reproducible without requiring
+  //    every caller to invent its own seed. Honestly disclosed: with only
+  //    a handful of replication partitions (typically 4), this CI is
+  //    necessarily wide — it reports genuine uncertainty rather than a
+  //    false precision, not a claim of high statistical power.
+  const ciSeed = deterministicSeedFrom(`${hypothesisId}:${generation}`);
+  const replicationConfidenceInterval = computeBootstrapCI(partitionEffectSizes, {
+    confidenceLevel: 0.95, numResamples: 2000, seed: ciSeed,
+  });
+
   const lockboxConsumption = await consumeLockboxHoldout({
     id: lockboxAllocation.record.id,
     consumedBy: allocatedBy,
@@ -170,7 +203,7 @@ export async function replicatePhase11Candidate({
         metadata: { hypothesisId, familyKey, stability },
       });
     }
-    return { outcome: 'replicated', candidate: replicatedCandidate, hypothesisId, stability, lockboxAllocation, lockboxConsumption };
+    return { outcome: 'replicated', candidate: replicatedCandidate, hypothesisId, stability, replicationConfidenceInterval, lockboxAllocation, lockboxConsumption };
   }
 
   const deprecatedCandidate = withPhase11Lifecycle(candidate, PHASE11_LIFECYCLE_STAGES.DEPRECATED);
@@ -193,5 +226,5 @@ export async function replicatePhase11Candidate({
       replicationStatus: 'failed',
     });
   }
-  return { outcome: 'failed', candidate: deprecatedCandidate, hypothesisId, stability, lockboxAllocation, lockboxConsumption };
+  return { outcome: 'failed', candidate: deprecatedCandidate, hypothesisId, stability, replicationConfidenceInterval, lockboxAllocation, lockboxConsumption };
 }

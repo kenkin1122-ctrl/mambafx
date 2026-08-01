@@ -34555,6 +34555,12 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
   let ph11TriagedCandidates = [];
   let ph11ConfirmedResults = [];   // [{ candidate, hypothesisId, familyKey, provenance }]
   let ph11ReplicatedResults = [];  // [{ candidate, hypothesisId }]
+  // Stage 7 fix: a snapshot of prices RESERVED at Confirm time and never
+  // touched during Confirmation itself -- Replication reads ONLY from
+  // this array, never re-fetching live history, so it genuinely never
+  // reuses Confirmation's own data (previously both drew from the same
+  // live getHistory() buffer with overlapping windows).
+  let ph11ReplicationHoldoutPrices = [];
   let ph11ProvenanceById = {};     // candidateId -> provenance (from generate())
 
   window.ph11Boot = function () {
@@ -34571,9 +34577,11 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
   // which reuses the EXACT SAME canonical Indicator Registry lookup,
   // outcome computation, and correlation math full Confirmation uses --
   // one scoring pipeline, not a parallel one.
-  function ph11DemoScore(candidate){
-    const hist = (window.__mfxDebug && window.__mfxDebug.getHistory) ? window.__mfxDebug.getHistory(300) : null;
-    const prices = (hist && hist.ticks || []).map(t => t.tick).filter(v => typeof v === "number");
+  function ph11DemoScore(candidate, prices){
+    if (!prices) {
+      const hist = (window.__mfxDebug && window.__mfxDebug.getHistory) ? window.__mfxDebug.getHistory(300) : null;
+      prices = (hist && hist.ticks || []).map(t => t.tick).filter(v => typeof v === "number");
+    }
     const { score } = computeQuickIndicatorScore({
       indicatorRegistry: ph11IndicatorRegistry, candidate, prices,
       targetDefinition: { direction: "Rise", runLength: 5 },
@@ -34581,16 +34589,17 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
     return score;
   }
 
-  // Splits this session's real tick history into disjoint chunks and
-  // computes the SAME canonical computeQuickIndicatorScore per chunk —
-  // genuine (if small-sample) per-partition effect-size estimates for
-  // Replication's stability check, indicator-aware exactly like
-  // Confirmation, not a separate ad hoc statistic.
-  function ph11PartitionScores(candidate, numPartitions = 4){
+  // Splits a REAL price series into disjoint chunks and computes the SAME
+  // canonical computeQuickIndicatorScore per chunk — genuine (if
+  // small-sample) per-partition effect-size estimates for Replication's
+  // stability check, indicator-aware exactly like Confirmation, not a
+  // separate ad hoc statistic. `prices` must be supplied explicitly by
+  // the caller (Stage 7 fix — see ph11ReplicationHoldoutPrices below):
+  // this function no longer fetches live history itself, precisely so it
+  // can never accidentally reuse Confirmation's own data.
+  function ph11PartitionScores(candidate, prices, numPartitions = 4){
     const period = candidate?.period || 14;
-    const hist = (window.__mfxDebug && window.__mfxDebug.getHistory) ? window.__mfxDebug.getHistory(400) : null;
-    const prices = (hist && hist.ticks || []).map(t => t.tick).filter(v => typeof v === "number");
-    const chunkSize = Math.floor(prices.length / numPartitions);
+    const chunkSize = Math.floor((prices || []).length / numPartitions);
     if (chunkSize < period + 1) return null; // not enough real data yet for this many partitions
     const scores = [];
     for (let p = 0; p < numPartitions; p++){
@@ -34785,9 +34794,17 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
     ph11SetStatus("Running Round 3 confirmation (fully automated — computing the p-value, not asking for one)…");
     progress.log("[1/5] Loading this session's real tick history…");
 
-    const hist = (window.__mfxDebug && window.__mfxDebug.getHistory) ? window.__mfxDebug.getHistory(2000) : null;
-    const prices = (hist && hist.ticks || []).map(t => t.tick).filter(v => typeof v === "number");
-    progress.log(`      ${prices.length} ticks available.`);
+    const hist = (window.__mfxDebug && window.__mfxDebug.getHistory) ? window.__mfxDebug.getHistory(3000) : null;
+    const allPrices = (hist && hist.ticks || []).map(t => t.tick).filter(v => typeof v === "number");
+    // Stage 7: split ONCE, here, into a confirmation portion and a
+    // RESERVED replication holdout -- the holdout is set aside now and
+    // never read again until the Replicate button runs, so Confirmation
+    // and Replication are genuinely disjoint slices of this snapshot,
+    // not two separate live getHistory() calls that could overlap.
+    const splitIndex = Math.floor(allPrices.length * 0.7);
+    const prices = allPrices.slice(0, splitIndex);
+    ph11ReplicationHoldoutPrices = allPrices.slice(splitIndex);
+    progress.log(`      ${prices.length} ticks available for confirmation (${ph11ReplicationHoldoutPrices.length} reserved, untouched, for later replication).`);
 
     ph11ConfirmedResults = [];
     let confirmedCount = 0;
@@ -34838,17 +34855,21 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
 
   document.getElementById("ph11ReplicateBtn").addEventListener("click", async () => {
     if (!ph11Orchestrator || !ph11ConfirmedResults.length) return;
-    ph11SetStatus("Running Round 4 replication (real per-partition effect sizes from this session's tick history)…");
+    if (!ph11ReplicationHoldoutPrices.length) {
+      ph11SetStatus("No replication holdout reserved yet — run Confirmation first (it reserves the holdout automatically).");
+      return;
+    }
+    ph11SetStatus("Running Round 4 replication (real per-partition effect sizes from the RESERVED holdout, disjoint from Confirmation's own data)…");
     ph11ReplicatedResults = [];
     let replicatedCount = 0;
     try {
       for (const { candidate, hypothesisId, familyKey } of ph11ConfirmedResults) {
-        const partitionEffectSizes = ph11PartitionScores(candidate, 4);
+        const partitionEffectSizes = ph11PartitionScores(candidate, ph11ReplicationHoldoutPrices, 4);
         if (!partitionEffectSizes) {
-          ph11SetStatus("Not enough live tick history yet for 4 independent replication partitions — let more ticks accumulate and try again.");
+          ph11SetStatus("Not enough reserved holdout ticks yet for 4 independent replication partitions — let more ticks accumulate, re-run Confirmation to reserve a larger holdout, and try again.");
           continue;
         }
-        const pooledEffectSize = ph11DemoScore(candidate);
+        const pooledEffectSize = ph11DemoScore(candidate, ph11ReplicationHoldoutPrices);
         const result = await ph11Orchestrator.replicate({
           candidate, hypothesisId, familyKey,
           featureKey: candidate.id, generation: 0,

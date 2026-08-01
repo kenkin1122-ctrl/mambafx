@@ -160,6 +160,90 @@ test('failed replication: inconsistent partitions below threshold -> Deprecated,
   }
 });
 
+test('Stage 7: replicatePhase11Candidate() reports a REAL confidence interval on the replication effect size, reusing the existing computeBootstrapCI verbatim', async () => {
+  const teardown = await setup();
+  try {
+    const rc = await makeRc();
+    const freeze = await makeFreeze(rc);
+    const sap = await makeSap();
+    const familyRegistry = new FamilyRegistry();
+    familyRegistry.registerFamily({ familyName: 'momentum', version: '1.0.0', allowedCandidateTypes: [CANDIDATE_TYPES.INDICATOR_FEATURE] });
+    const orchestrator = new Phase11Orchestrator({ researchFreeze: freeze, sap, familyRegistry });
+
+    const { confirmed, hypothesisId, familyKey } = await buildConfirmedCandidate(orchestrator, rc, 'repl-cand-ci');
+
+    const result = await orchestrator.replicate({
+      candidate: confirmed, hypothesisId, familyKey,
+      featureKey: 'rsi14-close', generation: 0, holdoutRange: { startTick: 1000, endTick: 2000 },
+      partitionEffectSizes: [0.12, 0.11, 0.13, 0.12], pooledEffectSize: 0.12,
+    });
+
+    assert.ok(result.replicationConfidenceInterval, 'expected a real confidence interval on the replication result');
+    assert.equal(typeof result.replicationConfidenceInterval.pointEstimate, 'number');
+    assert.equal(typeof result.replicationConfidenceInterval.ciLower, 'number');
+    assert.equal(typeof result.replicationConfidenceInterval.ciUpper, 'number');
+    assert.ok(result.replicationConfidenceInterval.ciLower <= result.replicationConfidenceInterval.ciUpper);
+  } finally {
+    teardown();
+  }
+});
+
+test('Stage 7: the replication confidence interval is deterministic (same hypothesisId+generation -> same CI, run to run)', async () => {
+  const teardown = await setup();
+  try {
+    const rc = await makeRc();
+    const freeze = await makeFreeze(rc);
+    const sap = await makeSap();
+    const familyRegistry = new FamilyRegistry();
+    familyRegistry.registerFamily({ familyName: 'momentum', version: '1.0.0', allowedCandidateTypes: [CANDIDATE_TYPES.INDICATOR_FEATURE] });
+
+    async function runOnce() {
+      const orchestrator = new Phase11Orchestrator({ researchFreeze: freeze, sap, familyRegistry });
+      const { confirmed, hypothesisId, familyKey } = await buildConfirmedCandidate(orchestrator, rc, 'repl-cand-det');
+      return orchestrator.replicate({
+        candidate: confirmed, hypothesisId, familyKey,
+        featureKey: 'rsi14-close-det', generation: 0, holdoutRange: { startTick: 1000, endTick: 2000 },
+        partitionEffectSizes: [0.12, 0.11, 0.13, 0.12], pooledEffectSize: 0.12,
+      });
+    }
+    const a = await runOnce();
+    teardown();
+
+    const teardown2 = await setup();
+    const b = await runOnce();
+    assert.deepEqual(a.replicationConfidenceInterval, b.replicationConfidenceInterval);
+    teardown2();
+  } catch (e) {
+    teardown();
+    throw e;
+  }
+});
+
+test('failed replication also reports a real confidence interval (reproducibility tracking applies regardless of verdict)', async () => {
+  const teardown = await setup();
+  try {
+    const rc = await makeRc();
+    const freeze = await makeFreeze(rc);
+    const sap = await makeSap();
+    const familyRegistry = new FamilyRegistry();
+    familyRegistry.registerFamily({ familyName: 'momentum', version: '1.0.0', allowedCandidateTypes: [CANDIDATE_TYPES.INDICATOR_FEATURE] });
+    const orchestrator = new Phase11Orchestrator({ researchFreeze: freeze, sap, familyRegistry });
+
+    const { confirmed, hypothesisId, familyKey } = await buildConfirmedCandidate(orchestrator, rc, 'repl-cand-fail-ci');
+
+    const result = await orchestrator.replicate({
+      candidate: confirmed, hypothesisId, familyKey,
+      featureKey: 'rsi14-close-fail', generation: 0, holdoutRange: { startTick: 1000, endTick: 2000 },
+      partitionEffectSizes: [0.30, -0.25, 0.10, -0.15], pooledEffectSize: 0.12, // inconsistent signs -> low stability
+    });
+
+    assert.equal(result.outcome, 'failed');
+    assert.ok(result.replicationConfidenceInterval, 'a failed replication must still report its CI -- reproducibility tracking is not conditional on the verdict');
+  } finally {
+    teardown();
+  }
+});
+
 test('validation: refuses a candidate that is not Confirmed, before any Lockbox call', async () => {
   const teardown = await setup();
   try {
