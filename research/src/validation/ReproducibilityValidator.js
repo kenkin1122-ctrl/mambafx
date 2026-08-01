@@ -71,6 +71,9 @@ function valuesMatch(a, b) {
  * @param {object} params.candidateB - Second candidate instance, built
  *   independently from the same parameters (e.g. a second run of the same
  *   campaign, or the same candidate reloaded from storage).
+ * @param {import('../indicator/IndicatorRegistry.js').IndicatorRegistry} params.indicatorRegistry
+ *   The canonical Indicator Registry -- resolved identically for both runs,
+ *   same as production Confirmation would.
  * @param {number[]} params.prices - The SAME price series supplied to both runs
  *   (standing in for "identical ResearchFreeze + DatasetManifest" — see
  *   module header).
@@ -81,7 +84,7 @@ function valuesMatch(a, b) {
  * @returns {Phase11ReproducibilityMismatchReport}
  */
 export function verifyReproducibility({
-  candidateA, candidateB, prices, targetDefinition, seed, permutations = 1000, bootstrapResamples = 2000,
+  candidateA, candidateB, indicatorRegistry, prices, targetDefinition, seed, permutations = 1000, bootstrapResamples = 2000,
 } = {}) {
   const comparisons = [];
   const mismatches = [];
@@ -90,8 +93,8 @@ export function verifyReproducibility({
   comparisons.push({ field: 'candidateFingerprint', valueA: candidateA.fingerprint, valueB: candidateB.fingerprint, matched: fpMatch });
   if (!fpMatch) mismatches.push({ field: 'candidateFingerprint', valueA: candidateA.fingerprint, valueB: candidateB.fingerprint });
 
-  const reportA = runAutomatedConfirmationTest({ candidate: candidateA, prices, targetDefinition, seed, permutations, bootstrapResamples });
-  const reportB = runAutomatedConfirmationTest({ candidate: candidateB, prices, targetDefinition, seed, permutations, bootstrapResamples });
+  const reportA = runAutomatedConfirmationTest({ candidate: candidateA, indicatorRegistry, prices, targetDefinition, seed, permutations, bootstrapResamples });
+  const reportB = runAutomatedConfirmationTest({ candidate: candidateB, indicatorRegistry, prices, targetDefinition, seed, permutations, bootstrapResamples });
 
   for (const field of COMPARED_FIELDS) {
     const matched = valuesMatch(reportA[field], reportB[field]);

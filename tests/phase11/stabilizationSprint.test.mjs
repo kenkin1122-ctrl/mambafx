@@ -166,6 +166,32 @@ test('MASTER REGRESSION: multiple same-family candidates, mixed confirm/reject o
   }
 });
 
+test('index.html wiring: readiness and confirmation both resolve indicators through the SAME canonical Indicator Registry instance, for both demo and registry-driven candidates', async () => {
+  const fs = await import('node:fs');
+  const html = await fs.promises.readFile(new URL('../../index.html', import.meta.url), 'utf8');
+
+  const scriptMatches = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)];
+  const ph11Script = scriptMatches.map((m) => m[1]).find((s) => s.includes('ph11StartRegistryCampaignBtn'));
+  assert.ok(ph11Script, 'could not locate the Phase 11 campaign script block');
+
+  // Exactly one IndicatorRegistry construction in this script -- not one
+  // per call site, not a second lookup table.
+  const registryConstructions = (ph11Script.match(/new IndicatorRegistry\(\)/g) || []).length;
+  assert.equal(registryConstructions, 1, 'exactly one canonical IndicatorRegistry instance must be constructed, shared by readiness and confirmation alike');
+
+  // Readiness and Confirmation both reference that SAME instance.
+  assert.match(ph11Script, /computeOverallReadiness\(\{[\s\S]{0,200}indicatorRegistry:\s*ph11IndicatorRegistry/);
+  assert.match(ph11Script, /confirmAutomatically\(\{[\s\S]{0,200}indicatorRegistry:\s*ph11IndicatorRegistry/);
+
+  // The Validation Dashboard script (a separate module scope) constructs
+  // its own instance from the SAME canonical source, not a duplicate
+  // definition of the indicator math itself.
+  const valScript = scriptMatches.map((m) => m[1]).find((s) => s.includes('ph11ValRunBtn'));
+  assert.ok(valScript, 'could not locate the Phase 11 Validation Dashboard script block');
+  assert.match(valScript, /import\s*\{\s*IndicatorRegistry\s*\}\s*from\s*"\.\/research\/src\/indicator\/IndicatorRegistry\.js"/);
+  assert.match(valScript, /verifyReproducibility\(\{[\s\S]{0,200}indicatorRegistry:/);
+});
+
 test('index.html wiring: the registry-driven campaign button calls startRegistryDrivenCampaign() and is wired alongside the demo campaign path', async () => {
   const fs = await import('node:fs');
   const html = await fs.promises.readFile(new URL('../../index.html', import.meta.url), 'utf8');

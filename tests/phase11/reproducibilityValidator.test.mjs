@@ -13,6 +13,11 @@ import {
   Phase11ReproducibilityMismatchReport,
 } from '../../research/src/validation/ReproducibilityValidator.js';
 import { IndicatorFeature } from '../../research/src/candidate/IndicatorFeature.js';
+import { IndicatorRegistry } from '../../research/src/indicator/IndicatorRegistry.js';
+import { registerCoreIndicators } from '../../research/src/indicator/coreIndicators.js';
+
+const indicatorRegistry = new IndicatorRegistry();
+registerCoreIndicators(indicatorRegistry);
 
 const BASE_FIELDS = {
   id: 'repro-cand-1', family: 'momentum', parameters: { threshold: 0.5 },
@@ -36,7 +41,7 @@ test('verifyReproducibility: two independently-built candidates from identical p
 
   const prices = makePrices(300, 7);
   const report = verifyReproducibility({
-    candidateA, candidateB, prices, targetDefinition: { direction: 'Rise', runLength: 5 },
+    candidateA, candidateB, indicatorRegistry, prices, targetDefinition: { direction: 'Rise', runLength: 5 },
     seed: 42, permutations: 300, bootstrapResamples: 300,
   });
 
@@ -53,7 +58,7 @@ test('verifyReproducibility: detects a candidate fingerprint mismatch when param
 
   const prices = makePrices(300, 7);
   const report = verifyReproducibility({
-    candidateA, candidateB, prices, targetDefinition: { direction: 'Rise', runLength: 5 },
+    candidateA, candidateB, indicatorRegistry, prices, targetDefinition: { direction: 'Rise', runLength: 5 },
     seed: 42, permutations: 300, bootstrapResamples: 300,
   });
 
@@ -68,11 +73,11 @@ test('verifyReproducibility: reports remain honest (do not force agreement) when
   const pricesB = makePrices(300, 8); // a different underlying dataset
 
   const reportA = verifyReproducibility({
-    candidateA, candidateB: candidateA, prices: pricesA, targetDefinition: { direction: 'Rise', runLength: 5 },
+    candidateA, candidateB: candidateA, indicatorRegistry, prices: pricesA, targetDefinition: { direction: 'Rise', runLength: 5 },
     seed: 42, permutations: 300, bootstrapResamples: 300,
   });
   const reportB = verifyReproducibility({
-    candidateA, candidateB: candidateA, prices: pricesB, targetDefinition: { direction: 'Rise', runLength: 5 },
+    candidateA, candidateB: candidateA, indicatorRegistry, prices: pricesB, targetDefinition: { direction: 'Rise', runLength: 5 },
     seed: 42, permutations: 300, bootstrapResamples: 300,
   });
 

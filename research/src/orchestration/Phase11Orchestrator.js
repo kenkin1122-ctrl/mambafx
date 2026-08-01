@@ -433,7 +433,7 @@ export class Phase11Orchestrator {
    *   ci95, pValue, sampleSize, permutations, nullModel, seed).
    */
   async confirmAutomatically({
-    candidate, researchConfiguration, datasetManifest, provenance,
+    candidate, researchConfiguration, datasetManifest, provenance, indicatorRegistry,
     market, targetDefinition, prices, seed, permutations, bootstrapResamples, testMethod, testedAt,
   } = {}) {
     let knowledgeGraphCandidateNode = this._knowledgeGraphNodes.get(candidate?.id) ?? null;
@@ -450,7 +450,7 @@ export class Phase11Orchestrator {
 
     const result = await confirmPhase11CandidateAutomatically({
       candidate, researchFreeze: this.researchFreeze, sap: this.sap, researchConfiguration,
-      datasetManifest, provenance, familyRegistry: this.familyRegistry,
+      datasetManifest, provenance, familyRegistry: this.familyRegistry, indicatorRegistry,
       market, targetDefinition, prices, seed, permutations, bootstrapResamples, testMethod, testedAt,
       decisionAuditLog: this.decisionAuditLog, negativeEvidenceRegistry: this.negativeEvidenceRegistry,
       knowledgeGraphCandidateNode,

@@ -34536,6 +34536,16 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
   import { mountPhase11 } from "./research/src/ui/Phase11Application.js";
   import { startPhase11Campaign, startRegistryDrivenCampaign } from "./research/src/orchestration/startPhase11Campaign.js";
   import { computeOverallReadiness } from "./research/src/bridge/Phase11ConfirmationReadiness.js";
+  import { IndicatorRegistry } from "./research/src/indicator/IndicatorRegistry.js";
+  import { registerCoreIndicators } from "./research/src/indicator/coreIndicators.js";
+
+  // The SINGLE canonical Indicator Registry for this whole page -- the
+  // exact same registry (and EMA_SLOPE plugin) the demo campaign and the
+  // registry-driven campaign candidates both resolve their indicatorName
+  // against, at every stage: Readiness, Confirmation, Reproducibility.
+  // There is no second lookup table anywhere else in this file.
+  const ph11IndicatorRegistry = new IndicatorRegistry();
+  registerCoreIndicators(ph11IndicatorRegistry);
 
   let ph11Handle = null;
   let ph11Orchestrator = null;
@@ -34722,7 +34732,7 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
     const hist = (window.__mfxDebug && window.__mfxDebug.getHistory) ? window.__mfxDebug.getHistory(2000) : null;
     const prices = (hist && hist.ticks || []).map(t => t.tick).filter(v => typeof v === "number");
     const overall = computeOverallReadiness({
-      candidates: ph11TriagedCandidates, prices, targetDefinition: { direction: "Rise", runLength: 5 },
+      candidates: ph11TriagedCandidates, indicatorRegistry: ph11IndicatorRegistry, prices, targetDefinition: { direction: "Rise", runLength: 5 },
     });
     ph11RenderReadiness(overall);
     confirmBtn.disabled = !overall.overallReady;
@@ -34783,7 +34793,7 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
       progress.log(`[4/5] Running circular-shift permutation test + paired bootstrap CI (this is the actual statistical procedure — no manual input)…`);
       try {
         const result = await ph11Orchestrator.confirmAutomatically({
-          candidate, researchConfiguration: ph11ResearchConfiguration,
+          candidate, researchConfiguration: ph11ResearchConfiguration, indicatorRegistry: ph11IndicatorRegistry,
           datasetManifest: { datasetId: `session-${Date.now()}` }, // this session's live ticks, not a locked historical dataset
           provenance: ph11ProvenanceById[candidate.id],
           market: "R_100", targetDefinition,
@@ -34890,6 +34900,15 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
   import { verifyReproducibility } from "./research/src/validation/ReproducibilityValidator.js";
   import { buildValidationReport } from "./research/src/validation/ValidationReport.js";
   import { IndicatorFeature } from "./research/src/candidate/IndicatorFeature.js";
+  import { IndicatorRegistry } from "./research/src/indicator/IndicatorRegistry.js";
+  import { registerCoreIndicators } from "./research/src/indicator/coreIndicators.js";
+
+  // Same canonical registry SOURCE (indicator/IndicatorRegistry.js +
+  // coreIndicators.js) as the campaign script -- module scripts don't
+  // share JS scope, so this is its own instance, but there is still only
+  // ONE place the indicator formulas themselves are defined.
+  const ph11ValIndicatorRegistry = new IndicatorRegistry();
+  registerCoreIndicators(ph11ValIndicatorRegistry);
 
   let ph11ValHandle = null;
 
@@ -34927,7 +34946,7 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
       const syntheticPrices = [100];
       for (let i = 0; i < 300; i++) syntheticPrices.push(syntheticPrices[syntheticPrices.length - 1] + (i % 2 === 0 ? 1 : -1));
       const reproducibility = verifyReproducibility({
-        candidateA, candidateB, prices: syntheticPrices,
+        candidateA, candidateB, indicatorRegistry: ph11ValIndicatorRegistry, prices: syntheticPrices,
         targetDefinition: { direction: "Rise", runLength: 5 }, seed: 42, permutations: 300, bootstrapResamples: 300,
       });
 

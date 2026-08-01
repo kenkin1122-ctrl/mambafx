@@ -43,6 +43,10 @@ import { computeIndicatorSeries, computeOutcomeSeries, MIN_ALIGNED_PAIRS } from 
  *
  * @param {object} params
  * @param {object} params.candidate - Provides indicatorName/period.
+ * @param {import('../indicator/IndicatorRegistry.js').IndicatorRegistry} params.indicatorRegistry
+ *   The canonical Indicator Registry -- resolves indicatorName exactly as
+ *   Confirmation itself does, since readiness is a preview of the same
+ *   real computation, not a separate approximation of it.
  * @param {number[]} params.prices - The current real price series.
  * @param {{ direction: 'Rise'|'Fall', runLength: number }} params.targetDefinition
  * @returns {{
@@ -53,14 +57,14 @@ import { computeIndicatorSeries, computeOutcomeSeries, MIN_ALIGNED_PAIRS } from 
  *   ready: boolean, reason: string|null
  * }}
  */
-export function computeCandidateReadiness({ candidate, prices, targetDefinition } = {}) {
+export function computeCandidateReadiness({ candidate, indicatorRegistry, prices, targetDefinition } = {}) {
   const currentTickCount = Array.isArray(prices) ? prices.length : 0;
   const period = candidate?.period ?? 14;
   const runLength = targetDefinition?.runLength ?? 5;
 
   let usableObservations = 0;
   if (currentTickCount > 0) {
-    const indicatorSeries = computeIndicatorSeries(candidate.indicatorName, period, prices);
+    const indicatorSeries = computeIndicatorSeries(indicatorRegistry, candidate.indicatorName, period, prices);
     const outcomeSeries = computeOutcomeSeries(prices, targetDefinition);
     for (let i = 0; i < prices.length; i++) {
       if (Number.isFinite(indicatorSeries[i]) && Number.isFinite(outcomeSeries[i])) usableObservations++;
@@ -100,6 +104,7 @@ export function computeCandidateReadiness({ candidate, prices, targetDefinition 
  *
  * @param {object} params
  * @param {object[]} params.candidates
+ * @param {import('../indicator/IndicatorRegistry.js').IndicatorRegistry} params.indicatorRegistry
  * @param {number[]} params.prices
  * @param {{ direction: 'Rise'|'Fall', runLength: number }} params.targetDefinition
  * @returns {{
@@ -108,9 +113,9 @@ export function computeCandidateReadiness({ candidate, prices, targetDefinition 
  *   readyCount: number, totalCount: number
  * }}
  */
-export function computeOverallReadiness({ candidates, prices, targetDefinition } = {}) {
+export function computeOverallReadiness({ candidates, indicatorRegistry, prices, targetDefinition } = {}) {
   const list = Array.isArray(candidates) ? candidates : [];
-  const perCandidate = list.map((candidate) => computeCandidateReadiness({ candidate, prices, targetDefinition }));
+  const perCandidate = list.map((candidate) => computeCandidateReadiness({ candidate, indicatorRegistry, prices, targetDefinition }));
   const readyCount = perCandidate.filter((r) => r.ready).length;
   const overallReadinessPercentage = perCandidate.length
     ? perCandidate.reduce((a, r) => a + r.readinessPercentage, 0) / perCandidate.length

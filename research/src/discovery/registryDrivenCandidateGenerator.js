@@ -68,7 +68,7 @@ export class RegistryDrivenGenerationError extends Error {
  * throwing — registration should never require updating this file.
  */
 export const INDICATOR_FAMILY_BY_NAME = Object.freeze({
-  EMA: 'trend', SMA: 'trend', WMA: 'trend', MACD: 'trend', ADX: 'trend',
+  EMA: 'trend', SMA: 'trend', WMA: 'trend', MACD: 'trend', ADX: 'trend', EMA_SLOPE: 'trend',
   RSI: 'momentum', CCI: 'momentum', Momentum: 'momentum', ROC: 'momentum', StochasticK: 'momentum',
   ATR: 'volatility', BollingerWidth: 'volatility', BollingerPosition: 'volatility', Volatility: 'volatility', Range: 'volatility', KeltnerWidth: 'volatility',
   ZScore: 'statistical', Entropy: 'statistical', Hurst: 'statistical', FractalDimension: 'statistical', Autocorrelation: 'statistical', Skewness: 'statistical', Kurtosis: 'statistical',

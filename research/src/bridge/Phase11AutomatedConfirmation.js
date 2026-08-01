@@ -75,63 +75,57 @@ export const MIN_ALIGNED_PAIRS = 60; // below this, a permutation test's null is
 
 /**
  * Computes the candidate's indicator reading at every valid index of a
- * price series — this IS "the candidate's mathematical definition" (its
- * indicatorName + period), applied for real, not a placeholder.
+ * price series, by delegating to the canonical indicator/IndicatorRegistry.js
+ * -- the SAME registry candidate generation (discovery/
+ * registryDrivenCandidateGenerator.js) and the original 3-candidate demo
+ * (startPhase11Campaign.js) both resolve indicator identity through. This
+ * function computes NOTHING itself: it looks up
+ * indicatorRegistry.lookup(indicatorName) and calls that plugin's own
+ * compute({prices, period}), exactly as generateCandidate()'s own callers
+ * never reimplement indicator math either.
  *
- * @param {string} indicatorName - 'RSI' | 'EMA_SLOPE' | 'CCI'.
+ * PRIOR DESIGN (removed by this change): this function used to contain its
+ * own hardcoded RSI/EMA_SLOPE/CCI formulas, entirely separate from the
+ * Indicator Registry's real plugins of the same names. That duplication is
+ * what caused "unrecognised indicatorName 'EMA'" for registry-generated
+ * candidates: this function's hardcoded three-name list had no way to
+ * know about the Indicator Registry's other 26 plugins, because it wasn't
+ * consulting the registry at all. Verified byte-for-byte equivalent before
+ * removal: the old hardcoded RSI and CCI formulas were IDENTICAL to
+ * indicator/coreIndicators.js's RSIIndicator/CCIIndicator (same Wilder
+ * smoothing, same mean-absolute-deviation CCI) -- so this change produces
+ * IDENTICAL statistical results for existing RSI/CCI candidates, zero
+ * behavioral change. EMA_SLOPE had no registry equivalent at all; it is
+ * now registered as indicator/coreIndicators.js's EMASlopeIndicator,
+ * using the EXACT SAME formula this function used to hardcode -- so the
+ * original 3-candidate demo campaign's statistical behavior is preserved
+ * exactly, just resolved through the canonical registry instead of a
+ * second, parallel implementation.
+ *
+ * @param {import('../indicator/IndicatorRegistry.js').IndicatorRegistry} indicatorRegistry
+ *   The canonical registry. Required -- there is no fallback hardcoded
+ *   formula set anymore.
+ * @param {string} indicatorName
  * @param {number} period
  * @param {number[]} prices
  * @returns {number[]} One value per input index; NaN where insufficient
  *   lookback exists yet (trimmed by the caller before use).
  */
-export function computeIndicatorSeries(indicatorName, period, prices) {
-  const n = prices.length;
-  const out = new Array(n).fill(NaN);
-
-  if (indicatorName === 'RSI') {
-    let avgGain = null, avgLoss = null;
-    for (let i = 1; i < n; i++) {
-      const change = prices[i] - prices[i - 1];
-      const gain = Math.max(change, 0), loss = Math.max(-change, 0);
-      if (i <= period) {
-        avgGain = (avgGain ?? 0) + gain / period;
-        avgLoss = (avgLoss ?? 0) + loss / period;
-        if (i === period) out[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
-      } else {
-        avgGain = (avgGain * (period - 1) + gain) / period;
-        avgLoss = (avgLoss * (period - 1) + loss) / period;
-        out[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
-      }
-    }
-    return out;
+export function computeIndicatorSeries(indicatorRegistry, indicatorName, period, prices) {
+  if (!indicatorRegistry || typeof indicatorRegistry.lookup !== 'function') {
+    throw new Phase11InsufficientDataError(
+      'computeIndicatorSeries: a valid IndicatorRegistry is required -- indicator computation is no longer hardcoded in this module'
+    );
   }
-
-  if (indicatorName === 'EMA_SLOPE') {
-    const k = 2 / (period + 1);
-    let ema = null;
-    const emaSeries = new Array(n).fill(NaN);
-    for (let i = 0; i < n; i++) {
-      ema = ema === null ? prices[i] : prices[i] * k + ema * (1 - k);
-      emaSeries[i] = ema;
-    }
-    for (let i = 1; i < n; i++) out[i] = emaSeries[i] - emaSeries[i - 1];
-    return out;
+  const plugin = indicatorRegistry.lookup(indicatorName);
+  if (!plugin) {
+    throw new Phase11InsufficientDataError(
+      `computeIndicatorSeries: "${indicatorName}" is not registered in the canonical Indicator Registry. ` +
+      `Registered indicators: ${indicatorRegistry.listNames().join(', ')}.`
+    );
   }
-
-  if (indicatorName === 'CCI') {
-    // Standard CCI formula with "typical price" simplified to the raw
-    // price itself (tick-level data has no high/low/close to average) —
-    // an honest, disclosed simplification, not a different indicator.
-    for (let i = period - 1; i < n; i++) {
-      const window = prices.slice(i - period + 1, i + 1);
-      const sma = window.reduce((a, b) => a + b, 0) / period;
-      const meanAbsDev = window.reduce((a, b) => a + Math.abs(b - sma), 0) / period;
-      out[i] = meanAbsDev === 0 ? 0 : (prices[i] - sma) / (0.015 * meanAbsDev);
-    }
-    return out;
-  }
-
-  throw new Phase11InsufficientDataError(`computeIndicatorSeries: unrecognised indicatorName "${indicatorName}"`);
+  const { signal } = plugin.compute({ prices, period });
+  return signal;
 }
 
 /**
@@ -211,6 +205,10 @@ function bootstrapPairedCorrelation(xs, ys, { confidenceLevel = 0.95, numResampl
  * @param {object} params
  * @param {object} params.candidate - Provides indicatorName/period. Unused
  *   if featureValues/outcomeValues are both supplied directly.
+ * @param {import('../indicator/IndicatorRegistry.js').IndicatorRegistry} [params.indicatorRegistry]
+ *   The canonical Indicator Registry -- required unless featureValues/
+ *   outcomeValues are both supplied directly (the Validation Suite's path,
+ *   which never resolves a candidate's indicatorName at all).
  * @param {number[]} [params.prices] - The confirmation dataset's real price
  *   series. Required unless featureValues/outcomeValues are both supplied.
  * @param {number[]} [params.featureValues] - Optional pre-computed indicator
@@ -234,7 +232,7 @@ function bootstrapPairedCorrelation(xs, ys, { confidenceLevel = 0.95, numResampl
  * }}
  */
 export function runAutomatedConfirmationTest({
-  candidate, prices, featureValues: injectedFeatureValues, outcomeValues: injectedOutcomeValues,
+  candidate, indicatorRegistry, prices, featureValues: injectedFeatureValues, outcomeValues: injectedOutcomeValues,
   targetDefinition, seed, permutations = 1000, bootstrapResamples = 2000,
 } = {}) {
   let featureValues, outcomeValues;
@@ -246,7 +244,7 @@ export function runAutomatedConfirmationTest({
     featureValues = injectedFeatureValues;
     outcomeValues = injectedOutcomeValues;
   } else {
-    const indicatorSeries = computeIndicatorSeries(candidate.indicatorName, candidate.period, prices);
+    const indicatorSeries = computeIndicatorSeries(indicatorRegistry, candidate.indicatorName, candidate.period, prices);
     const outcomeSeries = computeOutcomeSeries(prices, targetDefinition);
     featureValues = []; outcomeValues = [];
     for (let i = 0; i < prices.length; i++) {

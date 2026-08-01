@@ -40,7 +40,7 @@ test('startRegistryDrivenCampaign: generates far more than the old 3-candidate d
   });
 
   assert.ok(generatedCount > 80, `expected a much larger candidate space than the old 3-candidate demo, got ${generatedCount}`);
-  assert.equal(countsByType.indicator, 26 * 4); // 26 core indicators x 4 periods
+  assert.equal(countsByType.indicator, 27 * 4); // 27 core indicators x 4 periods
   assert.equal(countsByType.marketState, 15);
   assert.equal(orchestrator.listCandidates().length, generatedCount);
 
@@ -82,7 +82,7 @@ test('startRegistryDrivenCampaign -> Screen -> Triage -> Confirm: a registry-gen
     });
 
     const candidates = orchestrator.listCandidates();
-    assert.ok(candidates.length >= 26);
+    assert.ok(candidates.length >= 27);
 
     const { promoted: screened } = orchestrator.screen({
       candidates, scoreFn: () => 1, promotionQuantile: 1,

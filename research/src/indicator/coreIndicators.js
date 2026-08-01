@@ -138,6 +138,31 @@ export const EMAIndicator = makePlugin({
   testInputs: DEFAULT_TEST_INPUT,
 });
 
+export const EMASlopeIndicator = makePlugin({
+  name: 'EMA_SLOPE', displayName: 'EMA Slope',
+  description: 'First difference of the Exponential Moving Average -- the EMA\'s own rate of change, distinct from EMA\'s level. This is the original Phase 11 demo campaign\'s founding indicator definition (startPhase11Campaign.js\'s DEFAULT_INDICATOR_CANDIDATES), registered here as the canonical implementation -- the confirmation pipeline no longer maintains a separate copy of this formula.',
+  assumptions: ['A rising/falling EMA slope indicates accelerating/decelerating trend strength beyond the EMA level alone.'],
+  complexity: 'O(n)', validationStatus: 'VALIDATED',
+  mathDef: createMathDefinition({
+    humanReadable: 'EMA_SLOPE_t = EMA_t - EMA_{t-1}',
+    symbolicExpression: String.raw`\Delta\text{EMA}_t = \text{EMA}_t - \text{EMA}_{t-1}`,
+    executableFormula: (p, period) => {
+      const emaSeries = ema(p, period);
+      const out = new Array(emaSeries.length).fill(NaN);
+      for (let i = 1; i < emaSeries.length; i++) out[i] = emaSeries[i] - emaSeries[i - 1];
+      return out;
+    },
+    units: 'price units per tick', domain: 'ℝ^n', range: 'ℝ',
+  }),
+  computeFn: ({ prices, period = 14 } = {}) => {
+    const emaSeries = ema(prices || [], period);
+    const out = new Array(emaSeries.length).fill(NaN);
+    for (let i = 1; i < emaSeries.length; i++) out[i] = emaSeries[i] - emaSeries[i - 1];
+    return { signal: out, period };
+  },
+  testInputs: DEFAULT_TEST_INPUT,
+});
+
 export const SMAIndicator = makePlugin({
   name: 'SMA', displayName: 'Simple Moving Average',
   description: 'Unweighted rolling mean of price over a fixed window.',
@@ -744,7 +769,7 @@ export const KurtosisIndicator = makePlugin({
 // ── Registration ────────────────────────────────────────────────────────
 
 export const CORE_INDICATOR_PLUGINS = Object.freeze([
-  EMAIndicator, SMAIndicator, WMAIndicator,
+  EMAIndicator, EMASlopeIndicator, SMAIndicator, WMAIndicator,
   RSIIndicator, CCIIndicator, MomentumIndicator, ROCIndicator,
   MACDIndicator, ADXIndicator,
   ATRIndicator, BollingerWidthIndicator, BollingerPositionIndicator, VolatilityIndicator,

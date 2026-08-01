@@ -14,6 +14,11 @@ import {
   computeOverallReadiness,
 } from '../../research/src/bridge/Phase11ConfirmationReadiness.js';
 import { MIN_ALIGNED_PAIRS, runAutomatedConfirmationTest } from '../../research/src/bridge/Phase11AutomatedConfirmation.js';
+import { IndicatorRegistry } from '../../research/src/indicator/IndicatorRegistry.js';
+import { registerCoreIndicators } from '../../research/src/indicator/coreIndicators.js';
+
+const indicatorRegistry = new IndicatorRegistry();
+registerCoreIndicators(indicatorRegistry);
 
 function makeWalkPrices(length, seed = 7) {
   let state = seed;
@@ -27,7 +32,7 @@ const RSI14 = { id: 'cand-rsi', indicatorName: 'RSI', period: 14 };
 
 test('computeCandidateReadiness: reports not-ready with a specific scientific reason when there is too little data', () => {
   const readiness = computeCandidateReadiness({
-    candidate: RSI14, prices: makeWalkPrices(20), targetDefinition: { direction: 'Rise', runLength: 5 },
+    candidate: RSI14, indicatorRegistry, prices: makeWalkPrices(20), targetDefinition: { direction: 'Rise', runLength: 5 },
   });
   assert.equal(readiness.ready, false);
   assert.ok(readiness.usableObservations < MIN_ALIGNED_PAIRS);
@@ -41,7 +46,7 @@ test('computeCandidateReadiness: reports not-ready with a specific scientific re
 test('computeCandidateReadiness: reports ready once enough real data exists, matching the real test\'s own MIN_ALIGNED_PAIRS threshold exactly', () => {
   const prices = makeWalkPrices(300);
   const readiness = computeCandidateReadiness({
-    candidate: RSI14, prices, targetDefinition: { direction: 'Rise', runLength: 5 },
+    candidate: RSI14, indicatorRegistry, prices, targetDefinition: { direction: 'Rise', runLength: 5 },
   });
   assert.equal(readiness.ready, true);
   assert.equal(readiness.reason, null);
@@ -53,8 +58,8 @@ test('computeCandidateReadiness: reports ready once enough real data exists, mat
 test('computeCandidateReadiness: usableObservations exactly matches the real confirmation test\'s own sampleSize for the identical inputs', () => {
   const prices = makeWalkPrices(300);
   const targetDefinition = { direction: 'Rise', runLength: 5 };
-  const readiness = computeCandidateReadiness({ candidate: RSI14, prices, targetDefinition });
-  const realReport = runAutomatedConfirmationTest({ candidate: RSI14, prices, targetDefinition, seed: 1, permutations: 100, bootstrapResamples: 100 });
+  const readiness = computeCandidateReadiness({ candidate: RSI14, indicatorRegistry, prices, targetDefinition });
+  const realReport = runAutomatedConfirmationTest({ candidate: RSI14, indicatorRegistry, prices, targetDefinition, seed: 1, permutations: 100, bootstrapResamples: 100 });
   assert.equal(readiness.usableObservations, realReport.sampleSize);
 });
 
@@ -66,14 +71,14 @@ test('computeCandidateReadiness: works across RSI, EMA_SLOPE, and CCI indicator 
     { id: 'b', indicatorName: 'EMA_SLOPE', period: 10 },
     { id: 'c', indicatorName: 'CCI', period: 20 },
   ]) {
-    const readiness = computeCandidateReadiness({ candidate: spec, prices, targetDefinition });
+    const readiness = computeCandidateReadiness({ candidate: spec, indicatorRegistry, prices, targetDefinition });
     assert.equal(readiness.indicatorName, spec.indicatorName);
     assert.equal(readiness.ready, true);
   }
 });
 
 test('computeCandidateReadiness: with zero prices, reports zero usable observations and a full remaining-ticks estimate', () => {
-  const readiness = computeCandidateReadiness({ candidate: RSI14, prices: [], targetDefinition: { direction: 'Rise', runLength: 5 } });
+  const readiness = computeCandidateReadiness({ candidate: RSI14, indicatorRegistry, prices: [], targetDefinition: { direction: 'Rise', runLength: 5 } });
   assert.equal(readiness.currentTickCount, 0);
   assert.equal(readiness.usableObservations, 0);
   assert.equal(readiness.ready, false);
@@ -88,7 +93,7 @@ test('computeOverallReadiness: overallReady is true once at least one candidate 
   // available data, keeping it genuinely not-ready with the same price series.
   const notReadyCandidate = { id: 'not-ready-1', indicatorName: 'RSI', period: 280 };
 
-  const overall = computeOverallReadiness({ candidates: [readyCandidate, notReadyCandidate], prices, targetDefinition });
+  const overall = computeOverallReadiness({ candidates: [readyCandidate, notReadyCandidate], indicatorRegistry, prices, targetDefinition });
   assert.equal(overall.totalCount, 2);
   assert.equal(overall.readyCount, 1);
   assert.equal(overall.overallReady, true);
@@ -99,13 +104,13 @@ test('computeOverallReadiness: overallReady is true once at least one candidate 
 test('computeOverallReadiness: overallReady is false when no candidate has enough data', () => {
   const prices = makeWalkPrices(15);
   const targetDefinition = { direction: 'Rise', runLength: 5 };
-  const overall = computeOverallReadiness({ candidates: [RSI14], prices, targetDefinition });
+  const overall = computeOverallReadiness({ candidates: [RSI14], indicatorRegistry, prices, targetDefinition });
   assert.equal(overall.overallReady, false);
   assert.equal(overall.readyCount, 0);
 });
 
 test('computeOverallReadiness: handles an empty candidate list gracefully', () => {
-  const overall = computeOverallReadiness({ candidates: [], prices: makeWalkPrices(300), targetDefinition: { direction: 'Rise', runLength: 5 } });
+  const overall = computeOverallReadiness({ candidates: [], indicatorRegistry, prices: makeWalkPrices(300), targetDefinition: { direction: 'Rise', runLength: 5 } });
   assert.equal(overall.totalCount, 0);
   assert.equal(overall.overallReady, false);
   assert.equal(overall.overallReadinessPercentage, 0);

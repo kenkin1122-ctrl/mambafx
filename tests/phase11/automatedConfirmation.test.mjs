@@ -17,6 +17,11 @@ import {
   _resetConnectionCacheForTesting as _resetExistingDbCacheForTesting,
 } from '../../research/src/storage/existingDbExtensions.js';
 import { _resetKnownFamiliesForTesting } from '../../research/src/governance/family.js';
+import { IndicatorRegistry } from '../../research/src/indicator/IndicatorRegistry.js';
+import { registerCoreIndicators } from '../../research/src/indicator/coreIndicators.js';
+
+const indicatorRegistry = new IndicatorRegistry();
+registerCoreIndicators(indicatorRegistry);
 
 import {
   computeIndicatorSeries,
@@ -81,7 +86,7 @@ function makeAlternatingPrices(n = 500) {
 
 test('computeIndicatorSeries: RSI produces values in [0, 100] after the lookback period', () => {
   const prices = makeTrendingPrices(5);
-  const rsi = computeIndicatorSeries('RSI', 14, prices);
+  const rsi = computeIndicatorSeries(indicatorRegistry, 'RSI', 14, prices);
   const valid = rsi.filter(Number.isFinite);
   assert.ok(valid.length > 0);
   for (const v of valid) assert.ok(v >= 0 && v <= 100);
@@ -89,20 +94,20 @@ test('computeIndicatorSeries: RSI produces values in [0, 100] after the lookback
 
 test('computeIndicatorSeries: EMA_SLOPE is positive during the rising leg and negative during the falling leg', () => {
   const prices = makeTrendingPrices(1);
-  const slope = computeIndicatorSeries('EMA_SLOPE', 5, prices);
+  const slope = computeIndicatorSeries(indicatorRegistry, 'EMA_SLOPE', 5, prices);
   assert.ok(slope[10] > 0);  // well into the rising leg
   assert.ok(slope[30] < 0);  // well into the falling leg
 });
 
 test('computeIndicatorSeries: CCI produces finite numeric values after the lookback period', () => {
   const prices = makeTrendingPrices(5);
-  const cci = computeIndicatorSeries('CCI', 20, prices);
+  const cci = computeIndicatorSeries(indicatorRegistry, 'CCI', 20, prices);
   const valid = cci.filter(Number.isFinite);
   assert.ok(valid.length > 0);
 });
 
 test('computeIndicatorSeries: throws for an unrecognised indicator name', () => {
-  assert.throws(() => computeIndicatorSeries('NOT_REAL', 14, [1, 2, 3]), Phase11InsufficientDataError);
+  assert.throws(() => computeIndicatorSeries(indicatorRegistry, 'NOT_REAL', 14, [1, 2, 3]), Phase11InsufficientDataError);
 });
 
 test('computeOutcomeSeries: correctly identifies a 3-tick pure rise run', () => {
@@ -120,7 +125,7 @@ test('runAutomatedConfirmationTest: throws Phase11InsufficientDataError for a to
   const candidate = { indicatorName: 'RSI', period: 14 };
   assert.throws(
     () => runAutomatedConfirmationTest({
-      candidate, prices: makeTrendingPrices(1).slice(0, 20), // far too short
+      candidate, indicatorRegistry, prices: makeTrendingPrices(1).slice(0, 20), // far too short
       targetDefinition: { direction: 'Rise', runLength: 5 }, seed: 42,
     }),
     (err) => err instanceof Phase11InsufficientDataError && /valid \(indicator, outcome\) pairs/.test(err.message)
@@ -130,7 +135,7 @@ test('runAutomatedConfirmationTest: throws Phase11InsufficientDataError for a to
 test('runAutomatedConfirmationTest: returns a complete statistical report with all required fields', () => {
   const candidate = { indicatorName: 'RSI', period: 14 };
   const report = runAutomatedConfirmationTest({
-    candidate, prices: makeTrendingPrices(20),
+    candidate, indicatorRegistry, prices: makeTrendingPrices(20),
     targetDefinition: { direction: 'Rise', runLength: 3 }, seed: 42, permutations: 200, bootstrapResamples: 200,
   });
   assert.equal(typeof report.observedStatistic, 'number');
@@ -146,11 +151,11 @@ test('runAutomatedConfirmationTest: returns a complete statistical report with a
 test('runAutomatedConfirmationTest: a genuinely trending series produces a lower p-value than a null-like alternating series', () => {
   const candidate = { indicatorName: 'RSI', period: 14 };
   const trendingReport = runAutomatedConfirmationTest({
-    candidate, prices: makeTrendingPrices(40, 7),
+    candidate, indicatorRegistry, prices: makeTrendingPrices(40, 7),
     targetDefinition: { direction: 'Rise', runLength: 3 }, seed: 7, permutations: 1000,
   });
   const nullReport = runAutomatedConfirmationTest({
-    candidate, prices: makeAlternatingPrices(1200),
+    candidate, indicatorRegistry, prices: makeAlternatingPrices(1200),
     targetDefinition: { direction: 'Rise', runLength: 3 }, seed: 7, permutations: 1000,
   });
   assert.ok(trendingReport.pValue < nullReport.pValue,
@@ -162,7 +167,7 @@ test('runAutomatedConfirmationTest: a genuinely trending series produces a lower
 test('runAutomatedConfirmationTest: reports permutation and bootstrap diagnostics derived from the real null distribution', () => {
   const candidate = { indicatorName: 'RSI', period: 14 };
   const report = runAutomatedConfirmationTest({
-    candidate, prices: makeTrendingPrices(20, 3),
+    candidate, indicatorRegistry, prices: makeTrendingPrices(20, 3),
     targetDefinition: { direction: 'Rise', runLength: 3 }, seed: 5, permutations: 300, bootstrapResamples: 300,
   });
   assert.equal(typeof report.nullMean, 'number');
@@ -193,7 +198,7 @@ test('runAutomatedConfirmationTest: throws for mismatched injected featureValues
 test('runAutomatedConfirmationTest: is deterministic for a fixed seed (no hidden randomness)', () => {
   const candidate = { indicatorName: 'RSI', period: 14 };
   const params = {
-    candidate, prices: makeTrendingPrices(20),
+    candidate, indicatorRegistry, prices: makeTrendingPrices(20),
     targetDefinition: { direction: 'Rise', runLength: 3 }, seed: 99, permutations: 200,
   };
   const a = runAutomatedConfirmationTest(params);
@@ -239,7 +244,7 @@ test('confirmPhase11CandidateAutomatically: computes a real p-value and submits 
     const triaged = withPhase11Lifecycle(withPhase11Lifecycle(draft, PHASE11_LIFECYCLE_STAGES.SCREENED), PHASE11_LIFECYCLE_STAGES.TRIAGED);
 
     const result = await confirmPhase11CandidateAutomatically({
-      candidate: triaged, researchFreeze: freeze, sap, researchConfiguration: rc,
+      candidate: triaged, researchFreeze: freeze, sap, researchConfiguration: rc, indicatorRegistry,
       datasetManifest: { datasetId: 'ds-autoconf-001' }, provenance, familyRegistry,
       market: 'R_100', targetDefinition: { direction: 'Rise', runLength: 3 },
       prices: makeTrendingPrices(20), seed: 123, permutations: 300,
@@ -295,7 +300,7 @@ test('confirmPhase11CandidateAutomatically: propagates Phase11InsufficientDataEr
     const triaged = withPhase11Lifecycle(withPhase11Lifecycle(draft, PHASE11_LIFECYCLE_STAGES.SCREENED), PHASE11_LIFECYCLE_STAGES.TRIAGED);
 
     await assert.rejects(confirmPhase11CandidateAutomatically({
-      candidate: triaged, researchFreeze: freeze, sap, researchConfiguration: rc,
+      candidate: triaged, researchFreeze: freeze, sap, researchConfiguration: rc, indicatorRegistry,
       datasetManifest: { datasetId: 'ds-autoconf-002' }, provenance, familyRegistry,
       market: 'R_100', targetDefinition: { direction: 'Rise', runLength: 3 },
       prices: [100, 101, 102], seed: 1, // far too short
