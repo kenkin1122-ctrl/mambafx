@@ -167,7 +167,7 @@ test('streamRegistryDrivenCandidates: skips (via onSkip, not a thrown abort) can
 
 test('streamRegistryDrivenCandidates: handles a 10,000+ candidate space via true streaming consumption', async () => {
   const registry = new IndicatorRegistry();
-  registerCoreIndicators(registry); // 21 indicators
+  registerCoreIndicators(registry); // registry.size indicators (expanded over time, currently 26+)
   const rc = await makeRc();
   const freeze = await makeFreeze(rc);
   const sap = await makeSap();

@@ -606,6 +606,141 @@ export const DirectionalEntropyIndicator = makePlugin({
   testInputs: DEFAULT_TEST_INPUT,
 });
 
+// ── 22-26. Newly added: range-normalization, ATR-based bands, and
+//    distribution-shape statistics not covered by the existing 21
+//    (avoiding renamed duplicates of RSI/CCI/BollingerWidth/ZScore etc.) ──
+
+export const StochasticKIndicator = makePlugin({
+  name: 'StochasticK', displayName: 'Stochastic %K',
+  description: 'Current price\'s position within its own rolling min/max range over the period — a min/max-based normalization, distinct from BollingerPosition\'s standard-deviation-based one.',
+  assumptions: ['Price position relative to its recent range is informative independent of the range\'s own statistical shape.'],
+  complexity: 'O(n·period)', validationStatus: 'HEURISTIC',
+  mathDef: createMathDefinition({
+    humanReadable: '%K_t = (price_t - min(window)) / (max(window) - min(window)) * 100',
+    symbolicExpression: String.raw`\%K_t = \frac{P_t - \min(W_t)}{\max(W_t) - \min(W_t)} \times 100`,
+    executableFormula: (p, i, period) => {
+      const w = p.slice(Math.max(0, i - period + 1), i + 1);
+      const lo = Math.min(...w), hi = Math.max(...w);
+      return hi === lo ? 50 : ((p[i] - lo) / (hi - lo)) * 100;
+    },
+    units: 'dimensionless [0,100]', domain: 'ℝ^n', range: '[0,100]',
+  }),
+  computeFn: ({ prices, period = 14 } = {}) => {
+    const p = prices || [];
+    const out = new Array(p.length).fill(NaN);
+    for (let i = period - 1; i < p.length; i++) {
+      const w = p.slice(i - period + 1, i + 1);
+      const lo = Math.min(...w), hi = Math.max(...w);
+      out[i] = hi === lo ? 50 : ((p[i] - lo) / (hi - lo)) * 100;
+    }
+    return { signal: out, period };
+  },
+  testInputs: DEFAULT_TEST_INPUT,
+});
+
+export const KeltnerWidthIndicator = makePlugin({
+  name: 'KeltnerWidth', displayName: 'Keltner Channel Width',
+  description: 'Normalized channel width using ATR (average absolute tick-to-tick movement) rather than standard deviation — distinct from BollingerWidth\'s variance-based construction.',
+  assumptions: ['ATR-based bands respond differently to outlier ticks than standard-deviation-based bands.'],
+  complexity: 'O(n)', validationStatus: 'HEURISTIC',
+  mathDef: createMathDefinition({
+    humanReadable: 'width_t = 2 * ATR_t / SMA_t',
+    symbolicExpression: String.raw`W_t = \frac{2\,\text{ATR}_t}{\text{SMA}_t}`,
+    executableFormula: (atr, meanVal) => (meanVal === 0 ? NaN : (2 * atr) / meanVal),
+    units: 'dimensionless ratio', domain: 'ℝ^n', range: '[0, ∞)',
+  }),
+  computeFn: ({ prices, period = 20 } = {}) => {
+    const p = prices || [];
+    const atrSeries = ema(diffs(p).map((v) => Math.abs(v || 0)), period);
+    const meanSeries = sma(p, period);
+    const out = p.map((_, i) => (meanSeries[i] === 0 || Number.isNaN(meanSeries[i]) ? NaN : (2 * atrSeries[i]) / meanSeries[i]));
+    return { signal: out, period };
+  },
+  testInputs: DEFAULT_TEST_INPUT,
+});
+
+export const AutocorrelationIndicator = makePlugin({
+  name: 'Autocorrelation', displayName: 'Lag-1 Return Autocorrelation',
+  description: 'Rolling lag-1 serial correlation of tick-to-tick returns — a genuinely distinct statistical concept from any single-value dispersion or position measure already in this registry.',
+  assumptions: ['Serial correlation in returns, if present, reflects momentum (positive) or mean-reversion (negative) at the tick scale.'],
+  complexity: 'O(n·period)', validationStatus: 'HEURISTIC',
+  mathDef: createMathDefinition({
+    humanReadable: 'autocorr_t = corr(returns[t-period+1..t-1], returns[t-period+2..t])',
+    symbolicExpression: String.raw`\rho_1(t) = \text{corr}(r_{t-p+1..t-1},\, r_{t-p+2..t})`,
+    executableFormula: (returns) => returns, units: 'dimensionless [-1,1]', domain: 'ℝ^n', range: '[-1,1]',
+  }),
+  computeFn: ({ prices, period = 20 } = {}) => {
+    const p = prices || [];
+    const returns = diffs(p);
+    const out = new Array(p.length).fill(NaN);
+    for (let i = period; i < p.length; i++) {
+      const a = returns.slice(i - period + 1, i);
+      const b = returns.slice(i - period + 2, i + 1);
+      const n = a.length;
+      const ma = a.reduce((s, v) => s + v, 0) / n, mb = b.reduce((s, v) => s + v, 0) / n;
+      let cov = 0, va = 0, vb = 0;
+      for (let k = 0; k < n; k++) { const da = a[k] - ma, db = b[k] - mb; cov += da * db; va += da * da; vb += db * db; }
+      out[i] = va === 0 || vb === 0 ? 0 : cov / Math.sqrt(va * vb);
+    }
+    return { signal: out, period };
+  },
+  testInputs: DEFAULT_TEST_INPUT,
+});
+
+export const SkewnessIndicator = makePlugin({
+  name: 'Skewness', displayName: 'Rolling Return Skewness',
+  description: 'Third standardized moment of the rolling return distribution — a higher-order distribution-shape statistic not covered by ZScore (first/second moment only).',
+  assumptions: ['Return-distribution asymmetry may carry information beyond mean/variance alone.'],
+  complexity: 'O(n·period)', validationStatus: 'HEURISTIC',
+  mathDef: createMathDefinition({
+    humanReadable: 'skew_t = mean((r - mean(r))^3) / stddev(r)^3, over the rolling return window',
+    symbolicExpression: String.raw`\gamma_1(t) = \frac{E[(r-\mu)^3]}{\sigma^3}`,
+    executableFormula: (returns) => returns, units: 'dimensionless', domain: 'ℝ^n', range: 'ℝ',
+  }),
+  computeFn: ({ prices, period = 20 } = {}) => {
+    const p = prices || [];
+    const returns = diffs(p);
+    const out = new Array(p.length).fill(NaN);
+    for (let i = period; i < p.length; i++) {
+      const w = returns.slice(i - period + 1, i + 1);
+      const n = w.length;
+      const mu = w.reduce((s, v) => s + v, 0) / n;
+      const variance = w.reduce((s, v) => s + (v - mu) ** 2, 0) / n;
+      const sd = Math.sqrt(variance);
+      out[i] = sd === 0 ? 0 : (w.reduce((s, v) => s + (v - mu) ** 3, 0) / n) / (sd ** 3);
+    }
+    return { signal: out, period };
+  },
+  testInputs: DEFAULT_TEST_INPUT,
+});
+
+export const KurtosisIndicator = makePlugin({
+  name: 'Kurtosis', displayName: 'Rolling Return Excess Kurtosis',
+  description: 'Fourth standardized moment (excess kurtosis) of the rolling return distribution — a distinct higher-order statistic capturing tail-heaviness, not covered elsewhere in this registry.',
+  assumptions: ['Return-distribution tail-heaviness may indicate regime changes not visible in mean/variance/skew alone.'],
+  complexity: 'O(n·period)', validationStatus: 'HEURISTIC',
+  mathDef: createMathDefinition({
+    humanReadable: 'kurt_t = mean((r - mean(r))^4) / stddev(r)^4 - 3, over the rolling return window',
+    symbolicExpression: String.raw`\gamma_2(t) = \frac{E[(r-\mu)^4]}{\sigma^4} - 3`,
+    executableFormula: (returns) => returns, units: 'dimensionless', domain: 'ℝ^n', range: '[-2, ∞)',
+  }),
+  computeFn: ({ prices, period = 20 } = {}) => {
+    const p = prices || [];
+    const returns = diffs(p);
+    const out = new Array(p.length).fill(NaN);
+    for (let i = period; i < p.length; i++) {
+      const w = returns.slice(i - period + 1, i + 1);
+      const n = w.length;
+      const mu = w.reduce((s, v) => s + v, 0) / n;
+      const variance = w.reduce((s, v) => s + (v - mu) ** 2, 0) / n;
+      const sd = Math.sqrt(variance);
+      out[i] = sd === 0 ? -3 : (w.reduce((s, v) => s + (v - mu) ** 4, 0) / n) / (sd ** 4) - 3;
+    }
+    return { signal: out, period };
+  },
+  testInputs: DEFAULT_TEST_INPUT,
+});
+
 // ── Registration ────────────────────────────────────────────────────────
 
 export const CORE_INDICATOR_PLUGINS = Object.freeze([
@@ -616,6 +751,7 @@ export const CORE_INDICATOR_PLUGINS = Object.freeze([
   RangeIndicator, ZScoreIndicator, EntropyIndicator,
   HurstIndicator, FractalDimensionIndicator,
   RunLengthIndicator, TickImbalanceIndicator, DirectionalEntropyIndicator,
+  StochasticKIndicator, KeltnerWidthIndicator, AutocorrelationIndicator, SkewnessIndicator, KurtosisIndicator,
 ]);
 
 /**

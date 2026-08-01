@@ -40,8 +40,8 @@ test('startRegistryDrivenCampaign: generates far more than the old 3-candidate d
   });
 
   assert.ok(generatedCount > 80, `expected a much larger candidate space than the old 3-candidate demo, got ${generatedCount}`);
-  assert.equal(countsByType.indicator, 21 * 4); // 21 core indicators x 4 periods
-  assert.equal(countsByType.marketState, 8);
+  assert.equal(countsByType.indicator, 26 * 4); // 26 core indicators x 4 periods
+  assert.equal(countsByType.marketState, 15);
   assert.equal(orchestrator.listCandidates().length, generatedCount);
 
   for (const candidate of orchestrator.listCandidates()) {
@@ -82,7 +82,7 @@ test('startRegistryDrivenCampaign -> Screen -> Triage -> Confirm: a registry-gen
     });
 
     const candidates = orchestrator.listCandidates();
-    assert.ok(candidates.length >= 21);
+    assert.ok(candidates.length >= 26);
 
     const { promoted: screened } = orchestrator.screen({
       candidates, scoreFn: () => 1, promotionQuantile: 1,
@@ -107,5 +107,16 @@ test('startRegistryDrivenCampaign -> Screen -> Triage -> Confirm: a registry-gen
     assert.ok(['confirmed', 'rejected'].includes(result.outcome));
   } finally {
     teardown();
+  }
+});
+
+test('startRegistryDrivenCampaign: includeComposites=true adds real, governed CompositeCandidate instances, all fingerprints in the rebuilt freeze', async () => {
+  const { orchestrator, researchFreeze, generatedCount, countsByType } = await startRegistryDrivenCampaign({
+    indicatorPeriods: [14, 20], includeMarketStates: true, includeComposites: true,
+  });
+  assert.ok(countsByType.composite > 0);
+  assert.equal(generatedCount, countsByType.indicator + countsByType.marketState + countsByType.composite);
+  for (const candidate of orchestrator.listCandidates()) {
+    assert.ok(researchFreeze.candidateFingerprints.includes(candidate.fingerprint));
   }
 });

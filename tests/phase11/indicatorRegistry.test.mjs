@@ -70,11 +70,12 @@ test('every core indicator plugin has maxLookahead=0 (causal safety)', () => {
   }
 });
 
-test('registerCoreIndicators: registers all 21 plugins with distinct names', () => {
+test('registerCoreIndicators: registers all plugins with distinct names', () => {
   const registry = new IndicatorRegistry();
   registerCoreIndicators(registry);
-  assert.equal(registry.size, 21);
-  assert.equal(new Set(registry.listNames()).size, 21);
+  assert.equal(registry.size, CORE_INDICATOR_PLUGINS.length);
+  assert.equal(new Set(registry.listNames()).size, CORE_INDICATOR_PLUGINS.length);
+  assert.ok(registry.size >= 21, 'expansion should never reduce the indicator library below its prior size');
 });
 
 test('every core indicator plugin computes a finite signal from real trending price data, without throwing', () => {

@@ -154,9 +154,132 @@ export const ReversalStatePlugin = makeStatePlugin({
   testCase: { name: 'rise then fall shows reversal', inputs: { states: [...Array.from({ length: 10 }, (_, i) => ({ tick_price: 100 + i })), ...Array.from({ length: 10 }, (_, i) => ({ tick_price: 110 - i }))], window: 20 }, expectedOutputShape: { signal: 'number[]' } },
 });
 
+export const OscillationStatePlugin = makeStatePlugin({
+  name: 'Oscillation', displayName: 'Oscillation', stateLabel: 'Oscillation',
+  description: 'Price crosses its own rolling mean at least 3 times within the window -- a distinct pattern from Range (which requires low net movement but not necessarily repeated crossing).',
+  detectFn: (stats, prices, i, window) => {
+    const w = prices.slice(i - window + 1, i + 1);
+    let crossings = 0;
+    for (let k = 1; k < w.length; k++) {
+      if ((w[k - 1] - stats.mean) * (w[k] - stats.mean) < 0) crossings++;
+    }
+    return crossings >= 3;
+  },
+  humanReadable: 'count(sign(price[k-1]-mean) != sign(price[k]-mean)) >= 3 over the window',
+  testCase: { name: 'an alternating series oscillates around its mean', inputs: { states: Array.from({ length: 25 }, (_, i) => ({ tick_price: 100 + (i % 2 === 0 ? 3 : -3) })), window: 20 }, expectedOutputShape: { signal: 'number[]' } },
+});
+
+export const DriftStatePlugin = makeStatePlugin({
+  name: 'Drift', displayName: 'Drift', stateLabel: 'Drift',
+  description: 'A small but consistent net directional bias -- net movement exceeds Range\'s own no-movement threshold but stays below Trend\'s stronger-movement threshold. The gap between those two existing states, not a duplicate of either.',
+  detectFn: (stats) => stats.stdDev > 0
+    && Math.abs(stats.last - stats.first) >= stats.stdDev * 0.25
+    && Math.abs(stats.last - stats.first) <= stats.stdDev * 0.5,
+  humanReadable: '0.25*stdDev <= |last-first| <= 0.5*stdDev over the window',
+  testCase: { name: 'a mild, slow rise with noise is drift, not a full trend', inputs: { states: (() => {
+    let s = 7; const noise = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return ((s / 0x7fffffff) - 0.5) * 6; };
+    return Array.from({ length: 25 }, (_, i) => ({ tick_price: 100 + i * 0.05 + noise() }));
+  })(), window: 20 }, expectedOutputShape: { signal: 'number[]' } },
+});
+
+export const RegimeTransitionStatePlugin = makeStatePlugin({
+  name: 'RegimeTransition', displayName: 'Regime Transition', stateLabel: 'RegimeTransition',
+  description: 'The first half and second half of the window belong to visibly different regimes -- one half is Range-like (little net movement) while the other is Trend-like (large net movement relative to its own volatility). Distinct from Reversal, which only checks directional sign, not regime character.',
+  detectFn: (stats, prices, i, window) => {
+    const half = Math.floor(window / 2);
+    const firstHalf = windowStats(prices, i - half, half);
+    const secondHalf = windowStats(prices, i, half);
+    if (!firstHalf || !secondHalf) return false;
+    const firstIsTrend = firstHalf.stdDev > 0 && Math.abs(firstHalf.last - firstHalf.first) > firstHalf.stdDev * 0.5;
+    const secondIsTrend = secondHalf.stdDev > 0 && Math.abs(secondHalf.last - secondHalf.first) > secondHalf.stdDev * 0.5;
+    return firstIsTrend !== secondIsTrend;
+  },
+  humanReadable: 'isTrendLike(firstHalf) != isTrendLike(secondHalf)',
+  testCase: { name: 'flat then trending is a regime transition', inputs: { states: [...Array(10).fill({ tick_price: 100 }), ...Array.from({ length: 10 }, (_, i) => ({ tick_price: 100 + i * 3 }))], window: 20 }, expectedOutputShape: { signal: 'number[]' } },
+});
+
+export const MeanReversionStatePlugin = makeStatePlugin({
+  name: 'MeanReversion', displayName: 'Mean Reversion', stateLabel: 'MeanReversion',
+  description: 'The current price is closer to the window\'s rolling mean than the window\'s own maximum deviation from that mean -- price has moved away from and then back toward its mean within the window. Distinct from Reversal (which is about directional sign flip, not distance from mean).',
+  detectFn: (stats, prices, i, window) => {
+    const w = prices.slice(i - window + 1, i + 1);
+    const maxDev = Math.max(...w.map((v) => Math.abs(v - stats.mean)));
+    const currentDev = Math.abs(stats.last - stats.mean);
+    return maxDev > 0 && currentDev < maxDev * 0.3;
+  },
+  humanReadable: '|last - mean| < 0.3 * max(|price_k - mean|) over the window',
+  testCase: { name: 'a spike that returns to the mean shows mean reversion', inputs: { states: [...Array(10).fill({ tick_price: 100 }), { tick_price: 130 }, ...Array(9).fill({ tick_price: 100 })], window: 20 }, expectedOutputShape: { signal: 'number[]' } },
+});
+
+export const LowPersistenceStatePlugin = makeStatePlugin({
+  name: 'LowPersistence', displayName: 'Low Persistence', stateLabel: 'LowPersistence',
+  description: 'The complement of the existing Persistence state: directional sign flips at least twice across three consecutive thirds of the window, rather than remaining consistent (Persistence) or cleanly flipping once (Reversal).',
+  detectFn: (stats, prices, i, window) => {
+    const third = Math.floor(window / 3);
+    if (third < 1) return false;
+    const s1 = windowStats(prices, i - 2 * third, third);
+    const s2 = windowStats(prices, i - third, third);
+    const s3 = windowStats(prices, i, third);
+    if (!s1 || !s2 || !s3) return false;
+    const d1 = Math.sign(s1.last - s1.first), d2 = Math.sign(s2.last - s2.first), d3 = Math.sign(s3.last - s3.first);
+    let flips = 0;
+    if (d1 !== 0 && d2 !== 0 && d1 !== d2) flips++;
+    if (d2 !== 0 && d3 !== 0 && d2 !== d3) flips++;
+    return flips >= 2;
+  },
+  humanReadable: 'direction flips at least twice across three consecutive thirds of the window',
+  testCase: { name: 'an up-down-up zigzag across three window-thirds has low persistence', inputs: { states: [
+    ...Array.from({ length: 8 }, (_, k) => ({ tick_price: 100 + k })),
+    ...Array.from({ length: 8 }, (_, k) => ({ tick_price: 107 - k })),
+    ...Array.from({ length: 8 }, (_, k) => ({ tick_price: 100 + k })),
+  ], window: 24 }, expectedOutputShape: { signal: 'number[]' } },
+});
+
+export const VolatilityShiftStatePlugin = makeStatePlugin({
+  name: 'VolatilityShift', displayName: 'Volatility Shift', stateLabel: 'VolatilityShift',
+  description: 'Volatility in the second half of the window differs materially (either direction) from the first half -- a bidirectional summary of the existing directional Compression/Expansion pair, useful when the direction of the shift is not itself the hypothesis under test.',
+  detectFn: (stats, prices, i, window) => {
+    const half = Math.floor(window / 2);
+    const firstHalf = windowStats(prices, i - half, half);
+    const secondHalf = windowStats(prices, i, half);
+    if (!firstHalf || !secondHalf) return false;
+    // A shift FROM zero volatility TO nonzero volatility is itself the most
+    // extreme possible shift, not an excluded case -- the reverse (nonzero
+    // to exactly zero) is equally extreme.
+    if (firstHalf.stdDev === 0) return secondHalf.stdDev > 0;
+    const ratio = secondHalf.stdDev / firstHalf.stdDev;
+    return ratio > 1.75 || ratio < 0.57;
+  },
+  humanReadable: 'stdDev(secondHalf)/stdDev(firstHalf) > 1.75 or < 0.57 (or a 0-to-nonzero shift)',
+  testCase: { name: 'a volatility spike is a volatility shift', inputs: { states: [...Array(10).fill({ tick_price: 100 }), ...Array.from({ length: 10 }, (_, i) => ({ tick_price: 100 + (i % 2 === 0 ? 15 : -15) }))], window: 20 }, expectedOutputShape: { signal: 'number[]' } },
+});
+
+export const EntropyShiftStatePlugin = makeStatePlugin({
+  name: 'EntropyShift', displayName: 'Entropy Shift', stateLabel: 'EntropyShift',
+  description: 'The up/down tick-direction proportion (a simple binary entropy proxy) differs materially between the first and second half of the window -- distinct from VolatilityShift, which measures movement MAGNITUDE, not directional balance.',
+  detectFn: (stats, prices, i, window) => {
+    const half = Math.floor(window / 2);
+    const upFraction = (start, len) => {
+      let ups = 0, total = 0;
+      for (let k = start + 1; k <= start + len; k++) {
+        if (k < 1 || k >= prices.length) continue;
+        if (prices[k] !== prices[k - 1]) { total++; if (prices[k] > prices[k - 1]) ups++; }
+      }
+      return total > 0 ? ups / total : 0.5;
+    };
+    const f1 = upFraction(i - window + 1, half);
+    const f2 = upFraction(i - half + 1, half);
+    return Math.abs(f1 - f2) > 0.3;
+  },
+  humanReadable: '|upFraction(firstHalf) - upFraction(secondHalf)| > 0.3',
+  testCase: { name: 'mostly-up then mostly-down ticks shows an entropy shift', inputs: { states: [...Array.from({ length: 10 }, (_, i) => ({ tick_price: 100 + i })), ...Array.from({ length: 10 }, (_, i) => ({ tick_price: 110 - i }))], window: 20 }, expectedOutputShape: { signal: 'number[]' } },
+});
+
 export const CORE_MARKET_STATE_PLUGINS = Object.freeze([
   TrendStatePlugin, RangeStatePlugin, HighVolatilityStatePlugin, LowVolatilityStatePlugin,
   CompressionStatePlugin, ExpansionStatePlugin, PersistenceStatePlugin, ReversalStatePlugin,
+  OscillationStatePlugin, DriftStatePlugin, RegimeTransitionStatePlugin, MeanReversionStatePlugin,
+  LowPersistenceStatePlugin, VolatilityShiftStatePlugin, EntropyShiftStatePlugin,
 ]);
 
 /** Registers all core market-state plugins into the given MarketStateRegistry. */

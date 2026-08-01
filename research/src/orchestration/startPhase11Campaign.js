@@ -37,7 +37,7 @@ import { IndicatorRegistry } from '../indicator/IndicatorRegistry.js';
 import { registerCoreIndicators } from '../indicator/coreIndicators.js';
 import { MarketStateRegistry } from '../plugin/MarketStateRegistry.js';
 import { registerCoreMarketStates } from '../plugin/coreMarketStates.js';
-import { streamAllRegistryDrivenCandidates } from '../discovery/registryDrivenCandidateGenerator.js';
+import { streamAllRegistryDrivenCandidates, streamCompositeCandidates } from '../discovery/registryDrivenCandidateGenerator.js';
 import { PRIMITIVE_OBSERVABLES } from '../candidate/MeasurementRegistry.js';
 import { INDICATOR_INPUT_FIELDS } from '../candidate/IndicatorFeature.js';
 
@@ -220,16 +220,21 @@ export { runPhase11Screening, runPhase11Triage } from '../discovery/phase11Funne
  * @param {string} [params.symbol]
  * @param {number[]} [params.indicatorPeriods] - Defaults to [10, 14, 20, 30].
  * @param {boolean} [params.includeMarketStates=true]
+ * @param {boolean} [params.includeComposites=false] - Stage 4: generates
+ *   CompositeCandidate instances (bounded sequential pairing, not full n²)
+ *   over the base indicator/market-state pool, via the same governed
+ *   streamCompositeCandidates() the tests exercise. Off by default since
+ *   it roughly doubles generation time and candidate count.
  * @returns {Promise<{
  *   orchestrator: Phase11Orchestrator, researchConfiguration: object,
  *   researchFreeze: object, sap: object, familyRegistry: FamilyRegistry,
- *   generatedCount: number, countsByType: { indicator: number, marketState: number },
+ *   generatedCount: number, countsByType: { indicator: number, marketState: number, composite: number },
  *   provenanceById: Record<string, object>
  * }>}
  */
 export async function startRegistryDrivenCampaign({
   campaignName = 'Phase 11 registry-driven campaign', symbol = '1HZ100V',
-  indicatorPeriods = [10, 14, 20, 30], includeMarketStates = true,
+  indicatorPeriods = [10, 14, 20, 30], includeMarketStates = true, includeComposites = false,
 } = {}) {
   const researchConfiguration = await ResearchConfiguration.create({
     id: `rc-registry-${Date.now()}`, name: campaignName,
@@ -254,7 +259,7 @@ export async function startRegistryDrivenCampaign({
   // in registryDrivenCandidateGenerator.js) and market states can land in,
   // plus the DEFAULT_FAMILY_NAME fallback used elsewhere in this file.
   const REGISTRY_FAMILIES = Object.freeze([
-    'trend', 'momentum', 'volatility', 'statistical', 'microstructure', 'indicator', 'marketState',
+    'trend', 'momentum', 'volatility', 'statistical', 'microstructure', 'indicator', 'marketState', 'composite',
   ]);
   const sap = await StatisticalAnalysisPlan.create({
     sapId: `sap-registry-${Date.now()}`, hypothesisFamilies: [...REGISTRY_FAMILIES],
@@ -269,7 +274,7 @@ export async function startRegistryDrivenCampaign({
   for (const familyName of REGISTRY_FAMILIES) {
     familyRegistry.registerFamily({
       familyName, version: '1.0.0',
-      allowedCandidateTypes: [CANDIDATE_TYPES.INDICATOR_FEATURE, CANDIDATE_TYPES.MARKET_STATE],
+      allowedCandidateTypes: [CANDIDATE_TYPES.INDICATOR_FEATURE, CANDIDATE_TYPES.MARKET_STATE, CANDIDATE_TYPES.COMPOSITE_CANDIDATE],
       description: `Registry-driven candidates auto-categorized as "${familyName}".`,
     });
   }
@@ -283,7 +288,7 @@ export async function startRegistryDrivenCampaign({
 
   const generatedFingerprints = [];
   const provenanceById = {};
-  const countsByType = { indicator: 0, marketState: 0 };
+  const countsByType = { indicator: 0, marketState: 0, composite: 0 };
 
   for await (const { candidate, provenance } of streamAllRegistryDrivenCandidates({
     indicatorRegistry, marketStateRegistry, periods: indicatorPeriods,
@@ -295,6 +300,25 @@ export async function startRegistryDrivenCampaign({
     generatedFingerprints.push(candidate.fingerprint);
     if (candidate.type === CANDIDATE_TYPES.MARKET_STATE) countsByType.marketState++;
     else countsByType.indicator++;
+  }
+
+  // Stage 4: composite generation, over the base indicator/market-state
+  // pool just generated above -- same placeholderFreeze (fingerprints are
+  // rebuilt into the freeze once, below, covering base AND composite
+  // candidates together, rather than two separate rebuild passes).
+  if (includeComposites) {
+    const baseComponents = orchestrator.listCandidates();
+    if (baseComponents.length >= 2) {
+      for await (const { candidate, provenance } of streamCompositeCandidates({
+        components: baseComponents, researchConfiguration, researchFreeze: placeholderFreeze, sap, familyRegistry,
+        decisionAuditLog: orchestrator.decisionAuditLog,
+      })) {
+        orchestrator.updateCandidate(candidate);
+        provenanceById[candidate.id] = provenance;
+        generatedFingerprints.push(candidate.fingerprint);
+        countsByType.composite++;
+      }
+    }
   }
 
   // Rebuild the freeze to include every generated candidate's fingerprint
