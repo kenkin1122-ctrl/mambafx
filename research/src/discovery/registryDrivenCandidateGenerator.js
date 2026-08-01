@@ -256,6 +256,84 @@ export async function* streamMarketStateCandidates({
 }
 
 /**
+ * Lazily yields candidateParams-shaped objects for every registered
+ * Market Construct Proxy plugin (Stage 4's ontology-repair prerequisite:
+ * proxy/MarketConstructProxyRegistry.js is the SOLE source -- this
+ * function copies only proxyName and assumedConstruct from each plugin's
+ * own metadata() VERBATIM, never inventing or duplicating the plugin's
+ * scientific claims). Mirrors streamMarketStateCandidateParams()'s exact
+ * shape/discipline.
+ *
+ * @param {object} params
+ * @param {import('../proxy/MarketConstructProxyRegistry.js').MarketConstructProxyRegistry} params.proxyRegistry
+ * @param {object} params.researchConfiguration
+ * @yields {object} A candidateParams object ready for generateCandidate().
+ */
+export function* streamProxyCandidateParams({
+  proxyRegistry, researchConfiguration,
+} = {}) {
+  if (!proxyRegistry || typeof proxyRegistry.list !== 'function') {
+    throw new RegistryDrivenGenerationError('streamProxyCandidateParams: a valid MarketConstructProxyRegistry is required');
+  }
+  if (!researchConfiguration?.id || !researchConfiguration?.configHash) {
+    throw new RegistryDrivenGenerationError('streamProxyCandidateParams: a valid ResearchConfiguration is required');
+  }
+  for (const plugin of proxyRegistry.list()) {
+    const meta = plugin.metadata();
+    yield {
+      id: `proxy-${meta.name}`,
+      family: 'proxy',
+      parameters: {},
+      description: `${meta.displayName || meta.name} — auto-generated from the Market Construct Proxy Registry.`,
+      generatorVersion: '11.1.0',
+      grammarVersion: '11.0.0',
+      configHash: researchConfiguration.configHash,
+      researchConfigurationId: researchConfiguration.id,
+      proxyName: meta.name,
+      assumedConstruct: meta.assumedConstruct,
+    };
+  }
+}
+
+/**
+ * Streams fully-governed, deduplicated ProxyCandidate instances -- the
+ * MarketConstructProxyRegistry counterpart to streamMarketStateCandidates().
+ * Same generateCandidate()-routed governance, same graceful onSkip
+ * handling, same fingerprint deduplication.
+ *
+ * @param {object} params
+ * @param {import('../proxy/MarketConstructProxyRegistry.js').MarketConstructProxyRegistry} params.proxyRegistry
+ * @param {object} params.researchConfiguration
+ * @param {import('../config/ResearchFreeze.js').ResearchFreeze} params.researchFreeze
+ * @param {import('../config/StatisticalAnalysisPlan.js').StatisticalAnalysisPlan} params.sap
+ * @param {import('../governance/FamilyRegistry.js').FamilyRegistry} [params.familyRegistry]
+ * @param {import('../governance/DecisionAuditLog.js').DecisionAuditLog} [params.decisionAuditLog]
+ * @param {Set<string>} [params.seenFingerprints]
+ * @param {(err: Error, candidateParams: object) => void} [params.onSkip]
+ * @yields {{ candidate: object, provenance: object }}
+ */
+export async function* streamProxyCandidates({
+  proxyRegistry, researchConfiguration, researchFreeze, sap,
+  familyRegistry = null, decisionAuditLog = null, seenFingerprints = new Set(), onSkip = null,
+} = {}) {
+  for (const candidateParams of streamProxyCandidateParams({ proxyRegistry, researchConfiguration })) {
+    let result;
+    try {
+      result = await generateCandidate({
+        candidateType: CANDIDATE_TYPES.PROXY_CANDIDATE,
+        candidateParams, researchFreeze, sap, familyRegistry, decisionAuditLog,
+      });
+    } catch (err) {
+      if (onSkip) onSkip(err, candidateParams);
+      continue;
+    }
+    if (seenFingerprints.has(result.candidate.fingerprint)) continue;
+    seenFingerprints.add(result.candidate.fingerprint);
+    yield result;
+  }
+}
+
+/**
  * Chains streamRegistryDrivenCandidates() (indicators) and
  * streamMarketStateCandidates() (market states) into one stream sharing a
  * single seenFingerprints Set, exactly as this file's own original
@@ -272,7 +350,7 @@ export async function* streamMarketStateCandidates({
  * @yields {{ candidate: object, provenance: object }}
  */
 export async function* streamAllRegistryDrivenCandidates({
-  indicatorRegistry, marketStateRegistry, periods, researchConfiguration, researchFreeze, sap,
+  indicatorRegistry, marketStateRegistry, proxyRegistry, periods, researchConfiguration, researchFreeze, sap,
   familyRegistry = null, decisionAuditLog = null, onSkip = null,
 } = {}) {
   const seenFingerprints = new Set();
@@ -288,6 +366,13 @@ export async function* streamAllRegistryDrivenCandidates({
   if (marketStateRegistry) {
     for await (const result of streamMarketStateCandidates({
       marketStateRegistry, researchConfiguration, researchFreeze, sap, familyRegistry, decisionAuditLog, seenFingerprints, onSkip,
+    })) {
+      yield result;
+    }
+  }
+  if (proxyRegistry) {
+    for await (const result of streamProxyCandidates({
+      proxyRegistry, researchConfiguration, researchFreeze, sap, familyRegistry, decisionAuditLog, seenFingerprints, onSkip,
     })) {
       yield result;
     }
@@ -384,25 +469,27 @@ export async function* streamCompositeCandidates({
 
 /*
  * LIMITATIONS (stated honestly, not silently omitted; updated again to
- * reflect the composite-generation extension):
+ * reflect Stage 4's completion -- ProxyCandidate + all composite types):
  *
- * This module now implements Stages 1 (Indicator Registry, 26 plugins),
+ * This module now implements Stages 1 (Indicator Registry, 27 plugins),
  * 2 (Market State Registry, 15 plugins, in plugin/MarketStateRegistry.js
  * + coreMarketStates.js — directory placement inconsistent with
  * indicator/IndicatorRegistry.js's convention; a real but minor
- * organizational debt, not a functional gap), 4 (Composite Candidate
- * Generator -- Indicator+Indicator, Indicator+MarketState, State+State,
- * via streamCompositeCandidates(), bounded sequential pairing not full
- * n²), 7 (streaming), 8 (fingerprint dedup), and the covered-registries
- * slice of Stage 9 (automatic Generated entry). It does NOT implement:
+ * organizational debt, not a functional gap), 3 (context/coreContexts.js,
+ * 10 contexts), 4 COMPLETE (Composite Candidate Generator -- Indicator+
+ * Indicator, Indicator+MarketState, Indicator+Proxy, State+State,
+ * Proxy+Proxy, and every other pairing among indicator/state/proxy
+ * candidates, all via the SAME unmodified streamCompositeCandidates(),
+ * bounded sequential pairing not full n² -- ProxyCandidate is now a real
+ * fourth Candidate subclass, generated via streamProxyCandidates() the
+ * exact same way IndicatorFeature/MarketState already were), 7
+ * (streaming), 8 (fingerprint dedup), and the covered-registries slice of
+ * Stage 9 (automatic Generated entry). It does NOT implement:
  *
- *   - Stage 3 (Observable Context Registry with the 3-context hard limit)
- *   - Stage 4's remaining two composite types (Indicator+Proxy,
- *     State+Proxy) -- the 10 proxies in proxy/coreProxies.js exist and
- *     are already registry-driven via proxy/MarketConstructProxyRegistry.js,
- *     but this generator does not yet compose them into candidates
  *   - Stage 5 (Conditional Hypothesis Generator, respecting the 3-context
- *     limit)
+ *     limit) -- context/coreContexts.js's 10 contexts exist and are
+ *     enumerable, but nothing yet consumes them to generate
+ *     ConditionalHypothesis candidates
  *   - Stage 10 (dashboard breakdown by family/indicator/state/context/
  *     proxy/composite/conditional/duplicate/streaming-progress/memory)
  *   - "Novel States" (deliberately not invented -- would require an
@@ -411,10 +498,11 @@ export async function* streamCompositeCandidates({
  *     invent states unsupported by observable measurements")
  *
  * Candidate space size with the current default periods=[10,14,20,30],
- * 26 registered indicators, and 15 registered market states:
- * (26 x 4) + 15 = 119 single-type candidates. Composite generation over
+ * 27 registered indicators, 15 registered market states, and 10
+ * registered proxies:
+ * (27 x 4) + 15 + 10 = 133 single-type candidates. Composite generation over
  * that same pool (bounded sequential pairing, one composite per adjacent
- * pair) adds up to another ~118. Combined: ~237 candidates from the
+ * pair) adds up to another ~132. Combined: ~265 candidates from the
  * currently-registered plugin sets alone, before widening the period
  * grid further (which does scale this substantially -- see the
  * regression tests for a 1,500+-candidate run).

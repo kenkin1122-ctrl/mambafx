@@ -39,6 +39,7 @@
 import { CANDIDATE_TYPES } from '../candidate/Candidate.js';
 import { IndicatorFeature } from '../candidate/IndicatorFeature.js';
 import { MarketState } from '../candidate/MarketState.js';
+import { ProxyCandidate } from '../candidate/ProxyCandidate.js';
 import { CompositeCandidate } from '../candidate/CompositeCandidate.js';
 import { ConditionalHypothesis } from '../candidate/ConditionalHypothesis.js';
 import { buildCandidateProvenance } from '../provenance/CandidateProvenance.js';
@@ -55,6 +56,7 @@ export class GeneratorPreconditionError extends Error {
 const CANDIDATE_CLASSES = Object.freeze({
   [CANDIDATE_TYPES.INDICATOR_FEATURE]: IndicatorFeature,
   [CANDIDATE_TYPES.MARKET_STATE]: MarketState,
+  [CANDIDATE_TYPES.PROXY_CANDIDATE]: ProxyCandidate,
   [CANDIDATE_TYPES.COMPOSITE_CANDIDATE]: CompositeCandidate,
   [CANDIDATE_TYPES.CONDITIONAL_HYPOTHESIS]: ConditionalHypothesis,
 });

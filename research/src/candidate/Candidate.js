@@ -49,6 +49,7 @@ export class CandidateValidationError extends Error {
 export const CANDIDATE_TYPES = Object.freeze({
   INDICATOR_FEATURE:    'IndicatorFeature',
   MARKET_STATE:         'MarketState',
+  PROXY_CANDIDATE:      'ProxyCandidate',
   COMPOSITE_CANDIDATE:  'CompositeCandidate',
   CONDITIONAL_HYPOTHESIS: 'ConditionalHypothesis',
 });
