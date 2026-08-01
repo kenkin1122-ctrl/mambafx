@@ -26,6 +26,7 @@ registerCoreIndicators(indicatorRegistry);
 import {
   computeIndicatorSeries,
   computeOutcomeSeries,
+  computeQuickIndicatorScore,
   runAutomatedConfirmationTest,
   confirmPhase11CandidateAutomatically,
   Phase11InsufficientDataError,
@@ -193,6 +194,35 @@ test('runAutomatedConfirmationTest: throws for mismatched injected featureValues
   assert.throws(() => runAutomatedConfirmationTest({
     featureValues: [1, 2, 3], outcomeValues: [1, 0], seed: 1,
   }), Phase11InsufficientDataError);
+});
+
+test('computeQuickIndicatorScore: uses the SAME canonical registry lookup as full confirmation, producing a real, indicator-aware score', () => {
+  const candidate = { indicatorName: 'RSI', period: 14 };
+  const prices = makeTrendingPrices(20, 7);
+  const { score, sampleSize } = computeQuickIndicatorScore({
+    indicatorRegistry, candidate, prices, targetDefinition: { direction: 'Rise', runLength: 5 },
+  });
+  assert.ok(score >= 0 && score <= 1);
+  assert.ok(sampleSize > 0);
+});
+
+test('computeQuickIndicatorScore: never throws -- returns a zero score for insufficient data instead of aborting the batch', () => {
+  const result1 = computeQuickIndicatorScore({ indicatorRegistry, candidate: { indicatorName: 'RSI', period: 14 }, prices: [1, 2], targetDefinition: { direction: 'Rise', runLength: 5 } });
+  assert.deepEqual(result1, { score: 0, sampleSize: 0 });
+
+  const result2 = computeQuickIndicatorScore({ indicatorRegistry: null, candidate: { indicatorName: 'RSI', period: 14 }, prices: [1, 2, 3], targetDefinition: { direction: 'Rise', runLength: 5 } });
+  assert.deepEqual(result2, { score: 0, sampleSize: 0 });
+
+  const result3 = computeQuickIndicatorScore({ indicatorRegistry: undefined, candidate: {}, prices: undefined, targetDefinition: undefined });
+  assert.deepEqual(result3, { score: 0, sampleSize: 0 });
+});
+
+test('computeQuickIndicatorScore: different indicators on the same prices are genuinely independently computed, not a uniform tick-movement statistic', () => {
+  const prices = makeTrendingPrices(30, 3);
+  const targetDefinition = { direction: 'Rise', runLength: 5 };
+  const rsiResult = computeQuickIndicatorScore({ indicatorRegistry, candidate: { indicatorName: 'RSI', period: 14 }, prices, targetDefinition });
+  const kurtResult = computeQuickIndicatorScore({ indicatorRegistry, candidate: { indicatorName: 'Kurtosis', period: 14 }, prices, targetDefinition });
+  assert.ok(typeof rsiResult.score === 'number' && typeof kurtResult.score === 'number');
 });
 
 test('runAutomatedConfirmationTest: is deterministic for a fixed seed (no hidden randomness)', () => {

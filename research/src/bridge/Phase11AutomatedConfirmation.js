@@ -165,6 +165,63 @@ function pearsonCorrelation(xs, ys) {
   return cov / Math.sqrt(varX * varY);
 }
 
+/**
+ * THE single canonical scoring function for Screening, Triage, and
+ * Replication (Stage 2 of the "Remove Remaining Parallel Logic"
+ * directive). Reuses, verbatim, the exact same pieces full Confirmation
+ * uses -- computeIndicatorSeries() (canonical Indicator Registry lookup),
+ * computeOutcomeSeries(), and pearsonCorrelation() -- just without the
+ * permutation test or bootstrap (those are Confirmation-specific
+ * statistical rigor tied to the Online-FDR alpha spend; Screening/Triage/
+ * Replication are pre-confirmation funnel stages that were never
+ * supposed to spend alpha or claim p-value-level rigor in the first
+ * place, so this function computes ONLY the observed correlation and
+ * sample size -- nothing more, nothing less).
+ *
+ * Before this function existed, index.html's Screening/Triage/Replication
+ * button handlers computed their own ad hoc "average absolute tick
+ * movement" statistic, uniformly, without ever consulting a candidate's
+ * actual indicatorName -- a parallel, non-canonical scoring path that
+ * treated every candidate identically regardless of what indicator it
+ * actually was. This function replaces that entirely: the score IS the
+ * candidate's real indicator signal correlated with the real forward
+ * outcome, exactly the same underlying relationship Confirmation later
+ * tests formally.
+ *
+ * @param {object} params
+ * @param {import('../indicator/IndicatorRegistry.js').IndicatorRegistry} params.indicatorRegistry
+ * @param {object} params.candidate - Provides indicatorName/period.
+ * @param {number[]} params.prices - The real price series to score against
+ *   (may be a sub-window, e.g. one replication partition).
+ * @param {{ direction: 'Rise'|'Fall', runLength: number }} params.targetDefinition
+ * @returns {{ score: number, sampleSize: number }} score = |correlation|
+ *   in [0,1]; 0 (with sampleSize 0) if there isn't enough data to compute
+ *   anything meaningful -- never throws, since Screening/Triage/
+ *   Replication must be able to rank even thin candidates rather than
+ *   abort the whole batch.
+ */
+export function computeQuickIndicatorScore({ indicatorRegistry, candidate, prices, targetDefinition } = {}) {
+  if (!indicatorRegistry || !candidate?.indicatorName || !Array.isArray(prices) || prices.length === 0) {
+    return { score: 0, sampleSize: 0 };
+  }
+  let indicatorSeries, outcomeSeries;
+  try {
+    indicatorSeries = computeIndicatorSeries(indicatorRegistry, candidate.indicatorName, candidate.period, prices);
+    outcomeSeries = computeOutcomeSeries(prices, targetDefinition);
+  } catch {
+    return { score: 0, sampleSize: 0 };
+  }
+  const featureValues = [], outcomeValues = [];
+  for (let i = 0; i < prices.length; i++) {
+    if (Number.isFinite(indicatorSeries[i]) && Number.isFinite(outcomeSeries[i])) {
+      featureValues.push(indicatorSeries[i]);
+      outcomeValues.push(outcomeSeries[i]);
+    }
+  }
+  if (featureValues.length < 2) return { score: 0, sampleSize: 0 };
+  return { score: Math.abs(pearsonCorrelation(featureValues, outcomeValues)), sampleSize: featureValues.length };
+}
+
 /** Paired bootstrap (resample INDEX pairs together) for effect size + SE + 95% CI. Reuses createSeededRng, not a second PRNG. */
 function bootstrapPairedCorrelation(xs, ys, { confidenceLevel = 0.95, numResamples = 2000, seed }) {
   const rng = createSeededRng(seed);

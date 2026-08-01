@@ -3412,7 +3412,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
 <div id="page-msdphase11" class="page">
   <div id="phase11-controls" style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
     <button id="ph11StartCampaignBtn" class="gc-btn">▶ Start Campaign</button>
-    <button id="ph11StartRegistryCampaignBtn" class="gc-btn">▶ Start Registry Campaign (84 candidates)</button>
+    <button id="ph11StartRegistryCampaignBtn" class="gc-btn">▶ Start Registry Campaign (108 candidates)</button>
     <button id="ph11ScreenBtn" class="gc-btn" disabled>🔍 Run Screening</button>
     <button id="ph11TriageBtn" class="gc-btn" disabled>✅ Run Triage</button>
     <button id="ph11ConfirmBtn" class="gc-btn" disabled>🧪 Run Confirmation</button>
@@ -34536,6 +34536,7 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
   import { mountPhase11 } from "./research/src/ui/Phase11Application.js";
   import { startPhase11Campaign, startRegistryDrivenCampaign } from "./research/src/orchestration/startPhase11Campaign.js";
   import { computeOverallReadiness } from "./research/src/bridge/Phase11ConfirmationReadiness.js";
+  import { computeQuickIndicatorScore } from "./research/src/bridge/Phase11AutomatedConfirmation.js";
   import { IndicatorRegistry } from "./research/src/indicator/IndicatorRegistry.js";
   import { registerCoreIndicators } from "./research/src/indicator/coreIndicators.js";
 
@@ -34562,37 +34563,43 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
     catch (e) { console.warn("[phase11]", e); }
   };
 
-  // A real (small-sample, demo-scale) diagnostic computed from this
-  // session's actual tick history — NOT a validated statistical test.
-  // Used only to give the Screening/Triage buttons a real number to act
-  // on instead of a placeholder constant.
+  // THE canonical scoring function for Screening/Triage/Replication --
+  // Stage 2 of the "Remove Remaining Parallel Logic" directive. This used
+  // to be an ad hoc "average absolute tick movement" statistic that never
+  // looked at the candidate's actual indicatorName, treating every
+  // candidate identically. It now calls computeQuickIndicatorScore(),
+  // which reuses the EXACT SAME canonical Indicator Registry lookup,
+  // outcome computation, and correlation math full Confirmation uses --
+  // one scoring pipeline, not a parallel one.
   function ph11DemoScore(candidate){
-    const period = candidate?.parameters?.period || 14;
     const hist = (window.__mfxDebug && window.__mfxDebug.getHistory) ? window.__mfxDebug.getHistory(300) : null;
     const prices = (hist && hist.ticks || []).map(t => t.tick).filter(v => typeof v === "number");
-    if (prices.length < period + 1) return 0;
-    let sum = 0, n = 0;
-    for (let i = period; i < prices.length; i++){ sum += Math.abs(prices[i] - prices[i - period]); n++; }
-    return n ? sum / n : 0;
+    const { score } = computeQuickIndicatorScore({
+      indicatorRegistry: ph11IndicatorRegistry, candidate, prices,
+      targetDefinition: { direction: "Rise", runLength: 5 },
+    });
+    return score;
   }
 
   // Splits this session's real tick history into disjoint chunks and
-  // computes the same demo diagnostic per chunk — genuine (if small-sample)
-  // per-partition effect-size estimates for Replication's stability check,
-  // not fabricated numbers. Each chunk really is an independent slice of
-  // whatever ticks this session has actually seen so far.
+  // computes the SAME canonical computeQuickIndicatorScore per chunk —
+  // genuine (if small-sample) per-partition effect-size estimates for
+  // Replication's stability check, indicator-aware exactly like
+  // Confirmation, not a separate ad hoc statistic.
   function ph11PartitionScores(candidate, numPartitions = 4){
-    const period = candidate?.parameters?.period || 14;
+    const period = candidate?.period || 14;
     const hist = (window.__mfxDebug && window.__mfxDebug.getHistory) ? window.__mfxDebug.getHistory(400) : null;
     const prices = (hist && hist.ticks || []).map(t => t.tick).filter(v => typeof v === "number");
     const chunkSize = Math.floor(prices.length / numPartitions);
-    const scores = [];
     if (chunkSize < period + 1) return null; // not enough real data yet for this many partitions
+    const scores = [];
     for (let p = 0; p < numPartitions; p++){
       const chunk = prices.slice(p * chunkSize, (p + 1) * chunkSize);
-      let sum = 0, n = 0;
-      for (let i = period; i < chunk.length; i++){ sum += Math.abs(chunk[i] - chunk[i - period]); n++; }
-      scores.push(n ? sum / n : 0);
+      const { score } = computeQuickIndicatorScore({
+        indicatorRegistry: ph11IndicatorRegistry, candidate, prices: chunk,
+        targetDefinition: { direction: "Rise", runLength: 5 },
+      });
+      scores.push(score);
     }
     return scores;
   }
@@ -34630,7 +34637,7 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
   });
 
   document.getElementById("ph11StartRegistryCampaignBtn").addEventListener("click", async () => {
-    ph11SetStatus("Starting registry-driven campaign (enumerating the Indicator Registry — 21 indicators x 4 periods)…");
+    ph11SetStatus("Starting registry-driven campaign (enumerating the Indicator Registry — 27 indicators x 4 periods)…");
     try {
       const hist = (window.__mfxDebug && window.__mfxDebug.getHistory) ? window.__mfxDebug.getHistory(1) : null;
       const liveSymbol = (hist && hist.ticks && hist.ticks[0] && hist.ticks[0].symbol) || "1HZ100V";

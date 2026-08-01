@@ -192,6 +192,22 @@ test('index.html wiring: readiness and confirmation both resolve indicators thro
   assert.match(valScript, /verifyReproducibility\(\{[\s\S]{0,200}indicatorRegistry:/);
 });
 
+test('index.html wiring (Stage 2, "Remove Remaining Parallel Logic"): Screening/Triage/Replication call the canonical computeQuickIndicatorScore(), not a separate ad hoc tick-movement statistic', async () => {
+  const fs = await import('node:fs');
+  const html = await fs.promises.readFile(new URL('../../index.html', import.meta.url), 'utf8');
+
+  const scriptMatches = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)];
+  const ph11Script = scriptMatches.map((m) => m[1]).find((s) => s.includes('ph11StartRegistryCampaignBtn'));
+  assert.ok(ph11Script);
+
+  assert.match(ph11Script, /import\s*\{\s*computeQuickIndicatorScore\s*\}\s*from\s*"\.\/research\/src\/bridge\/Phase11AutomatedConfirmation\.js"/);
+  assert.match(ph11Script, /function ph11DemoScore\(candidate\)\{[\s\S]{0,300}computeQuickIndicatorScore\(/);
+  assert.match(ph11Script, /function ph11PartitionScores\(candidate,[\s\S]{0,900}computeQuickIndicatorScore\(/);
+
+  // The old ad hoc "average absolute tick movement" formula must be gone entirely.
+  assert.ok(!/sum \+= Math\.abs\(prices\[i\] - prices\[i - period\]\)/.test(ph11Script), 'the old ad hoc tick-movement statistic must be fully removed, not left alongside the new one');
+});
+
 test('index.html wiring: the registry-driven campaign button calls startRegistryDrivenCampaign() and is wired alongside the demo campaign path', async () => {
   const fs = await import('node:fs');
   const html = await fs.promises.readFile(new URL('../../index.html', import.meta.url), 'utf8');
