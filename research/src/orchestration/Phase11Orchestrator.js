@@ -42,6 +42,7 @@ import { PromotionPolicy } from '../governance/PromotionPolicy.js';
 import { DecisionAuditLog } from '../governance/DecisionAuditLog.js';
 import { NegativeEvidenceRegistry } from '../governance/NegativeEvidenceRegistry.js';
 import { ReproducibilityGate } from '../governance/reproducibilityLevels.js';
+import { E_TIER_RANK } from '../governance/scientificEvidenceTiers.js';
 import { explainCandidate } from '../interpretation/ExplainabilityEngine.js';
 import { computeDiscoveryStabilityIndex } from '../analysis/DiscoveryStabilityAnalysis.js';
 import {
@@ -352,6 +353,34 @@ export class Phase11Orchestrator {
         if (expectedContextVersions[key] !== actualContextVersions[key]) {
           failures.push(`contextVersions["${key}"] mismatch: expected="${expectedContextVersions[key]}", actual="${actualContextVersions[key]}"`);
         }
+      }
+    }
+
+    // Stage 8 fix (audit finding): the StatisticalAnalysisPlan's own
+    // publicationCriteria field was declared in the schema (config/
+    // StatisticalAnalysisPlan.js requires it as a plain object on every
+    // SAP) but was never actually read or enforced anywhere in the
+    // publication path -- the real reproducibility floor was a hardcoded
+    // constant (reproducibilityLevels.js's MIN_PUBLICATION_REPRODUCIBILITY_LEVEL),
+    // completely independent of whatever a SAP declared. This closes that
+    // gap: if the active SAP's publicationCriteria specifies a
+    // minReproducibilityLevel or minEvidenceTier, it is now genuinely
+    // enforced -- and can only ever STRENGTHEN the existing floor (the
+    // effective threshold is the max of the SAP's request and the
+    // pre-existing hardcoded minimum), never weaken governance by
+    // configuring a lower bar.
+    const sapCriteria = this.sap?.publicationCriteria || {};
+    if (typeof sapCriteria.minReproducibilityLevel === 'number') {
+      const repLevel = candidate?.reproducibilityLevel ?? 0;
+      if (repLevel < sapCriteria.minReproducibilityLevel) {
+        failures.push(`reproducibilityLevel ${repLevel} < SAP-required minimum ${sapCriteria.minReproducibilityLevel} (sap.publicationCriteria.minReproducibilityLevel)`);
+      }
+    }
+    if (typeof sapCriteria.minEvidenceTier === 'string') {
+      const requiredRank = E_TIER_RANK[sapCriteria.minEvidenceTier];
+      const candidateRank = E_TIER_RANK[candidate?.evidenceTier] ?? -1;
+      if (requiredRank !== undefined && candidateRank < requiredRank) {
+        failures.push(`evidenceTier "${candidate?.evidenceTier}" is below SAP-required minimum "${sapCriteria.minEvidenceTier}" (sap.publicationCriteria.minEvidenceTier)`);
       }
     }
 

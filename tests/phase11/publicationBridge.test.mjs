@@ -186,6 +186,83 @@ test('ineligible publication: configuration drift blocks publication, candidate 
   }
 });
 
+test('Stage 8 fix: sap.publicationCriteria.minReproducibilityLevel is now genuinely enforced (was previously declared but silently ignored)', async () => {
+  const teardown = await setup();
+  try {
+    const rc = await makeRc();
+    const freeze = await makeFreeze(rc);
+    // Request a STRICTER reproducibility level than the candidate has (3) --
+    // this must now genuinely block publication, where before this fix it
+    // would have been silently ignored.
+    const sap = await makeSap({ publicationCriteria: { minReproducibilityLevel: 4 } });
+    const familyRegistry = new FamilyRegistry();
+    familyRegistry.registerFamily({ familyName: 'momentum', version: '1.0.0', allowedCandidateTypes: [CANDIDATE_TYPES.INDICATOR_FEATURE] });
+    const orchestrator = new Phase11Orchestrator({ researchFreeze: freeze, sap, familyRegistry });
+
+    const { replicated, hypothesisId } = await buildReplicatedCandidate(orchestrator, rc, freeze, 'pub-cand-sap-repro');
+    await orchestrator.syncKnowledgeGraph(replicated);
+
+    const result = await orchestrator.publish({ candidate: replicated, hypothesisId, publishTimeConfig: rc });
+
+    assert.equal(result.outcome, 'ineligible');
+    assert.ok(result.gateResult.failures.some((f) => f.includes('SAP-required minimum 4')));
+    assert.equal(result.candidate.lifecycle, PHASE11_LIFECYCLE_STAGES.REPLICATED, 'ineligible publication is administrative, not a scientific rejection -- candidate stays Replicated');
+  } finally {
+    teardown();
+  }
+});
+
+test('Stage 8 fix: sap.publicationCriteria.minEvidenceTier is now genuinely enforced', async () => {
+  const teardown = await setup();
+  try {
+    const rc = await makeRc();
+    const freeze = await makeFreeze(rc);
+    // A fresh candidate defaults to evidenceTier E0 -- requiring E1 must
+    // genuinely block publication.
+    const sap = await makeSap({ publicationCriteria: { minEvidenceTier: 'E1' } });
+    const familyRegistry = new FamilyRegistry();
+    familyRegistry.registerFamily({ familyName: 'momentum', version: '1.0.0', allowedCandidateTypes: [CANDIDATE_TYPES.INDICATOR_FEATURE] });
+    const orchestrator = new Phase11Orchestrator({ researchFreeze: freeze, sap, familyRegistry });
+
+    const { replicated, hypothesisId } = await buildReplicatedCandidate(orchestrator, rc, freeze, 'pub-cand-sap-evidence');
+    await orchestrator.syncKnowledgeGraph(replicated);
+
+    const result = await orchestrator.publish({ candidate: replicated, hypothesisId, publishTimeConfig: rc });
+
+    assert.equal(result.outcome, 'ineligible');
+    assert.ok(result.gateResult.failures.some((f) => f.includes('SAP-required minimum "E1"')));
+  } finally {
+    teardown();
+  }
+});
+
+test('Stage 8 fix: a SAP requesting a WEAKER reproducibility level than the existing hardcoded floor never weakens governance -- the floor still applies', async () => {
+  const teardown = await setup();
+  try {
+    const rc = await makeRc();
+    const freeze = await makeFreeze(rc);
+    // minReproducibilityLevel: 1 is weaker than the hardcoded floor of 3
+    // (ReproducibilityGate.MIN_PUBLICATION_REPRODUCIBILITY_LEVEL) -- this
+    // must NOT let a candidate with reproducibilityLevel < 3 through.
+    const sap = await makeSap({ publicationCriteria: { minReproducibilityLevel: 1 } });
+    const familyRegistry = new FamilyRegistry();
+    familyRegistry.registerFamily({ familyName: 'momentum', version: '1.0.0', allowedCandidateTypes: [CANDIDATE_TYPES.INDICATOR_FEATURE] });
+    const orchestrator = new Phase11Orchestrator({ researchFreeze: freeze, sap, familyRegistry });
+
+    const { replicated, hypothesisId } = await buildReplicatedCandidate(orchestrator, rc, freeze, 'pub-cand-sap-weak');
+    // Deliberately weaken the candidate's own reproducibilityLevel below
+    // the hardcoded floor.
+    const weakened = withField(replicated, 'reproducibilityLevel', 1);
+    await orchestrator.syncKnowledgeGraph(weakened);
+
+    const result = await orchestrator.publish({ candidate: weakened, hypothesisId, publishTimeConfig: rc });
+
+    assert.equal(result.outcome, 'ineligible', 'the hardcoded reproducibility floor must still block this, regardless of the SAP requesting a weaker minimum');
+  } finally {
+    teardown();
+  }
+});
+
 test('validation: refuses a candidate that is not Replicated', async () => {
   const teardown = await setup();
   try {
