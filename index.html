@@ -3412,6 +3412,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
 <div id="page-msdphase11" class="page">
   <div id="phase11-controls" style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
     <button id="ph11StartCampaignBtn" class="gc-btn">▶ Start Campaign</button>
+    <button id="ph11StartRegistryCampaignBtn" class="gc-btn">▶ Start Registry Campaign (84 candidates)</button>
     <button id="ph11ScreenBtn" class="gc-btn" disabled>🔍 Run Screening</button>
     <button id="ph11TriageBtn" class="gc-btn" disabled>✅ Run Triage</button>
     <button id="ph11ConfirmBtn" class="gc-btn" disabled>🧪 Run Confirmation</button>
@@ -34533,7 +34534,7 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
 <!-- Phase 11 MSD Lab: isolated UI, lazily mounted on first visit to the Phase 11 page -->
 <script type="module">
   import { mountPhase11 } from "./research/src/ui/Phase11Application.js";
-  import { startPhase11Campaign } from "./research/src/orchestration/startPhase11Campaign.js";
+  import { startPhase11Campaign, startRegistryDrivenCampaign } from "./research/src/orchestration/startPhase11Campaign.js";
   import { computeOverallReadiness } from "./research/src/bridge/Phase11ConfirmationReadiness.js";
 
   let ph11Handle = null;
@@ -34615,6 +34616,45 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
     } catch (e) {
       console.warn("[phase11] start campaign failed", e);
       ph11SetStatus("Failed to start campaign — see console.");
+    }
+  });
+
+  document.getElementById("ph11StartRegistryCampaignBtn").addEventListener("click", async () => {
+    ph11SetStatus("Starting registry-driven campaign (enumerating the Indicator Registry — 21 indicators x 4 periods)…");
+    try {
+      const hist = (window.__mfxDebug && window.__mfxDebug.getHistory) ? window.__mfxDebug.getHistory(1) : null;
+      const liveSymbol = (hist && hist.ticks && hist.ticks[0] && hist.ticks[0].symbol) || "1HZ100V";
+      // includeMarketStates is deliberately false here: downstream Screen/
+      // Triage/Confirm (ph11DemoScore, computeIndicatorSeries) assume an
+      // indicator-shaped candidate (indicatorName/period). MarketState
+      // candidates use a different shape (stateLabel/detectionCriteria)
+      // that Confirm doesn't yet know how to test -- they'd fail
+      // gracefully (a real Phase11InsufficientDataError, not a crash) but
+      // with a misleading "insufficient data" message, so they're left out
+      // of this UI path until Confirm gains real MarketState support.
+      const { orchestrator, researchConfiguration, provenanceById, generatedCount, countsByType } = await startRegistryDrivenCampaign({
+        symbol: liveSymbol, includeMarketStates: false,
+      });
+      ph11Orchestrator = orchestrator;
+      ph11ResearchConfiguration = researchConfiguration;
+      ph11ProvenanceById = provenanceById;
+      ph11ScreenedCandidates = [];
+      ph11TriagedCandidates = [];
+      ph11ConfirmedResults = [];
+      ph11ReplicatedResults = [];
+      if (ph11ReadinessInterval) { clearInterval(ph11ReadinessInterval); ph11ReadinessInterval = null; }
+      ph11RenderReadiness(null);
+      if (!ph11Handle) window.ph11Boot();
+      ph11Handle.attachOrchestrator(orchestrator);
+      document.getElementById("ph11ScreenBtn").disabled = false;
+      document.getElementById("ph11TriageBtn").disabled = true;
+      document.getElementById("ph11ConfirmBtn").disabled = true;
+      document.getElementById("ph11ReplicateBtn").disabled = true;
+      document.getElementById("ph11PublishBtn").disabled = true;
+      ph11SetStatus(`Registry-driven campaign: generated ${generatedCount} candidates (${countsByType.indicator} indicators) under freeze ${orchestrator.researchFreeze.id}.`);
+    } catch (e) {
+      console.warn("[phase11] start registry campaign failed", e);
+      ph11SetStatus("Failed to start registry-driven campaign — see console.");
     }
   });
 

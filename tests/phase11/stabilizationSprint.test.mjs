@@ -166,6 +166,19 @@ test('MASTER REGRESSION: multiple same-family candidates, mixed confirm/reject o
   }
 });
 
+test('index.html wiring: the registry-driven campaign button calls startRegistryDrivenCampaign() and is wired alongside the demo campaign path', async () => {
+  const fs = await import('node:fs');
+  const html = await fs.promises.readFile(new URL('../../index.html', import.meta.url), 'utf8');
+
+  const scriptMatches = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)];
+  const ph11Script = scriptMatches.map((m) => m[1]).find((s) => s.includes('ph11StartRegistryCampaignBtn'));
+  assert.ok(ph11Script, 'could not locate the Phase 11 campaign script block containing ph11StartRegistryCampaignBtn');
+
+  assert.match(ph11Script, /import\s*\{\s*startPhase11Campaign,\s*startRegistryDrivenCampaign\s*\}/);
+  assert.match(ph11Script, /startRegistryDrivenCampaign\(\{/);
+  assert.match(html, /id="ph11StartRegistryCampaignBtn"/);
+});
+
 test('index.html wiring: Screen and Triage buttons call the orchestrator\'s own screen()/triage() methods, not the standalone funnel functions directly', async () => {
   const fs = await import('node:fs');
   const html = await fs.promises.readFile(new URL('../../index.html', import.meta.url), 'utf8');
