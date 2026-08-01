@@ -50,6 +50,7 @@
 import { generateCandidate } from './candidateGenerator.js';
 import { CANDIDATE_TYPES } from '../candidate/Candidate.js';
 import { PRIMITIVE_OBSERVABLES } from '../candidate/MeasurementRegistry.js';
+import { MAX_CONTEXT_CONDITIONS } from '../candidate/ConditionalHypothesis.js';
 
 export class RegistryDrivenGenerationError extends Error {
   constructor(message) {
@@ -466,10 +467,141 @@ export async function* streamCompositeCandidates({
   }
 }
 
+/**
+ * Lazily yields candidateParams-shaped objects for ConditionalHypothesis
+ * instances: one per (baseCandidate x rotating window of context plugins),
+ * hard-bounded at MAX_CONTEXT_CONDITIONS (3) conditions per hypothesis --
+ * Stage 5 of the "Continue Implementation" directive. Candidate-type
+ * agnostic (works for MarketState, IndicatorFeature, ProxyCandidate, or
+ * CompositeCandidate base candidates); the directive's own Stage 5 title
+ * emphasizes MarketState + ContextSet, so the campaign wiring defaults to
+ * MarketState base candidates, but this generator itself does not
+ * hardcode a candidate type.
+ *
+ * Context selection is a BOUNDED ROTATION, not the full combinatorial
+ * product of registered contexts choose 1/2/3 (which would be
+ * combinatorially large even at only 10 registered contexts -- C(10,1) +
+ * C(10,2) + C(10,3) = 175 per base candidate). For contextsPerHypothesis=k,
+ * each base candidate i is paired with contexts[i % n .. i % n + k - 1]
+ * (wrapping), producing exactly one k-context hypothesis per base
+ * candidate -- a disclosed simplification, not silent under-generation;
+ * exploring the full combinatorial context space is deferred (see this
+ * file's LIMITATIONS note).
+ *
+ * baseHypothesis stores only enough identity to route back to the real
+ * base candidate (candidateId, candidateType, description) -- the base
+ * candidate's own full record is never duplicated onto the
+ * ConditionalHypothesis, matching CompositeCandidate's own componentIds-
+ * by-reference discipline.
+ *
+ * @param {object} params
+ * @param {object[]} params.baseCandidates - Real candidate objects to condition.
+ * @param {import('../context/ContextRegistry.js').ContextRegistry} params.contextRegistry
+ * @param {object} params.researchConfiguration
+ * @param {number} [params.contextsPerHypothesis=1] - 1, 2, or 3 -- validated
+ *   against MAX_CONTEXT_CONDITIONS before any candidate is constructed.
+ * @param {string} [params.conditionCombinator='all']
+ * @yields {object} A candidateParams object ready for generateCandidate().
+ */
+export function* streamConditionalHypothesisCandidateParams({
+  baseCandidates, contextRegistry, researchConfiguration, contextsPerHypothesis = 1, conditionCombinator = 'all',
+} = {}) {
+  if (!Array.isArray(baseCandidates) || baseCandidates.length === 0) {
+    throw new RegistryDrivenGenerationError('streamConditionalHypothesisCandidateParams: at least 1 base candidate is required');
+  }
+  if (!contextRegistry || typeof contextRegistry.list !== 'function') {
+    throw new RegistryDrivenGenerationError('streamConditionalHypothesisCandidateParams: a valid ContextRegistry is required');
+  }
+  if (!Number.isInteger(contextsPerHypothesis) || contextsPerHypothesis < 1 || contextsPerHypothesis > MAX_CONTEXT_CONDITIONS) {
+    throw new RegistryDrivenGenerationError(`streamConditionalHypothesisCandidateParams: contextsPerHypothesis must be an integer in [1, ${MAX_CONTEXT_CONDITIONS}] -- the Laboratory-wide anti-overfitting cap, never bypassed`);
+  }
+  if (!researchConfiguration?.id || !researchConfiguration?.configHash) {
+    throw new RegistryDrivenGenerationError('streamConditionalHypothesisCandidateParams: a valid ResearchConfiguration is required');
+  }
+  const contextPlugins = contextRegistry.list();
+  if (contextPlugins.length < contextsPerHypothesis) {
+    throw new RegistryDrivenGenerationError(`streamConditionalHypothesisCandidateParams: only ${contextPlugins.length} contexts registered, need at least ${contextsPerHypothesis}`);
+  }
+
+  for (let i = 0; i < baseCandidates.length; i++) {
+    const base = baseCandidates[i];
+    const contextConditions = [];
+    for (let k = 0; k < contextsPerHypothesis; k++) {
+      const plugin = contextPlugins[(i + k) % contextPlugins.length];
+      contextConditions.push({ contextName: plugin.metadata().name, description: plugin.metadata().description });
+    }
+    yield {
+      id: `conditional-${base.id}-${contextConditions.map((c) => c.contextName).join('-')}`,
+      family: 'conditional',
+      parameters: {},
+      description: `${base.description} — conditional on [${contextConditions.map((c) => c.contextName).join(', ')}] (${conditionCombinator}).`,
+      generatorVersion: '11.1.0',
+      grammarVersion: '11.0.0',
+      configHash: researchConfiguration.configHash,
+      researchConfigurationId: researchConfiguration.id,
+      contextConditions,
+      baseHypothesis: { candidateId: base.id, candidateType: base.type, description: base.description },
+      conditionCombinator,
+    };
+  }
+}
+
+/**
+ * Streams fully-governed, deduplicated ConditionalHypothesis instances --
+ * routed through the existing generateCandidate(), same as every other
+ * stream in this module. The 3-context hard cap is enforced THREE times
+ * independently before any candidate reaches this function's caller: by
+ * streamConditionalHypothesisCandidateParams() above (refuses to even
+ * yield params for an out-of-range contextsPerHypothesis), by
+ * ConditionalHypothesis.create() itself (candidate/ConditionalHypothesis.js,
+ * unmodified), and by that class's own constructor (defence-in-depth
+ * against a malformed deserialized record) -- no new enforcement
+ * mechanism was introduced here; this function simply never has the
+ * opportunity to violate a cap that was already independently enforced
+ * twice before this code existed.
+ *
+ * @param {object} params
+ * @param {object[]} params.baseCandidates
+ * @param {import('../context/ContextRegistry.js').ContextRegistry} params.contextRegistry
+ * @param {object} params.researchConfiguration
+ * @param {import('../config/ResearchFreeze.js').ResearchFreeze} params.researchFreeze
+ * @param {import('../config/StatisticalAnalysisPlan.js').StatisticalAnalysisPlan} params.sap
+ * @param {import('../governance/FamilyRegistry.js').FamilyRegistry} [params.familyRegistry]
+ * @param {import('../governance/DecisionAuditLog.js').DecisionAuditLog} [params.decisionAuditLog]
+ * @param {number} [params.contextsPerHypothesis=1]
+ * @param {string} [params.conditionCombinator='all']
+ * @param {Set<string>} [params.seenFingerprints]
+ * @param {(err: Error, candidateParams: object) => void} [params.onSkip]
+ * @yields {{ candidate: object, provenance: object }}
+ */
+export async function* streamConditionalHypothesisCandidates({
+  baseCandidates, contextRegistry, researchConfiguration, researchFreeze, sap,
+  familyRegistry = null, decisionAuditLog = null, contextsPerHypothesis = 1, conditionCombinator = 'all',
+  seenFingerprints = new Set(), onSkip = null,
+} = {}) {
+  for (const candidateParams of streamConditionalHypothesisCandidateParams({
+    baseCandidates, contextRegistry, researchConfiguration, contextsPerHypothesis, conditionCombinator,
+  })) {
+    let result;
+    try {
+      result = await generateCandidate({
+        candidateType: CANDIDATE_TYPES.CONDITIONAL_HYPOTHESIS,
+        candidateParams, researchFreeze, sap, familyRegistry, decisionAuditLog,
+      });
+    } catch (err) {
+      if (onSkip) onSkip(err, candidateParams);
+      continue;
+    }
+    if (seenFingerprints.has(result.candidate.fingerprint)) continue;
+    seenFingerprints.add(result.candidate.fingerprint);
+    yield result;
+  }
+}
+
 
 /*
  * LIMITATIONS (stated honestly, not silently omitted; updated again to
- * reflect Stage 4's completion -- ProxyCandidate + all composite types):
+ * reflect Stage 5's completion -- Conditional Hypothesis Generator):
  *
  * This module now implements Stages 1 (Indicator Registry, 27 plugins),
  * 2 (Market State Registry, 15 plugins, in plugin/MarketStateRegistry.js
@@ -482,14 +614,22 @@ export async function* streamCompositeCandidates({
  * candidates, all via the SAME unmodified streamCompositeCandidates(),
  * bounded sequential pairing not full n² -- ProxyCandidate is now a real
  * fourth Candidate subclass, generated via streamProxyCandidates() the
- * exact same way IndicatorFeature/MarketState already were), 7
- * (streaming), 8 (fingerprint dedup), and the covered-registries slice of
- * Stage 9 (automatic Generated entry). It does NOT implement:
+ * exact same way IndicatorFeature/MarketState already were), 5 COMPLETE
+ * (Conditional Hypothesis Generator -- streamConditionalHypothesisCandidates(),
+ * any base candidate type x up to 3 real registered contexts, the 3-cap
+ * enforced independently at three layers: this generator's own
+ * precondition check, candidate/ConditionalHypothesis.js's create()
+ * validation, and that class's own constructor -- BOUNDED rotation over
+ * registered contexts, not the full combinatorial product, see this
+ * note's own candidate-space estimate below), 7 (streaming), 8
+ * (fingerprint dedup), and the covered-registries slice of Stage 9
+ * (automatic Generated entry). It does NOT implement:
  *
- *   - Stage 5 (Conditional Hypothesis Generator, respecting the 3-context
- *     limit) -- context/coreContexts.js's 10 contexts exist and are
- *     enumerable, but nothing yet consumes them to generate
- *     ConditionalHypothesis candidates
+ *   - Full combinatorial context exploration for Stage 5 (all C(10,1) +
+ *     C(10,2) + C(10,3) = 175 context combinations per base candidate --
+ *     the current bounded-rotation approach yields exactly 1 hypothesis
+ *     per base candidate per contextsPerHypothesis value requested, not
+ *     an exhaustive search of the combination space)
  *   - Stage 10 (dashboard breakdown by family/indicator/state/context/
  *     proxy/composite/conditional/duplicate/streaming-progress/memory)
  *   - "Novel States" (deliberately not invented -- would require an
