@@ -177,16 +177,137 @@ export async function* streamRegistryDrivenCandidates({
   }
 }
 
+/**
+ * Lazily yields candidateParams-shaped objects for every registered
+ * market-state plugin (Stage 2's MarketState Registry, added alongside
+ * this extension — plugin/MarketStateRegistry.js + coreMarketStates.js).
+ * Mirrors streamIndicatorCandidateParams()'s exact shape/discipline: pure,
+ * synchronous, no async work, no fingerprinting.
+ *
+ * @param {object} params
+ * @param {import('../plugin/MarketStateRegistry.js').MarketStateRegistry} params.marketStateRegistry
+ * @param {object} params.researchConfiguration
+ * @yields {object} A candidateParams object ready for generateCandidate().
+ */
+export function* streamMarketStateCandidateParams({
+  marketStateRegistry, researchConfiguration,
+} = {}) {
+  if (!marketStateRegistry || typeof marketStateRegistry.list !== 'function') {
+    throw new RegistryDrivenGenerationError('streamMarketStateCandidateParams: a valid MarketStateRegistry is required');
+  }
+  if (!researchConfiguration?.id || !researchConfiguration?.configHash) {
+    throw new RegistryDrivenGenerationError('streamMarketStateCandidateParams: a valid ResearchConfiguration is required');
+  }
+  for (const plugin of marketStateRegistry.list()) {
+    const meta = plugin.metadata();
+    yield {
+      id: `state-${meta.name}`,
+      family: 'marketState',
+      parameters: {},
+      description: `${meta.displayName || meta.name} — auto-generated from the Market State Registry.`,
+      generatorVersion: '11.1.0',
+      grammarVersion: '11.0.0',
+      configHash: researchConfiguration.configHash,
+      researchConfigurationId: researchConfiguration.id,
+      stateLabel: plugin.stateLabel || meta.name,
+      detectionCriteria: { pluginName: meta.name, humanReadable: meta.description },
+    };
+  }
+}
+
+/**
+ * Streams fully-governed, deduplicated MarketState candidates — the
+ * MarketState-Registry counterpart to streamRegistryDrivenCandidates().
+ * Same generateCandidate()-routed governance, same graceful onSkip
+ * handling, same fingerprint deduplication.
+ *
+ * @param {object} params
+ * @param {import('../plugin/MarketStateRegistry.js').MarketStateRegistry} params.marketStateRegistry
+ * @param {object} params.researchConfiguration
+ * @param {import('../config/ResearchFreeze.js').ResearchFreeze} params.researchFreeze
+ * @param {import('../config/StatisticalAnalysisPlan.js').StatisticalAnalysisPlan} params.sap
+ * @param {import('../governance/FamilyRegistry.js').FamilyRegistry} [params.familyRegistry]
+ * @param {import('../governance/DecisionAuditLog.js').DecisionAuditLog} [params.decisionAuditLog]
+ * @param {Set<string>} [params.seenFingerprints] - Shared with
+ *   streamRegistryDrivenCandidates() to deduplicate across BOTH streams
+ *   when chained (see streamAllRegistryDrivenCandidates below).
+ * @param {(err: Error, candidateParams: object) => void} [params.onSkip]
+ * @yields {{ candidate: object, provenance: object }}
+ */
+export async function* streamMarketStateCandidates({
+  marketStateRegistry, researchConfiguration, researchFreeze, sap,
+  familyRegistry = null, decisionAuditLog = null, seenFingerprints = new Set(), onSkip = null,
+} = {}) {
+  for (const candidateParams of streamMarketStateCandidateParams({ marketStateRegistry, researchConfiguration })) {
+    let result;
+    try {
+      result = await generateCandidate({
+        candidateType: CANDIDATE_TYPES.MARKET_STATE,
+        candidateParams, researchFreeze, sap, familyRegistry, decisionAuditLog,
+      });
+    } catch (err) {
+      if (onSkip) onSkip(err, candidateParams);
+      continue;
+    }
+    if (seenFingerprints.has(result.candidate.fingerprint)) continue;
+    seenFingerprints.add(result.candidate.fingerprint);
+    yield result;
+  }
+}
+
+/**
+ * Chains streamRegistryDrivenCandidates() (indicators) and
+ * streamMarketStateCandidates() (market states) into one stream sharing a
+ * single seenFingerprints Set, exactly as this file's own original
+ * LIMITATIONS note anticipated ("extending it to those stages should not
+ * require revisiting this file's memory profile, only adding new
+ * streamXCandidateParams() generators that a combined streamAllCandidates()
+ * can chain"). Composite/Conditional/Context/Proxy generation (Stages
+ * 3-6) are NOT chained here yet — see the updated LIMITATIONS note below.
+ *
+ * @param {object} params - Union of streamRegistryDrivenCandidates' and
+ *   streamMarketStateCandidates' params, plus:
+ * @param {import('../indicator/IndicatorRegistry.js').IndicatorRegistry} [params.indicatorRegistry]
+ * @param {import('../plugin/MarketStateRegistry.js').MarketStateRegistry} [params.marketStateRegistry]
+ * @yields {{ candidate: object, provenance: object }}
+ */
+export async function* streamAllRegistryDrivenCandidates({
+  indicatorRegistry, marketStateRegistry, periods, researchConfiguration, researchFreeze, sap,
+  familyRegistry = null, decisionAuditLog = null, onSkip = null,
+} = {}) {
+  const seenFingerprints = new Set();
+  if (indicatorRegistry) {
+    for await (const result of streamRegistryDrivenCandidates({
+      indicatorRegistry, periods, researchConfiguration, researchFreeze, sap, familyRegistry, decisionAuditLog, onSkip,
+    })) {
+      if (seenFingerprints.has(result.candidate.fingerprint)) continue;
+      seenFingerprints.add(result.candidate.fingerprint);
+      yield result;
+    }
+  }
+  if (marketStateRegistry) {
+    for await (const result of streamMarketStateCandidates({
+      marketStateRegistry, researchConfiguration, researchFreeze, sap, familyRegistry, decisionAuditLog, seenFingerprints, onSkip,
+    })) {
+      yield result;
+    }
+  }
+}
+
 /*
- * LIMITATIONS (stated honestly, not silently omitted):
+ * LIMITATIONS (stated honestly, not silently omitted; updated from this
+ * file's original version to reflect the Market State extension):
  *
- * This module implements Stages 1 (Indicator Registry, in
- * indicator/IndicatorRegistry.js + coreIndicators.js), 7 (streaming), 8
- * (fingerprint dedup), and the single-indicator slice of Stage 9
- * (automatic Generated entry) from the directive. It does NOT implement:
+ * This module now implements Stages 1 (Indicator Registry),
+ * 2 (Market State Registry, in plugin/MarketStateRegistry.js +
+ * coreMarketStates.js — directory placement inconsistent with
+ * indicator/IndicatorRegistry.js's convention; a real but minor
+ * organizational debt, not a functional gap), 7 (streaming), 8
+ * (fingerprint dedup, now shared across both streams via
+ * streamAllRegistryDrivenCandidates), and the two-registry slice of
+ * Stage 9 (automatic Generated entry) from the directive. It does NOT
+ * implement:
  *
- *   - Stage 2 (MarketState Registry / plugins for Trend, Range,
- *     Compression, etc.)
  *   - Stage 3 (Observable Context Registry with the 3-context hard limit)
  *   - Stage 4 (Market Construct Proxy Registry auto-enumeration — the 10
  *     proxies in proxy/coreProxies.js exist and are already registry-
@@ -199,12 +320,10 @@ export async function* streamRegistryDrivenCandidates({
  *   - Stage 10 (dashboard breakdown by family/indicator/state/context/
  *     proxy/composite/conditional/duplicate/streaming-progress/memory)
  *
- * Candidate space size with the current default periods=[10,14,20,30] and
- * 21 registered indicators: 21 x 4 = 84 candidates (single-indicator only).
- * Composite and conditional generation (Stages 5-6) would multiply this
- * substantially once implemented — the streaming architecture here is
- * already sized for that (no unbounded array anywhere in this module), so
- * extending it to those stages should not require revisiting this file's
- * memory profile, only adding new streamXCandidateParams() generators
- * that a combined streamAllCandidates() can chain.
+ * Candidate space size with the current default periods=[10,14,20,30],
+ * 21 registered indicators, and 8 registered market states:
+ * (21 x 4) + 8 = 92 candidates. Composite and conditional generation
+ * (Stages 5-6) would multiply this substantially once implemented — the
+ * streaming architecture here is already sized for that.
  */
+

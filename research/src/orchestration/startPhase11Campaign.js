@@ -33,13 +33,11 @@ import { StatisticalAnalysisPlan } from '../config/StatisticalAnalysisPlan.js';
 import { FamilyRegistry } from '../governance/FamilyRegistry.js';
 import { Phase11Orchestrator } from './Phase11Orchestrator.js';
 import { CANDIDATE_TYPES } from '../candidate/Candidate.js';
-import { IndicatorRegistry } from '../plugin/IndicatorRegistry.js';
-import { registerCoreIndicators } from '../plugin/coreIndicators.js';
+import { IndicatorRegistry } from '../indicator/IndicatorRegistry.js';
+import { registerCoreIndicators } from '../indicator/coreIndicators.js';
 import { MarketStateRegistry } from '../plugin/MarketStateRegistry.js';
 import { registerCoreMarketStates } from '../plugin/coreMarketStates.js';
-import {
-  generateIndicatorCandidatesStream, generateMarketStateCandidatesStream, generateCompositeCandidatesStream,
-} from '../discovery/registryDrivenGenerator.js';
+import { streamAllRegistryDrivenCandidates } from '../discovery/registryDrivenCandidateGenerator.js';
 import { PRIMITIVE_OBSERVABLES } from '../candidate/MeasurementRegistry.js';
 import { INDICATOR_INPUT_FIELDS } from '../candidate/IndicatorFeature.js';
 
@@ -202,46 +200,49 @@ export { runPhase11Screening, runPhase11Triage } from '../discovery/phase11Funne
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Starts a campaign using discovery/registryDrivenGenerator.js instead of
- * the fixed 3-candidate DEFAULT_INDICATOR_CANDIDATES list -- "Registry-Driven
- * Candidate Generation" directive, Stage 9 (automatic registration into
- * Generated, without altering confirmation). Builds the same real
+ * Starts a campaign using discovery/registryDrivenCandidateGenerator.js's
+ * streamAllRegistryDrivenCandidates() instead of the fixed 3-candidate
+ * DEFAULT_INDICATOR_CANDIDATES list -- "Registry-Driven Candidate
+ * Generation" directive, Stage 9 (automatic registration into Generated,
+ * without altering confirmation). Builds the same real
  * ResearchConfiguration/ResearchFreeze/SAP/FamilyRegistry cycle as
  * startPhase11Campaign(), then streams candidates from the Indicator and
- * Market State registries directly into the orchestrator's persisted
- * registry via updateCandidate() (each candidate correctly tagged with the
- * real researchFreezeId/sapId, matching what candidateGenerator.js's own
- * generate() path attaches -- required for those candidates to later pass
- * Confirmation's validateBeforeConfirmation check). Screening, Triage, and
- * Confirmation are unchanged -- this only replaces WHAT gets generated,
- * never how it's evaluated.
+ * Market State registries through the EXISTING, UNMODIFIED
+ * generateCandidate() (the same function Phase11Orchestrator.generate()
+ * itself uses) -- every candidate gets a real FamilyRegistry compatibility
+ * check, a real ProvenanceDAG, and (if a DecisionAuditLog is supplied) a
+ * real GENERATED audit entry, exactly as demo-generated candidates already
+ * do. Screening, Triage, and Confirmation are unchanged -- this only
+ * replaces WHAT gets generated, never how it's evaluated.
  *
  * @param {object} [params]
  * @param {string} [params.campaignName]
  * @param {string} [params.symbol]
- * @param {number[]} [params.indicatorPeriods] - Defaults to [10, 14, 20, 50].
+ * @param {number[]} [params.indicatorPeriods] - Defaults to [10, 14, 20, 30].
  * @param {boolean} [params.includeMarketStates=true]
- * @param {boolean} [params.includeComposites=false] - Off by default (Stage 5
- *   composite generation is an early, deliberately bounded increment --
- *   see registryDrivenGenerator.js's own header for exactly which of the
- *   9 combination types are implemented so far).
  * @returns {Promise<{
  *   orchestrator: Phase11Orchestrator, researchConfiguration: object,
  *   researchFreeze: object, sap: object, familyRegistry: FamilyRegistry,
- *   generatedCount: number, countsByType: { indicator: number, marketState: number, composite: number }
+ *   generatedCount: number, countsByType: { indicator: number, marketState: number },
+ *   provenanceById: Record<string, object>
  * }>}
  */
 export async function startRegistryDrivenCampaign({
   campaignName = 'Phase 11 registry-driven campaign', symbol = '1HZ100V',
-  indicatorPeriods = [10, 14, 20, 50], includeMarketStates = true, includeComposites = false,
+  indicatorPeriods = [10, 14, 20, 30], includeMarketStates = true,
 } = {}) {
   const researchConfiguration = await ResearchConfiguration.create({
     id: `rc-registry-${Date.now()}`, name: campaignName,
     description: `Registry-driven discovery campaign over ${symbol} -- enumerates the Indicator and Market State registries rather than a fixed candidate list.`,
-    grammarVersion: '11.0.0', ontologyVersion: '11.0.0', generatorVersion: '11.0.0',
+    grammarVersion: '11.0.0', ontologyVersion: '11.0.0', generatorVersion: '11.1.0',
     proxyVersions: { coreProxies: '1.0.0' },
   });
 
+  // Placeholder freeze so generateCandidate()'s precondition is satisfied
+  // during generation -- fingerprints aren't known until candidates exist,
+  // so (same pattern as startPhase11Campaign() above) the freeze is
+  // rebuilt with them afterward and every candidate's researchFreezeId
+  // is patched to match.
   const placeholderFreeze = await ResearchFreeze.create({
     researchConfigurationId: researchConfiguration.id, configHash: researchConfiguration.configHash,
     ontologyVersion: researchConfiguration.ontologyVersion, generatorVersion: researchConfiguration.generatorVersion,
@@ -249,70 +250,57 @@ export async function startRegistryDrivenCampaign({
     researchConfigurationHash: researchConfiguration.configHash,
   });
 
+  // Every family the auto-categorized indicators (INDICATOR_FAMILY_BY_NAME
+  // in registryDrivenCandidateGenerator.js) and market states can land in,
+  // plus the DEFAULT_FAMILY_NAME fallback used elsewhere in this file.
+  const REGISTRY_FAMILIES = Object.freeze([
+    'trend', 'momentum', 'volatility', 'statistical', 'microstructure', 'indicator', 'marketState',
+  ]);
   const sap = await StatisticalAnalysisPlan.create({
-    sapId: `sap-registry-${Date.now()}`, hypothesisFamilies: [DEFAULT_FAMILY_NAME],
-    alphaAllocation: { [DEFAULT_FAMILY_NAME]: 0.05 }, promotionPolicies: { screeningPromotionQuantile: 0.5 },
+    sapId: `sap-registry-${Date.now()}`, hypothesisFamilies: [...REGISTRY_FAMILIES],
+    alphaAllocation: Object.fromEntries(REGISTRY_FAMILIES.map((f) => [f, 0.05])),
+    promotionPolicies: { screeningPromotionQuantile: 0.5 },
     stoppingRules: [{ maxCandidates: 1000000 }], replicationCriteria: { minReplicationBlocks: 1 },
     publicationCriteria: { minReproducibilityLevel: 1 }, effectSizeThresholds: { default: 0 },
     minimumSampleSizes: { default: 1 }, requiredDiagnostics: [],
   });
 
   const familyRegistry = new FamilyRegistry();
-  familyRegistry.registerFamily({
-    familyName: DEFAULT_FAMILY_NAME, version: '1.0.0',
-    allowedCandidateTypes: [CANDIDATE_TYPES.INDICATOR_FEATURE, CANDIDATE_TYPES.MARKET_STATE, CANDIDATE_TYPES.COMPOSITE_CANDIDATE],
-    description: 'Registry-driven technical-indicator, market-state, and composite candidates over synthetic index price series.',
-  });
+  for (const familyName of REGISTRY_FAMILIES) {
+    familyRegistry.registerFamily({
+      familyName, version: '1.0.0',
+      allowedCandidateTypes: [CANDIDATE_TYPES.INDICATOR_FEATURE, CANDIDATE_TYPES.MARKET_STATE],
+      description: `Registry-driven candidates auto-categorized as "${familyName}".`,
+    });
+  }
 
   const orchestrator = new Phase11Orchestrator({ researchFreeze: placeholderFreeze, sap, familyRegistry });
 
   const indicatorRegistry = new IndicatorRegistry();
   registerCoreIndicators(indicatorRegistry);
-  const marketStateRegistry = new MarketStateRegistry();
-  registerCoreMarketStates(marketStateRegistry);
+  const marketStateRegistry = includeMarketStates ? new MarketStateRegistry() : null;
+  if (marketStateRegistry) registerCoreMarketStates(marketStateRegistry);
 
-  const seenFingerprints = new Set();
   const generatedFingerprints = [];
-  const countsByType = { indicator: 0, marketState: 0, composite: 0 };
-  const componentPool = [];
+  const provenanceById = {};
+  const countsByType = { indicator: 0, marketState: 0 };
 
-  // researchFreezeId is resolved AFTER generation (fingerprints must be
-  // known first -- same pattern as startPhase11Campaign() above), so
-  // candidates are generated first with a placeholder freeze id, then
-  // patched once the real freeze (with fingerprints) exists.
-  const baseParams = {
-    family: DEFAULT_FAMILY_NAME, generatorVersion: researchConfiguration.generatorVersion,
-    grammarVersion: researchConfiguration.grammarVersion, configHash: researchConfiguration.configHash,
-    researchConfigurationId: researchConfiguration.id, researchFreezeId: placeholderFreeze.id, sapId: sap.sapId,
-  };
-
-  for await (const { candidate } of generateIndicatorCandidatesStream({ indicatorRegistry, periods: indicatorPeriods, baseParams, seenFingerprints })) {
+  for await (const { candidate, provenance } of streamAllRegistryDrivenCandidates({
+    indicatorRegistry, marketStateRegistry, periods: indicatorPeriods,
+    researchConfiguration, researchFreeze: placeholderFreeze, sap, familyRegistry,
+    decisionAuditLog: orchestrator.decisionAuditLog,
+  })) {
     orchestrator.updateCandidate(candidate);
+    provenanceById[candidate.id] = provenance;
     generatedFingerprints.push(candidate.fingerprint);
-    countsByType.indicator++;
-    if (includeComposites) componentPool.push(candidate);
-  }
-
-  if (includeMarketStates) {
-    for await (const { candidate } of generateMarketStateCandidatesStream({ marketStateRegistry, baseParams, seenFingerprints })) {
-      orchestrator.updateCandidate(candidate);
-      generatedFingerprints.push(candidate.fingerprint);
-      countsByType.marketState++;
-      if (includeComposites) componentPool.push(candidate);
-    }
-  }
-
-  if (includeComposites && componentPool.length >= 2) {
-    for await (const { candidate } of generateCompositeCandidatesStream({ components: componentPool, baseParams, seenFingerprints })) {
-      orchestrator.updateCandidate(candidate);
-      generatedFingerprints.push(candidate.fingerprint);
-      countsByType.composite++;
-    }
+    if (candidate.type === CANDIDATE_TYPES.MARKET_STATE) countsByType.marketState++;
+    else countsByType.indicator++;
   }
 
   // Rebuild the freeze to include every generated candidate's fingerprint
-  // (ReproducibilityGate requirement -- same fix as startPhase11Campaign()),
-  // then patch every candidate's researchFreezeId to match and re-register.
+  // (ReproducibilityGate requirement -- same fix already applied to
+  // startPhase11Campaign()), then patch every candidate's researchFreezeId
+  // to match and re-register.
   const researchFreeze = await ResearchFreeze.create({
     researchConfigurationId: researchConfiguration.id, configHash: researchConfiguration.configHash,
     ontologyVersion: researchConfiguration.ontologyVersion, generatorVersion: researchConfiguration.generatorVersion,
@@ -326,6 +314,6 @@ export async function startRegistryDrivenCampaign({
 
   return {
     orchestrator, researchConfiguration, researchFreeze, sap, familyRegistry,
-    generatedCount: generatedFingerprints.length, countsByType,
+    generatedCount: generatedFingerprints.length, countsByType, provenanceById,
   };
 }

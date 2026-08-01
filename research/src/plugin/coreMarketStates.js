@@ -76,9 +76,9 @@ export const TrendStatePlugin = makeStatePlugin({
 
 export const RangeStatePlugin = makeStatePlugin({
   name: 'Range', displayName: 'Range / Consolidation', stateLabel: 'Range',
-  description: 'Net directional movement across the window is small relative to the window\'s own volatility.',
-  detectFn: (stats) => stats.stdDev > 0 && Math.abs(stats.last - stats.first) < stats.stdDev * 0.25,
-  humanReadable: '|last - first| < 0.25 * stdDev over the window',
+  description: 'Net directional movement across the window is small relative to the window\'s own volatility (or the window is perfectly flat).',
+  detectFn: (stats) => stats.stdDev === 0 ? stats.first === stats.last : Math.abs(stats.last - stats.first) < stats.stdDev * 0.25,
+  humanReadable: '|last - first| < 0.25 * stdDev over the window (or stdDev=0 and no movement)',
   testCase: { name: 'a flat series is a range', inputs: { states: Array(25).fill({ tick_price: 100 }), window: 20 }, expectedOutputShape: { signal: 'number[]' } },
 });
 
