@@ -191,16 +191,39 @@ export async function confirmPhase11Candidate({
   const familyKey = familyRegistry.routeToLegacyFamilyKey(candidate, { market, targetDefinition });
   const hypothesisId = legacyHypothesisIdFor(candidate);
 
+  // hypothesisRegistry.js enforces a UNIQUE (lineageId, generationId) pair
+  // (statistics/indexingStrategy.js's by_lineage_generation index) — this
+  // is intentional and must be preserved: it's what stops two unrelated
+  // hypotheses from silently colliding into the same lineage slot.
+  //
+  // candidate.family (e.g. "momentum") is a broad category shared by many
+  // UNRELATED candidates (RSI-14, EMA-10-slope, CCI-20 all belong to the
+  // same family) — using it as lineageId was the bug: it put every
+  // candidate in one family into ONE lineage, so the second candidate
+  // confirmed in a session always collided with the first at
+  // generationId=0. lineageId/generationId must instead come from the
+  // candidate's own real ancestor chain (Candidate.js's `lineage` array —
+  // parent candidate IDs, empty for a root/seed candidate):
+  //   - lineage.length === 0 (a root candidate, e.g. everything Phase 11's
+  //     current generator produces): it starts its OWN lineage, uniquely
+  //     identified by its own fingerprint, at generation 0.
+  //   - lineage.length > 0 (a genuinely derived candidate): its lineage is
+  //     identified by its founding ancestor (lineage[0]), at generation
+  //     = however many ancestors it has.
+  const candidateLineage = Array.isArray(candidate.lineage) ? candidate.lineage : [];
+  const generationId = candidateLineage.length;
+  const lineageId = generationId > 0 ? candidateLineage[0] : candidate.fingerprint;
+
   // ── Registration (Part 3) — precondition for any Discovery decision ──
   let currentStage = await getCurrentLifecycleStage(hypothesisId);
   if (!currentStage) {
     await registerHypothesis({
       hypothesisId,
-      lineageId: candidate.family,
-      generationId: 0,
+      lineageId,
+      generationId,
       parentIds: Array.isArray(candidate.componentIds) ? candidate.componentIds : [],
       familyKey,
-      lineageDeclaration: { isContinuation: false },
+      lineageDeclaration: { isContinuation: generationId > 0 },
       // Phase 11's own discipline (ResearchFreeze/SAP locked BEFORE
       // generation, enforced by candidateGenerator.js) is what makes this
       // attestation honestly assertable here, rather than a rubber stamp.

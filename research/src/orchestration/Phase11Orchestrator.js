@@ -187,16 +187,53 @@ export class Phase11Orchestrator {
    * registry -- never reads IndexedDB directly.
    * @returns {object}
    */
+  /**
+   * Read-only summary for UI dashboards (Part 2 "Dashboard" requirements).
+   *
+   * `confirmedCount`/`replicationCount`/`publicationCount` reflect CURRENT
+   * lifecycle state (candidates presently AT that stage or later) --
+   * unchanged from before, kept for backward compatibility.
+   *
+   * `confirmationAttempts`/`confirmedDiscoveries`/`rejectedConfirmations`
+   * are historical counts derived from the append-only DecisionAuditLog
+   * (CONFIRMED + CONFIRMED_REJECTED entries) rather than current lifecycle
+   * state. This distinction matters: a candidate that was genuinely
+   * Confirmed and later Deprecated (e.g. failed Replication) still counted
+   * as a real confirmation attempt and a real confirmed discovery when it
+   * happened -- `confirmedCount` alone would silently lose that history
+   * once the candidate moves off the Confirmed stage. A REJECTED
+   * confirmation (real statistical test ran, p-value did not clear the
+   * bar) is a genuine attempt too, and previously had NO dashboard-visible
+   * counter at all -- this was the root cause of "Confirmation Count = 0
+   * even though confirmation was executed and negative evidence was
+   * archived": the old `confirmedCount` only ever counted SUCCESSFUL
+   * confirmations, with no separate metric for attempts.
+   *
+   * `archivedNegativeEvidenceCount` reads NegativeEvidenceRegistry.all()
+   * directly -- the authoritative, persistent count of every rejection
+   * ever archived (Screening, Triage, Confirmation, or Replication stage),
+   * not just Confirmation-stage rejections.
+   */
   getCampaignSummary() {
     const counts = { Generated: 0, Screened: 0, Triaged: 0, Confirmed: 0, Replicated: 0, Published: 0, Deprecated: 0 };
     for (const c of this._candidates.values()) {
       if (counts[c.lifecycle] !== undefined) counts[c.lifecycle]++;
     }
+    const auditEntries = this.decisionAuditLog.toArray();
+    const confirmationAttempts = auditEntries.filter((e) => e.decisionType === 'CONFIRMED' || e.decisionType === 'CONFIRMED_REJECTED').length;
+    const confirmedDiscoveries = auditEntries.filter((e) => e.decisionType === 'CONFIRMED').length;
+    const rejectedConfirmations = auditEntries.filter((e) => e.decisionType === 'CONFIRMED_REJECTED').length;
+    const archivedNegativeEvidenceCount = this.negativeEvidenceRegistry.all().length;
+
     return {
       researchFreezeId: this.researchFreeze.id,
       sapId: this.sap.sapId,
       candidateCount: this._candidates.size,
       countsByStage: counts,
+      confirmationAttempts,
+      confirmedDiscoveries,
+      rejectedConfirmations,
+      archivedNegativeEvidenceCount,
       confirmedCount: counts.Confirmed + counts.Replicated + counts.Published,
       replicationCount: counts.Replicated + counts.Published,
       publicationCount: counts.Published,

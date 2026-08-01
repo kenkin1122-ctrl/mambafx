@@ -34533,7 +34533,7 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
 <!-- Phase 11 MSD Lab: isolated UI, lazily mounted on first visit to the Phase 11 page -->
 <script type="module">
   import { mountPhase11 } from "./research/src/ui/Phase11Application.js";
-  import { startPhase11Campaign, runPhase11Screening, runPhase11Triage } from "./research/src/orchestration/startPhase11Campaign.js";
+  import { startPhase11Campaign } from "./research/src/orchestration/startPhase11Campaign.js";
   import { computeOverallReadiness } from "./research/src/bridge/Phase11ConfirmationReadiness.js";
 
   let ph11Handle = null;
@@ -34623,11 +34623,17 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
     ph11SetStatus("Running Round 1 screening (demo scoreFn from live ticks)…");
     try {
       const candidates = ph11Orchestrator.listCandidates();
-      const { promoted } = runPhase11Screening({
-        candidates, scoreFn: ph11DemoScore,
-        promotionPolicy: ph11Orchestrator.promotionPolicy,
-        familyRegistry: ph11Orchestrator.familyRegistry,
-        promotionQuantile: 0.67,
+      // Calls the orchestrator's OWN screen() method (not the standalone
+      // runPhase11Screening() function directly) -- screen() writes both
+      // promoted and rejected candidates back into the orchestrator's
+      // persistent registry, which is what the dashboard/campaign summary
+      // actually reads from. Calling the standalone function here instead
+      // was the root cause of the dashboard showing "No screening/triage
+      // results yet" even after screening had genuinely run: its result
+      // was only ever stored in this script's local ph11ScreenedCandidates
+      // variable, never synced back into ph11Orchestrator's own state.
+      const { promoted } = ph11Orchestrator.screen({
+        candidates, scoreFn: ph11DemoScore, promotionQuantile: 0.67,
       });
       ph11ScreenedCandidates = promoted;
       ph11Handle.refresh();
@@ -34694,8 +34700,10 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
     try {
       const diagnosticsByCandidateId = {};
       for (const c of ph11ScreenedCandidates) diagnosticsByCandidateId[c.id] = { effectSize: ph11DemoScore(c), diagnosticsPassed: [] };
-      const { promoted } = runPhase11Triage({
-        promotionPolicy: ph11Orchestrator.promotionPolicy,
+      // Same fix as Screen: the orchestrator's OWN triage() method writes
+      // results back into its persistent registry; the standalone
+      // runPhase11Triage() function does not.
+      const { promoted } = ph11Orchestrator.triage({
         candidates: ph11ScreenedCandidates, diagnosticsByCandidateId,
       });
       ph11TriagedCandidates = promoted;

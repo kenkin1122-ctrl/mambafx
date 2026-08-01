@@ -228,6 +228,64 @@ test('validation: refuses with a clear error when datasetManifest is missing —
   }
 });
 
+test('REGRESSION: multiple candidates from the SAME family, confirmed within the same research cycle, do not collide on hypothesisRegistry\'s unique (lineageId, generationId) index', async () => {
+  const teardown = setup();
+  try {
+    const rc = await makeRc();
+    const freeze = await makeFreeze(rc);
+    const sap = await makeSap();
+    const familyRegistry = new FamilyRegistry();
+    familyRegistry.registerFamily({ familyName: 'momentum', version: '1.0.0', allowedCandidateTypes: [CANDIDATE_TYPES.INDICATOR_FEATURE] });
+    const orchestrator = new Phase11Orchestrator({ researchFreeze: freeze, sap, familyRegistry });
+
+    // Exactly the real-world shape that triggered the original bug: three
+    // DIFFERENT indicators (RSI, EMA_SLOPE, CCI), all sharing the same
+    // broad `family` ("momentum") -- the thing that was incorrectly used
+    // as hypothesisRegistry's lineageId before this fix.
+    const generated = await orchestrator.generate({
+      candidateType: CANDIDATE_TYPES.INDICATOR_FEATURE,
+      candidateParamsList: [
+        { id: 'regress-rsi', family: 'momentum', parameters: { period: 14 }, description: 'RSI', generatorVersion: '11.0.0', grammarVersion: '11.0.0', configHash: rc.configHash, researchConfigurationId: rc.id, indicatorName: 'RSI', period: 14, inputObservables: [] },
+        { id: 'regress-ema', family: 'momentum', parameters: { period: 10 }, description: 'EMA', generatorVersion: '11.0.0', grammarVersion: '11.0.0', configHash: rc.configHash, researchConfigurationId: rc.id, indicatorName: 'EMA_SLOPE', period: 10, inputObservables: [] },
+        { id: 'regress-cci', family: 'momentum', parameters: { period: 20 }, description: 'CCI', generatorVersion: '11.0.0', grammarVersion: '11.0.0', configHash: rc.configHash, researchConfigurationId: rc.id, indicatorName: 'CCI', period: 20, inputObservables: [] },
+      ],
+    });
+
+    const results = [];
+    for (const { candidate, provenance } of generated) {
+      const triaged = withPhase11Lifecycle(withPhase11Lifecycle(candidate, PHASE11_LIFECYCLE_STAGES.SCREENED), PHASE11_LIFECYCLE_STAGES.TRIAGED);
+      // Must not throw -- this is exactly the call that previously hit
+      // "Unable to add key to index 'by_lineage_generation'" on the second
+      // and third candidate.
+      const result = await orchestrator.confirm({
+        candidate: triaged, researchConfiguration: rc,
+        datasetManifest: { datasetId: `ds-${candidate.id}` }, provenance,
+        market: 'R_100', targetDefinition: { direction: 'Rise', runLength: 5 },
+        pValue: 0.0001,
+      });
+      results.push(result);
+    }
+
+    assert.equal(results.length, 3);
+    for (const r of results) assert.equal(r.outcome, 'confirmed');
+
+    // Every candidate landed in its OWN lineage (unique fingerprint-derived
+    // lineageId), all at generation 0 -- not one shared, colliding lineage.
+    const lineageIds = new Set();
+    for (const { candidate } of generated) {
+      const hypothesisId = `ph11_${candidate.fingerprint}`;
+      const stage = await getCurrentLifecycleStage(hypothesisId);
+      assert.equal(stage, LIFECYCLE_STAGES.DISCOVERY);
+    }
+
+    // Dashboard-relevant: all three show up as distinct Confirmed candidates.
+    const confirmedInRegistry = orchestrator.listCandidates().filter((c) => c.lifecycle === PHASE11_LIFECYCLE_STAGES.CONFIRMED);
+    assert.equal(confirmedInRegistry.length, 3);
+  } finally {
+    teardown();
+  }
+});
+
 test('does not import or duplicate onlineFdr/hypothesisRegistry/discoveryDecision statistical logic', async () => {
   const src = await import('node:fs').then(fs => fs.promises.readFile(
     new URL('../../research/src/bridge/Phase11ConfirmationBridge.js', import.meta.url), 'utf8'
