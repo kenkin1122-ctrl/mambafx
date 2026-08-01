@@ -63,6 +63,8 @@
 import { computeCircularShiftPermutationTest } from '../statistics/permutationTest.js';
 import { createSeededRng } from '../statistics/uncertaintyEstimation.js';
 import { confirmPhase11Candidate } from './Phase11ConfirmationBridge.js';
+import { resolveCandidateFeatureSeries } from './Phase11CandidateFeatureResolver.js';
+import { CANDIDATE_TYPES } from '../candidate/Candidate.js';
 
 export class Phase11InsufficientDataError extends Error {
   constructor(message) {
@@ -291,6 +293,7 @@ function bootstrapPairedCorrelation(xs, ys, { confidenceLevel = 0.95, numResampl
 export function runAutomatedConfirmationTest({
   candidate, indicatorRegistry, prices, featureValues: injectedFeatureValues, outcomeValues: injectedOutcomeValues,
   targetDefinition, seed, permutations = 1000, bootstrapResamples = 2000,
+  registries, componentsById,
 } = {}) {
   let featureValues, outcomeValues;
 
@@ -301,7 +304,21 @@ export function runAutomatedConfirmationTest({
     featureValues = injectedFeatureValues;
     outcomeValues = injectedOutcomeValues;
   } else {
-    const indicatorSeries = computeIndicatorSeries(indicatorRegistry, candidate.indicatorName, candidate.period, prices);
+    // IndicatorFeature candidates (including plain {indicatorName, period}
+    // test fixtures with no .type at all, for exact backward compatibility)
+    // keep using computeIndicatorSeries unchanged. Every OTHER real
+    // candidate type (MarketState, ProxyCandidate, CompositeCandidate,
+    // ConditionalHypothesis) is Stage 6's generalization -- routed through
+    // bridge/Phase11CandidateFeatureResolver.js's resolveCandidateFeatureSeries(),
+    // the single canonical dispatcher every candidate type resolves through.
+    // No special-case confirmation math lives here: this branch only
+    // decides WHICH resolver to call, never reimplements what either one does.
+    let indicatorSeries;
+    if (!candidate.type || candidate.type === CANDIDATE_TYPES.INDICATOR_FEATURE) {
+      indicatorSeries = computeIndicatorSeries(indicatorRegistry, candidate.indicatorName, candidate.period, prices);
+    } else {
+      indicatorSeries = resolveCandidateFeatureSeries({ candidate, registries, prices, componentsById });
+    }
     const outcomeSeries = computeOutcomeSeries(prices, targetDefinition);
     featureValues = []; outcomeValues = [];
     for (let i = 0; i < prices.length; i++) {

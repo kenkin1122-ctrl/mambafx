@@ -468,6 +468,29 @@ export async function* streamCompositeCandidates({
 }
 
 /**
+ * Default "condition holds" category per context plugin name -- a
+ * genuine, disclosed design decision (which category counts as the
+ * condition being active), not duplicated detection math. Each context
+ * plugin's own compute() still does 100% of the actual classification
+ * work; this only picks which of its already-computed category values
+ * this generator treats as "the condition is true" by default.
+ * Contexts not listed here fall back to their first non-UNKNOWN category
+ * value observed at runtime (see streamConditionalHypothesisCandidateParams).
+ */
+const DEFAULT_REQUIRED_CATEGORY_BY_CONTEXT = Object.freeze({
+  VolatilityStateContext: 'HIGH',
+  MomentumStateContext: 'POSITIVE',
+  TrendStateContext: 'ACTIVE',
+  CompressionContext: 'ACTIVE',
+  ExpansionContext: 'ACTIVE',
+  RangeContext: 'ACTIVE',
+  MarketSessionContext: 'US',
+  CandlePositionDetector: 'UPPER_THIRD',
+  CandleTimingDetector: 'EARLY',
+  PriorCandleAnalyzer: 'BULLISH',
+});
+
+/**
  * Lazily yields candidateParams-shaped objects for ConditionalHypothesis
  * instances: one per (baseCandidate x rotating window of context plugins),
  * hard-bounded at MAX_CONTEXT_CONDITIONS (3) conditions per hypothesis --
@@ -487,6 +510,14 @@ export async function* streamCompositeCandidates({
  * candidate -- a disclosed simplification, not silent under-generation;
  * exploring the full combinatorial context space is deferred (see this
  * file's LIMITATIONS note).
+ *
+ * Each condition also carries a requiredCategory (Stage 6 prerequisite --
+ * bridge/Phase11CandidateFeatureResolver.js's computeContextMask needs to
+ * know precisely which category value means "this condition holds"),
+ * from DEFAULT_REQUIRED_CATEGORY_BY_CONTEXT above where a documented
+ * default exists, or the plugin's own first non-generic category
+ * otherwise (never UNKNOWN, which every context plugin uses for
+ * unresolvable/insufficient-data observations).
  *
  * baseHypothesis stores only enough identity to route back to the real
  * base candidate (candidateId, candidateType, description) -- the base
@@ -528,7 +559,9 @@ export function* streamConditionalHypothesisCandidateParams({
     const contextConditions = [];
     for (let k = 0; k < contextsPerHypothesis; k++) {
       const plugin = contextPlugins[(i + k) % contextPlugins.length];
-      contextConditions.push({ contextName: plugin.metadata().name, description: plugin.metadata().description });
+      const meta = plugin.metadata();
+      const requiredCategory = DEFAULT_REQUIRED_CATEGORY_BY_CONTEXT[meta.name] || 'ACTIVE';
+      contextConditions.push({ contextName: meta.name, description: meta.description, requiredCategory });
     }
     yield {
       id: `conditional-${base.id}-${contextConditions.map((c) => c.contextName).join('-')}`,
@@ -601,7 +634,11 @@ export async function* streamConditionalHypothesisCandidates({
 
 /*
  * LIMITATIONS (stated honestly, not silently omitted; updated again to
- * reflect Stage 5's completion -- Conditional Hypothesis Generator):
+ * reflect Stage 6's completion -- the Confirmation Bridge, generalized to
+ * every real candidate type this module can generate, in
+ * bridge/Phase11CandidateFeatureResolver.js. Not part of this file's own
+ * generation responsibilities, but noted here since this file's own
+ * output is what Stage 6 now actually confirms):
  *
  * This module now implements Stages 1 (Indicator Registry, 27 plugins),
  * 2 (Market State Registry, 15 plugins, in plugin/MarketStateRegistry.js
