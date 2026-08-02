@@ -4841,6 +4841,12 @@ function msdOnTick(epoch, price){
       runEndPrice: msdRunState.lastPrice, // the LAST price that was actually still part of the rise
       actualRunLength: msdRunState.count, // confirmed final length — never guessed, never later mutated
       detectedAt: Date.now(),
+      // Phase 12: a sequential tick counter at the moment of completion —
+      // purely additive, no existing field touched, no behavior change.
+      // This is the ONLY basis this pipeline has for a genuine tick-count
+      // gap (tickGap) between events; runStartEpoch/runEndEpoch are
+      // wall-clock epochs from the Deriv feed, not a tick index.
+      tickIndex: msdDebugCounters.ticksProcessed,
     };
     msdEventQueue.push(completedEvent);
     msdDebugCounters.completedCount++;
@@ -4906,8 +4912,14 @@ function msdResetDetectorState(){
 // Version Validator, or MarketStates — those remain later phases.
 
 const MSD_EVENT_DB_NAME    = 'mfx_msd_events';
-const MSD_EVENT_DB_VERSION = 1;
+const MSD_EVENT_DB_VERSION = 2; // Phase 12: v1->v2 adds a sessionId index only — no existing field/index removed, no data transformation of existing v1 records (their new fields are simply absent/undefined, exactly the additive-migration discipline described in the approved Phase 12 architectural review).
 const MSD_EVENT_STORE      = 'EventDatabase';
+
+// Phase 12 protocol/schema version constants — recorded on every event
+// written from this point forward (refinement #5: versioned provenance
+// distinct from software version).
+const MSD_EVENT_SCHEMA_VERSION = '2.0.0';
+const MSD_PROTOCOL_VERSION = 'P12-GAP-v1.1.0';
 
 let _msdEventDbPromise = null;
 
@@ -4919,10 +4931,23 @@ function msdOpenEventDatabase(){
     const req = indexedDB.open(MSD_EVENT_DB_NAME, MSD_EVENT_DB_VERSION);
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
+      const tx = e.target.transaction;
+      let store;
       if (!db.objectStoreNames.contains(MSD_EVENT_STORE)) {
-        const store = db.createObjectStore(MSD_EVENT_STORE, { keyPath: 'eventId' });
+        store = db.createObjectStore(MSD_EVENT_STORE, { keyPath: 'eventId' });
         store.createIndex('runStartEpoch', 'runStartEpoch', { unique: false });
         store.createIndex('detectedAt', 'detectedAt', { unique: false });
+      } else {
+        store = tx.objectStore(MSD_EVENT_STORE);
+      }
+      // Phase 12 (v1->v2): a sessionId index, needed to efficiently find
+      // "the most recent event in THIS session" without scanning the
+      // whole store — existing v1 records simply have no sessionId field
+      // and are excluded from this index automatically (IndexedDB skips
+      // records missing an indexed property), never queried incorrectly
+      // as if they belonged to the current session.
+      if (!store.indexNames.contains('sessionId')) {
+        store.createIndex('sessionId', 'sessionId', { unique: false });
       }
     };
     req.onsuccess = (e) => resolve(e.target.result);
@@ -4932,9 +4957,57 @@ function msdOpenEventDatabase(){
 }
 
 /**
+ * Reads the most recently detected event in the given session (by
+ * detectedAt, descending), or null if this is the first event of that
+ * session. Read-only; used by msdWriteEvent to compute event-local
+ * fields (previousEventId/timeGap/tickGap) exactly once, at insertion
+ * time — never touched again afterward (append-only philosophy,
+ * refinement #7).
+ * @param {string} sessionId
+ * @returns {Promise<object|null>}
+ */
+async function msdGetLastEventInSession(sessionId){
+  const db = await msdOpenEventDatabase();
+  return new Promise((resolve) => {
+    const store = db.transaction(MSD_EVENT_STORE, 'readonly').objectStore(MSD_EVENT_STORE);
+    const index = store.index('sessionId');
+    const req = index.openCursor(IDBKeyRange.only(sessionId), 'prev'); // 'prev' = descending insertion order within this session
+    let latest = null;
+    req.onsuccess = (e) => {
+      const cursor = e.target.result;
+      if (cursor) {
+        // Multiple events can share a sessionId — walk back until we
+        // find the one with the latest detectedAt (index iteration order
+        // is by sessionId equality, not detectedAt, so a linear scan
+        // within the (typically small, per-session) cursor range is
+        // correct and simple; this store's per-session volume does not
+        // yet warrant a compound index).
+        if (!latest || cursor.value.detectedAt > latest.detectedAt) latest = cursor.value;
+        cursor.continue();
+      } else {
+        resolve(latest);
+      }
+    };
+    req.onerror = () => resolve(null);
+  });
+}
+
+/**
  * Appends ONE completed event to the permanent Event Database. Uses
  * add() — never put() — so this can never silently mutate an existing
  * record; a duplicate Event ID is rejected outright.
+ *
+ * Phase 12: before writing, computes this event's event-local fields —
+ * sessionId (the CURRENT msdSessionId, a raw observation about where
+ * this event was recorded, not derived), previousEventId, timeGap,
+ * tickGap (all null if this is honestly the first event of the session
+ * — refinements #1/#7: never a fabricated default, never recomputed
+ * later), and protocolVersion/schemaVersion (refinement #5: versioned
+ * provenance distinct from software version). Computed EXACTLY ONCE,
+ * here, at insertion time — the record is then immutable forever
+ * (append-only), never revisited even if a future protocol version
+ * changes how gaps would be computed.
+ *
  * @param {object} event a COMPLETED event record (see msdOnTick's `completed` field)
  * @returns {Promise<{ok:boolean, error?:string}>}
  */
@@ -4943,11 +5016,22 @@ async function msdWriteEvent(event){
   const _t0 = msdNowMs();
   let result;
   try {
+    const previousEvent = await msdGetLastEventInSession(msdSessionId);
+    const enrichedEvent = {
+      ...event,
+      sessionId: msdSessionId,
+      previousEventId: previousEvent ? previousEvent.eventId : null,
+      timeGap: previousEvent ? (event.detectedAt - previousEvent.detectedAt) : null,
+      tickGap: (previousEvent && typeof previousEvent.tickIndex === 'number' && typeof event.tickIndex === 'number')
+        ? (event.tickIndex - previousEvent.tickIndex) : null,
+      protocolVersion: MSD_PROTOCOL_VERSION,
+      schemaVersion: MSD_EVENT_SCHEMA_VERSION,
+    };
     const db = await msdOpenEventDatabase();
     result = await new Promise((resolve) => {
       const tx = db.transaction(MSD_EVENT_STORE, 'readwrite');
       const store = tx.objectStore(MSD_EVENT_STORE);
-      const req = store.add(event);
+      const req = store.add(enrichedEvent);
       req.onsuccess = () => resolve({ ok:true });
       req.onerror   = (e) => { e.preventDefault(); resolve({ ok:false, error:'duplicate or invalid eventId — write rejected (append-only store)' }); };
     });
