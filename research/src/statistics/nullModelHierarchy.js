@@ -28,18 +28,28 @@
  *     i.i.d. renewal process, even if not exponential?).
  *   Stage D (Renewal/independence) consistent -> advance to Stage E
  *     (characterize which distribution it actually is).
- *   Stage D rejected -> STOP the C/D/E branch here. Genuine dependence
- *     between successive gaps has been found -- real evidence that would
- *     motivate Stages F/G/H (Semi-Markov/Hawkes/HMM), which explicitly
- *     model dependence/self-excitation/hidden state. Those stages do NOT
- *     exist yet (each gets its own dedicated slice with its own synthetic
- *     validation, per the agreed pacing) -- this is reported honestly as
- *     "advancement warranted, not yet implemented," never silently
- *     dropped or misreported as a stronger conclusion than the evidence
- *     supports.
+ *   Stage D rejected -> advance to Stage F (Semi-Markov,
+ *     statistics/semiMarkovTest.js, unmodified, reused) ONLY IF a
+ *     `states` array was supplied (Stage F needs the preceding-event
+ *     RISE/FALL label per gap, an input the earlier stages don't need --
+ *     see runNullModelHierarchy's own parameter docs). Without `states`,
+ *     the hierarchy stops at Stage D and reports honestly that
+ *     advancement is warranted but cannot be attempted without that
+ *     input, rather than silently skipping straight past Stage F.
+ *   Stage F (Semi-Markov) detects real state-dependence -> STOP. The
+ *     dependence Stage D found is explained by state-conditional gap
+ *     distributions -- a genuine, well-characterized conclusion, not a
+ *     failure to find something deeper.
+ *   Stage F does NOT detect state-dependence -> STOP the C/D/E/F branch
+ *     here. The state-conditioning explanation fails to account for the
+ *     dependence found; real evidence that would motivate Stage G
+ *     (Hawkes) or Stage H (HMM), which do NOT exist yet (each gets its
+ *     own dedicated slice with its own synthetic validation, per the
+ *     agreed pacing) -- reported honestly as "advancement warranted, not
+ *     yet implemented," never silently dropped or overstated.
  *   Stage E always runs to completion once reached (it is descriptive,
- *     not a reject/advance test) and is the hierarchy's terminal stage
- *     for this slice's scope.
+ *     not a reject/advance test) and is one of the hierarchy's two
+ *     possible terminal stages for this slice's scope (alongside Stage F).
  *
  * STRUCTURAL ENFORCEMENT of "no stage may execute until every
  *   advancement criterion is satisfied": each stage's decision to invoke
@@ -52,14 +62,16 @@
  *
  * Dependencies: statistics/renewalProcessTests.js (testPoissonStage,
  *   testRenewalStage, testRenewalDistributionStage -- all unmodified,
- *   reused; zero statistical logic is reimplemented here, this module is
- *   pure sequencing).
+ *   reused) and statistics/semiMarkovTest.js (testSemiMarkovStage --
+ *   unmodified, reused); zero statistical logic is reimplemented here,
+ *   this module is pure sequencing.
  * Public API: runNullModelHierarchy, HIERARCHY_CONCLUSIONS, NullModelHierarchyError.
  * Complexity: O(stage costs) -- at most one call to each of the three
  *   stage functions; never redundant.
  */
 
 import { testPoissonStage, testRenewalStage, testRenewalDistributionStage } from './renewalProcessTests.js';
+import { testSemiMarkovStage } from './semiMarkovTest.js';
 
 export class NullModelHierarchyError extends Error {
   constructor(message) {
@@ -72,11 +84,12 @@ export class NullModelHierarchyError extends Error {
 export const HIERARCHY_CONCLUSIONS = Object.freeze({
   CONSISTENT_WITH_POISSON: 'consistent-with-poisson',
   CONSISTENT_WITH_RENEWAL_NON_EXPONENTIAL: 'consistent-with-renewal-non-exponential',
+  CONSISTENT_WITH_SEMI_MARKOV: 'consistent-with-semi-markov',
   DEPENDENCE_DETECTED_ADVANCEMENT_REQUIRED: 'dependence-detected-advancement-required',
 });
 
 /**
- * Runs the Null Model Hierarchy's Stages C-E in sequence, gated by each
+ * Runs the Null Model Hierarchy's Stages C-F in sequence, gated by each
  * stage's own advancement criterion, and returns which stages actually
  * ran plus the overall conclusion.
  *
@@ -88,14 +101,21 @@ export const HIERARCHY_CONCLUSIONS = Object.freeze({
  * @param {number} [options.numSimulations=1000] - Stage C's Monte Carlo trial count.
  * @param {number} [options.maxLag=5] - Stage D's max autocorrelation lag.
  * @param {number} [options.cvTolerance=0.1] - Stage E's exponential-like tolerance band.
+ * @param {string[]} [options.states] - Parallel array to `gaps` (RISE/FALL
+ *   preceding-event labels), required ONLY to attempt Stage F if Stage D
+ *   rejects independence. If omitted, the hierarchy correctly stops at
+ *   Stage D rather than silently skipping Stage F.
+ * @param {number} [options.numPermutations=1000] - Stage F's permutation trial count.
  * @returns {{
  *   stagesRun: object[],
- *   finalStage: 'Poisson'|'Renewal'|'RenewalDistribution',
+ *   finalStage: 'Poisson'|'Renewal'|'RenewalDistribution'|'SemiMarkov',
  *   conclusion: string (a HIERARCHY_CONCLUSIONS value),
  *   summary: string
  * }}
  */
-export function runNullModelHierarchy(gaps, { alpha = 0.05, seed, numSimulations = 1000, maxLag = 5, cvTolerance = 0.1 } = {}) {
+export function runNullModelHierarchy(gaps, {
+  alpha = 0.05, seed, numSimulations = 1000, maxLag = 5, cvTolerance = 0.1, states = null, numPermutations = 1000,
+} = {}) {
   if (!Array.isArray(gaps) || gaps.length === 0) {
     throw new NullModelHierarchyError('runNullModelHierarchy: gaps must be a non-empty array');
   }
@@ -123,11 +143,33 @@ export function runNullModelHierarchy(gaps, { alpha = 0.05, seed, numSimulations
   stagesRun.push(stageD);
 
   if (!stageD.consistentWithIndependence) {
+    if (!states) {
+      return {
+        stagesRun,
+        finalStage: 'Renewal',
+        conclusion: HIERARCHY_CONCLUSIONS.DEPENDENCE_DETECTED_ADVANCEMENT_REQUIRED,
+        summary: 'Gap sequence shows genuine dependence between successive gaps (rejected both Poisson and independence). Advancing to Stage F (Semi-Markov) would require a `states` array (RISE/FALL preceding-event labels), which was not supplied to this call. Stages G (Hawkes) and H (HMM) are not yet implemented in this codebase; each gets its own dedicated slice with its own synthetic validation before being trusted on real data.',
+      };
+    }
+
+    // Stage F only ever runs because Stage D was just rejected, above, AND states was supplied.
+    const stageF = testSemiMarkovStage(gaps, states, { alpha, seed, numPermutations });
+    stagesRun.push(stageF);
+
+    if (stageF.stateDependenceDetected) {
+      return {
+        stagesRun,
+        finalStage: 'SemiMarkov',
+        conclusion: HIERARCHY_CONCLUSIONS.CONSISTENT_WITH_SEMI_MARKOV,
+        summary: 'Gap sequence shows genuine dependence explained by preceding-event state (RISE vs FALL gap distributions differ significantly) -- a semi-Markov process, not necessarily deeper self-excitation or hidden state.',
+      };
+    }
+
     return {
       stagesRun,
-      finalStage: 'Renewal',
+      finalStage: 'SemiMarkov',
       conclusion: HIERARCHY_CONCLUSIONS.DEPENDENCE_DETECTED_ADVANCEMENT_REQUIRED,
-      summary: 'Gap sequence shows genuine dependence between successive gaps (rejected both Poisson and independence). This would warrant advancing to Semi-Markov, Hawkes, or Hidden Markov Model stages (F/G/H) -- not yet implemented in this codebase; each gets its own dedicated slice with its own synthetic validation before being trusted on real data.',
+      summary: 'Gap sequence shows genuine dependence NOT explained by preceding-event state (Stage F found no significant RISE/FALL gap-distribution difference). This would warrant advancing to Hawkes (Stage G) or Hidden Markov Model (Stage H) stages -- not yet implemented in this codebase; each gets its own dedicated slice with its own synthetic validation before being trusted on real data.',
     };
   }
 

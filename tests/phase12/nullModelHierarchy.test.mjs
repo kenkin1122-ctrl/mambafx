@@ -116,6 +116,50 @@ test('deterministic for a fixed seed across the whole hierarchy', () => {
   assert.deepEqual(a, b);
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Stage F wiring (states parameter) -- extends the C/D/E hierarchy above
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('without a states array, dependence found at Stage D still correctly stops at Renewal (unchanged, pre-existing behavior)', () => {
+  const rng = seededRng(7);
+  const gaps = [1.0];
+  for (let i = 1; i < 300; i++) gaps.push(0.7 * gaps[i - 1] + 0.3 * (0.5 + rng()));
+  const result = runNullModelHierarchy(gaps, { seed: 321, numSimulations: 500 });
+  assert.equal(result.finalStage, 'Renewal');
+  assert.equal(result.conclusion, HIERARCHY_CONCLUSIONS.DEPENDENCE_DETECTED_ADVANCEMENT_REQUIRED);
+  assert.ok(!result.stagesRun.some((s) => s.stage === 'SemiMarkov'), 'Stage F must not run without a states array');
+});
+
+test('with a states array and a strong genuine semi-Markov effect (persistent, autocorrelated states with real state-conditional gap distributions), the hierarchy correctly cascades C -> D -> F and terminates at consistent-with-semi-markov', () => {
+  const rng = seededRng(50);
+  const n = 800;
+  const states = ['RISE'];
+  for (let i = 1; i < n; i++) {
+    const stay = rng() < 0.92; // real persistence -- a degenerate i.i.d. state assignment would NOT reliably trigger Stage D's rejection (see this module's own commit history for why)
+    states.push(stay ? states[i - 1] : (states[i - 1] === 'RISE' ? 'FALL' : 'RISE'));
+  }
+  const gaps = states.map((s) => (s === 'RISE' ? -Math.log(1 - rng()) * 5 : -Math.log(1 - rng()) * 0.3));
+  const result = runNullModelHierarchy(gaps, { seed: 77, numSimulations: 500, states, numPermutations: 500 });
+  assert.equal(result.finalStage, 'SemiMarkov');
+  assert.equal(result.conclusion, HIERARCHY_CONCLUSIONS.CONSISTENT_WITH_SEMI_MARKOV);
+  assert.deepEqual(result.stagesRun.map((s) => s.stage), ['Poisson', 'Renewal', 'SemiMarkov']);
+});
+
+test('with a states array but dependence unrelated to state, Stage F correctly finds no state-dependence and reports advancement-required at SemiMarkov (Stage E never runs, since Stage D already rejected independence)', () => {
+  const rng = seededRng(9);
+  const n = 300;
+  const gaps = [1.0];
+  const states = [];
+  for (let i = 0; i < n; i++) {
+    states.push(rng() < 0.5 ? 'RISE' : 'FALL'); // state is i.i.d., unrelated to the AR(1) dependence below
+    if (i > 0) gaps.push(0.75 * gaps[i - 1] + 0.25 * (0.5 + rng()));
+  }
+  const result = runNullModelHierarchy(gaps, { seed: 654, numSimulations: 500, states, numPermutations: 500 });
+  assert.equal(result.finalStage, 'SemiMarkov');
+  assert.equal(result.conclusion, HIERARCHY_CONCLUSIONS.DEPENDENCE_DETECTED_ADVANCEMENT_REQUIRED);
+  assert.ok(!result.stagesRun.some((s) => s.stage === 'RenewalDistribution'), 'Stage E must not run when Stage D already rejected independence');
+});
+
 test('never touches onlineFdr.js/discoveryDecision.js/hypothesisRegistry.js/lockbox.js/randomnessAudit.js/knowledgeGraph.js, and reimplements no statistical logic of its own', async () => {
   const fs = await import('node:fs');
   const src = await fs.promises.readFile(new URL('../../research/src/statistics/nullModelHierarchy.js', import.meta.url), 'utf8');
