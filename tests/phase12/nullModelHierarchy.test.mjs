@@ -146,7 +146,7 @@ test('with a states array and a strong genuine semi-Markov effect (persistent, a
   assert.deepEqual(result.stagesRun.map((s) => s.stage), ['Poisson', 'Renewal', 'SemiMarkov']);
 });
 
-test('with a states array but dependence unrelated to state or self-excitation, the hierarchy correctly cascades through Stage F AND Stage G (neither explains the dependence) and reports advancement-required at Hawkes (Stage E never runs, since Stage D already rejected independence)', () => {
+test('with a states array but dependence unrelated to state, self-excitation, or hidden state, the hierarchy correctly cascades through Stages F, G, AND H (none explain the dependence) and reports hierarchy-exhausted at HMM (Stage E never runs, since Stage D already rejected independence)', () => {
   const rng = seededRng(9);
   const n = 300;
   const gaps = [1.0];
@@ -155,9 +155,9 @@ test('with a states array but dependence unrelated to state or self-excitation, 
     states.push(rng() < 0.5 ? 'RISE' : 'FALL'); // state is i.i.d., unrelated to the AR(1) dependence below
     if (i > 0) gaps.push(0.75 * gaps[i - 1] + 0.25 * (0.5 + rng()));
   }
-  const result = runNullModelHierarchy(gaps, { seed: 654, numSimulations: 300, states, numPermutations: 200, hawkesNumSimulations: 40 });
-  assert.equal(result.finalStage, 'Hawkes');
-  assert.equal(result.conclusion, HIERARCHY_CONCLUSIONS.DEPENDENCE_DETECTED_ADVANCEMENT_REQUIRED);
+  const result = runNullModelHierarchy(gaps, { seed: 654, numSimulations: 300, states, numPermutations: 200, hawkesNumSimulations: 40, hmmNumSimulations: 40 });
+  assert.equal(result.finalStage, 'HMM');
+  assert.equal(result.conclusion, HIERARCHY_CONCLUSIONS.DEPENDENCE_UNEXPLAINED_HIERARCHY_EXHAUSTED);
   assert.ok(!result.stagesRun.some((s) => s.stage === 'RenewalDistribution'), 'Stage E must not run when Stage D already rejected independence');
 });
 
@@ -178,7 +178,7 @@ test('regression test: T for Stage G must be strictly greater than the last even
   assert.doesNotThrow(() => runNullModelHierarchy(gaps, { seed: 654, numSimulations: 200, states, numPermutations: 150, hawkesNumSimulations: 30 }));
 });
 
-test('with states supplied and Stage F finds no state-dependence, the hierarchy correctly cascades to Stage G (never stops prematurely at SemiMarkov)', () => {
+test('with states supplied and Stage F/G find no explanation, the hierarchy correctly cascades all the way to Stage H and reports hierarchy-exhausted (never stops prematurely at SemiMarkov or Hawkes)', () => {
   const rng = seededRng(9);
   const n = 150;
   const gaps = [1.0];
@@ -187,9 +187,10 @@ test('with states supplied and Stage F finds no state-dependence, the hierarchy 
     states.push(rng() < 0.5 ? 'RISE' : 'FALL');
     if (i > 0) gaps.push(0.75 * gaps[i - 1] + 0.25 * (0.5 + rng()));
   }
-  const result = runNullModelHierarchy(gaps, { seed: 654, numSimulations: 200, states, numPermutations: 150, hawkesNumSimulations: 30 });
-  assert.equal(result.finalStage, 'Hawkes');
-  assert.deepEqual(result.stagesRun.map((s) => s.stage), ['Poisson', 'Renewal', 'SemiMarkov', 'Hawkes']);
+  const result = runNullModelHierarchy(gaps, { seed: 654, numSimulations: 200, states, numPermutations: 150, hawkesNumSimulations: 30, hmmNumSimulations: 30 });
+  assert.equal(result.finalStage, 'HMM');
+  assert.equal(result.conclusion, HIERARCHY_CONCLUSIONS.DEPENDENCE_UNEXPLAINED_HIERARCHY_EXHAUSTED);
+  assert.deepEqual(result.stagesRun.map((s) => s.stage), ['Poisson', 'Renewal', 'SemiMarkov', 'Hawkes', 'HMM']);
 });
 
 test('genuine Hawkes-generated gap data (converted from a real simulated self-exciting process, with i.i.d./uninformative states) correctly cascades all the way through and terminates at consistent-with-hawkes', () => {
