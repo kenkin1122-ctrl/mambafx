@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 
 import { runNullModelHierarchy, HIERARCHY_CONCLUSIONS, NullModelHierarchyError } from '../../research/src/statistics/nullModelHierarchy.js';
 import * as renewalProcessTests from '../../research/src/statistics/renewalProcessTests.js';
+import { simulateHawkesProcess } from '../../research/src/statistics/hawkesTest.js';
 
 function seededRng(seed) {
   let state = seed >>> 0;
@@ -145,7 +146,7 @@ test('with a states array and a strong genuine semi-Markov effect (persistent, a
   assert.deepEqual(result.stagesRun.map((s) => s.stage), ['Poisson', 'Renewal', 'SemiMarkov']);
 });
 
-test('with a states array but dependence unrelated to state, Stage F correctly finds no state-dependence and reports advancement-required at SemiMarkov (Stage E never runs, since Stage D already rejected independence)', () => {
+test('with a states array but dependence unrelated to state or self-excitation, the hierarchy correctly cascades through Stage F AND Stage G (neither explains the dependence) and reports advancement-required at Hawkes (Stage E never runs, since Stage D already rejected independence)', () => {
   const rng = seededRng(9);
   const n = 300;
   const gaps = [1.0];
@@ -154,10 +155,53 @@ test('with a states array but dependence unrelated to state, Stage F correctly f
     states.push(rng() < 0.5 ? 'RISE' : 'FALL'); // state is i.i.d., unrelated to the AR(1) dependence below
     if (i > 0) gaps.push(0.75 * gaps[i - 1] + 0.25 * (0.5 + rng()));
   }
-  const result = runNullModelHierarchy(gaps, { seed: 654, numSimulations: 500, states, numPermutations: 500 });
-  assert.equal(result.finalStage, 'SemiMarkov');
+  const result = runNullModelHierarchy(gaps, { seed: 654, numSimulations: 300, states, numPermutations: 200, hawkesNumSimulations: 40 });
+  assert.equal(result.finalStage, 'Hawkes');
   assert.equal(result.conclusion, HIERARCHY_CONCLUSIONS.DEPENDENCE_DETECTED_ADVANCEMENT_REQUIRED);
   assert.ok(!result.stagesRun.some((s) => s.stage === 'RenewalDistribution'), 'Stage E must not run when Stage D already rejected independence');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Stage G wiring -- extends the C/D/E/F hierarchy above
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('regression test: T for Stage G must be strictly greater than the last event time (a real bug caught during this slice\'s own end-to-end validation -- using T=lastEventTime exactly threw)', () => {
+  const rng = seededRng(9);
+  const n = 150;
+  const gaps = [1.0];
+  const states = [];
+  for (let i = 0; i < n; i++) {
+    states.push(rng() < 0.5 ? 'RISE' : 'FALL');
+    if (i > 0) gaps.push(0.75 * gaps[i - 1] + 0.25 * (0.5 + rng()));
+  }
+  // Must not throw -- this exact scenario threw before the T-buffer fix.
+  assert.doesNotThrow(() => runNullModelHierarchy(gaps, { seed: 654, numSimulations: 200, states, numPermutations: 150, hawkesNumSimulations: 30 }));
+});
+
+test('with states supplied and Stage F finds no state-dependence, the hierarchy correctly cascades to Stage G (never stops prematurely at SemiMarkov)', () => {
+  const rng = seededRng(9);
+  const n = 150;
+  const gaps = [1.0];
+  const states = [];
+  for (let i = 0; i < n; i++) {
+    states.push(rng() < 0.5 ? 'RISE' : 'FALL');
+    if (i > 0) gaps.push(0.75 * gaps[i - 1] + 0.25 * (0.5 + rng()));
+  }
+  const result = runNullModelHierarchy(gaps, { seed: 654, numSimulations: 200, states, numPermutations: 150, hawkesNumSimulations: 30 });
+  assert.equal(result.finalStage, 'Hawkes');
+  assert.deepEqual(result.stagesRun.map((s) => s.stage), ['Poisson', 'Renewal', 'SemiMarkov', 'Hawkes']);
+});
+
+test('genuine Hawkes-generated gap data (converted from a real simulated self-exciting process, with i.i.d./uninformative states) correctly cascades all the way through and terminates at consistent-with-hawkes', () => {
+  const rng = seededRng(11);
+  const eventTimes = simulateHawkesProcess(0.5, 2.0, 2.5, 300, rng);
+  const gaps = [];
+  for (let i = 1; i < eventTimes.length; i++) gaps.push(eventTimes[i] - eventTimes[i - 1]);
+  const states = gaps.map(() => (rng() < 0.5 ? 'RISE' : 'FALL'));
+
+  const result = runNullModelHierarchy(gaps, { seed: 999, numSimulations: 150, states, numPermutations: 150, hawkesNumSimulations: 40 });
+  assert.equal(result.finalStage, 'Hawkes');
+  assert.equal(result.conclusion, HIERARCHY_CONCLUSIONS.CONSISTENT_WITH_HAWKES);
 });
 
 test('never touches onlineFdr.js/discoveryDecision.js/hypothesisRegistry.js/lockbox.js/randomnessAudit.js/knowledgeGraph.js, and reimplements no statistical logic of its own', async () => {
