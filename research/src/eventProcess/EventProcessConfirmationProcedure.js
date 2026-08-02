@@ -46,7 +46,8 @@
  *   is reimplemented here, this module is pure adaptation), candidate/Candidate.js
  *   (CANDIDATE_TYPES, read-only).
  * Public API: GAP_LIKE_FEATURES, runEventProcessFeatureConfirmation,
- *   registerEventProcessProcedures, EventProcessConfirmationError.
+ *   registerEventProcessProcedures, extractConfirmationPValue,
+ *   EventProcessConfirmationError.
  * Complexity: O(hierarchy cost) -- delegates entirely to
  *   runNullModelHierarchy; this module adds only O(1) dispatch overhead.
  */
@@ -137,6 +138,66 @@ export function runEventProcessFeatureConfirmation(params = {}) {
 export function registerEventProcessProcedures(registry) {
   registry.register(CANDIDATE_TYPES.EVENT_PROCESS_FEATURE, runEventProcessFeatureConfirmation);
   return registry;
+}
+
+/**
+ * Extracts the SINGLE p-value to submit to alpha-spending
+ * (discoveryDecision.js's evaluateDiscoveryCandidate(), via
+ * bridge/Phase11ConfirmationBridge.js's confirmPhase11Candidate() --
+ * neither touched by this module) for a completed Null Model Hierarchy
+ * run: Stage C's (Poisson) p-value, ALWAYS.
+ *
+ * WHY STAGE C, not whichever stage produced the final conclusion -- a
+ * real design decision, resolved here explicitly rather than left
+ * ambiguous:
+ *
+ *   Online FDR's own correctness REQUIRES submitting exactly one p-value
+ *   per candidate, for EVERY candidate that reaches Confirmation,
+ *   regardless of outcome -- refusing to submit "uninteresting" results
+ *   (e.g. Poisson-consistent candidates) would break the sequential
+ *   wealth-tracking guarantee the whole Online FDR mechanism depends on.
+ *   This rules out "only submit a p-value when something interesting was
+ *   found."
+ *
+ *   Submitting a DIFFERENT stage's p-value depending on how far the
+ *   cascade advanced (Stage C's for a Poisson-consistent candidate,
+ *   Stage F's for a semi-Markov-explained one, Stage H's for a hidden-
+ *   Markov-explained one, etc.) would mean each candidate's "primary
+ *   test" is a DIFFERENT statistical procedure depending on its own
+ *   outcome -- a well-known problem (the specific test chosen is itself
+ *   a function of the data), and would additionally require its own
+ *   multi-stage alpha-correction scheme (Stages D through H would each
+ *   need to spend SOME alpha too, on top of Stage C, requiring a
+ *   Bonferroni-style split of the family's alpha budget across up to 5
+ *   further tests -- a substantially larger governance change than this
+ *   slice's scope, and one this project's own "no unregistered analyses,
+ *   no relaxed stopping rules" discipline would require pre-registering
+ *   explicitly before ever spending against it).
+ *
+ *   Stage C -- "is this gap sequence consistent with a homogeneous
+ *   Poisson process" -- is the ONE test every EventProcessFeature
+ *   candidate always undergoes, first, with a real, well-defined,
+ *   Monte-Carlo-calibrated p-value (see statistics/renewalProcessTests.js's
+ *   own Lilliefors-bias fix). Treating it as the pre-registered primary
+ *   test, and everything past it (Stages D-H) as EXPLORATORY structural
+ *   characterization of an already-statistically-established rejection
+ *   -- not a second, third, fourth independent confirmatory test each
+ *   consuming its own alpha -- is the simplest, cleanest, most standard
+ *   sequential-testing discipline available, and requires no change to
+ *   any protected governance module.
+ *
+ * @param {ReturnType<import('../statistics/nullModelHierarchy.js').runNullModelHierarchy>} hierarchyResult
+ * @returns {number} Stage C's p-value.
+ */
+export function extractConfirmationPValue(hierarchyResult) {
+  if (!hierarchyResult || !Array.isArray(hierarchyResult.stagesRun) || hierarchyResult.stagesRun.length === 0) {
+    throw new EventProcessConfirmationError('extractConfirmationPValue: hierarchyResult must be a real runNullModelHierarchy() result with at least one stage run');
+  }
+  const stageC = hierarchyResult.stagesRun[0];
+  if (stageC.stage !== 'Poisson' || typeof stageC.pValue !== 'number') {
+    throw new EventProcessConfirmationError('extractConfirmationPValue: stagesRun[0] must be the Poisson stage with a real pValue -- the hierarchy always runs Stage C first, this indicates a malformed or foreign result object');
+  }
+  return stageC.pValue;
 }
 
 export { HIERARCHY_CONCLUSIONS };

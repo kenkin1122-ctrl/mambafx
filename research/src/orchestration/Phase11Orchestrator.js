@@ -53,6 +53,7 @@ import { confirmPhase11Candidate } from '../bridge/Phase11ConfirmationBridge.js'
 import { replicatePhase11Candidate } from '../bridge/Phase11ReplicationBridge.js';
 import { publishPhase11Candidate } from '../bridge/Phase11PublicationBridge.js';
 import { confirmPhase11CandidateAutomatically } from '../bridge/Phase11AutomatedConfirmation.js';
+import { runEventProcessFeatureConfirmation, extractConfirmationPValue } from '../eventProcess/EventProcessConfirmationProcedure.js';
 import { runRngForensicsForCandidate, characterizeConfirmedCandidate } from '../bridge/Phase11ScientificCharacterization.js';
 
 export class NotYetIntegratedError extends Error {
@@ -441,6 +442,84 @@ export class Phase11Orchestrator {
 
     this._candidates.set(result.candidate.id, result.candidate);
     return result;
+  }
+
+  /**
+   * Runs the real, completed Null Model Hierarchy on a real gap series
+   * and submits Stage C's p-value (see
+   * eventProcess/EventProcessConfirmationProcedure.js's own
+   * extractConfirmationPValue() for why Stage C specifically) to the
+   * exact same governed confirmation path confirmAutomatically() uses
+   * (bridge/Phase11ConfirmationBridge.js's confirmPhase11Candidate(),
+   * unmodified, alpha spent exactly once, only through
+   * discoveryDecision.evaluateDiscoveryCandidate() as always) -- mirrors
+   * confirmAutomatically()'s own Knowledge Graph registration + candidate
+   * registry update wrapper structure exactly, differing only in which
+   * statistical procedure computes the p-value (the Null Model Hierarchy,
+   * via runEventProcessFeatureConfirmation(), instead of the permutation
+   * test confirmPhase11CandidateAutomatically() runs for indicator-family
+   * candidates).
+   *
+   * @param {object} params
+   * @param {object} params.candidate - Must be type EVENT_PROCESS_FEATURE.
+   * @param {object} params.researchConfiguration
+   * @param {object} params.datasetManifest
+   * @param {object} params.provenance
+   * @param {number[]} params.gaps - The real gap series for this candidate's featureName.
+   * @param {string} params.market
+   * @param {object} params.targetDefinition - REQUIRED, contrary to what
+   *   might be assumed: the Null Model Hierarchy itself has no forward-
+   *   outcome concept and never reads this value, but
+   *   routeToLegacyFamilyKey() (inside confirmPhase11Candidate, called
+   *   below, unmodified) DOES require a real {direction, runLength}
+   *   object for family-key partitioning -- this is not optional or
+   *   ignorable. The honest value here is {direction: 'Rise', runLength: 5},
+   *   since that IS the true, accurate definition of what generates the
+   *   gaps being tested (msdOnTick currently detects 5-consecutive-tick
+   *   RISE events only -- see this project's own commit history for that
+   *   finding); it is not a fabricated placeholder, it genuinely
+   *   describes the event type these candidates are about.
+   * @param {number} params.seed - Required (no hidden randomness).
+   * @param {number} [params.numSimulations]
+   * @param {number} [params.numPermutations]
+   * @param {number} [params.hawkesNumSimulations]
+   * @param {number} [params.hmmNumSimulations]
+   * @param {string} [params.testMethod]
+   * @param {number} [params.testedAt]
+   * @returns {Promise<{ outcome: 'confirmed'|'rejected', candidate: object, hypothesisId: string, familyKey: string, hierarchyResult: object, pValue: number }>}
+   */
+  async confirmEventProcessFeatureAutomatically({
+    candidate, researchConfiguration, datasetManifest, provenance, gaps,
+    market, targetDefinition, seed, numSimulations, numPermutations, hawkesNumSimulations, hmmNumSimulations,
+    testMethod, testedAt,
+  } = {}) {
+    const hierarchyResult = runEventProcessFeatureConfirmation({
+      candidate, gaps, seed, numSimulations, numPermutations, hawkesNumSimulations, hmmNumSimulations,
+    });
+    const pValue = extractConfirmationPValue(hierarchyResult);
+
+    let knowledgeGraphCandidateNode = this._knowledgeGraphNodes.get(candidate?.id) ?? null;
+    if (!knowledgeGraphCandidateNode) {
+      try {
+        knowledgeGraphCandidateNode = await registerPhase11CandidateInKnowledgeGraph(candidate, {
+          datasetManifestId: datasetManifest?.datasetId,
+        });
+        this._knowledgeGraphNodes.set(candidate.id, knowledgeGraphCandidateNode);
+      } catch {
+        knowledgeGraphCandidateNode = null;
+      }
+    }
+
+    const result = await confirmPhase11Candidate({
+      candidate, researchFreeze: this.researchFreeze, sap: this.sap, researchConfiguration,
+      datasetManifest, provenance, familyRegistry: this.familyRegistry,
+      market, targetDefinition, pValue, testMethod, testedAt,
+      decisionAuditLog: this.decisionAuditLog, negativeEvidenceRegistry: this.negativeEvidenceRegistry,
+      knowledgeGraphCandidateNode,
+    });
+
+    this._candidates.set(result.candidate.id, result.candidate);
+    return { ...result, hierarchyResult, pValue };
   }
 
   /**
