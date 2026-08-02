@@ -3418,6 +3418,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button id="ph11ConfirmBtn" class="gc-btn" disabled>🧪 Run Confirmation</button>
     <button id="ph11ReplicateBtn" class="gc-btn" disabled>🔁 Run Replication</button>
     <button id="ph11PublishBtn" class="gc-btn" disabled>📄 Attempt Publication</button>
+    <button id="ph11ConfirmEventProcessBtn" class="gc-btn">🕐 Confirm Event Process Features</button>
     <span id="ph11StatusMsg" style="font-size:12px;color:#7f849c;"></span>
   </div>
   <pre id="ph11ConfirmProgress" style="display:none;background:#0d1120;border:1px solid #1e2d55;border-radius:8px;padding:10px 12px;font-size:12px;color:#cdd6f4;white-space:pre-wrap;margin-bottom:8px;"></pre>
@@ -34623,6 +34624,14 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
   import { computeQuickIndicatorScore } from "./research/src/bridge/Phase11AutomatedConfirmation.js";
   import { IndicatorRegistry } from "./research/src/indicator/IndicatorRegistry.js";
   import { registerCoreIndicators } from "./research/src/indicator/coreIndicators.js";
+  import { StatisticalProcedureRegistry, registerCorePermutationTestProcedures } from "./research/src/bridge/StatisticalProcedureRegistry.js";
+  import { registerEventProcessProcedures } from "./research/src/eventProcess/EventProcessConfirmationProcedure.js";
+  import { EventFeatureRegistry } from "./research/src/eventProcess/EventFeatureRegistry.js";
+  import { registerCoreEventFeatures } from "./research/src/eventProcess/coreEventFeatures.js";
+  import { streamEventProcessFeatureCandidates } from "./research/src/eventProcess/streamEventProcessFeatureCandidates.js";
+  import { StatisticalAnalysisPlan } from "./research/src/config/StatisticalAnalysisPlan.js";
+  import { FamilyRegistry } from "./research/src/governance/FamilyRegistry.js";
+  import { CANDIDATE_TYPES } from "./research/src/candidate/Candidate.js";
 
   // The SINGLE canonical Indicator Registry for this whole page -- the
   // exact same registry (and EMA_SLOPE plugin) the demo campaign and the
@@ -35001,6 +35010,116 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
       console.warn("[phase11] publication failed", e);
       ph11SetStatus("Publication check failed — see console.");
     }
+  });
+
+  // Phase 12: reads real events from the (now schema-extended) permanent
+  // Event Database for the CURRENT session, extracts the real, already-
+  // computed timeGap/tickGap series (Stage-computed once at insertion,
+  // never recomputed here), generates real EventProcessFeature
+  // candidates, and runs each through the real, completed Null Model
+  // Hierarchy via StatisticalProcedureRegistry -- the piece that
+  // connects real live data to the statistical apparatus for the first
+  // time. Deliberately additive and self-contained: does not touch
+  // ph11Orchestrator, ph11ResearchConfiguration, or any existing
+  // button's state -- a genuinely separate governance context (its own
+  // ResearchFreeze reuse + a dedicated, narrow SAP/FamilyRegistry for
+  // exactly this one family), so nothing about the existing indicator
+  // campaign flow is put at risk.
+  document.getElementById("ph11ConfirmEventProcessBtn").addEventListener("click", async () => {
+    if (!ph11Orchestrator || !ph11Orchestrator.researchFreeze) {
+      ph11SetStatus("Start a campaign first (Confirmation reuses its Research Freeze) before confirming Event Process features.");
+      return;
+    }
+    const progress = ph11ShowProgress();
+    ph11SetStatus("Running Event Process confirmation (real gap data from this session's Event Database, real Null Model Hierarchy)…");
+    progress.log("[1/4] Reading this session's real events from the permanent Event Database…");
+
+    let allEvents;
+    try {
+      allEvents = await msdGetAllEvents();
+    } catch (e) {
+      progress.log(`  FAILED to read the Event Database: ${e && e.message ? e.message : e}`);
+      ph11SetStatus("Event Process confirmation failed — see progress log.");
+      return;
+    }
+    const sessionEvents = allEvents
+      .filter((e) => e.sessionId === msdSessionId && e.detectedAt != null)
+      .sort((a, b) => a.detectedAt - b.detectedAt);
+    progress.log(`      ${sessionEvents.length} event(s) recorded so far in this session (${allEvents.length} total across all sessions).`);
+
+    const timeGaps = sessionEvents.map((e) => e.timeGap).filter((g) => typeof g === "number" && g > 0);
+    const tickGaps = sessionEvents.map((e) => e.tickGap).filter((g) => typeof g === "number" && g > 0);
+    progress.log(`      Usable gap-like series: TimeGap n=${timeGaps.length}, TickGap n=${tickGaps.length} (the first event of the session, and any cross-session boundary, correctly contribute no gap value here).`);
+
+    if (timeGaps.length < 10 && tickGaps.length < 10) {
+      progress.log("  INSUFFICIENT DATA: fewer than 10 usable gaps for both TimeGap and TickGap — let more 5-run events accumulate this session and try again (the Null Model Hierarchy's own stages each have their own minimum-sample precondition, checked again per-stage below).");
+      ph11SetStatus("Event Process confirmation: insufficient data yet — see progress log.");
+      return;
+    }
+
+    progress.log("[2/4] Generating real EventProcessFeature candidates from the registered event-local feature plugins…");
+    const eventFeatureRegistry = new EventFeatureRegistry();
+    registerCoreEventFeatures(eventFeatureRegistry);
+
+    const eventProcessSap = await StatisticalAnalysisPlan.create({
+      sapId: `sap-eventprocess-${msdSessionId}-${Date.now()}`,
+      hypothesisFamilies: ["eventProcess"],
+      alphaAllocation: { eventProcess: 0.01 },
+      promotionPolicies: {}, stoppingRules: [{ maxCandidates: 100 }],
+      replicationCriteria: {}, publicationCriteria: {},
+      effectSizeThresholds: { default: 0 }, minimumSampleSizes: { default: 10 },
+      requiredDiagnostics: [],
+    });
+    const eventProcessFamilyRegistry = new FamilyRegistry();
+    eventProcessFamilyRegistry.registerFamily({ familyName: "eventProcess", version: "1.0.0", allowedCandidateTypes: [CANDIDATE_TYPES.EVENT_PROCESS_FEATURE] });
+
+    const statisticalProcedureRegistry = new StatisticalProcedureRegistry();
+    registerCorePermutationTestProcedures(statisticalProcedureRegistry);
+    registerEventProcessProcedures(statisticalProcedureRegistry);
+
+    const gapsByFeatureName = { TimeGap: timeGaps, TickGap: tickGaps };
+    let confirmedCount = 0, testedCount = 0;
+
+    for await (const { candidate } of streamEventProcessFeatureCandidates({
+      eventFeatureRegistry, researchConfiguration: ph11ResearchConfiguration, protocolVersion: "P12-GAP-v1.1.0",
+      researchFreeze: ph11Orchestrator.researchFreeze, sap: eventProcessSap, familyRegistry: eventProcessFamilyRegistry,
+    })) {
+      const gaps = gapsByFeatureName[candidate.featureName];
+      if (!gaps) continue; // AlternatingRun etc. -- no registered procedure yet, skipped honestly, not silently misapplied
+
+      progress.log(`\n— ${candidate.featureName} (n=${gaps.length} real gaps) —`);
+      if (gaps.length < 10) {
+        progress.log(`  INSUFFICIENT DATA: fewer than 10 usable ${candidate.featureName} gaps.`);
+        continue;
+      }
+      testedCount++;
+      progress.log("[3/4] Running the real Null Model Hierarchy (Poisson → Renewal → Renewal Distribution / Semi-Markov → Hawkes → HMM, gated)…");
+      try {
+        const result = statisticalProcedureRegistry.run({
+          candidate, gaps, seed: 42, numSimulations: 500, numPermutations: 500, hawkesNumSimulations: 100, hmmNumSimulations: 100,
+        });
+        progress.log(
+          `[4/4] finalStage=${result.finalStage}, conclusion=${result.conclusion}\n` +
+          `  ${result.summary}\n` +
+          `  Stages run: ${result.stagesRun.map((s) => s.stage).join(" → ")}`
+        );
+        if (result.conclusion !== "consistent-with-poisson") confirmedCount++; // any non-trivial finding, not an alpha-spending "confirmed" verdict — see note below
+      } catch (e) {
+        progress.log(`  FAILED: ${e && e.message ? e.message : e}`);
+        console.warn("[phase11] event process confirmation failed", e);
+      }
+    }
+
+    // NOTE, stated plainly: this button runs the real statistical
+    // hierarchy on real data and reports its real conclusion -- it does
+    // NOT spend alpha or advance any candidate's lifecycle through
+    // Screen/Triage/Confirmed the way the indicator campaign's Confirm
+    // button does. That governed lifecycle integration (candidates
+    // actually reaching a real Confirmed/Published state through
+    // discoveryDecision.js) remains a further, separate integration step
+    // -- this button's scope is proving the statistical apparatus
+    // correctly operates on real, not synthetic, data end to end.
+    ph11SetStatus(`Event Process confirmation: ${testedCount} feature(s) tested, ${confirmedCount} showed non-trivial structure (see progress log for the real Null Model Hierarchy conclusion on each — this does not yet spend alpha or change any candidate's governed lifecycle state).`);
   });
 </script>
 
