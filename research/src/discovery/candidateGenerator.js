@@ -42,6 +42,7 @@ import { MarketState } from '../candidate/MarketState.js';
 import { ProxyCandidate } from '../candidate/ProxyCandidate.js';
 import { CompositeCandidate } from '../candidate/CompositeCandidate.js';
 import { ConditionalHypothesis } from '../candidate/ConditionalHypothesis.js';
+import { EventProcessFeature } from '../candidate/EventProcessFeature.js';
 import { buildCandidateProvenance } from '../provenance/CandidateProvenance.js';
 import { DECISION_TYPES } from '../governance/DecisionAuditLog.js';
 
@@ -59,6 +60,7 @@ const CANDIDATE_CLASSES = Object.freeze({
   [CANDIDATE_TYPES.PROXY_CANDIDATE]: ProxyCandidate,
   [CANDIDATE_TYPES.COMPOSITE_CANDIDATE]: CompositeCandidate,
   [CANDIDATE_TYPES.CONDITIONAL_HYPOTHESIS]: ConditionalHypothesis,
+  [CANDIDATE_TYPES.EVENT_PROCESS_FEATURE]: EventProcessFeature,
 });
 
 /**

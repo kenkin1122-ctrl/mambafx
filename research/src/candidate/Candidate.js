@@ -52,6 +52,7 @@ export const CANDIDATE_TYPES = Object.freeze({
   PROXY_CANDIDATE:      'ProxyCandidate',
   COMPOSITE_CANDIDATE:  'CompositeCandidate',
   CONDITIONAL_HYPOTHESIS: 'ConditionalHypothesis',
+  EVENT_PROCESS_FEATURE: 'EventProcessFeature',
 });
 
 /**
