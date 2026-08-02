@@ -47,12 +47,13 @@
  *   (CANDIDATE_TYPES, read-only).
  * Public API: GAP_LIKE_FEATURES, runEventProcessFeatureConfirmation,
  *   registerEventProcessProcedures, extractConfirmationPValue,
- *   EventProcessConfirmationError.
+ *   computeEventProcessPartitionStatistics, EventProcessConfirmationError.
  * Complexity: O(hierarchy cost) -- delegates entirely to
  *   runNullModelHierarchy; this module adds only O(1) dispatch overhead.
  */
 
 import { runNullModelHierarchy, HIERARCHY_CONCLUSIONS } from '../statistics/nullModelHierarchy.js';
+import { fitExponentialMLE, kolmogorovSmirnovStatistic, exponentialCDF } from '../statistics/renewalProcessTests.js';
 import { CANDIDATE_TYPES } from '../candidate/Candidate.js';
 
 export class EventProcessConfirmationError extends Error {
@@ -198,6 +199,69 @@ export function extractConfirmationPValue(hierarchyResult) {
     throw new EventProcessConfirmationError('extractConfirmationPValue: stagesRun[0] must be the Poisson stage with a real pValue -- the hierarchy always runs Stage C first, this indicates a malformed or foreign result object');
   }
   return stageC.pValue;
+}
+
+/**
+ * Computes real, per-partition "effect sizes" for replication --
+ * analysis/DiscoveryStabilityAnalysis.js's computeDiscoveryStabilityIndex()
+ * (unmodified, reused via replicatePhase11Candidate, not called directly
+ * here), applied to Stage C's KS statistic -- the SAME primary test
+ * whose p-value is submitted for confirmation (see
+ * extractConfirmationPValue's own reasoning for why Stage C, not
+ * whichever stage the cascade happened to reach, is the one quantity
+ * treated as this candidate's confirmable/replicable statistic).
+ *
+ * A REAL, DISCLOSED LIMITATION, not silently worked around: this reuses
+ * fitExponentialMLE/kolmogorovSmirnovStatistic (statistics/renewalProcessTests.js,
+ * unmodified) to compute each partition's KS statistic against a fitted
+ * exponential -- and a KS statistic is ALWAYS NON-NEGATIVE by
+ * construction. computeDiscoveryStabilityIndex's sign-agreement
+ * component (does the effect consistently point the same direction
+ * across partitions, e.g. a momentum indicator's correlation being
+ * consistently positive) is therefore TRIVIALLY satisfied here every
+ * time (every KS statistic has the same "sign," +1) -- not wrong, but
+ * contributing zero real discriminating information for this candidate
+ * type. The stability index effectively reduces to
+ * computeDiscoveryStabilityIndex's OTHER component, magnitudeConsistency
+ * -- does the SIZE of the Poisson-rejection signal replicate consistently
+ * across independent held-out partitions -- which remains a genuinely
+ * meaningful replication check on its own. This limitation is inherent to
+ * applying a signed-effect-size-shaped stability metric to an
+ * unsigned test statistic, not a defect in this function; documented
+ * here rather than silently accepted without comment.
+ *
+ * @param {number[]} gaps - A real, held-out replication dataset's gap series.
+ * @param {number} partitionCount - Number of contiguous partitions (>= 2).
+ * @returns {{ partitionEffectSizes: number[], pooledEffectSize: number }}
+ */
+export function computeEventProcessPartitionStatistics(gaps, partitionCount) {
+  if (!Array.isArray(gaps) || gaps.length === 0) {
+    throw new EventProcessConfirmationError('computeEventProcessPartitionStatistics: gaps must be a non-empty array');
+  }
+  if (!Number.isInteger(partitionCount) || partitionCount < 2) {
+    throw new EventProcessConfirmationError('computeEventProcessPartitionStatistics: partitionCount must be an integer >= 2');
+  }
+  const MIN_GAPS_PER_PARTITION = 10;
+  const partitionSize = Math.floor(gaps.length / partitionCount);
+  if (partitionSize < MIN_GAPS_PER_PARTITION) {
+    throw new EventProcessConfirmationError(
+      `computeEventProcessPartitionStatistics: not enough gaps (${gaps.length}) to form ${partitionCount} partitions of at least ${MIN_GAPS_PER_PARTITION} each`
+    );
+  }
+
+  const partitionEffectSizes = [];
+  for (let p = 0; p < partitionCount; p++) {
+    const start = p * partitionSize;
+    const end = p === partitionCount - 1 ? gaps.length : start + partitionSize; // last partition absorbs any remainder
+    const partitionGaps = gaps.slice(start, end);
+    const { lambda } = fitExponentialMLE(partitionGaps);
+    partitionEffectSizes.push(kolmogorovSmirnovStatistic(partitionGaps, (x) => exponentialCDF(x, lambda)));
+  }
+
+  const { lambda: pooledLambda } = fitExponentialMLE(gaps);
+  const pooledEffectSize = kolmogorovSmirnovStatistic(gaps, (x) => exponentialCDF(x, pooledLambda));
+
+  return { partitionEffectSizes, pooledEffectSize };
 }
 
 export { HIERARCHY_CONCLUSIONS };
