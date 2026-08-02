@@ -6,9 +6,27 @@
  *   sibling subtype alongside IndicatorFeature, MarketState, ProxyCandidate,
  *   CompositeCandidate, ConditionalHypothesis. Represents a hypothesis
  *   about ONE event-local feature (e.g. "TimeGap between consecutive
- *   5-run events") as a real, testable Candidate -- Generated, Screened,
- *   Triaged, Confirmed, Replicated, Published, exactly like every other
- *   subtype, through the exact same, unmodified generateCandidate().
+ *   5-run events predicts something") as a real, testable Candidate --
+ *   Generated, Screened, Triaged, Confirmed, Replicated, Published,
+ *   exactly like every other subtype, through the exact same, unmodified
+ *   generateCandidate().
+ *
+ * IDENTITY SCOPING -- CORRECTED (2nd draft; see project history for the
+ *   first draft's mistake, left visible rather than silently rewritten):
+ *   the first draft of this class scoped identity to ONE SPECIFIC
+ *   (eventId, previousEventId) pair. That was wrong: it would mean one
+ *   candidate per data point, not one candidate per hypothesis -- no
+ *   other Candidate subtype works that way (IndicatorFeature is scoped to
+ *   indicatorName+period, a hypothesis TEMPLATE tested across an entire
+ *   price series, never to one specific tick index), and a single event
+ *   pair is not something that can be statistically tested at all. The
+ *   corrected identity is featureName alone (mirroring indicatorName) --
+ *   the hypothesis "this event-local feature, as computed across the full
+ *   available event history, predicts some outcome." The specific event
+ *   pairs it is tested against are supplied at Confirmation time (the
+ *   event log itself, resolved fresh -- exactly how IndicatorFeature's
+ *   price series is supplied at Confirmation time, never baked into the
+ *   candidate's own identity).
  *
  * REFINEMENT #3 (passive data object, no statistical logic): this class
  *   stores IDENTITY, METADATA, and PROVENANCE only -- featureName (routes
@@ -16,14 +34,12 @@
  *   resolution time, never a cached/frozen computed value -- same
  *   discipline IndicatorFeature/MarketState/ProxyCandidate already
  *   follow: the actual signal is always recomputed fresh from real data
- *   at Confirmation time, never trusted from storage) and the identity of
- *   the specific event pair this feature concerns (eventId,
- *   previousEventId). It has NO compute()/test()/statistical method of
- *   its own -- exactly like every other Candidate subtype, this is a
- *   record of WHAT is being tested, never HOW to test it. The Null Model
- *   Hierarchy that eventually tests it (per refinement #4) lives entirely
- *   outside this class, resolved via a StatisticalProcedureRegistry (a
- *   separate, later slice).
+ *   at Confirmation time, never trusted from storage). It has NO
+ *   compute()/test()/statistical method of its own -- exactly like every
+ *   other Candidate subtype, this is a record of WHAT is being tested,
+ *   never HOW to test it. The Null Model Hierarchy that eventually tests
+ *   it (per refinement #4) lives entirely outside this class, resolved
+ *   via a StatisticalProcedureRegistry (a separate, later slice).
  *
  * REFINEMENT #5 (versioned provenance, distinct from software version):
  *   protocolVersion/extractorVersion/schemaVersion are NEW fields, not a
@@ -54,10 +70,8 @@
  *
  * Additional fields (beyond base Candidate):
  *   featureName       — the registered EventFeatureRegistry plugin name
- *   eventId           — the event this feature concerns
- *   previousEventId   — the event it was computed against, or null (first
- *                        event of a session -- mirrors the plugin's own
- *                        honest-null discipline)
+ *                        (the hypothesis's identity, mirroring
+ *                        IndicatorFeature's indicatorName)
  *   protocolVersion   — the frozen scientific protocol version (e.g. "P12-GAP-v1.1.0")
  *   extractorVersion  — the EventFeatureRegistry plugin's own version() at generation time
  *   schemaVersion     — the mfx_msd_events schema version this candidate assumes
@@ -71,9 +85,7 @@ import { Candidate, CandidateValidationError, CANDIDATE_TYPES } from './Candidat
 
 export class EventProcessFeature extends Candidate {
   // Note: no bare class field declarations — see IndicatorFeature.js for the rationale.
-  // @field {string} featureName       - EventFeatureRegistry plugin name.
-  // @field {string} eventId           - The event this feature concerns.
-  // @field {string|null} previousEventId - The event pair's predecessor, or null.
+  // @field {string} featureName       - EventFeatureRegistry plugin name (the hypothesis's identity).
   // @field {string} protocolVersion   - Frozen scientific protocol version.
   // @field {string} extractorVersion  - Source plugin's own version() at generation time.
   // @field {string} schemaVersion     - mfx_msd_events schema version assumed.
@@ -93,9 +105,6 @@ export class EventProcessFeature extends Candidate {
    *   at generation time (this class does not enforce that itself -- the
    *   generator, same as for every other subtype, is responsible for
    *   only ever constructing candidates for real registered plugins).
-   * @param {string} params.eventId - Required non-empty string.
-   * @param {string|null} [params.previousEventId] - Nullable string;
-   *   null means this is the first event of its session (honest, not an error).
    * @param {string} params.protocolVersion - Required non-empty string.
    * @param {string} params.extractorVersion - Required non-empty string.
    * @param {string} params.schemaVersion - Required non-empty string.
@@ -109,10 +118,6 @@ export class EventProcessFeature extends Candidate {
     const typeErrors = [];
     if (!params.featureName || typeof params.featureName !== 'string')
       typeErrors.push('featureName: required non-empty string (must match an EventFeatureRegistry plugin name)');
-    if (!params.eventId || typeof params.eventId !== 'string')
-      typeErrors.push('eventId: required non-empty string');
-    if (params.previousEventId !== null && params.previousEventId !== undefined && typeof params.previousEventId !== 'string')
-      typeErrors.push('previousEventId: must be a non-empty string or null (null = first event of session)');
     if (!params.protocolVersion || typeof params.protocolVersion !== 'string')
       typeErrors.push('protocolVersion: required non-empty string (the frozen scientific protocol version)');
     if (!params.extractorVersion || typeof params.extractorVersion !== 'string')
@@ -128,15 +133,12 @@ export class EventProcessFeature extends Candidate {
       });
     }
 
-    const previousEventId = params.previousEventId ?? null;
     const effectiveParams = { ...params, type: CANDIDATE_TYPES.EVENT_PROCESS_FEATURE };
     const fingerprintParams = {
       ...effectiveParams,
       parameters: {
         ...effectiveParams.parameters,
         featureName: params.featureName,
-        eventId: params.eventId,
-        previousEventId,
         protocolVersion: params.protocolVersion,
         extractorVersion: params.extractorVersion,
         schemaVersion: params.schemaVersion,
@@ -148,8 +150,6 @@ export class EventProcessFeature extends Candidate {
     return new EventProcessFeature({
       ...common,
       featureName: params.featureName,
-      eventId: params.eventId,
-      previousEventId,
       protocolVersion: params.protocolVersion,
       extractorVersion: params.extractorVersion,
       schemaVersion: params.schemaVersion,
@@ -160,8 +160,6 @@ export class EventProcessFeature extends Candidate {
     return {
       ...super.toJSON(),
       featureName: this.featureName,
-      eventId: this.eventId,
-      previousEventId: this.previousEventId,
       protocolVersion: this.protocolVersion,
       extractorVersion: this.extractorVersion,
       schemaVersion: this.schemaVersion,

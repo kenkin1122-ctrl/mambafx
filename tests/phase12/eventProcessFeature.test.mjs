@@ -4,6 +4,12 @@
  * Tests for candidate/EventProcessFeature.js -- Phase 12's sixth Candidate
  * subtype, per approved design v1.2's refinements #3 (passive data object)
  * and #5 (versioned provenance distinct from software version).
+ *
+ * Identity scoping is featureName alone, mirroring IndicatorFeature's
+ * indicatorName -- a hypothesis TEMPLATE tested across the full available
+ * event history at Confirmation time, never scoped to one specific event
+ * pair (the first draft of this class made that mistake; see
+ * EventProcessFeature.js's own header for the correction history).
  */
 
 import test from 'node:test';
@@ -23,7 +29,7 @@ const BASE_FIELDS = {
   family: 'eventProcess', generatorVersion: '12.0.0', grammarVersion: '11.0.0',
   configHash: 'a'.repeat(64), researchConfigurationId: 'rc-test',
   description: 'test event process feature',
-  featureName: 'TimeGap', eventId: 'evt-2', previousEventId: 'evt-1',
+  featureName: 'TimeGap',
   protocolVersion: 'P12-GAP-v1.1.0', extractorVersion: '1.0.0', schemaVersion: '2.0.0',
 };
 
@@ -54,8 +60,6 @@ test('EventProcessFeature.create(): builds a real candidate with a valid SHA-256
   const candidate = await EventProcessFeature.create({ ...BASE_FIELDS, id: 'evtf-1', parameters: {} });
   assert.equal(candidate.type, CANDIDATE_TYPES.EVENT_PROCESS_FEATURE);
   assert.equal(candidate.featureName, 'TimeGap');
-  assert.equal(candidate.eventId, 'evt-2');
-  assert.equal(candidate.previousEventId, 'evt-1');
   assert.equal(candidate.protocolVersion, 'P12-GAP-v1.1.0');
   assert.equal(candidate.extractorVersion, '1.0.0');
   assert.equal(candidate.schemaVersion, '2.0.0');
@@ -63,21 +67,11 @@ test('EventProcessFeature.create(): builds a real candidate with a valid SHA-256
   assert.equal(candidate.lifecycle, PHASE11_LIFECYCLE_STAGES.GENERATED);
 });
 
-test('EventProcessFeature.create(): previousEventId may be explicitly null (first event of session), not an error', async () => {
-  const candidate = await EventProcessFeature.create({ ...BASE_FIELDS, id: 'evtf-first', parameters: {}, previousEventId: null });
-  assert.equal(candidate.previousEventId, null);
-});
-
-test('EventProcessFeature.create(): rejects missing featureName/eventId/protocolVersion/extractorVersion/schemaVersion', async () => {
+test('EventProcessFeature.create(): rejects missing featureName/protocolVersion/extractorVersion/schemaVersion', async () => {
   await assert.rejects(EventProcessFeature.create({ ...BASE_FIELDS, id: 'x', parameters: {}, featureName: undefined }), CandidateValidationError);
-  await assert.rejects(EventProcessFeature.create({ ...BASE_FIELDS, id: 'x', parameters: {}, eventId: '' }), CandidateValidationError);
   await assert.rejects(EventProcessFeature.create({ ...BASE_FIELDS, id: 'x', parameters: {}, protocolVersion: undefined }), CandidateValidationError);
   await assert.rejects(EventProcessFeature.create({ ...BASE_FIELDS, id: 'x', parameters: {}, extractorVersion: undefined }), CandidateValidationError);
   await assert.rejects(EventProcessFeature.create({ ...BASE_FIELDS, id: 'x', parameters: {}, schemaVersion: undefined }), CandidateValidationError);
-});
-
-test('EventProcessFeature.create(): rejects a non-string, non-null previousEventId (e.g. a number)', async () => {
-  await assert.rejects(EventProcessFeature.create({ ...BASE_FIELDS, id: 'x', parameters: {}, previousEventId: 42 }), CandidateValidationError);
 });
 
 test('EventProcessFeature: two candidates with identical defining parameters produce identical fingerprints (deterministic)', async () => {
@@ -86,10 +80,16 @@ test('EventProcessFeature: two candidates with identical defining parameters pro
   assert.equal(a.fingerprint, b.fingerprint);
 });
 
+test('EventProcessFeature: two candidates with different featureName produce different fingerprints -- each event-local feature is its own distinct hypothesis', async () => {
+  const timeGap = await EventProcessFeature.create({ ...BASE_FIELDS, id: 'evtf-tg', parameters: {}, featureName: 'TimeGap' });
+  const tickGap = await EventProcessFeature.create({ ...BASE_FIELDS, id: 'evtf-tg2', parameters: {}, featureName: 'TickGap' });
+  assert.notEqual(timeGap.fingerprint, tickGap.fingerprint);
+});
+
 test('refinement #5: protocolVersion is a genuinely distinct field from the base Candidate\'s generatorVersion -- both are independently recorded', async () => {
   const candidate = await EventProcessFeature.create({ ...BASE_FIELDS, id: 'evtf-versions', parameters: {} });
-  assert.equal(candidate.generatorVersion, '12.0.0'); // software version (base Candidate field)
-  assert.equal(candidate.protocolVersion, 'P12-GAP-v1.1.0'); // frozen scientific protocol version (this class's own field)
+  assert.equal(candidate.generatorVersion, '12.0.0');
+  assert.equal(candidate.protocolVersion, 'P12-GAP-v1.1.0');
   assert.notEqual(candidate.generatorVersion, candidate.protocolVersion);
 });
 
@@ -100,6 +100,13 @@ test('refinement #3: EventProcessFeature is a passive data object -- no compute/
   assert.equal(typeof candidate.runStatisticalTest, 'undefined');
   const json = candidate.toJSON();
   assert.ok(!('value' in json) && !('signal' in json) && !('pValue' in json));
+});
+
+test('EventProcessFeature: not scoped to a specific event -- no eventId/previousEventId field exists (identity is featureName alone, mirroring IndicatorFeature\'s indicatorName)', async () => {
+  const candidate = await EventProcessFeature.create({ ...BASE_FIELDS, id: 'evtf-noevent', parameters: {} });
+  const json = candidate.toJSON();
+  assert.ok(!('eventId' in json), 'a hypothesis-level candidate must not be scoped to one specific event pair');
+  assert.ok(!('previousEventId' in json));
 });
 
 test('EventProcessFeature: does not duplicate any EventFeatureRegistry plugin metadata onto the candidate -- only featureName is stored, routing back to the real plugin', async () => {
@@ -120,9 +127,9 @@ test('EventProcessFeature flows through the real, unmodified generateCandidate()
 
   const candidateParams = {
     id: 'evtf-gov-1', family: 'eventProcess', parameters: {},
-    description: 'TimeGap between evt-2 and evt-1.',
+    description: 'TimeGap, tested as a general hypothesis across the event history.',
     generatorVersion: '12.0.0', grammarVersion: '11.0.0', configHash: rc.configHash, researchConfigurationId: rc.id,
-    featureName: 'TimeGap', eventId: 'evt-2', previousEventId: 'evt-1',
+    featureName: 'TimeGap',
     protocolVersion: 'P12-GAP-v1.1.0', extractorVersion: '1.0.0', schemaVersion: '2.0.0',
   };
   const { candidate, provenance } = await generateCandidate({
