@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Volatility 100 — Consecutive Tick Tracker</title>
+<title>Deriv Synthetic Indices — Volatility, Step & Jump Tick Tracker</title>
 <style>
 :root{
   --bg:#0a0e17;--panel:#121826;--line:#1f2937;--text:#e8edf4;--muted:#6b7689;
@@ -3747,7 +3747,9 @@ table.an-table tbody tr:last-child td{border-bottom:none}
 
 // ── Config ───────────────────────────────────────────────────────────
 const APP_ID = 1089;                 // Deriv public app id (read-only tick data)
-// All 10 standard Volatility indices (continuous + 1-second variants)
+// Volatility indices + Deriv Step Indices
+// Step Index products currently listed by Deriv:
+// Step Index, Step Index 200, 300, 400 and 500.
 const MARKETS = {
   "R_10":    "Volatility 10",
   "R_25":    "Volatility 25",
@@ -3759,6 +3761,20 @@ const MARKETS = {
   "1HZ50V":  "Volatility 50 (1s)",
   "1HZ75V":  "Volatility 75 (1s)",
   "1HZ100V": "Volatility 100 (1s)",
+
+  // ── Step Indices ───────────────────────────────────────────────────
+  "STP":     "Step Index",
+  "STP200":  "Step Index 200",
+  "STP300":  "Step Index 300",
+  "STP400":  "Step Index 400",
+  "STP500":  "Step Index 500",
+
+  // ── Jump Indices ───────────────────────────────────────────────────
+  "JD10":    "Jump 10 Index",
+  "JD25":    "Jump 25 Index",
+  "JD50":    "Jump 50 Index",
+  "JD75":    "Jump 75 Index",
+  "JD100":   "Jump 100 Index",
 };
 let SYMBOL = "1HZ100V";              // currently selected market
 const RUN_LENGTH = 5;                // consecutive ticks that trigger a signal
@@ -3780,7 +3796,7 @@ const ARROW_COUNT = 5; // arrows shown per indicator
 const $ = id => document.getElementById(id);
 
 // ── Persistence (localStorage) ───────────────────────────────────────
-const STORE_PREFIX = "v100tracker_v1_";   // per-market data key prefix
+const STORE_PREFIX = "derivtracker_v3_";  // per-market data key prefix (Volatility + Step)
 const LAST_MARKET_KEY = "v100tracker_last_market";
 const RECALL_COUNT = 100;                  // ticks to recall after refresh
 const STALE_MS = 12 * 60 * 60 * 1000;      // discard saved data older than 12h
@@ -3875,19 +3891,52 @@ function _symFields(s){
 // Matches loosely on the volatility number and the "(1s)" tick-speed tag
 // rather than assuming any specific naming scheme.
 function _findDiscoveredSymbol(list, marketKey){
-  const wantedLabel = (MARKETS[marketKey] || "").toLowerCase();
-  const wantedNumber = (wantedLabel.match(/\d+/) || [])[0];
-  const wantsOneSecond = /\(1s\)/.test(wantedLabel);
-  for (const raw of list){
-    const { sym, dname } = _symFields(raw);
-    if (!sym) continue;
-    const lname = (dname || "").toLowerCase();
-    const looksVolatility = lname.includes("volatility") || /^r_/i.test(sym) || /^1hz/i.test(sym);
-    if (!looksVolatility) continue;
-    const hasOneSecond = /1s\b|1-second|1 second/.test(lname) || /^1hz/i.test(sym);
-    if (wantedNumber && lname.includes(wantedNumber) && wantsOneSecond === hasOneSecond) return sym;
+  const target = String(marketKey || "").toUpperCase();
+
+  // Normalize active_symbols entries from both legacy and current API shapes.
+  const rows = (Array.isArray(list) ? list : []).map(x => ({
+    ...x,
+    _sym: String(x?.underlying_symbol || x?.symbol || "").toUpperCase(),
+    _name: String(x?.display_name || x?.name || "").toUpperCase()
+  }));
+
+  // ── Jump Indices ─────────────────────────────────────────────────
+  // Current Deriv product family: Jump 10/25/50/75/100 Index.
+  if (target === "JD10" || target === "JD25" || target === "JD50" ||
+      target === "JD75" || target === "JD100") {
+    const n = target.replace("JD", "");
+    return rows.find(x =>
+      /JUMP\s*\d+\s*INDEX/.test(x._name) &&
+      new RegExp(`JUMP\\s*${n}\\s*INDEX`).test(x._name)
+    ) || rows.find(x =>
+      x._sym === target || x._sym === `JUMP${n}` || x._sym === `JD${n}`
+    ) || null;
   }
-  return null;
+
+  // ── Step Indices ─────────────────────────────────────────────────
+  if (target === "STP" || /^STP\d+$/.test(target)) {
+    const n = target === "STP" ? "" : target.replace("STP", "");
+    return rows.find(x => {
+      if (!/STEP\s*INDEX/.test(x._name) && !x._sym.startsWith("STP")) return false;
+      if (!n) return /STEP\s*INDEX(?!\s*\d)/.test(x._name);
+      return new RegExp(`STEP\\s*INDEX\\s*${n}\\b`).test(x._name);
+    }) || rows.find(x => x._sym === target) || null;
+  }
+
+  // ── Volatility Indices ────────────────────────────────────────────
+  if (/^R_\d+$/.test(target) || /^1HZ\d+V$/.test(target)) {
+    const number = target.match(/\d+/)?.[0] || "";
+    const oneSec = target.startsWith("1HZ");
+    return rows.find(x => {
+      if (!x._name.includes("VOLATILITY")) return false;
+      if (!x._name.includes(number)) return false;
+      if (oneSec) return x._name.includes("(1S)");
+      return !x._name.includes("(1S)");
+    }) || rows.find(x => x._sym === target) || null;
+  }
+
+  // Generic exact-symbol fallback.
+  return rows.find(x => x._sym === target) || null;
 }
 let _tickSubscriptionSymbol = SYMBOL; // the symbol code we actually subscribed with (may differ from SYMBOL if discovered)
 let _activeSymbolsReqId = 900001;
