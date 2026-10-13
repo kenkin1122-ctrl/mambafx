@@ -2,13 +2,14 @@
  * src/bazu/page.js
  * BAZU page view. Sends commands to engine.js and renders its state — NO trading rules here.
  */
-import * as E from './engine.js?v=14';
-import { clusterZones } from './structure.js?v=14';
-import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=14';
+import * as E from './engine.js?v=15';
+import { clusterZones } from './structure.js?v=15';
+import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=15';
 import { findSwingPoints } from '../../mtf/src/analysis/swingPoints.js';
-import { wilson } from './stats.js?v=14';
-import { accountInfo } from './execution.js?v=14';
-import { GATE } from './decision.js?v=14';
+import { wilson } from './stats.js?v=15';
+import { accountInfo } from './execution.js?v=15';
+import { GATE } from './decision.js?v=15';
+import { calibrationSummary, accuracyByDuration } from './calibration3m.js?v=15';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -28,6 +29,7 @@ function bindOnce() {
     E.setRunning(true);
   };
   $('bzStop').onclick = () => { E.setRunning(false); };
+  $('bzDur').onchange = (e) => E.setManualDuration(e.target.value);
   $('bzStake').onchange = (e) => E.setStake(e.target.value);
   $('bzMart').onchange = (e) => E.setMartingale(e.target.value);
   $('bzRealOk').onchange = (e) => E.confirmReal(e.target.checked);
@@ -101,10 +103,34 @@ function render() {
     mk('Capital exposure', M.exposure.toUpperCase(), M.exposure),
     mk('Markets', M.markets), mk('Strong signals', M.tradable), mk('Completed', M.closed), mk('Failed', M.failed),
   ].join(''); } catch (e) { console.error('BAZU metrics', e); }
-  const part = { live: () => renderLive(S), accuracy: () => renderAccuracy(S), perf: () => renderPerf(S), exec: () => renderExec(S, acc) }[tab] || (() => renderExec(S, acc));
+  const part = { live: () => renderLive(S), accuracy: () => renderAccuracy(S), perf: () => renderPerf(S), exec: () => renderExec(S, acc), calib: () => renderCalib(S) }[tab] || (() => renderExec(S, acc));
+  syncDur(S);
   try { part(); } catch (e) { console.error('BAZU render', e); }
 }
 
+const secFmt = (s) => (s == null || !Number.isFinite(s) ? 'n/a' : s >= 120 ? (s / 60).toFixed(1) + 'm' : s.toFixed(0) + 's');
+function lifetimeHtml(sig) {
+  const L = sig.lifetime; if (!L) return '';
+  const est = Object.entries(L.estimators || {}).map(([k, v]) => `${k} ${v == null ? '<span class="mu">not applicable</span>' : secFmt(v)}`).join(' · ');
+  return `<div class="note num">Expected lifetime ${secFmt(L.lifetime)}${L.cappedBy ? ` (capped by ${esc(L.cappedBy)})` : ''} → duration ${esc(sig.duration || 'WAIT')}${sig.manual ? ' (manual duration)' : ''} · break-even ${sig.breakEven == null ? '—' : pct(sig.breakEven, 1)} · ${est}</div>`;
+}
+function syncDur(S) {
+  const sel = $('bzDur'); if (!sel) return;
+  const keys = E.allowedKeys(), want = ['', ...keys].join('|');
+  if (sel.dataset.k !== want) { sel.dataset.k = want; sel.innerHTML = '<option value="">Auto (lifetime)</option>' + keys.map((k) => `<option value="${esc(k)}">${esc(k)}</option>`).join(''); }
+  if (document.activeElement !== sel) sel.value = S.manualKey || '';
+}
+function renderCalib(S) {
+  const recs = S.records, sum = calibrationSummary(recs), acc = accuracyByDuration(recs);
+  const dist = (e) => e.dist.map((d) => `${d.label}: ${d.count}`).join(' · ');
+  const rows = (o) => Object.entries(o).map(([k, e]) => `<tr><td>${esc(k)}</td><td class="num">${e.n}</td><td class="num">${secFmt(e.medianErrorS)}</td><td class="num">${e.medianRatio == null ? '—' : e.medianRatio.toFixed(2) + 'x'}</td><td class="mu">${dist(e)}</td></tr>`).join('') || '<tr><td colspan="5" class="mu">no resolved records yet</td></tr>';
+  const head = '<tr><th></th><th>N</th><th>Median error (pred − real)</th><th>Median pred/real</th><th>Error distribution</th></tr>';
+  $('bzCalib').innerHTML = `<div class="panel"><h3>Lifetime calibration <span class="mu">(a record, not a gate)</span></h3>
+    <div class="note num">Signals logged ${recs.length} · resolved ${sum.resolved} · target first ${sum.targetFirst} · invalidation first ${sum.invalidFirst} · neither within max ${sum.neither} · target touched within chosen duration but contract lost ${sum.touchedButLost} of ${sum.targetTouchedInDur}</div>
+    <h4>By playbook</h4><table>${head}${rows(sum.byPlaybook)}</table><h4>By estimator</h4><table>${head}${rows(sum.byEstimator)}</table></div>
+    <div class="panel" style="margin-top:10px"><h3>Accuracy by chosen duration <span class="mu">(shadow outcomes, ties lose)</span></h3>
+    <table><tr><th>Duration</th><th>Hit rate (95% CI)</th><th>Mean break-even</th></tr>${acc.map((a) => `<tr><td>${esc(a.key)}</td><td>${ci(a.ci)}</td><td class="num">${pct(a.breakEven, 1)}</td></tr>`).join('') || '<tr><td colspan="3" class="mu">no resolved records yet</td></tr>'}</table></div>`;
+}
 function renderPerf(S) {
   const by = new Map();
   S.trades.filter((t) => t.status === 'closed' && t.result !== 'unknown' && Number.isFinite(t.profit)).forEach((t) => { if (!by.has(t.market)) by.set(t.market, []); by.get(t.market).push(t); });
@@ -132,9 +158,9 @@ function renderLive(S) {
   drawChart(m);
   const sig = m.signal;
   $('bzSignal').innerHTML = sig && sig.direction ? `<div class="sig ${sig.gate === GATE.OK ? (sig.direction === 'Rise' ? 'ok' : 'bad') : ''}">
-      <div class="row"><b class="${sig.direction === 'Rise' ? 'up' : 'dn'}" style="font-size:18px">${esc(sig.direction)}</b><span class="pill">${esc(sig.duration)}</span><span class="pill ${sig.gate === GATE.OK ? (sig.direction === 'Rise' ? 'ok' : 'bad') : 'warn'}">${esc(sig.gate)}</span>${sig.proxy ? '<span class="pill proxy">uses proxy</span>' : ''}</div>
+      <div class="row"><b class="${sig.direction === 'Rise' ? 'up' : 'dn'}" style="font-size:18px">${esc(sig.direction)}</b><span class="pill">${esc(sig.duration)}${sig.manual ? ' · manual duration' : ''}</span><span class="pill ${sig.gate === GATE.OK ? (sig.direction === 'Rise' ? 'ok' : 'bad') : 'warn'}">${esc(sig.gate)}</span>${sig.proxy ? '<span class="pill proxy">uses proxy</span>' : ''}</div>
       <div class="note num">Signal strength ${pct(sig.strength, 0)} · ${sig.agree}/${sig.total} analysis features agree${sig.quote ? ` · Deriv quote: stake ${sig.quote.ask}, payout ${sig.quote.payout}` : ''}</div>
-      <div class="note"><b>${esc(sig.playbook || '3-min analysis')}</b>${sig.provisional ? ' (provisional trigger)' : ''} · ${esc(sig.reason || '')}</div>${(sig.reasons || []).length ? `<div class="note">${sig.reasons.map(esc).join('; ')}</div>` : ''}<div class="note">Drivers: ${(sig.drivers || []).map(esc).join(', ') || '-'}. Decided ${sig.decisionTs ? new Date(sig.decisionTs * 1000).toLocaleTimeString() : ''} for a ${sig.durationSec || 180}s Rise/Fall (exit vs entry; a tie loses). Score is a rule-based confluence, not a win probability.</div></div>`
+      ${lifetimeHtml(sig)}<div class="note"><b>${esc(sig.playbook || 'analysis')}</b>${sig.provisional ? ' (provisional trigger)' : ''} · ${esc(sig.reason || '')}</div>${(sig.reasons || []).length ? `<div class="note">${sig.reasons.map(esc).join('; ')}</div>` : ''}<div class="note">Drivers: ${(sig.drivers || []).map(esc).join(', ') || '-'}. Decided ${sig.decisionTs ? new Date(sig.decisionTs * 1000).toLocaleTimeString() : ''} for a ${esc(sig.duration)} Rise/Fall (exit vs entry; a tie loses). Score is a rule-based confluence, not a win probability.</div></div>`
     : `<div class="sig"><b>${esc(E.marketGate(m).label)}</b><div class="note">Collecting ticks to analyse this market.</div></div>`;
 }
 

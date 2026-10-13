@@ -3,7 +3,7 @@
  * Small candle-based indicator helpers for the 3-minute path. Statistical tools reuse ./stats.js.
  * All functions take closed candles and return the latest value (or a series where noted).
  */
-import { varianceRatio, ouFit, kalmanTrend, cusumSeries } from './stats.js?v=14';
+import { varianceRatio, ouFit, kalmanTrend, cusumSeries } from './stats.js?v=15';
 
 export function emaSeries(x, n) {
   const k = 2 / (n + 1), out = [];
@@ -95,12 +95,20 @@ export function hurst(x) {
 }
 
 /** Statistical regime read on recent tick prices (tick-rate agnostic: caller passes epochs for the half-life scale). */
-export function statRegime(prices, epochs) {
+/** EWMA variance of tick changes, returned per second (variance rate). */
+export function ewmaVarRate(prices, epochs, lambda = 0.94) {
+  let v = null;
+  for (let i = 1; i < prices.length; i++) { const d = prices[i] - prices[i - 1]; v = v == null ? d * d : lambda * v + (1 - lambda) * d * d; }
+  const dt = prices.length > 1 ? (epochs[epochs.length - 1] - epochs[0]) / (epochs.length - 1) : NaN;
+  return v != null && dt > 0 ? v / dt : NaN;
+}
+
+export function statRegime(prices, epochs, lambda = 0.94) {
   const p = prices.slice(-600), e = epochs.slice(-600);
   if (p.length < 100) return null;
   const dt = (e[e.length - 1] - e[0]) / (e.length - 1) || 1;
   const vr = varianceRatio(p, 4), ou = ouFit(p), kal = kalmanTrend(p), rets = p.slice(1).map((v, i) => v - p[i]);
   const cus = cusumSeries(rets);
   const sd = Math.sqrt(rets.reduce((a, b) => a + b * b, 0) / rets.length) || 1;
-  return { hurst: hurst(p), vr, halfLifeSec: ou.halfLife * dt, kalSlope: last(kal.velocity) / sd, cusum: typeof last(cus) === 'number' ? last(cus) : 0, sigmaPerSec: sd / Math.sqrt(dt) };
+  return { hurst: hurst(p), vr, halfLifeSec: ou.halfLife * dt, kalSlope: last(kal.velocity) / sd, cusum: typeof last(cus) === 'number' ? last(cus) : 0, sigmaPerSec: Math.sqrt(ewmaVarRate(p, e, lambda)), sigma2PerSec: ewmaVarRate(p, e, lambda), kalVelPerSec: last(kal.velocity) / dt, tickSecs: dt };
 }

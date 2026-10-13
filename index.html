@@ -2281,6 +2281,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       <button class="btn" id="bzLogin">Login with Deriv</button>
       <button class="btn primary" id="bzConnect">Connect</button>
       <label class="mu" style="font-size:12px">Stake <input id="bzStake" type="number" min="0.35" step="0.05" value="1" style="width:70px"></label>
+      <label class="mu" style="font-size:12px" title="Auto = duration from the signal's expected lifetime; picking one is a manual override">Duration <select id="bzDur"><option value="">Auto (lifetime)</option></select></label>
       <label class="mu" style="font-size:12px" title="Multiply the stake after each loss; 1 = off">Martingale x <input id="bzMart" type="number" min="1" step="0.1" value="1" style="width:60px"></label>
       <label class="mu" style="font-size:12px"><input id="bzRealOk" type="checkbox"> I confirm trading REAL money with BAZU (stake capped)</label>
     </div>
@@ -2288,7 +2289,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   <div class="note" id="bzWhy" style="margin:6px 0"></div>
 <div class="bz-metrics" id="bzMetrics"></div>
   <div class="bz-tabs" id="bzTabs">
-    <button data-t="live" class="on">Live</button><button data-t="accuracy">Accuracy log</button><button data-t="exec">Execution</button><button data-t="perf">Performance log</button>
+    <button data-t="live" class="on">Live</button><button data-t="accuracy">Accuracy log</button><button data-t="exec">Execution</button><button data-t="perf">Performance log</button><button data-t="calib">Calibration</button>
   </div>
   <div class="bz-pane on" id="bzp-live">
     <div class="bz-cols">
@@ -2302,6 +2303,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   <div class="bz-pane" id="bzp-accuracy"><div id="bzAccuracy"></div></div>
   <div class="bz-pane" id="bzp-exec"><div id="bzExec"></div></div>
   <div class="bz-pane" id="bzp-perf"><div id="bzPerf"></div></div>
+<div class="bz-pane" id="bzp-calib"><div id="bzCalib"></div></div>
 </div>
 
 <div id="page-rfabot" class="page">
@@ -32960,7 +32962,7 @@ try {
   </div>
 </div>
 
-<script type="module" src="src/bazu/page.js?v=14"></script>
+<script type="module" src="src/bazu/page.js?v=15"></script>
 <script type="module" src="src/trading/fiveTickSignalEngine.js"></script>
 <script type="module" src="src/trading/multiplierHelpers.js"></script>
 <script type="module" src="src/trading/gridSetHelper.js"></script>

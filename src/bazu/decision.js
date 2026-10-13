@@ -5,7 +5,7 @@
  * -> Execution (execution.js). No UI, no network.
  */
 
-import { MIN_STRENGTH } from './predict.js?v=14';
+import { MIN_STRENGTH } from './predict.js?v=15';
 
 export const GATE = Object.freeze({ OK: 'tradable', WEAK: 'weak signal', NO_QUOTE: 'awaiting Deriv quote', NO_DATA: 'waiting for data' });
 
@@ -19,8 +19,9 @@ export function buildTradeSignal({ symbol, prediction, duration, quote, now = Da
     strength: prediction.strength, agree: up ? prediction.up : prediction.down, total: prediction.total,
     drivers: prediction.drivers, proxy: prediction.proxy, quote, at: now,
     playbook: prediction.playbook, reason: prediction.reason, vetoes: prediction.vetoes, reasons: prediction.reasons, parts: prediction.parts, patterns: prediction.patterns, factors: prediction.factors, decisionTs: prediction.decisionTs, provisional: prediction.provisional, durationSec: prediction.durationSec,
+    lifetime: prediction.lifetime, manual: !!prediction.manual, breakEven: quote && quote.payout > 0 ? quote.ask / quote.payout : null,
   };
-  if (prediction.wait) return { ...base, gate: GATE.WEAK };
+  if (prediction.wait || !duration) return { ...base, gate: GATE.WEAK };
   if (!quote || !(quote.ask > 0) || !(quote.payout > 0)) return { ...base, gate: GATE.NO_QUOTE };
   return { ...base, gate: prediction.strength >= min ? GATE.OK : GATE.WEAK };
 }
