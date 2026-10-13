@@ -66,5 +66,5 @@ export function watchContracts(cb) {
 
 export function requestContractUpdate(contractId) {
   const ws = window.gridWs;
-  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ proposal_open_contract: 1, contract_id: Number(contractId), subscribe: 1 }));
+  if (ws && ws.readyState === 1 && /^\d+$/.test(String(contractId))) ws.send(JSON.stringify({ proposal_open_contract: 1, contract_id: Number(contractId), subscribe: 1 }));
 }

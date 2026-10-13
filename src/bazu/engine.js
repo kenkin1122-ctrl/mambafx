@@ -7,13 +7,13 @@
  * -> Execution (execution.js). The UI only calls commands and reads `state`.
  */
 
-import { parseActiveSymbols, parseContractsFor, pickDurations } from './universe.js?v=3';
-import { durationKey } from './validation.js?v=3';
-import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=3';
-import { decimalsFromPip } from './timeframes.js?v=3';
-import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=3';
-import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=3';
-import { wilson } from './stats.js?v=3';
+import { parseActiveSymbols, parseContractsFor, pickDurations } from './universe.js?v=4';
+import { durationKey } from './validation.js?v=4';
+import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=4';
+import { decimalsFromPip } from './timeframes.js?v=4';
+import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=4';
+import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=4';
+import { wilson } from './stats.js?v=4';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;
@@ -29,7 +29,7 @@ export const state = {
 const listeners = new Set();
 export const onChange = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
 let dirty = false;
-function emit() { if (dirty) return; dirty = true; setTimeout(() => { dirty = false; listeners.forEach((f) => { try { f(state); } catch (e) { console.error(e); } }); }, 120); }
+function emit() { if (dirty) return; dirty = true; setTimeout(() => { dirty = false; listeners.forEach((f) => { try { f(state); } catch (e) { console.error(e); } }); }, 400); }
 function log(msg, kind = 'info') { state.log.unshift({ t: Date.now(), msg, kind }); state.log.length = Math.min(state.log.length, 200); emit(); }
 
 // ---------- public socket ----------
@@ -134,7 +134,7 @@ let sWorker = null;
 const jobs = new Map();
 let jobSeq = 0;
 function mkWorker() {
-  const w = new Worker(new URL('./worker.js?v=3', import.meta.url), { type: 'module' });
+  const w = new Worker(new URL('./worker.js?v=4', import.meta.url), { type: 'module' });
   w.onmessage = (ev) => { const j = jobs.get(ev.data.id); if (!j) return; jobs.delete(ev.data.id); ev.data.type === 'error' ? j.reject(new Error(ev.data.error)) : j.resolve(ev.data); };
   w.onerror = (e) => log(`worker error: ${e.message}`, 'bad');
   return w;
@@ -258,7 +258,14 @@ function onContract(c) {
   }
   emit();
 }
-export function attachAccount() { watchContracts(onContract); state.trades.filter((t) => t.status === 'open').forEach((t) => requestContractUpdate(t.id)); }
+let attachedWs = null;
+export function attachAccount() {
+  if (attachedWs === window.gridWs) return;
+  attachedWs = window.gridWs;
+  watchContracts(onContract);
+  state.trades.forEach((t) => { if (t.status === 'open' && !/^\d+$/.test(String(t.id))) { t.status = 'closed'; t.result = 'unknown'; } });
+  state.trades.filter((t) => t.status === 'open').forEach((t) => requestContractUpdate(t.id));
+}
 
 // ---------- derived metrics (all from recorded Deriv data) ----------
 export function metrics() {
