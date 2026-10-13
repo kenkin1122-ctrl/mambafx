@@ -7,13 +7,13 @@
  * -> Execution (execution.js). The UI only calls commands and reads `state`.
  */
 
-import { parseActiveSymbols, parseContractsFor, pickDurations } from './universe.js';
-import { durationKey } from './validation.js';
-import { buildTradeSignal, modeMayAct, GATE } from './decision.js';
-import { decimalsFromPip } from './timeframes.js';
-import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js';
-import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js';
-import { wilson } from './stats.js';
+import { parseActiveSymbols, parseContractsFor, pickDurations } from './universe.js?v=3';
+import { durationKey } from './validation.js?v=3';
+import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=3';
+import { decimalsFromPip } from './timeframes.js?v=3';
+import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=3';
+import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=3';
+import { wilson } from './stats.js?v=3';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;
@@ -134,7 +134,7 @@ let sWorker = null;
 const jobs = new Map();
 let jobSeq = 0;
 function mkWorker() {
-  const w = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
+  const w = new Worker(new URL('./worker.js?v=3', import.meta.url), { type: 'module' });
   w.onmessage = (ev) => { const j = jobs.get(ev.data.id); if (!j) return; jobs.delete(ev.data.id); ev.data.type === 'error' ? j.reject(new Error(ev.data.error)) : j.resolve(ev.data); };
   w.onerror = (e) => log(`worker error: ${e.message}`, 'bad');
   return w;
