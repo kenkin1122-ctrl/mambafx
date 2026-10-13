@@ -1,44 +1,28 @@
 /**
  * src/bazu/decision.js
  *
- * DECISION layer (pure). Prediction (validated setups + live signal) -> Decision (trade signal / gate)
+ * DECISION layer (pure). Prediction (Rise/Fall call) -> Decision (trade signal / gate)
  * -> Execution (execution.js). No UI, no network.
  */
 
-import { breakEven } from './stats.js';
+import { MIN_STRENGTH } from './predict.js';
 
-export const GATE = Object.freeze({ OK: 'tradable', NO_EDGE: 'No validated edge', BELOW_BE: 'edge below break-even', NO_QUOTE: 'awaiting Deriv quote', STALE: 'validation stale' });
+export const GATE = Object.freeze({ OK: 'tradable', WEAK: 'weak signal', NO_QUOTE: 'awaiting Deriv quote', NO_DATA: 'waiting for data' });
 
-/** Setups for a market+duration that are Published (the only tradable stage). */
-export function publishedSetups(validation) {
-  return (validation?.setups || []).filter((s) => s.stage === 'Published');
-}
-
-/**
- * Build a trade signal from a firing, published setup and the quote Deriv actually gave.
- * Tradable only when Wilson LCB of the out-of-sample hit rate > ask/payout.
- */
-export function buildTradeSignal({ symbol, setup, direction, quote, now = Date.now() }) {
-  if (!setup || setup.stage !== 'Published') return { gate: GATE.NO_EDGE };
-  if (!quote || !(quote.ask > 0) || !(quote.payout > 0)) return { gate: GATE.NO_QUOTE, market: symbol };
-  const be = breakEven(quote.ask, quote.payout);
-  const lcb = setup.oos.lo;
-  const margin = lcb - be;
-  return {
-    market: symbol, direction: direction > 0 ? 'Rise' : 'Fall', contractType: direction > 0 ? 'CALL' : 'PUT',
-    duration: setup.duration, probability: setup.probability, oosHitRate: setup.oos.p, oosN: setup.oos.n,
-    oosLcb: lcb, evidence: [setup.id], breakEven: be, margin, proxy: !!setup.proxy,
-    quote, at: now, gate: margin > 0 ? GATE.OK : GATE.BELOW_BE,
+/** Build a trade signal from a prediction and the quote Deriv gave. Tradable when strength >= MIN_STRENGTH. */
+export function buildTradeSignal({ symbol, prediction, duration, quote, now = Date.now() }) {
+  if (!prediction) return { gate: GATE.NO_DATA, market: symbol };
+  const up = prediction.direction > 0;
+  const base = {
+    market: symbol, direction: up ? 'Rise' : 'Fall', contractType: up ? 'CALL' : 'PUT', duration,
+    strength: prediction.strength, agree: up ? prediction.up : prediction.down, total: prediction.total,
+    drivers: prediction.drivers, proxy: prediction.proxy, quote, at: now,
   };
+  if (!quote || !(quote.ask > 0) || !(quote.payout > 0)) return { ...base, gate: GATE.NO_QUOTE };
+  return { ...base, gate: prediction.strength >= MIN_STRENGTH ? GATE.OK : GATE.WEAK };
 }
 
-/** Pick the best firing signal for a market (highest margin over break-even). */
-export function bestSignal(candidates) {
-  const ok = candidates.filter((c) => c.gate === GATE.OK).sort((a, b) => b.margin - a.margin);
-  return ok[0] || candidates.sort((a, b) => (b.margin ?? -1) - (a.margin ?? -1))[0] || null;
-}
-
-/** Whether a mode may act on a signal for a market. Manual is never gated here (demo flag only). */
+/** Whether a mode may act on a signal. Manual is never gated. */
 export function modeMayAct(mode, signal) {
   if (mode === 'manual') return true;
   return !!signal && signal.gate === GATE.OK;

@@ -586,7 +586,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button id="navAggression" onclick="showPage('aggression')">🔥 Aggression Bot</button>
     <button id="navMtf" onclick="showPage('mtf')">🧭 MTF Structure</button>
     <button id="navNjanja" onclick="showPage('njanja')">🏛 Njanja Analysis</button>
-    <button id="navBazu" onclick="showPage('bazu')">🐍 BAZU Rise/Fall</button>
+    <button id="navBazu" onclick="showPage('bazu')">👑 BAZU Rise/Fall</button>
     <button id="navRfaBot" onclick="showPage('rfabot')">📊 Rise/Fall Autobot</button>
     <button id="navMsdExplorer" onclick="showPage('msdexplorer')">🔬 Database Explorer</button>
     <button id="navMsdFeatures" onclick="showPage('msdfeatures')">📶 Feature Completeness</button>
@@ -2265,12 +2265,11 @@ table.an-table tbody tr:last-child td{border-bottom:none}
 </div><!-- /page-aggression -->
 <div id="page-bazu" class="page">
   <div class="bz-head">
-    <div><div class="bz-title">BAZU · Rise/Fall</div><div class="bz-sub">Validated-edge trading across all Deriv synthetic indices · real Deriv quotes &amp; settlements only</div></div>
+    <div><div class="bz-title">BAZU · Rise/Fall</div><div class="bz-sub">Rise/Fall predictions across all Deriv synthetic indices · real Deriv quotes &amp; settlements only</div></div>
     <span id="bzAcctPill" class="pill">NOT CONNECTED</span>
     <span class="pill"><span id="bzDot" class="dot"></span><span id="bzStatus">idle</span></span>
     <div class="bz-grow"></div>
     <div class="seg" id="bzMode"><button data-m="manual" class="on">Manual</button><button data-m="semi">Semi-auto</button><button data-m="auto">Auto</button></div>
-    <button class="btn" id="bzScan">Scan &amp; validate</button>
     <button class="btn primary" id="bzStart">Start</button>
     <button class="btn" id="bzStop">Stop</button>
   </div>
@@ -2286,18 +2285,17 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   </div>
   <div class="bz-metrics" id="bzMetrics"></div>
   <div class="bz-tabs" id="bzTabs">
-    <button data-t="live" class="on">Live</button><button data-t="validation">Validation</button><button data-t="accuracy">Accuracy log</button><button data-t="exec">Execution</button>
+    <button data-t="live" class="on">Live</button><button data-t="accuracy">Accuracy log</button><button data-t="exec">Execution</button>
   </div>
   <div class="bz-pane on" id="bzp-live">
     <div class="bz-cols">
       <div class="panel"><h3>Markets <span class="mu" id="bzMktCount"></span></h3><div class="cards" id="bzCards"></div></div>
       <div>
-        <div class="panel" style="margin-bottom:12px"><h3 id="bzSelTitle">Select a market</h3><canvas id="bzChart" width="900" height="300"></canvas><div class="note" id="bzChartNote"></div></div>
+        <div class="panel" style="margin-bottom:12px"><h3 id="bzSelTitle">Select a market</h3><div class="seg" id="bzTf" style="margin-bottom:8px;flex-wrap:wrap"></div><canvas id="bzChart" width="900" height="300"></canvas><div class="note" id="bzChartNote"></div></div>
         <div class="panel"><h3>Trade signal</h3><div id="bzSignal" class="note">No market selected.</div></div>
       </div>
     </div>
   </div>
-  <div class="bz-pane" id="bzp-validation"><div id="bzValidation"></div></div>
   <div class="bz-pane" id="bzp-accuracy"><div id="bzAccuracy"></div></div>
   <div class="bz-pane" id="bzp-exec"><div id="bzExec"></div></div>
 </div>

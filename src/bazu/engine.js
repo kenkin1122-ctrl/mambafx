@@ -9,13 +9,14 @@
 
 import { parseActiveSymbols, parseContractsFor, pickDurations } from './universe.js';
 import { durationKey } from './validation.js';
-import { buildTradeSignal, bestSignal, modeMayAct, GATE, publishedSetups } from './decision.js';
+import { buildTradeSignal, modeMayAct, GATE } from './decision.js';
+import { decimalsFromPip } from './timeframes.js';
 import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js';
 import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js';
 import { wilson } from './stats.js';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
-const HISTORY_PAGES = 6;
+const HISTORY_PAGES = 2;
 const MAX_TICKS = 20000;
 const TRADES_KEY = 'bazu_trades_v1';
 
@@ -45,9 +46,9 @@ function openWs() {
     ws.onclose = () => { state.status = 'reconnecting'; wsReady = null; emit(); setTimeout(() => { if (state.markets.size) reconnect(); }, 3000); };
     ws.onmessage = (ev) => {
       const m = JSON.parse(ev.data);
-      if (m.msg_type === 'tick' && m.tick) return onTick(m.tick);
       const w = m.req_id && waiting.get(m.req_id);
       if (w) { waiting.delete(m.req_id); m.error ? w.reject(new Error(m.error.message)) : w.resolve(m); }
+      if (m.msg_type === 'tick' && m.tick) onTick(m.tick);
     };
   });
   return wsReady;
@@ -87,7 +88,7 @@ export async function discover() {
       const rf = parseContractsFor(cf);
       if (!rf) { state.scan.done++; continue; }
       const durations = pickDurations(rf.ranges, 2);
-      state.markets.set(s.symbol, { ...s, ranges: rf.ranges, durations, prices: [], epochs: [], last: null, lastEpoch: null, tickCount: 0, val: {}, status: 'discovered', signal: null, historyLoaded: false });
+      state.markets.set(s.symbol, { ...s, ranges: rf.ranges, durations, dp: decimalsFromPip(s.pip), prices: [], epochs: [], last: null, lastEpoch: null, tickCount: 0, status: 'discovered', signal: null, historyLoaded: false });
     } catch (e) { log(`contracts_for ${s.symbol}: ${e.message}`, 'warn'); }
     state.scan.done++; emit();
   }
@@ -95,11 +96,19 @@ export async function discover() {
   log(`Universe: ${state.markets.size} synthetic indices offer Rise/Fall (of ${syms.length} active)`);
   for (const sym of state.markets.keys()) { try { await send({ ticks: sym, subscribe: 1 }); } catch { /* ignore */ } }
   state.status = 'live'; emit();
+  const q = [...state.markets.keys()];
+  for (let w = 0; w < 4; w++) (async () => { while (q.length) { try { await loadHistory(q.shift()); } catch (e) { log('history: ' + e.message, 'warn'); } } })();
 }
 
-async function loadHistory(sym) {
+const histBusy = new Map();
+function loadHistory(sym) {
   const m = state.markets.get(sym);
-  if (m.historyLoaded) return;
+  if (m.historyLoaded) return Promise.resolve();
+  if (!histBusy.has(sym)) histBusy.set(sym, loadHistoryNow(sym).finally(() => histBusy.delete(sym)));
+  return histBusy.get(sym);
+}
+async function loadHistoryNow(sym) {
+  const m = state.markets.get(sym);
   let end = 'latest', P = [], E = [];
   for (let page = 0; page < HISTORY_PAGES; page++) {
     const r = await send({ ticks_history: sym, end, count: 1000, style: 'ticks' });
@@ -116,7 +125,7 @@ async function loadHistory(sym) {
 }
 
 // ---------- workers ----------
-let vWorker = null, sWorker = null;
+let sWorker = null;
 const jobs = new Map();
 let jobSeq = 0;
 function mkWorker() {
@@ -129,35 +138,20 @@ function runJob(w, payload) {
   return new Promise((resolve, reject) => { const id = ++jobSeq; jobs.set(id, { resolve, reject }); w.postMessage({ ...payload, id }); });
 }
 
-// ---------- scan / validation ----------
-let scanToken = 0;
-export async function scan({ nullRuns = 2 } = {}) {
-  const token = ++scanToken;
-  if (!state.markets.size) await discover();
-  vWorker = vWorker || mkWorker();
-  const list = [...state.markets.values()].filter((m) => m.durations.length);
-  state.scan = { done: 0, total: list.length, active: true, phase: 'validation' }; emit();
-  for (const m of list) {
-    if (token !== scanToken) return;
-    try {
-      m.status = 'loading history'; emit();
-      await loadHistory(m.symbol);
-      for (const d of m.durations) {
-        if (token !== scanToken) return;
-        m.status = `validating ${durationKey(d)}`; emit();
-        const r = await runJob(vWorker, { type: 'validate', symbol: m.symbol, prices: m.prices.slice(), epochs: m.epochs.slice(), duration: d, nullRuns, permutations: 150 });
-        m.val[durationKey(d)] = r.result;
-      }
-      const pub = Object.values(m.val).reduce((a, v) => a + v.counts.published, 0);
-      m.status = pub ? `${pub} validated setup${pub > 1 ? 's' : ''}` : 'No validated edge';
-    } catch (e) { m.status = 'error'; log(`${m.symbol}: ${e.message}`, 'warn'); }
-    state.scan.done++; emit();
-  }
-  state.scan.active = false; log('Scan complete'); emit();
+// ---------- candles for the chart ----------
+const candleBusy = new Set();
+export function ensureCandles(m, tf) {
+  if (!tf.remote) return;
+  const c = (m.candleCache ||= {})[tf.key], k = m.symbol + tf.key;
+  if ((c && Date.now() - c.at < 15000) || candleBusy.has(k)) return;
+  candleBusy.add(k);
+  send({ ticks_history: m.symbol, style: 'candles', granularity: tf.secs, count: 150, end: 'latest' })
+    .then((r) => { m.candleCache[tf.key] = { at: Date.now(), candles: (r.candles || []).map((x) => ({ epoch: x.epoch, open: +x.open, high: +x.high, low: +x.low, close: +x.close })) }; })
+    .catch((e) => log('candles ' + m.symbol + ': ' + e.message, 'warn'))
+    .finally(() => { candleBusy.delete(k); emit(); });
 }
-export function stopScan() { scanToken++; state.scan.active = false; emit(); }
 
-// ---------- live signals / decisions ----------
+// ---------- predictions ----------
 const quoteCache = new Map();
 async function quoteFor(sym, d, type) {
   const k = `${sym}|${durationKey(d)}|${type}`, c = quoteCache.get(k);
@@ -175,28 +169,19 @@ async function signalTick() {
   try {
     sWorker = sWorker || mkWorker();
     for (const m of state.markets.values()) {
-      const cands = [];
-      for (const d of m.durations) {
-        const v = m.val[durationKey(d)];
-        const pub = publishedSetups(v);
-        if (!pub.length || m.prices.length < 800) continue;
-        const r = await runJob(sWorker, { type: 'signal', prices: m.prices.slice(-2500), epochs: m.epochs.slice(-2500), setupIds: pub.map((s) => s.id) });
-        for (const s of pub) {
-          const dir = r.result[s.id];
-          if (!dir) continue;
-          try {
-            const q = await quoteFor(m.symbol, d, dir > 0 ? 'CALL' : 'PUT');
-            cands.push({ ...buildTradeSignal({ symbol: m.symbol, setup: s, direction: dir, quote: q }), epoch: r.lastEpoch, durationObj: d });
-          } catch { /* quote failure: no signal */ }
-        }
-      }
-      const best = cands.length ? bestSignal(cands) : null;
-      m.signal = best; if (best) state.signals.set(m.symbol, best);
-      if (best && state.running && state.mode === 'auto' && modeMayAct('auto', best)) await autoTrade(m, best);
+      if (!m.historyLoaded) { try { await loadHistory(m.symbol); } catch { continue; } }
+      if (m.prices.length < 300 || !m.durations.length) continue;
+      const d = m.durations[0];
+      const r = await runJob(sWorker, { type: 'predict', prices: m.prices.slice(-1500), epochs: m.epochs.slice(-1500) });
+      let q = null;
+      if (r.result) { try { q = await quoteFor(m.symbol, d, r.result.direction > 0 ? 'CALL' : 'PUT'); } catch { /* no quote */ } }
+      const sig = { ...buildTradeSignal({ symbol: m.symbol, prediction: r.result, duration: durationKey(d), quote: q }), epoch: r.lastEpoch, durationObj: d };
+      m.signal = sig; state.signals.set(m.symbol, sig);
+      emit();
+      if (state.running && state.mode === 'auto' && modeMayAct('auto', sig)) await autoTrade(m, sig);
     }
   } finally { sigBusy = false; emit(); }
 }
-
 async function autoTrade(m, sig) {
   if (lastActedEpoch.get(m.symbol) === sig.epoch) return;
   lastActedEpoch.set(m.symbol, sig.epoch);
@@ -235,7 +220,7 @@ export async function placeOrder({ symbol, contractType, duration, source = 'man
       id: String(res.buy.contract_id), market: symbol, name: m?.name, contractType, direction: contractType === 'CALL' ? 'Rise' : 'Fall',
       duration: durationKey(duration), stake, buyPrice: res.buy.buy_price, payout: res.buy.payout ?? res.proposal.payout,
       entry: null, exit: null, profit: null, status: 'open', isReal: res.isReal, source, ts: Date.now(),
-      probability: signal?.probability ?? null, evidence: signal?.evidence || [], noEdge: !signal,
+      strength: signal?.strength ?? null, drivers: signal?.drivers || [],
     };
     state.trades.unshift(t); saveTrades(); watchContracts(onContract); requestContractUpdate(t.id);
     log(`${source} ${t.direction} ${symbol} ${t.duration} @ ${t.stake} (${t.isReal ? 'REAL' : 'DEMO'})`, 'ok');
@@ -273,13 +258,11 @@ export function metrics() {
     sessionPnl: closed.reduce((a, t) => a + t.profit, 0), closed: closed.length, wins, win: wilson(wins, closed.length),
     exposure: exposureLevel(openStake, acc.balance),
     markets: state.markets.size, tradable: [...state.markets.values()].filter((m) => m.signal?.gate === GATE.OK).length,
-    validated: [...state.markets.values()].filter((m) => Object.values(m.val).some((v) => v.counts.published)).length,
     failed: closed.length - wins,
   };
 }
 
 export function marketGate(m) {
-  const pub = Object.values(m.val).reduce((a, v) => a + v.counts.published, 0);
-  if (!Object.keys(m.val).length) return { label: 'Not validated yet', edge: false };
-  return pub ? { label: `${pub} validated`, edge: true } : { label: GATE.NO_EDGE, edge: false };
+  const g = m.signal?.gate;
+  return { label: g || GATE.NO_DATA, ok: g === GATE.OK };
 }
