@@ -110,15 +110,15 @@ function renderLive(S) {
   $('bzCards').innerHTML = arr.map((m) => {
     const sig = m.signal, has = sig && sig.direction;
     return `<div class="card ${S.selected === m.symbol ? 'sel' : ''}" data-sym="${esc(m.symbol)}"><div class="t"><span>${esc(m.symbol)}</span><span class="num">${fmtPrice(m.last, m.dp)}</span></div>
-      <div class="s">${esc(m.name)}</div><div class="s"><span class="pill ${has && sig.gate === GATE.OK ? 'ok' : ''}">${has ? esc(sig.direction + ' ' + sig.duration) : esc(E.marketGate(m).label)}</span> ${has ? `<span class="mu">${pct(sig.strength, 0)}</span>` : ''}</div></div>`;
+      <div class="s">${esc(m.name)}</div><div class="s"><span class="pill ${has && sig.gate === GATE.OK ? (sig.direction === 'Rise' ? 'ok' : 'bad') : ''}">${has ? esc(sig.direction + ' ' + sig.duration) : esc(E.marketGate(m).label)}</span> ${has ? `<span class="mu">${pct(sig.strength, 0)}</span>` : ''}</div></div>`;
   }).join('') || '<div class="note">Discovering markets from Deriv…</div>';
   const m = S.markets.get(S.selected);
   if (!m) return;
   $('bzSelTitle').textContent = `${m.symbol} · ${m.name}`;
   drawChart(m);
   const sig = m.signal;
-  $('bzSignal').innerHTML = sig && sig.direction ? `<div class="sig ${sig.gate === GATE.OK ? 'ok' : ''}">
-      <div class="row"><b class="${sig.direction === 'Rise' ? 'up' : 'dn'}" style="font-size:18px">${esc(sig.direction)}</b><span class="pill">${esc(sig.duration)}</span><span class="pill ${sig.gate === GATE.OK ? 'ok' : 'warn'}">${esc(sig.gate)}</span>${sig.proxy ? '<span class="pill proxy">uses proxy</span>' : ''}</div>
+  $('bzSignal').innerHTML = sig && sig.direction ? `<div class="sig ${sig.gate === GATE.OK ? (sig.direction === 'Rise' ? 'ok' : 'bad') : ''}">
+      <div class="row"><b class="${sig.direction === 'Rise' ? 'up' : 'dn'}" style="font-size:18px">${esc(sig.direction)}</b><span class="pill">${esc(sig.duration)}</span><span class="pill ${sig.gate === GATE.OK ? (sig.direction === 'Rise' ? 'ok' : 'bad') : 'warn'}">${esc(sig.gate)}</span>${sig.proxy ? '<span class="pill proxy">uses proxy</span>' : ''}</div>
       <div class="note num">Signal strength ${pct(sig.strength, 0)} · ${sig.agree}/${sig.total} analysis features agree${sig.quote ? ` · Deriv quote: stake ${sig.quote.ask}, payout ${sig.quote.payout}` : ''}</div>
       <div class="note">Main drivers: ${sig.drivers.map(esc).join(', ') || '—'}. Strength is the consensus of the analysis features, not a win probability.</div></div>`
     : `<div class="sig"><b>${esc(E.marketGate(m).label)}</b><div class="note">Collecting ticks to analyse this market.</div></div>`;
@@ -147,8 +147,10 @@ function drawChart(m) {
     ctx.beginPath(); ctx.moveTo(x + cw / 2, y(c.high)); ctx.lineTo(x + cw / 2, y(c.low)); ctx.stroke();
     ctx.fillRect(x + 1, Math.min(y(c.open), y(c.close)), Math.max(1, cw - 2), Math.max(1, Math.abs(y(c.open) - y(c.close))));
   });
-  ctx.fillStyle = '#EAECEF'; ctx.font = '11px ui-monospace,Consolas,monospace';
   const lastPx = m.last ?? candles[candles.length - 1].close;
+  ctx.strokeStyle = '#4C8DFF'; ctx.lineWidth = 1; ctx.setLineDash([]);
+  ctx.beginPath(); ctx.moveTo(0, y(lastPx)); ctx.lineTo(W - 52, y(lastPx)); ctx.stroke();
+  ctx.fillStyle = '#EAECEF'; ctx.font = '11px ui-monospace,Consolas,monospace';
   ctx.fillText(fmtPrice(lastPx, m.dp), W - 56, y(lastPx) + 4);
   ctx.fillStyle = '#848E9C'; ctx.fillText(fmtPrice(hi, m.dp), W - 56, 12); ctx.fillText(fmtPrice(lo, m.dp), W - 56, H - 2);
   $('bzChartNote').textContent = `${tf.label} candles from real Deriv data (${candles.length} candles). Dashed lines: S/R zones with ≥2 touches.`;

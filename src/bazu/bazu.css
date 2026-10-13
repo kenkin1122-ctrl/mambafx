@@ -55,6 +55,7 @@
 #page-bazu .note{color:var(--bz-muted);font-size:11px;line-height:1.5}
 #page-bazu .sig{border:1px solid var(--bz-line);border-radius:10px;padding:10px;background:var(--bz-card);margin-bottom:8px}
 #page-bazu .sig.ok{border-color:var(--bz-buy)}
+#page-bazu .sig.bad{border-color:var(--bz-sell)}
 #page-bazu .bar{height:8px;border-radius:999px;background:var(--bz-line);overflow:hidden}
 #page-bazu .bar>i{display:block;height:100%;background:var(--bz-blue)}
 #page-bazu .log{font-size:11px;max-height:220px;overflow:auto}

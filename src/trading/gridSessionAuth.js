@@ -29,6 +29,7 @@ async function gridCheckSession(){
   if (gridLoggedIn){
     gridDiag(null);
     await gridLoadAccounts();
+    if (!gridWs && !gridConnecting && gridAccounts.length) gridConnect();
   } else {
     const pickBlock = $("gridAcctPickBlock"), loginBlock = $("gridLoginBlock");
     if (pickBlock) pickBlock.style.display = "none";

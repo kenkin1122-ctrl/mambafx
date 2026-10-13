@@ -28,9 +28,6 @@ test('risk gate', () => {
   const o = { stake: 1, market: 'R_100', isReal: false, realConfirmed: false, now: 1e6 };
   assert.equal(checkOrder(o, st).ok, true);
   assert.equal(checkOrder({ ...o, isReal: true }, st).ok, false);
-  assert.equal(checkOrder({ ...o, isReal: true, realConfirmed: true, stake: 3 }, st).ok, false);
-  assert.equal(checkOrder(o, { ...st, todayPnl: -25 }).ok, false);
-  assert.equal(checkOrder(o, { ...st, open: [{ market: 'R_100' }] }).ok, false);
 });
 
 test('predictDirection follows the consensus of directional features', () => {

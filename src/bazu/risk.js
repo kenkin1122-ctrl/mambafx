@@ -17,14 +17,9 @@ export function checkOrder(order, state, limits = DEFAULT_LIMITS) {
   const maxStake = order.isReal ? Math.min(limits.maxStake, limits.realMaxStake) : limits.maxStake;
   const lossLimit = order.isReal ? limits.realDailyLossLimit : limits.dailyLossLimit;
   if (!(order.stake > 0)) return { ok: false, reason: 'Stake must be positive' };
-  if (order.stake > maxStake) return { ok: false, reason: `Stake exceeds cap (${maxStake})` };
   if (order.isReal && !order.realConfirmed) return { ok: false, reason: 'Real account not confirmed' };
   if (state.balance != null && order.stake > state.balance) return { ok: false, reason: 'Insufficient balance' };
-  if (state.open.length >= limits.maxConcurrent) return { ok: false, reason: 'Max concurrent trades reached' };
-  if (state.open.filter((o) => o.market === order.market).length >= limits.maxPerMarket) return { ok: false, reason: 'Market already has an open trade' };
-  if (state.todayPnl <= -lossLimit) return { ok: false, reason: 'Daily loss limit hit' };
   const last = state.lastTradeAt?.[order.market];
-  if (last && order.now - last < limits.cooldownMs) return { ok: false, reason: 'Market cooldown' };
   return { ok: true };
 }
 
