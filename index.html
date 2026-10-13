@@ -3992,9 +3992,9 @@ function connect(){
       const discovered = _findDiscoveredSymbol(msg.active_symbols || [], SYMBOL);
       if (discovered){
         console.log("[deriv ws] resolved", SYMBOL, "->", discovered, "— subscribing");
-        _tickSubscriptionSymbol = discovered;
+        _tickSubscriptionSymbol = _symFields(discovered).sym;
         ws.send(JSON.stringify({ forget_all: "ticks" }));
-        ws.send(JSON.stringify({ ticks: discovered, subscribe: 1 }));
+        ws.send(JSON.stringify({ ticks: _tickSubscriptionSymbol, subscribe: 1 }));
       } else {
         console.warn("[deriv ws] could not find a match for", SYMBOL, "in active_symbols — see raw list above to adjust matching");
       }
@@ -4003,6 +4003,7 @@ function connect(){
     if (msg.msg_type === "tick" && msg.tick && msg.tick.symbol === _tickSubscriptionSymbol){
       const pip = msg.tick.pip_size;
       if (Number.isInteger(pip)) decimals = pip;
+      else if (pip > 0 && pip < 1) decimals = Math.round(-Math.log10(pip));
       const epoch = msg.tick.epoch ? Number(msg.tick.epoch) : Math.floor(Date.now()/1000);
       handleTick(Number(msg.tick.quote), epoch);
     }
