@@ -7,13 +7,13 @@
  * -> Execution (execution.js). The UI only calls commands and reads `state`.
  */
 
-import { parseActiveSymbols, parseContractsFor, pickDurations } from './universe.js?v=9';
-import { durationKey } from './validation.js?v=9';
-import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=9';
-import { decimalsFromPip } from './timeframes.js?v=9';
-import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=9';
-import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=9';
-import { wilson } from './stats.js?v=9';
+import { parseActiveSymbols, parseContractsFor, pickDurations } from './universe.js?v=10';
+import { durationKey } from './validation.js?v=10';
+import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=10';
+import { decimalsFromPip } from './timeframes.js?v=10';
+import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=10';
+import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=10';
+import { wilson } from './stats.js?v=10';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;
@@ -134,13 +134,13 @@ let sWorker = null;
 const jobs = new Map();
 let jobSeq = 0;
 function mkWorker() {
-  const w = new Worker(new URL('./worker.js?v=9', import.meta.url), { type: 'module' });
+  const w = new Worker(new URL('./worker.js?v=10', import.meta.url), { type: 'module' });
   w.onmessage = (ev) => { const j = jobs.get(ev.data.id); if (!j) return; jobs.delete(ev.data.id); ev.data.type === 'error' ? j.reject(new Error(ev.data.error)) : j.resolve(ev.data); };
-  w.onerror = (e) => log(`worker error: ${e.message}`, 'bad');
+  w.onerror = (e) => { log(`worker error: ${e.message}`, 'bad'); for (const j of jobs.values()) j.reject(new Error('worker failed')); jobs.clear(); };
   return w;
 }
 function runJob(w, payload) {
-  return new Promise((resolve, reject) => { const id = ++jobSeq; jobs.set(id, { resolve, reject }); w.postMessage({ ...payload, id }); });
+  return new Promise((resolve, reject) => { const id = ++jobSeq; const to = setTimeout(() => { jobs.delete(id); reject(new Error('worker timeout')); }, 8000); jobs.set(id, { resolve: (v) => { clearTimeout(to); resolve(v); }, reject: (e) => { clearTimeout(to); reject(e); } }); w.postMessage({ ...payload, id }); });
 }
 
 // ---------- candles for the chart ----------
@@ -176,10 +176,10 @@ async function signalTick() {
   try {
     sWorker = sWorker || mkWorker();
     for (const m of state.markets.values()) {
-      if (!m.historyLoaded) { try { await loadHistory(m.symbol); } catch { continue; } }
+      if (!m.historyLoaded) { loadHistory(m.symbol).catch(() => {}); }
       if (m.prices.length < 300 || !m.durations.length) continue;
       const d = m.durations[0];
-      const r = await runJob(sWorker, { type: 'predict', prices: m.prices.slice(-1500), epochs: m.epochs.slice(-1500) });
+      let r; try { r = await runJob(sWorker, { type: 'predict', prices: m.prices.slice(-1500), epochs: m.epochs.slice(-1500) }); } catch (e) { log('predict ' + m.symbol + ': ' + e.message, 'warn'); if (/worker/.test(e.message)) { try { sWorker.terminate(); } catch {} sWorker = mkWorker(); } continue; }
       let q = null;
       if (r.result && r.result.strength >= MIN_STRENGTH) { try { q = await quoteFor(m.symbol, d, r.result.direction > 0 ? 'CALL' : 'PUT'); } catch { /* no quote */ } }
       const sig = { ...buildTradeSignal({ symbol: m.symbol, prediction: r.result, duration: durationKey(d), quote: q }), epoch: r.lastEpoch, durationObj: d };
