@@ -7,13 +7,14 @@
  * -> Execution (execution.js). The UI only calls commands and reads `state`.
  */
 
-import { parseActiveSymbols, parseContractsFor, pickDurations } from './universe.js?v=10';
-import { durationKey } from './validation.js?v=10';
-import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=10';
-import { decimalsFromPip } from './timeframes.js?v=10';
-import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=10';
-import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=10';
-import { wilson } from './stats.js?v=10';
+import { parseActiveSymbols, parseContractsFor, pickDurations } from './universe.js?v=11';
+import { durationKey } from './validation.js?v=11';
+import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=11';
+import { MIN_STRENGTH } from './predict.js?v=11';
+import { decimalsFromPip } from './timeframes.js?v=11';
+import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=11';
+import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=11';
+import { wilson } from './stats.js?v=11';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;
@@ -134,7 +135,7 @@ let sWorker = null;
 const jobs = new Map();
 let jobSeq = 0;
 function mkWorker() {
-  const w = new Worker(new URL('./worker.js?v=10', import.meta.url), { type: 'module' });
+  const w = new Worker(new URL('./worker.js?v=11', import.meta.url), { type: 'module' });
   w.onmessage = (ev) => { const j = jobs.get(ev.data.id); if (!j) return; jobs.delete(ev.data.id); ev.data.type === 'error' ? j.reject(new Error(ev.data.error)) : j.resolve(ev.data); };
   w.onerror = (e) => { log(`worker error: ${e.message}`, 'bad'); for (const j of jobs.values()) j.reject(new Error('worker failed')); jobs.clear(); };
   return w;

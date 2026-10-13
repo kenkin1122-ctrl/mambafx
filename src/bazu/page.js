@@ -2,13 +2,13 @@
  * src/bazu/page.js
  * BAZU page view. Sends commands to engine.js and renders its state — NO trading rules here.
  */
-import * as E from './engine.js?v=10';
-import { clusterZones } from './structure.js?v=10';
-import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=10';
+import * as E from './engine.js?v=11';
+import { clusterZones } from './structure.js?v=11';
+import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=11';
 import { findSwingPoints } from '../../mtf/src/analysis/swingPoints.js';
-import { wilson } from './stats.js?v=10';
-import { accountInfo } from './execution.js?v=10';
-import { GATE } from './decision.js?v=10';
+import { wilson } from './stats.js?v=11';
+import { accountInfo } from './execution.js?v=11';
+import { GATE } from './decision.js?v=11';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
