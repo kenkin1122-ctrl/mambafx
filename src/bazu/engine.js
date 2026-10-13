@@ -7,13 +7,13 @@
  * -> Execution (execution.js). The UI only calls commands and reads `state`.
  */
 
-import { parseActiveSymbols, parseContractsFor, pickDurations } from './universe.js?v=6';
-import { durationKey } from './validation.js?v=6';
-import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=6';
-import { decimalsFromPip } from './timeframes.js?v=6';
-import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=6';
-import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=6';
-import { wilson } from './stats.js?v=6';
+import { parseActiveSymbols, parseContractsFor, pickDurations } from './universe.js?v=7';
+import { durationKey } from './validation.js?v=7';
+import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=7';
+import { decimalsFromPip } from './timeframes.js?v=7';
+import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=7';
+import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=7';
+import { wilson } from './stats.js?v=7';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;
@@ -134,7 +134,7 @@ let sWorker = null;
 const jobs = new Map();
 let jobSeq = 0;
 function mkWorker() {
-  const w = new Worker(new URL('./worker.js?v=6', import.meta.url), { type: 'module' });
+  const w = new Worker(new URL('./worker.js?v=7', import.meta.url), { type: 'module' });
   w.onmessage = (ev) => { const j = jobs.get(ev.data.id); if (!j) return; jobs.delete(ev.data.id); ev.data.type === 'error' ? j.reject(new Error(ev.data.error)) : j.resolve(ev.data); };
   w.onerror = (e) => log(`worker error: ${e.message}`, 'bad');
   return w;
@@ -256,7 +256,7 @@ function onContract(c) {
   if (c.is_sold || c.status === 'sold' || c.is_expired) {
     t.exit = c.exit_tick ?? c.sell_spot ?? t.exit; t.profit = Number(c.profit);
     t.status = 'closed'; t.result = t.profit > 0 ? 'win' : 'loss'; saveTrades();
-    log(`${t.market} ${t.direction} ${t.result.toUpperCase()} ${t.profit >= 0 ? '+' : ''}${t.profit}`, t.profit > 0 ? 'ok' : 'bad');
+    log(`${t.market} ${t.direction}${t.strength != null ? ` (${Math.round(t.strength * 100)}%)` : ''} ${t.result.toUpperCase()} ${t.profit >= 0 ? '+' : ''}${t.profit}`, t.profit > 0 ? 'ok' : 'bad');
   }
   emit();
 }

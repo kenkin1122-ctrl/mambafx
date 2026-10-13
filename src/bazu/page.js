@@ -2,13 +2,13 @@
  * src/bazu/page.js
  * BAZU page view. Sends commands to engine.js and renders its state — NO trading rules here.
  */
-import * as E from './engine.js?v=6';
-import { clusterZones } from './structure.js?v=6';
-import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=6';
+import * as E from './engine.js?v=7';
+import { clusterZones } from './structure.js?v=7';
+import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=7';
 import { findSwingPoints } from '../../mtf/src/analysis/swingPoints.js';
-import { wilson } from './stats.js?v=6';
-import { accountInfo } from './execution.js?v=6';
-import { GATE } from './decision.js?v=6';
+import { wilson } from './stats.js?v=7';
+import { accountInfo } from './execution.js?v=7';
+import { GATE } from './decision.js?v=7';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -101,7 +101,21 @@ function render() {
   ].join('');
   if (tab === 'live') renderLive(S);
   else if (tab === 'accuracy') renderAccuracy(S);
+  else if (tab === 'perf') renderPerf(S);
   else renderExec(S, acc);
+}
+
+function renderPerf(S) {
+  const by = new Map();
+  S.trades.filter((t) => t.status === 'closed' && t.result !== 'unknown' && Number.isFinite(t.profit)).forEach((t) => { if (!by.has(t.market)) by.set(t.market, []); by.get(t.market).push(t); });
+  const rows = [...by.entries()].map(([mk, ts]) => {
+    const wins = ts.filter((t) => t.profit > 0), ws = wins.filter((t) => t.strength != null);
+    const bands = {}; ws.forEach((t) => { const b = Math.floor(t.strength * 10) * 10; bands[b] = (bands[b] || 0) + 1; });
+    const top = Object.entries(bands).sort((a, b) => b[1] - a[1])[0];
+    return { mk, n: ts.length, w: wilson(wins.length, ts.length), pnl: ts.reduce((a, t) => a + t.profit, 0), avgS: ws.length ? ws.reduce((a, t) => a + t.strength, 0) / ws.length : null, top: top ? `${top[0]}-${+top[0] + 10}% (${top[1]} of ${ws.length} wins)` : '—', last: Math.max(...ts.map((t) => t.ts)) };
+  }).sort((a, b) => b.w.p - a.w.p || b.n - a.n);
+  const when = (x) => new Date(x).toLocaleTimeString();
+  $('bzPerf').innerHTML = rows.length ? `<div class="panel"><h3>Performance log <span class="mu">(markets ranked by win rate, real Deriv settlements)</span></h3><div class="scroll"><table><tr><th>#</th><th>Market</th><th>Win rate (95% CI)</th><th>Trades</th><th>Net P/L</th><th>Avg strength of wins</th><th>Most wins at strength</th><th>Last trade</th></tr>${rows.map((r, i) => `<tr><td>${i + 1}</td><td>${esc(r.mk)}</td><td>${ci(r.w)}</td><td class="num">${r.n}</td><td class="num ${r.pnl >= 0 ? 'up' : 'dn'}">${money(r.pnl)}</td><td class="num">${r.avgS == null ? '—' : pct(r.avgS, 0)}</td><td>${r.top}</td><td class="mu">${when(r.last)}</td></tr>`).join('')}</table></div><div class="note">${esc(rows[0].mk)} leads with ${pct(rows[0].w.p, 0)} wins over ${rows[0].n} trades; most of its wins came at strength ${rows[0].top}. Small samples are noisy - check the interval.</div></div>` : '<div class="note">No completed trades yet.</div>';
 }
 
 function renderLive(S) {
