@@ -7,13 +7,13 @@
  * -> Execution (execution.js). The UI only calls commands and reads `state`.
  */
 
-import { parseActiveSymbols, parseContractsFor, pickDurations } from './universe.js?v=8';
-import { durationKey } from './validation.js?v=8';
-import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=8';
-import { decimalsFromPip } from './timeframes.js?v=8';
-import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=8';
-import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=8';
-import { wilson } from './stats.js?v=8';
+import { parseActiveSymbols, parseContractsFor, pickDurations } from './universe.js?v=9';
+import { durationKey } from './validation.js?v=9';
+import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=9';
+import { decimalsFromPip } from './timeframes.js?v=9';
+import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=9';
+import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=9';
+import { wilson } from './stats.js?v=9';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;
@@ -21,7 +21,7 @@ const MAX_TICKS = 20000;
 const TRADES_KEY = 'bazu_trades_v1';
 
 export const state = {
-  status: 'idle', mode: 'manual', running: false, stake: 1, limits: { ...DEFAULT_LIMITS },
+  status: 'idle', mode: 'manual', running: false, stake: 1, curStake: 1, martingale: 1, limits: { ...DEFAULT_LIMITS },
   markets: new Map(), trades: [], log: [], scan: { done: 0, total: 0, active: false }, realConfirmed: false,
   selected: null, signals: new Map(),
 };
@@ -134,7 +134,7 @@ let sWorker = null;
 const jobs = new Map();
 let jobSeq = 0;
 function mkWorker() {
-  const w = new Worker(new URL('./worker.js?v=8', import.meta.url), { type: 'module' });
+  const w = new Worker(new URL('./worker.js?v=9', import.meta.url), { type: 'module' });
   w.onmessage = (ev) => { const j = jobs.get(ev.data.id); if (!j) return; jobs.delete(ev.data.id); ev.data.type === 'error' ? j.reject(new Error(ev.data.error)) : j.resolve(ev.data); };
   w.onerror = (e) => log(`worker error: ${e.message}`, 'bad');
   return w;
@@ -209,7 +209,9 @@ export function resume() {
 export function startLoop() { if (!sigTimer) sigTimer = setInterval(signalTick, 4000); }
 export function setRunning(on) { state.running = !!on; if (on) startLoop(); log(on ? `Engine started (${state.mode})` : 'Engine stopped'); emit(); }
 export function setMode(m) { state.mode = m; log(`Mode: ${m}`); emit(); }
-export function setStake(v) { state.stake = Math.max(0.35, Number(v) || 1); emit(); }
+export function setStake(v) { state.stake = Math.max(0.35, Number(v) || 1); state.curStake = state.stake; emit(); }
+export function setMartingale(v) { const n = Number(v); state.martingale = n > 1 ? n : 1; state.curStake = state.stake; emit(); }
+const nextStake = () => +(Math.max(0.35, state.curStake || state.stake)).toFixed(2);
 export function confirmReal(v) { state.realConfirmed = !!v; emit(); }
 
 // ---------- trades ----------
@@ -226,7 +228,7 @@ function riskState() {
 }
 
 /** Manual (from ticket) or signal-driven order. Returns {ok, reason}. */
-export async function placeOrder({ symbol, contractType, duration, source = 'manual', signal = null, stake = state.stake }) {
+export async function placeOrder({ symbol, contractType, duration, source = 'manual', signal = null, stake = nextStake() }) {
   const acc = accountInfo();
   if (!acc.connected) return { ok: false, reason: 'Connect a Deriv account first' };
   const m = state.markets.get(symbol);
@@ -256,6 +258,7 @@ function onContract(c) {
   if (c.is_sold || c.status === 'sold' || c.is_expired) {
     t.exit = c.exit_tick ?? c.sell_spot ?? t.exit; t.profit = Number(c.profit);
     t.status = 'closed'; t.result = t.profit > 0 ? 'win' : 'loss'; saveTrades();
+    if (t.profit > 0) state.curStake = state.stake; else if (state.martingale > 1 && t.profit < 0) state.curStake = +(Number(t.stake) * state.martingale).toFixed(2);
     log(`${t.market} ${t.direction}${t.strength != null ? ` (${Math.round(t.strength * 100)}%)` : ''} ${t.result.toUpperCase()} ${t.profit >= 0 ? '+' : ''}${t.profit}`, t.profit > 0 ? 'ok' : 'bad');
   }
   emit();

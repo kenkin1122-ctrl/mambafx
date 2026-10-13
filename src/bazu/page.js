@@ -2,13 +2,13 @@
  * src/bazu/page.js
  * BAZU page view. Sends commands to engine.js and renders its state — NO trading rules here.
  */
-import * as E from './engine.js?v=8';
-import { clusterZones } from './structure.js?v=8';
-import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=8';
+import * as E from './engine.js?v=9';
+import { clusterZones } from './structure.js?v=9';
+import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=9';
 import { findSwingPoints } from '../../mtf/src/analysis/swingPoints.js';
-import { wilson } from './stats.js?v=8';
-import { accountInfo } from './execution.js?v=8';
-import { GATE } from './decision.js?v=8';
+import { wilson } from './stats.js?v=9';
+import { accountInfo } from './execution.js?v=9';
+import { GATE } from './decision.js?v=9';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -29,6 +29,7 @@ function bindOnce() {
   };
   $('bzStop').onclick = () => { E.setRunning(false); };
   $('bzStake').onchange = (e) => E.setStake(e.target.value);
+  $('bzMart').onchange = (e) => E.setMartingale(e.target.value);
   $('bzRealOk').onchange = (e) => E.confirmReal(e.target.checked);
   $('bzLogin').onclick = () => (typeof window.gridStartLogin === 'function' ? window.gridStartLogin() : alert('Login is on the Grid page'));
   $('bzConnect').onclick = () => {
@@ -194,7 +195,7 @@ function renderExec(S, acc) {
     <div class="panel"><h3>Quick routing <span class="mu">(strong signals)</span></h3>${tiles.length ? tiles.map((x) => `<div class="sig ok"><div class="row"><b>${esc(x.symbol)}</b><b class="${x.signal.direction === 'Rise' ? 'up' : 'dn'}">${esc(x.signal.direction)}</b><span class="pill">${esc(x.signal.duration)}</span><span class="num">strength ${pct(x.signal.strength, 0)}</span>${S.mode === 'semi' ? `<button class="btn primary" data-act="confirm" data-sym="${esc(x.symbol)}">Confirm trade</button>` : ''}</div></div>`).join('') : '<div class="note">No strong signals right now. Semi-auto/Auto act only on signals above the minimum strength.</div>'}</div>
     <div class="panel" style="margin-top:10px"><h3>Order ticket</h3>${m ? `<div class="row"><b>${esc(m.symbol)}</b><select id="bzTkDur">${m.durations.map((d) => `<option>${d.n}${d.unit}</option>`).join('')}</select>
       <button class="btn buy" data-act="buy" data-type="CALL" data-sym="${esc(m.symbol)}" ${acc.connected ? '' : 'disabled'}>Rise</button><button class="btn sell" data-act="buy" data-type="PUT" data-sym="${esc(m.symbol)}" ${acc.connected ? '' : 'disabled'}>Fall</button></div>
-      <div class="note">Stake ${S.stake} · ${acc.connected ? (acc.isReal ? '🔴 REAL account (requires the confirm checkbox; stake capped)' : '🟢 DEMO account') : 'connect an account to trade'}. Orders go through Deriv proposal → buy; entry, payout, exit and P/L are Deriv's.</div>` : '<div class="note">Select a market on the Live tab.</div>'}</div>
+      <div class="note">Stake ${S.curStake || S.stake}${S.martingale > 1 ? ' (martingale x' + S.martingale + ')' : ''} · ${acc.connected ? (acc.isReal ? '🔴 REAL account (requires the confirm checkbox; stake capped)' : '🟢 DEMO account') : 'connect an account to trade'}. Orders go through Deriv proposal → buy; entry, payout, exit and P/L are Deriv's.</div>` : '<div class="note">Select a market on the Live tab.</div>'}</div>
     </div><div>
     <div class="panel"><h3>Open positions</h3>${tradesTable(S.trades.filter((t) => t.status === 'open'))}</div>
     <div class="panel" style="margin-top:10px"><h3>Event log</h3><div class="log">${S.log.map((l) => `<div class="${l.kind === 'bad' ? 'dn' : l.kind === 'ok' ? 'up' : l.kind === 'warn' ? '' : 'mu'}">${new Date(l.t).toLocaleTimeString()} · ${esc(l.msg)}</div>`).join('')}</div></div>

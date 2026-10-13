@@ -5,7 +5,7 @@
  * -> Execution (execution.js). No UI, no network.
  */
 
-import { MIN_STRENGTH } from './predict.js?v=8';
+import { MIN_STRENGTH } from './predict.js?v=9';
 
 export const GATE = Object.freeze({ OK: 'tradable', WEAK: 'weak signal', NO_QUOTE: 'awaiting Deriv quote', NO_DATA: 'waiting for data' });
 
