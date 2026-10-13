@@ -5,21 +5,24 @@
  * -> Execution (execution.js). No UI, no network.
  */
 
-import { MIN_STRENGTH } from './predict.js?v=13';
+import { MIN_STRENGTH } from './predict.js?v=14';
 
 export const GATE = Object.freeze({ OK: 'tradable', WEAK: 'weak signal', NO_QUOTE: 'awaiting Deriv quote', NO_DATA: 'waiting for data' });
 
 /** Build a trade signal from a prediction and the quote Deriv gave. Tradable when strength >= MIN_STRENGTH. */
 export function buildTradeSignal({ symbol, prediction, duration, quote, now = Date.now() }) {
   if (!prediction) return { gate: GATE.NO_DATA, market: symbol };
+  const min = prediction.minStrength ?? MIN_STRENGTH;
   const up = prediction.direction > 0;
   const base = {
     market: symbol, direction: up ? 'Rise' : 'Fall', contractType: up ? 'CALL' : 'PUT', duration,
     strength: prediction.strength, agree: up ? prediction.up : prediction.down, total: prediction.total,
     drivers: prediction.drivers, proxy: prediction.proxy, quote, at: now,
+    playbook: prediction.playbook, reason: prediction.reason, vetoes: prediction.vetoes, reasons: prediction.reasons, parts: prediction.parts, patterns: prediction.patterns, factors: prediction.factors, decisionTs: prediction.decisionTs, provisional: prediction.provisional, durationSec: prediction.durationSec,
   };
+  if (prediction.wait) return { ...base, gate: GATE.WEAK };
   if (!quote || !(quote.ask > 0) || !(quote.payout > 0)) return { ...base, gate: GATE.NO_QUOTE };
-  return { ...base, gate: prediction.strength >= MIN_STRENGTH ? GATE.OK : GATE.WEAK };
+  return { ...base, gate: prediction.strength >= min ? GATE.OK : GATE.WEAK };
 }
 
 /** Whether a mode may act on a signal. Manual is never gated. */

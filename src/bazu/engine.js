@@ -7,14 +7,15 @@
  * -> Execution (execution.js). The UI only calls commands and reads `state`.
  */
 
-import { parseActiveSymbols, parseContractsFor, pickDurations } from './universe.js?v=13';
-import { durationKey } from './validation.js?v=13';
-import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=13';
-import { MIN_STRENGTH } from './predict.js?v=13';
-import { decimalsFromPip } from './timeframes.js?v=13';
-import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=13';
-import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=13';
-import { wilson } from './stats.js?v=13';
+import { parseActiveSymbols, parseContractsFor, pickDurations, durationAllowed } from './universe.js?v=14';
+import { durationKey } from './validation.js?v=14';
+import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=14';
+import { predict3m } from './predict3m.js?v=14';
+import { threeMinuteDuration } from './config3m.js?v=14';
+import { decimalsFromPip } from './timeframes.js?v=14';
+import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=14';
+import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=14';
+import { wilson } from './stats.js?v=14';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;
@@ -91,7 +92,7 @@ export async function discover() {
         const cf = await send({ contracts_for: s.symbol });
         const rf = parseContractsFor(cf);
         if (rf) {
-          const durations = pickDurations(rf.ranges, 2);
+          const d3 = threeMinuteDuration(durationAllowed, rf.ranges), durations = d3 ? [d3] : [];
           state.markets.set(s.symbol, { ...s, ranges: rf.ranges, durations, dp: decimalsFromPip(s.pip), prices: [], epochs: [], last: null, lastEpoch: null, tickCount: 0, status: 'discovered', signal: null, historyLoaded: false });
         }
       } catch (e) { log(`contracts_for ${s.symbol}: ${e.message}`, 'warn'); }
@@ -135,7 +136,7 @@ let sWorker = null;
 const jobs = new Map();
 let jobSeq = 0;
 function mkWorker() {
-  const w = new Worker(new URL('./worker.js?v=13', import.meta.url), { type: 'module' });
+  const w = new Worker(new URL('./worker.js?v=14', import.meta.url), { type: 'module' });
   w.onmessage = (ev) => { const j = jobs.get(ev.data.id); if (!j) return; jobs.delete(ev.data.id); ev.data.type === 'error' ? j.reject(new Error(ev.data.error)) : j.resolve(ev.data); };
   w.onerror = (e) => { log(`worker error: ${e.message}`, 'bad'); for (const j of jobs.values()) j.reject(new Error('worker failed')); jobs.clear(); };
   return w;
@@ -157,6 +158,22 @@ export function ensureCandles(m, tf) {
     .finally(() => { candleBusy.delete(k); emit(); });
 }
 
+// ---------- remote candles for the 3-minute path (M1/M5/M15/H1), throttled ----------
+const REMOTE = [['M1', 60, 500, 60000], ['M5', 300, 300, 300000], ['M15', 900, 150, 600000], ['H1', 3600, 120, 1800000]];
+const remoteBusy = new Set();
+let remoteSlots = 3;
+export function ensureRemote(m) {
+  const store = (m.remote ||= {}), at = (m.remoteAt ||= {});
+  for (const [k, secs, count, ttl] of REMOTE) {
+    const key = m.symbol + k;
+    if (remoteBusy.has(key) || (store[k] && Date.now() - (at[k] || 0) < ttl) || remoteSlots <= 0) continue;
+    remoteBusy.add(key); remoteSlots--;
+    send({ ticks_history: m.symbol, style: 'candles', granularity: secs, count, end: 'latest' })
+      .then((r) => { store[k] = (r.candles || []).map((x) => ({ epoch: Number(x.epoch), open: +x.open, high: +x.high, low: +x.low, close: +x.close })); at[k] = Date.now(); })
+      .catch((e) => { at[k] = Date.now() - ttl + 15000; log(`candles ${k} ${m.symbol}: ${e.message}`, 'warn'); })
+      .finally(() => { remoteBusy.delete(key); remoteSlots++; });
+  }
+}
 // ---------- predictions ----------
 const quoteCache = new Map();
 let nextProposalAt = 0;
@@ -175,14 +192,16 @@ let sigTimer = null, sigBusy = false;
 async function signalTick() {
   if (sigBusy) return; sigBusy = true;
   try {
-    sWorker = sWorker || mkWorker();
     for (const m of state.markets.values()) {
       if (!m.historyLoaded) { loadHistory(m.symbol).catch(() => {}); }
       if (m.prices.length < 300 || !m.durations.length) continue;
       const d = m.durations[0];
-      let r; try { r = await runJob(sWorker, { type: 'predict', prices: m.prices.slice(-1500), epochs: m.epochs.slice(-1500) }); } catch (e) { log('predict ' + m.symbol + ': ' + e.message, 'warn'); if (/worker/.test(e.message)) { try { sWorker.terminate(); } catch {} sWorker = mkWorker(); } continue; }
+      ensureRemote(m);
+      let r;
+      try { r = predict3m({ symbol: m.symbol, prices: m.prices.slice(-6000), epochs: m.epochs.slice(-6000), remote: m.remote || {}, decisionEpoch: m.epochs[m.epochs.length - 1] }); } catch (e) { log('predict ' + m.symbol + ': ' + e.message, 'warn'); continue; }
+      r = { result: r, lastEpoch: r.decisionTs };
       let q = null;
-      if (r.result && r.result.strength >= MIN_STRENGTH) { try { q = await quoteFor(m.symbol, d, r.result.direction > 0 ? 'CALL' : 'PUT'); } catch { /* no quote */ } }
+      if (r.result && !r.result.wait && r.result.strength >= r.result.minStrength) { try { q = await quoteFor(m.symbol, d, r.result.direction > 0 ? 'CALL' : 'PUT'); } catch { /* no quote */ } }
       const sig = { ...buildTradeSignal({ symbol: m.symbol, prediction: r.result, duration: durationKey(d), quote: q }), epoch: r.lastEpoch, durationObj: d };
       m.signal = sig; state.signals.set(m.symbol, sig);
       emit();
