@@ -190,3 +190,6 @@ Position-fixed floating bot panel. Similar architecture to Mamba FX Bot.
 | `fiveMinCommentary.js` | 5-minute-timeframe commentary aggregation |
 | `continuousLearning.js` | Updates pattern weights from observed outcomes |
 | `marketIntelligence.js` | Cross-timeframe intelligence aggregation |
+
+## BAZU (Rise/Fall page)
+Pure logic in src/bazu (stats, indicators, structure, validation, decision, risk, universe); worker.js runs validation off-thread; engine.js orchestrates (own public WebSocket, Deriv-only data); execution.js places real Deriv contracts via the Grid page's authenticated socket; page.js renders. Tests: node --test tests/bazu/<file>.mjs. Trades persist in localStorage (bazu_trades_v1); no IndexedDB schema changes.

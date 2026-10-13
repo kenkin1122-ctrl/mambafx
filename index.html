@@ -550,6 +550,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   background:rgba(167,139,250,.1); border:1px solid rgba(167,139,250,.3); padding:4px 10px; border-radius:999px; margin-bottom:14px}#page-mtf .analysis-panel{display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--mtf-line); border-top:1px solid var(--mtf-line); max-height:170px; flex-shrink:0}#page-mtf .analysis-col{background:var(--mtf-panel2); display:flex; flex-direction:column; min-height:0}#page-mtf .analysis-head{font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--mtf-muted); padding:7px 12px; border-bottom:1px solid var(--mtf-line); flex-shrink:0}#page-mtf .finding-list{flex:1; overflow-y:auto; padding:4px 8px; min-height:0}#page-mtf .finding-row{display:flex; align-items:center; gap:8px; padding:5px 6px; border-radius:6px; cursor:pointer; font-size:11px}#page-mtf .finding-row:hover{background:var(--mtf-panel)}#page-mtf .finding-icon{width:16px; text-align:center; flex-shrink:0; font-size:11px}#page-mtf .finding-label{flex:1; color:var(--mtf-text)}#page-mtf .finding-label.up{color:var(--mtf-up)}#page-mtf .finding-label.down{color:var(--mtf-down)}#page-mtf .finding-time{color:var(--mtf-muted); font-size:9.5px; font-variant-numeric:tabular-nums; flex-shrink:0}#page-mtf .finding-empty{color:var(--mtf-muted); font-size:11px; padding:12px; text-align:center}#page-mtf .hint-foot{font-size:9px; color:#2a3650; text-align:center; padding:6px}
 @keyframes mtfPulse{0%{box-shadow:0 0 0 0 rgba(31,223,155,.45)}70%{box-shadow:0 0 0 7px rgba(31,223,155,0)}100%{box-shadow:0 0 0 0 rgba(31,223,155,0)}}
 </style>
+<link rel="stylesheet" href="src/bazu/bazu.css">
 </head>
 <body>
 <div class="wrap">
@@ -585,6 +586,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     <button id="navAggression" onclick="showPage('aggression')">🔥 Aggression Bot</button>
     <button id="navMtf" onclick="showPage('mtf')">🧭 MTF Structure</button>
     <button id="navNjanja" onclick="showPage('njanja')">🏛 Njanja Analysis</button>
+    <button id="navBazu" onclick="showPage('bazu')">🐍 BAZU Rise/Fall</button>
     <button id="navRfaBot" onclick="showPage('rfabot')">📊 Rise/Fall Autobot</button>
     <button id="navMsdExplorer" onclick="showPage('msdexplorer')">🔬 Database Explorer</button>
     <button id="navMsdFeatures" onclick="showPage('msdfeatures')">📶 Feature Completeness</button>
@@ -2261,6 +2263,45 @@ table.an-table tbody tr:last-child td{border-bottom:none}
     Measured from the real tick-rule (up-tick vs down-tick), not simulated volume. A high score with low intensity is directional but quiet; a high score with high intensity is a genuine forceful push. Synthetic indices are random walks — this describes what already happened in the candle, it does not predict the next one.
   </footer>
 </div><!-- /page-aggression -->
+<div id="page-bazu" class="page">
+  <div class="bz-head">
+    <div><div class="bz-title">BAZU · Rise/Fall</div><div class="bz-sub">Validated-edge trading across all Deriv synthetic indices · real Deriv quotes &amp; settlements only</div></div>
+    <span id="bzAcctPill" class="pill">NOT CONNECTED</span>
+    <span class="pill"><span id="bzDot" class="dot"></span><span id="bzStatus">idle</span></span>
+    <div class="bz-grow"></div>
+    <div class="seg" id="bzMode"><button data-m="manual" class="on">Manual</button><button data-m="semi">Semi-auto</button><button data-m="auto">Auto</button></div>
+    <button class="btn" id="bzScan">Scan &amp; validate</button>
+    <button class="btn primary" id="bzStart">Start</button>
+    <button class="btn" id="bzStop">Stop</button>
+  </div>
+  <div class="panel" style="margin-bottom:8px">
+    <div class="row">
+      <span class="mu" style="font-size:12px">Account</span>
+      <select id="bzAcctSel"></select>
+      <button class="btn" id="bzLogin">Login with Deriv</button>
+      <button class="btn primary" id="bzConnect">Connect</button>
+      <label class="mu" style="font-size:12px">Stake <input id="bzStake" type="number" min="0.35" step="0.05" value="1" style="width:70px"></label>
+      <label class="mu" style="font-size:12px"><input id="bzRealOk" type="checkbox"> I confirm trading REAL money with BAZU (stake capped)</label>
+    </div>
+  </div>
+  <div class="bz-metrics" id="bzMetrics"></div>
+  <div class="bz-tabs" id="bzTabs">
+    <button data-t="live" class="on">Live</button><button data-t="validation">Validation</button><button data-t="accuracy">Accuracy log</button><button data-t="exec">Execution</button>
+  </div>
+  <div class="bz-pane on" id="bzp-live">
+    <div class="bz-cols">
+      <div class="panel"><h3>Markets <span class="mu" id="bzMktCount"></span></h3><div class="cards" id="bzCards"></div></div>
+      <div>
+        <div class="panel" style="margin-bottom:12px"><h3 id="bzSelTitle">Select a market</h3><canvas id="bzChart" width="900" height="300"></canvas><div class="note" id="bzChartNote"></div></div>
+        <div class="panel"><h3>Trade signal</h3><div id="bzSignal" class="note">No market selected.</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="bz-pane" id="bzp-validation"><div id="bzValidation"></div></div>
+  <div class="bz-pane" id="bzp-accuracy"><div id="bzAccuracy"></div></div>
+  <div class="bz-pane" id="bzp-exec"><div id="bzExec"></div></div>
+</div>
+
 <div id="page-rfabot" class="page">
   <div class="grid-layout">
     <div class="grid-side">
@@ -26200,12 +26241,13 @@ function startTfTimers(){
 }
 
 function showPage(which){
-  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot", aggression:"page-aggression", mtf:"page-mtf", njanja:"page-njanja", rfabot:"page-rfabot", msdexplorer:"page-msdexplorer", msdfeatures:"page-msdfeatures", msdevents:"page-msdevents", msdinspector:"page-msdinspector", msddistribution:"page-msddistribution", msdcorrelation:"page-msdcorrelation", msdsearch:"page-msdsearch", msdexperiment:"page-msdexperiment", msdknowledge:"page-msdknowledge", msdvalidation:"page-msdvalidation", msdworkbench:"page-msdworkbench", msdphase8:"page-msdphase8", msdphase9:"page-msdphase9", msdphase11:"page-msdphase11", msdphase11validation:"page-msdphase11validation" };
-  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot", aggression:"navAggression", mtf:"navMtf", njanja:"navNjanja", rfabot:"navRfaBot", msdexplorer:"navMsdExplorer", msdfeatures:"navMsdFeatures", msdevents:"navMsdEvents", msdinspector:"navMsdInspector", msddistribution:"navMsdDistribution", msdcorrelation:"navMsdCorrelation", msdsearch:"navMsdSearch", msdexperiment:"navMsdExperiment", msdknowledge:"navMsdKnowledge", msdvalidation:"navMsdValidation", msdworkbench:"navMsdWorkbench", msdphase8:"navMsdPhase8", msdphase9:"navMsdPhase9", msdphase11:"navMsdPhase11", msdphase11validation:"navMsdPhase11Validation" };
+  const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot", aggression:"page-aggression", mtf:"page-mtf", njanja:"page-njanja", rfabot:"page-rfabot", bazu:"page-bazu", msdexplorer:"page-msdexplorer", msdfeatures:"page-msdfeatures", msdevents:"page-msdevents", msdinspector:"page-msdinspector", msddistribution:"page-msddistribution", msdcorrelation:"page-msdcorrelation", msdsearch:"page-msdsearch", msdexperiment:"page-msdexperiment", msdknowledge:"page-msdknowledge", msdvalidation:"page-msdvalidation", msdworkbench:"page-msdworkbench", msdphase8:"page-msdphase8", msdphase9:"page-msdphase9", msdphase11:"page-msdphase11", msdphase11validation:"page-msdphase11validation" };
+  const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot", aggression:"navAggression", mtf:"navMtf", njanja:"navNjanja", rfabot:"navRfaBot", bazu:"navBazu", msdexplorer:"navMsdExplorer", msdfeatures:"navMsdFeatures", msdevents:"navMsdEvents", msdinspector:"navMsdInspector", msddistribution:"navMsdDistribution", msdcorrelation:"navMsdCorrelation", msdsearch:"navMsdSearch", msdexperiment:"navMsdExperiment", msdknowledge:"navMsdKnowledge", msdvalidation:"navMsdValidation", msdworkbench:"navMsdWorkbench", msdphase8:"navMsdPhase8", msdphase9:"navMsdPhase9", msdphase11:"navMsdPhase11", msdphase11validation:"navMsdPhase11Validation" };
   Object.keys(pages).forEach(k => {
     document.getElementById(pages[k]).classList.toggle("active", k===which);
     const nav = document.getElementById(navs[k]); if (nav) nav.classList.toggle("active", k===which);
   });
+  if (which === "bazu" && typeof window.bazuPageInit === "function"){ window.bazuPageInit(); }
   if (which === "candles"){
     if (!candlesPageReady){ candlesPageReady = true; buildTfCards(); connectTfWs(); startTfTimers(); }
     TIMEFRAMES.forEach(tf => drawTfCandles(tf.g));
@@ -32915,6 +32957,7 @@ try {
   </div>
 </div>
 
+<script type="module" src="src/bazu/page.js"></script>
 <script type="module" src="src/trading/fiveTickSignalEngine.js"></script>
 <script type="module" src="src/trading/multiplierHelpers.js"></script>
 <script type="module" src="src/trading/gridSetHelper.js"></script>
