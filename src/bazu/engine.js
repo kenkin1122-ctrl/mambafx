@@ -82,19 +82,24 @@ export async function discover() {
   const as = await send({ active_symbols: 'brief' });
   const syms = parseActiveSymbols(as.active_symbols);
   state.scan = { done: 0, total: syms.length, active: true, phase: 'contracts_for' };
-  for (const s of syms) {
-    try {
-      const cf = await send({ contracts_for: s.symbol });
-      const rf = parseContractsFor(cf);
-      if (!rf) { state.scan.done++; continue; }
-      const durations = pickDurations(rf.ranges, 2);
-      state.markets.set(s.symbol, { ...s, ranges: rf.ranges, durations, dp: decimalsFromPip(s.pip), prices: [], epochs: [], last: null, lastEpoch: null, tickCount: 0, status: 'discovered', signal: null, historyLoaded: false });
-    } catch (e) { log(`contracts_for ${s.symbol}: ${e.message}`, 'warn'); }
-    state.scan.done++; emit();
-  }
+  const sq = syms.slice();
+  await Promise.all(Array.from({ length: 8 }, async () => {
+    while (sq.length) {
+      const s = sq.shift();
+      try {
+        const cf = await send({ contracts_for: s.symbol });
+        const rf = parseContractsFor(cf);
+        if (rf) {
+          const durations = pickDurations(rf.ranges, 2);
+          state.markets.set(s.symbol, { ...s, ranges: rf.ranges, durations, dp: decimalsFromPip(s.pip), prices: [], epochs: [], last: null, lastEpoch: null, tickCount: 0, status: 'discovered', signal: null, historyLoaded: false });
+        }
+      } catch (e) { log(`contracts_for ${s.symbol}: ${e.message}`, 'warn'); }
+      state.scan.done++; emit();
+    }
+  }));
   state.scan.active = false;
   log(`Universe: ${state.markets.size} synthetic indices offer Rise/Fall (of ${syms.length} active)`);
-  for (const sym of state.markets.keys()) { try { await send({ ticks: sym, subscribe: 1 }); } catch { /* ignore */ } }
+  await Promise.all([...state.markets.keys()].map((sym) => send({ ticks: sym, subscribe: 1 }).catch(() => {})));
   state.status = 'live'; emit();
   const q = [...state.markets.keys()];
   for (let w = 0; w < 4; w++) (async () => { while (q.length) { try { await loadHistory(q.shift()); } catch (e) { log('history: ' + e.message, 'warn'); } } })();
@@ -188,6 +193,17 @@ async function autoTrade(m, sig) {
   await placeSignal(sig, 'auto');
 }
 
+let paused = false;
+export function pause() {
+  if (state.running || paused || !state.markets.size) return;
+  paused = true; clearInterval(sigTimer); sigTimer = null;
+  send({ forget_all: 'ticks' }).catch(() => {});
+}
+export function resume() {
+  if (!paused) return;
+  paused = false; startLoop();
+  Promise.all([...state.markets.keys()].map((sym) => send({ ticks: sym, subscribe: 1 }).catch(() => {}))).then(emit);
+}
 export function startLoop() { if (!sigTimer) sigTimer = setInterval(signalTick, 4000); }
 export function setRunning(on) { state.running = !!on; if (on) startLoop(); log(on ? `Engine started (${state.mode})` : 'Engine stopped'); emit(); }
 export function setMode(m) { state.mode = m; log(`Mode: ${m}`); emit(); }

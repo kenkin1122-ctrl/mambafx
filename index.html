@@ -26246,6 +26246,7 @@ function showPage(which){
     const nav = document.getElementById(navs[k]); if (nav) nav.classList.toggle("active", k===which);
   });
   if (which === "bazu" && typeof window.bazuPageInit === "function"){ window.bazuPageInit(); }
+  else if (typeof window.bazuPageLeave === "function"){ window.bazuPageLeave(); }
   if (which === "candles"){
     if (!candlesPageReady){ candlesPageReady = true; buildTfCards(); connectTfWs(); startTfTimers(); }
     TIMEFRAMES.forEach(tf => drawTfCandles(tf.g));

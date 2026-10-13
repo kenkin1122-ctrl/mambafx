@@ -49,10 +49,11 @@ function onAction(e) {
 
 export function bazuPageInit() {
   if (!ready) { bindOnce(); ready = true; E.onChange(render); setInterval(() => { syncAccounts(); if (accountInfo().connected) E.attachAccount(); }, 3000); }
-  syncAccounts(); render();
+  E.resume(); syncAccounts(); render();
   if (!E.state.markets.size && E.state.status === 'idle') E.discover().then(() => E.startLoop()).catch((e) => { E.state.status = 'error: ' + e.message; render(); });
 }
 window.bazuPageInit = bazuPageInit;
+window.bazuPageLeave = () => E.pause();
 
 function syncAccounts() {
   const sel = $('bzAcctSel'), accts = window.gridAccounts || [];
