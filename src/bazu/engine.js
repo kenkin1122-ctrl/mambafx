@@ -7,14 +7,14 @@
  * -> Execution (execution.js). The UI only calls commands and reads `state`.
  */
 
-import { parseActiveSymbols, parseContractsFor, pickDurations } from './universe.js?v=12';
-import { durationKey } from './validation.js?v=12';
-import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=12';
-import { MIN_STRENGTH } from './predict.js?v=12';
-import { decimalsFromPip } from './timeframes.js?v=12';
-import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=12';
-import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=12';
-import { wilson } from './stats.js?v=12';
+import { parseActiveSymbols, parseContractsFor, pickDurations } from './universe.js?v=13';
+import { durationKey } from './validation.js?v=13';
+import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=13';
+import { MIN_STRENGTH } from './predict.js?v=13';
+import { decimalsFromPip } from './timeframes.js?v=13';
+import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=13';
+import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=13';
+import { wilson } from './stats.js?v=13';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;
@@ -135,7 +135,7 @@ let sWorker = null;
 const jobs = new Map();
 let jobSeq = 0;
 function mkWorker() {
-  const w = new Worker(new URL('./worker.js?v=12', import.meta.url), { type: 'module' });
+  const w = new Worker(new URL('./worker.js?v=13', import.meta.url), { type: 'module' });
   w.onmessage = (ev) => { const j = jobs.get(ev.data.id); if (!j) return; jobs.delete(ev.data.id); ev.data.type === 'error' ? j.reject(new Error(ev.data.error)) : j.resolve(ev.data); };
   w.onerror = (e) => { log(`worker error: ${e.message}`, 'bad'); for (const j of jobs.values()) j.reject(new Error('worker failed')); jobs.clear(); };
   return w;
@@ -186,9 +186,20 @@ async function signalTick() {
       const sig = { ...buildTradeSignal({ symbol: m.symbol, prediction: r.result, duration: durationKey(d), quote: q }), epoch: r.lastEpoch, durationObj: d };
       m.signal = sig; state.signals.set(m.symbol, sig);
       emit();
-      if (state.running && state.mode === 'auto' && modeMayAct('auto', sig)) await autoTrade(m, sig);
+      if (state.running && state.mode === 'auto' && state.martingale <= 1 && modeMayAct('auto', sig)) await autoTrade(m, sig);
     }
+    if (state.running && state.mode === 'auto' && state.martingale > 1) await autoTradeBest();
   } finally { sigBusy = false; emit(); }
+}
+/** Martingale mode: one trade at a time, always on the strongest tradable market. */
+let bestBusy = false;
+async function autoTradeBest() {
+  if (bestBusy || state.trades.some((t) => t.status === 'open')) return;
+  const fresh = Date.now() / 1000 - 90;
+  const cand = [...state.markets.values()].map((m) => m.signal && { m, sig: m.signal }).filter((x) => x && modeMayAct('auto', x.sig) && x.sig.epoch > fresh && lastActedEpoch.get(x.m.symbol) !== x.sig.epoch).sort((a, b) => b.sig.strength - a.sig.strength);
+  if (!cand.length) return;
+  bestBusy = true;
+  try { await autoTrade(cand[0].m, cand[0].sig); } finally { bestBusy = false; }
 }
 async function autoTrade(m, sig) {
   if (lastActedEpoch.get(m.symbol) === sig.epoch) return;

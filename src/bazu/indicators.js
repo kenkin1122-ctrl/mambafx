@@ -10,7 +10,7 @@
 import { IndicatorRegistry } from '../../research/src/indicator/IndicatorRegistry.js';
 import { registerCoreIndicators } from '../../research/src/indicator/coreIndicators.js';
 import { createMathDefinition } from '../../research/src/plugin/MachineReadableMathematics.js';
-import { varianceRatio, permutationEntropy, ouFit, kalmanTrend, cusumSeries, garchVariance, diffs } from './stats.js?v=12';
+import { varianceRatio, permutationEntropy, ouFit, kalmanTrend, cusumSeries, garchVariance, diffs } from './stats.js?v=13';
 
 const NAN = NaN;
 const DISC = 'BAZU candidate feature: exploratory, validated before use, not financial advice.';

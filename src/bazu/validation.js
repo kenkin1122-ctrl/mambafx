@@ -13,12 +13,12 @@
 
 import { computeCircularShiftPermutationTest } from '../../research/src/statistics/permutationTest.js';
 import { PHASE11_LIFECYCLE_STAGES as ST, transitionPhase11Stage } from '../../research/src/governance/phase11LifecycleStates.js';
-import { buildBazuRegistry, BAZU_FEATURE_FLAGS } from './indicators.js?v=12';
-import { computeStructureFeatures } from './structure.js?v=12';
+import { buildBazuRegistry, BAZU_FEATURE_FLAGS } from './indicators.js?v=13';
+import { computeStructureFeatures } from './structure.js?v=13';
 import {
   wilson, binomialTailGE, benjaminiHochberg, betaPosterior, brierScore, reliability,
   trailingQuantile, shuffleReturnsPath,
-} from './stats.js?v=12';
+} from './stats.js?v=13';
 
 export const SPLIT = Object.freeze({ discovery: 0.5, replication: 0.25 });
 export const MIN_TRADES = 30;

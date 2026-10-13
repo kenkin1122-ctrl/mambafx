@@ -13,9 +13,11 @@ export function parseDur(str) {
 }
 const toSec = (d) => d.n * UNIT_SEC[d.unit];
 
+/** World basket indices (WLDAUD, WLDEUR, ...) are excluded from BAZU entirely. */
+const isBasket = (s) => /^WLD/i.test(s.underlying_symbol || s.symbol || '') || /basket/i.test(s.submarket || '');
 export function parseActiveSymbols(list) {
   return (list || [])
-    .filter((s) => s.market === 'synthetic_index' && !s.is_trading_suspended && s.exchange_is_open !== 0)
+    .filter((s) => s.market === 'synthetic_index' && !s.is_trading_suspended && s.exchange_is_open !== 0 && !isBasket(s))
     .map((s) => ({ symbol: s.underlying_symbol || s.symbol, name: s.underlying_symbol_name || s.display_name || s.underlying_symbol, pip: s.pip_size, submarket: s.submarket }));
 }
 
