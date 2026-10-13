@@ -2,8 +2,8 @@
  * src/bazu/worker.js  (module Web Worker)
  * Runs the PREDICTION work off the UI thread: feature computation and the Rise/Fall call.
  */
-import { computeFeatures } from './validation.js?v=11';
-import { predictDirection } from './predict.js?v=11';
+import { computeFeatures } from './validation.js?v=12';
+import { predictDirection } from './predict.js?v=12';
 
 self.onmessage = (ev) => {
   const { type, id } = ev.data;

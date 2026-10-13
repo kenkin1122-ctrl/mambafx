@@ -7,18 +7,18 @@
  * -> Execution (execution.js). The UI only calls commands and reads `state`.
  */
 
-import { parseActiveSymbols, parseContractsFor, pickDurations } from './universe.js?v=11';
-import { durationKey } from './validation.js?v=11';
-import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=11';
-import { MIN_STRENGTH } from './predict.js?v=11';
-import { decimalsFromPip } from './timeframes.js?v=11';
-import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=11';
-import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=11';
-import { wilson } from './stats.js?v=11';
+import { parseActiveSymbols, parseContractsFor, pickDurations } from './universe.js?v=12';
+import { durationKey } from './validation.js?v=12';
+import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=12';
+import { MIN_STRENGTH } from './predict.js?v=12';
+import { decimalsFromPip } from './timeframes.js?v=12';
+import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=12';
+import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=12';
+import { wilson } from './stats.js?v=12';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;
-const MAX_TICKS = 20000;
+const MAX_TICKS = 6000;
 const TRADES_KEY = 'bazu_trades_v1';
 
 export const state = {
@@ -30,7 +30,7 @@ export const state = {
 const listeners = new Set();
 export const onChange = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
 let dirty = false;
-function emit() { if (dirty) return; dirty = true; setTimeout(() => { dirty = false; listeners.forEach((f) => { try { f(state); } catch (e) { console.error(e); } }); }, 400); }
+function emit() { if (dirty) return; dirty = true; setTimeout(() => { dirty = false; listeners.forEach((f) => { try { f(state); } catch (e) { console.error(e); } }); }, 1000); }
 function log(msg, kind = 'info') { state.log.unshift({ t: Date.now(), msg, kind }); state.log.length = Math.min(state.log.length, 200); emit(); }
 
 // ---------- public socket ----------
@@ -72,7 +72,7 @@ function onTick(t) {
   const last = m.epochs[m.epochs.length - 1];
   if (last != null && t.epoch <= last) return;
   m.prices.push(t.quote); m.epochs.push(t.epoch);
-  if (m.prices.length > MAX_TICKS) { m.prices.splice(0, 2000); m.epochs.splice(0, 2000); }
+  if (m.prices.length > MAX_TICKS) { m.prices.splice(0, 1500); m.epochs.splice(0, 1500); }
   m.last = t.quote; m.lastEpoch = t.epoch; m.tickCount++;
   emit();
 }
@@ -135,7 +135,7 @@ let sWorker = null;
 const jobs = new Map();
 let jobSeq = 0;
 function mkWorker() {
-  const w = new Worker(new URL('./worker.js?v=11', import.meta.url), { type: 'module' });
+  const w = new Worker(new URL('./worker.js?v=12', import.meta.url), { type: 'module' });
   w.onmessage = (ev) => { const j = jobs.get(ev.data.id); if (!j) return; jobs.delete(ev.data.id); ev.data.type === 'error' ? j.reject(new Error(ev.data.error)) : j.resolve(ev.data); };
   w.onerror = (e) => { log(`worker error: ${e.message}`, 'bad'); for (const j of jobs.values()) j.reject(new Error('worker failed')); jobs.clear(); };
   return w;
