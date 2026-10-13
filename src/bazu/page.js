@@ -2,13 +2,13 @@
  * src/bazu/page.js
  * BAZU page view. Sends commands to engine.js and renders its state — NO trading rules here.
  */
-import * as E from './engine.js?v=7';
-import { clusterZones } from './structure.js?v=7';
-import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=7';
+import * as E from './engine.js?v=8';
+import { clusterZones } from './structure.js?v=8';
+import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=8';
 import { findSwingPoints } from '../../mtf/src/analysis/swingPoints.js';
-import { wilson } from './stats.js?v=7';
-import { accountInfo } from './execution.js?v=7';
-import { GATE } from './decision.js?v=7';
+import { wilson } from './stats.js?v=8';
+import { accountInfo } from './execution.js?v=8';
+import { GATE } from './decision.js?v=8';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -80,7 +80,8 @@ function whyNoTrade(S, acc) {
 
 function render() {
   if (!ready || !document.getElementById('page-bazu')?.classList.contains('active')) return;
-  const S = E.state, M = E.metrics(), acc = M.account;
+  const S = E.state; let M; try { M = E.metrics(); } catch (e) { console.error('BAZU metrics', e); M = { account: accountInfo(), openStake: 0, potentialPayout: 0, sessionPnl: 0, closed: 0, win: {}, exposure: 'ok', markets: S.markets.size, tradable: 0, failed: 0 }; }
+  const acc = M.account;
   $('bzStatus').textContent = S.status + (S.scan.active ? ` · ${S.scan.phase} ${S.scan.done}/${S.scan.total}` : '');
   $('bzDot').className = 'dot' + (S.status === 'live' ? ' live' : '');
   const pill = $('bzAcctPill');
@@ -89,7 +90,7 @@ function render() {
   $('bzWhy').textContent = whyNoTrade(S, acc);
   $('bzStart').disabled = S.running; $('bzStop').disabled = !S.running;
   const mk = (l, v, c = '') => `<div class="m ${c}"><div class="l">${l}</div><div class="v num">${v}</div></div>`;
-  $('bzMetrics').innerHTML = [
+  try { $('bzMetrics').innerHTML = [
     mk('Balance', acc.connected ? `${Number(acc.balance).toFixed(2)} ${esc(acc.currency)}` : '—'),
     mk('Open stake', Number(M.openStake).toFixed(2)),
     mk('If settled now', M.settleNow == null ? '—' : Number(M.settleNow).toFixed(2)),
@@ -98,11 +99,9 @@ function render() {
     mk('Win rate', M.closed ? `${pct(M.win.p, 0)} <span class="mu" style="font-size:11px">n=${M.closed}</span>` : '—'),
     mk('Capital exposure', M.exposure.toUpperCase(), M.exposure),
     mk('Markets', M.markets), mk('Strong signals', M.tradable), mk('Completed', M.closed), mk('Failed', M.failed),
-  ].join('');
-  if (tab === 'live') renderLive(S);
-  else if (tab === 'accuracy') renderAccuracy(S);
-  else if (tab === 'perf') renderPerf(S);
-  else renderExec(S, acc);
+  ].join(''); } catch (e) { console.error('BAZU metrics', e); }
+  const part = { live: () => renderLive(S), accuracy: () => renderAccuracy(S), perf: () => renderPerf(S), exec: () => renderExec(S, acc) }[tab] || (() => renderExec(S, acc));
+  try { part(); } catch (e) { console.error('BAZU render', e); }
 }
 
 function renderPerf(S) {
@@ -199,5 +198,5 @@ function renderExec(S, acc) {
     </div><div>
     <div class="panel"><h3>Open positions</h3>${tradesTable(S.trades.filter((t) => t.status === 'open'))}</div>
     <div class="panel" style="margin-top:10px"><h3>Event log</h3><div class="log">${S.log.map((l) => `<div class="${l.kind === 'bad' ? 'dn' : l.kind === 'ok' ? 'up' : l.kind === 'warn' ? '' : 'mu'}">${new Date(l.t).toLocaleTimeString()} · ${esc(l.msg)}</div>`).join('')}</div></div>
-    <div class="panel note" style="margin-top:10px">Risk limits: stake ≤ ${S.limits.maxStake} (REAL ≤ ${S.limits.realMaxStake}), ≤ ${S.limits.maxConcurrent} open, 1 per market, daily loss limit ${S.limits.dailyLossLimit} (REAL ${S.limits.realDailyLossLimit}), ${S.limits.cooldownMs / 1000}s cooldown.</div></div></div>`;
+    <div class="panel note" style="margin-top:10px">No stake or trade-count limits are applied. REAL accounts require the confirmation tick.</div></div></div>`;
 }

@@ -3,7 +3,7 @@
  * Chart timeframes from 2 ticks to 1 hour, price formatting and candle bucketing.
  * Tick and sub-minute frames are built from real Deriv ticks; 1m and above come from Deriv candles.
  */
-import { toCandles } from './structure.js?v=7';
+import { toCandles } from './structure.js?v=8';
 
 export const TIMEFRAMES = Object.freeze([
   { key: '2t', label: '2 ticks', ticks: 2 }, { key: '5t', label: '5 ticks', ticks: 5 },
