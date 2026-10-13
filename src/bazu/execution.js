@@ -36,7 +36,17 @@ export async function buyRiseFall({ symbol, contractType, stake, duration }) {
   const acc = accountInfo();
   const proposal = await call({ proposal: 1, amount: stake, basis: 'stake', contract_type: contractType, currency: acc.currency, ...durationFields(duration), underlying_symbol: symbol });
   if (!proposal?.id) throw new Error('No proposal id from Deriv');
-  const buy = await call({ buy: proposal.id, price: proposal.ask_price });
+  let buy;
+  try {
+    buy = await call({ buy: proposal.id, price: proposal.ask_price });
+  } catch (e) {
+    if (!/unknown contract proposal|proposal/i.test(e.message)) throw e;
+    // Proposal id not recognised on this socket: buy directly from parameters (still a real Deriv contract).
+    buy = await call({
+      buy: 1, price: Number(proposal.ask_price),
+      parameters: { amount: stake, basis: 'stake', contract_type: contractType, currency: acc.currency, ...durationFields(duration), underlying_symbol: symbol },
+    });
+  }
   return { proposal, buy, isReal: acc.isReal, id: ++nextId };
 }
 
