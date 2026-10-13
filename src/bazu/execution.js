@@ -34,7 +34,14 @@ export function durationFields(d) { return { duration: d.n, duration_unit: d.uni
 /** proposal -> buy, atomically on the live proposal id/ask_price. Resolves with Deriv's buy response. */
 export async function buyRiseFall({ symbol, contractType, stake, duration }) {
   const acc = accountInfo();
-  const proposal = await call({ proposal: 1, amount: stake, basis: 'stake', contract_type: contractType, currency: acc.currency, ...durationFields(duration), underlying_symbol: symbol });
+  const pmsg = { proposal: 1, amount: stake, basis: 'stake', contract_type: contractType, currency: acc.currency, ...durationFields(duration), underlying_symbol: symbol };
+  let proposal;
+  for (let i = 0; ; i++) {
+    try { proposal = await call(pmsg); break; } catch (e) {
+      if (i >= 3 || !/rate limit/i.test(e.message)) throw e;
+      await new Promise((r) => setTimeout(r, 1200 * (i + 1)));
+    }
+  }
   if (!proposal?.id) throw new Error('No proposal id from Deriv');
   let buy;
   try {

@@ -7,13 +7,13 @@
  * -> Execution (execution.js). The UI only calls commands and reads `state`.
  */
 
-import { parseActiveSymbols, parseContractsFor, pickDurations } from './universe.js?v=5';
-import { durationKey } from './validation.js?v=5';
-import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=5';
-import { decimalsFromPip } from './timeframes.js?v=5';
-import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=5';
-import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=5';
-import { wilson } from './stats.js?v=5';
+import { parseActiveSymbols, parseContractsFor, pickDurations } from './universe.js?v=6';
+import { durationKey } from './validation.js?v=6';
+import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=6';
+import { decimalsFromPip } from './timeframes.js?v=6';
+import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=6';
+import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=6';
+import { wilson } from './stats.js?v=6';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;
@@ -134,7 +134,7 @@ let sWorker = null;
 const jobs = new Map();
 let jobSeq = 0;
 function mkWorker() {
-  const w = new Worker(new URL('./worker.js?v=5', import.meta.url), { type: 'module' });
+  const w = new Worker(new URL('./worker.js?v=6', import.meta.url), { type: 'module' });
   w.onmessage = (ev) => { const j = jobs.get(ev.data.id); if (!j) return; jobs.delete(ev.data.id); ev.data.type === 'error' ? j.reject(new Error(ev.data.error)) : j.resolve(ev.data); };
   w.onerror = (e) => log(`worker error: ${e.message}`, 'bad');
   return w;
@@ -158,9 +158,11 @@ export function ensureCandles(m, tf) {
 
 // ---------- predictions ----------
 const quoteCache = new Map();
+let nextProposalAt = 0;
 async function quoteFor(sym, d, type) {
   const k = `${sym}|${durationKey(d)}|${type}`, c = quoteCache.get(k);
-  if (c && Date.now() - c.at < 8000) return c.q;
+  if (c && Date.now() - c.at < 30000) return c.q;
+  const wait = Math.max(0, nextProposalAt - Date.now()); nextProposalAt = Math.max(Date.now(), nextProposalAt) + 700; if (wait) await new Promise((r) => setTimeout(r, wait));
   const r = await send({ proposal: 1, amount: 1, basis: 'stake', contract_type: type, currency: 'USD', duration: d.n, duration_unit: d.unit, underlying_symbol: sym });
   const q = { ask: Number(r.proposal.ask_price), payout: Number(r.proposal.payout), spot: r.proposal.spot, longcode: r.proposal.longcode };
   quoteCache.set(k, { q, at: Date.now() });
@@ -179,7 +181,7 @@ async function signalTick() {
       const d = m.durations[0];
       const r = await runJob(sWorker, { type: 'predict', prices: m.prices.slice(-1500), epochs: m.epochs.slice(-1500) });
       let q = null;
-      if (r.result) { try { q = await quoteFor(m.symbol, d, r.result.direction > 0 ? 'CALL' : 'PUT'); } catch { /* no quote */ } }
+      if (r.result && r.result.strength >= MIN_STRENGTH) { try { q = await quoteFor(m.symbol, d, r.result.direction > 0 ? 'CALL' : 'PUT'); } catch { /* no quote */ } }
       const sig = { ...buildTradeSignal({ symbol: m.symbol, prediction: r.result, duration: durationKey(d), quote: q }), epoch: r.lastEpoch, durationObj: d };
       m.signal = sig; state.signals.set(m.symbol, sig);
       emit();
