@@ -2,13 +2,13 @@
  * src/bazu/page.js
  * BAZU page view. Sends commands to engine.js and renders its state — NO trading rules here.
  */
-import * as E from './engine.js?v=4';
-import { clusterZones } from './structure.js?v=4';
-import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=4';
+import * as E from './engine.js?v=5';
+import { clusterZones } from './structure.js?v=5';
+import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=5';
 import { findSwingPoints } from '../../mtf/src/analysis/swingPoints.js';
-import { wilson } from './stats.js?v=4';
-import { accountInfo } from './execution.js?v=4';
-import { GATE } from './decision.js?v=4';
+import { wilson } from './stats.js?v=5';
+import { accountInfo } from './execution.js?v=5';
+import { GATE } from './decision.js?v=5';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -79,7 +79,7 @@ function whyNoTrade(S, acc) {
 }
 
 function render() {
-  if (!ready) return;
+  if (!ready || !document.getElementById('page-bazu')?.classList.contains('active')) return;
   const S = E.state, M = E.metrics(), acc = M.account;
   $('bzStatus').textContent = S.status + (S.scan.active ? ` · ${S.scan.phase} ${S.scan.done}/${S.scan.total}` : '');
   $('bzDot').className = 'dot' + (S.status === 'live' ? ' live' : '');

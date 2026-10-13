@@ -3,7 +3,7 @@
  * Chart timeframes from 2 ticks to 1 hour, price formatting and candle bucketing.
  * Tick and sub-minute frames are built from real Deriv ticks; 1m and above come from Deriv candles.
  */
-import { toCandles } from './structure.js?v=4';
+import { toCandles } from './structure.js?v=5';
 
 export const TIMEFRAMES = Object.freeze([
   { key: '2t', label: '2 ticks', ticks: 2 }, { key: '5t', label: '5 ticks', ticks: 5 },
@@ -56,6 +56,10 @@ export function mergeLive(candles, prices, epochs, secs) {
 
 /** Candles for a timeframe from local ticks (tick and sub-minute frames). */
 export function localCandles(prices, epochs, tf, max = 150) {
-  const c = tf.ticks ? toCandles(prices, epochs, tf.ticks).candles : bucketCandles(prices, epochs, tf.secs);
+  let from = 0;
+  if (tf.ticks) from = Math.max(0, prices.length - (max + 2) * tf.ticks);
+  else { const cut = epochs[epochs.length - 1] - (max + 1) * tf.secs; from = epochs.length; while (from > 0 && epochs[from - 1] >= cut) from--; }
+  const p = prices.slice(from), e = epochs.slice(from);
+  const c = tf.ticks ? toCandles(p, e, tf.ticks).candles : bucketCandles(p, e, tf.secs);
   return c.slice(-max);
 }
