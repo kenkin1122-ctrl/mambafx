@@ -134,3 +134,6 @@ The Phase 8 statistical campaign engine runs in a Node.js `vm` context to isolat
 | Front-end | GitHub Pages | `git push` to `main` branch |
 | Backend | Cloudflare Workers | `wrangler deploy` |
 | Development | Replit (node server.js) | Replit workflow |
+
+## BAZU
+Prediction (validation.js, worker) -> Decision (decision.js trade gate, risk.js) -> Execution (execution.js). UI (page.js) only sends commands and renders state.
