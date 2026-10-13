@@ -22,7 +22,11 @@ function bindOnce() {
   $('bzMode').onclick = (e) => { const m = e.target.dataset.m; if (!m) return; E.setMode(m); [...$('bzMode').children].forEach((b) => b.classList.toggle('on', b.dataset.m === m)); };
   $('bzTf').innerHTML = TIMEFRAMES.map((t) => `<button data-tf="${t.key}" class="${t.key === tfKey ? 'on' : ''}">${t.label}</button>`).join('');
   $('bzTf').onclick = (e) => { const k = e.target.dataset.tf; if (!k) return; tfKey = k; [...$('bzTf').children].forEach((b) => b.classList.toggle('on', b.dataset.tf === k)); render(); };
-  $('bzStart').onclick = () => E.setRunning(true);
+  $('bzStart').onclick = () => {
+    if (E.state.mode === 'manual') { E.setMode('auto'); [...$('bzMode').children].forEach((b) => b.classList.toggle('on', b.dataset.m === 'auto')); }
+    if (!accountInfo().connected && typeof window.gridConnect === 'function') $('bzConnect').onclick();
+    E.setRunning(true);
+  };
   $('bzStop').onclick = () => { E.setRunning(false); };
   $('bzStake').onchange = (e) => E.setStake(e.target.value);
   $('bzRealOk').onchange = (e) => E.confirmReal(e.target.checked);
@@ -64,6 +68,16 @@ function syncAccounts() {
   }
 }
 
+function whyNoTrade(S, acc) {
+  if (!acc.connected) return '⚠ No Deriv account connected - log in, pick an account and press Connect. Trades cannot be placed until then.';
+  if (!S.running) return 'Bot stopped - press Start to trade automatically (Auto mode).';
+  if (S.mode !== 'auto') return 'Mode is ' + S.mode + ' - choose Auto for automatic trades.';
+  if (!acc.isDemo && !S.realConfirmed) return '⚠ REAL account: tick the real-money confirmation to allow trades.';
+  const last = S.log.find((l) => /blocked|failed/.test(l.msg));
+  const open = S.trades.filter((t) => t.status === 'open').length;
+  return 'Auto trading ON (' + (acc.isDemo ? 'DEMO' : 'REAL') + ') - waiting for a signal with strength >= 20%. Open: ' + open + (last ? ' · last issue: ' + last.msg : '');
+}
+
 function render() {
   if (!ready) return;
   const S = E.state, M = E.metrics(), acc = M.account;
@@ -72,6 +86,7 @@ function render() {
   const pill = $('bzAcctPill');
   pill.textContent = acc.connected ? (acc.isReal ? '🔴 REAL' : '🟢 DEMO') : 'NOT CONNECTED';
   pill.className = 'pill ' + (acc.connected ? (acc.isReal ? 'real' : 'demo') : '');
+  $('bzWhy').textContent = whyNoTrade(S, acc);
   $('bzStart').disabled = S.running; $('bzStop').disabled = !S.running;
   const mk = (l, v, c = '') => `<div class="m ${c}"><div class="l">${l}</div><div class="v num">${v}</div></div>`;
   $('bzMetrics').innerHTML = [
