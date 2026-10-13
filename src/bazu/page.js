@@ -14,7 +14,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const pct = (x, d = 1) => (x == null || !Number.isFinite(x) ? '—' : (x * 100).toFixed(d) + '%');
 const ci = (w) => (w && w.n ? `${pct(w.p)} <span class="mu">[${pct(w.lo)}–${pct(w.hi)}] n=${w.n}</span>` : '<span class="mu">no data</span>');
-const money = (x) => (x == null || !Number.isFinite(x) ? '—' : (x >= 0 ? '+' : '') + x.toFixed(2));
+const money = (x) => (x == null || !Number.isFinite(x) ? '—' : (x >= 0 ? '+' : '') + Number(x).toFixed(2));
 let tab = 'live', ready = false, tfKey = '10t';
 
 function bindOnce() {
@@ -91,9 +91,9 @@ function render() {
   const mk = (l, v, c = '') => `<div class="m ${c}"><div class="l">${l}</div><div class="v num">${v}</div></div>`;
   $('bzMetrics').innerHTML = [
     mk('Balance', acc.connected ? `${Number(acc.balance).toFixed(2)} ${esc(acc.currency)}` : '—'),
-    mk('Open stake', M.openStake.toFixed(2)),
-    mk('If settled now', M.settleNow == null ? '—' : M.settleNow.toFixed(2)),
-    mk('Potential payout', M.potentialPayout.toFixed(2)),
+    mk('Open stake', Number(M.openStake).toFixed(2)),
+    mk('If settled now', M.settleNow == null ? '—' : Number(M.settleNow).toFixed(2)),
+    mk('Potential payout', Number(M.potentialPayout).toFixed(2)),
     mk('Session P/L', money(M.sessionPnl), M.sessionPnl > 0 ? 'ok' : M.sessionPnl < 0 ? 'bad' : ''),
     mk('Win rate', M.closed ? `${pct(M.win.p, 0)} <span class="mu" style="font-size:11px">n=${M.closed}</span>` : '—'),
     mk('Capital exposure', M.exposure.toUpperCase(), M.exposure),

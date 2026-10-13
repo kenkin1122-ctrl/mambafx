@@ -250,7 +250,7 @@ function onContract(c) {
   if (!t) return;
   if (c.entry_tick != null) t.entry = c.entry_tick;
   if (c.payout != null) t.payout = c.payout;
-  if (c.bid_price != null) t.bid = c.bid_price;
+  if (c.bid_price != null) t.bid = Number(c.bid_price);
   if (c.is_sold || c.status === 'sold' || c.is_expired) {
     t.exit = c.exit_tick ?? c.sell_spot ?? t.exit; t.profit = Number(c.profit);
     t.status = 'closed'; t.result = t.profit > 0 ? 'win' : 'loss'; saveTrades();
@@ -268,9 +268,9 @@ export function metrics() {
   const wins = closed.filter((t) => t.profit > 0).length;
   const openStake = open.reduce((a, t) => a + (t.buyPrice || t.stake), 0);
   const known = open.filter((t) => t.bid != null);
-  const settleNow = known.length === open.length && open.length ? known.reduce((a, t) => a + t.bid, 0) : null;
+  const settleNow = known.length === open.length && open.length ? known.reduce((a, t) => a + Number(t.bid), 0) : null;
   return {
-    account: acc, openStake, settleNow, potentialPayout: open.reduce((a, t) => a + (t.payout || 0), 0),
+    account: acc, openStake, settleNow, potentialPayout: open.reduce((a, t) => a + (Number(t.payout) || 0), 0),
     sessionPnl: closed.reduce((a, t) => a + t.profit, 0), closed: closed.length, wins, win: wilson(wins, closed.length),
     exposure: exposureLevel(openStake, acc.balance),
     markets: state.markets.size, tradable: [...state.markets.values()].filter((m) => m.signal?.gate === GATE.OK).length,
