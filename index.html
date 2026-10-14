@@ -2281,6 +2281,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       <button class="btn" id="bzLogin">Login with Deriv</button>
       <button class="btn primary" id="bzConnect">Connect</button>
       <label class="mu" style="font-size:12px">Stake <input id="bzStake" type="number" min="0.35" step="0.05" value="1" style="width:70px"></label>
+      <label class="mu" style="font-size:12px" title="Auto = duration from the signal's expected lifetime; picking one is a manual override">Duration <select id="bzDur"><option value="">Auto (lifetime)</option></select></label>
       <label class="mu" style="font-size:12px" title="Multiply the stake after each loss; 1 = off">Martingale x <input id="bzMart" type="number" min="1" step="0.1" value="1" style="width:60px"></label>
       <label class="mu" style="font-size:12px"><input id="bzRealOk" type="checkbox"> I confirm trading REAL money with BAZU (stake capped)</label>
     </div>
@@ -2288,7 +2289,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   <div class="note" id="bzWhy" style="margin:6px 0"></div>
 <div class="bz-metrics" id="bzMetrics"></div>
   <div class="bz-tabs" id="bzTabs">
-    <button data-t="live" class="on">Live</button><button data-t="accuracy">Accuracy log</button><button data-t="exec">Execution</button><button data-t="perf">Performance log</button>
+    <button data-t="live" class="on">Live</button><button data-t="accuracy">Accuracy log</button><button data-t="exec">Execution</button><button data-t="perf">Performance log</button><button data-t="calib">Calibration</button>
   </div>
   <div class="bz-pane on" id="bzp-live">
     <div class="bz-cols">
@@ -2302,6 +2303,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
   <div class="bz-pane" id="bzp-accuracy"><div id="bzAccuracy"></div></div>
   <div class="bz-pane" id="bzp-exec"><div id="bzExec"></div></div>
   <div class="bz-pane" id="bzp-perf"><div id="bzPerf"></div></div>
+<div class="bz-pane" id="bzp-calib"><div id="bzCalib"></div></div>
 </div>
 
 <div id="page-rfabot" class="page">
@@ -28449,6 +28451,20 @@ let gridAutoCount = 0;
 let gridLastAutoAt = 0;
 let gridPageInited = false;
 let gridConnecting = false;
+let gridAutoCall = false, gridWantConn = false, gridRetryTimer = null, gridRetryN = 0;   // auto-reconnect state
+function gridScheduleRetry(){
+  if (!gridWantConn || gridRetryTimer) return;
+  const delay = Math.min(30000, 1500 * Math.pow(1.6, gridRetryN++));
+  gridDiag(`<b>Connection lost.</b> Reconnecting automatically in ${Math.round(delay/1000)}s…`, true);
+  gridRetryTimer = setTimeout(() => { gridRetryTimer = null; if (gridWantConn && !gridConnecting && !(gridWs && gridWs.readyState === 1)) (gridAutoCall = true, gridConnect()); }, delay);
+}
+function gridRetryNow(){
+  if (!gridWantConn || gridConnecting || (gridWs && gridWs.readyState === 1)) return;
+  if (gridRetryTimer){ clearTimeout(gridRetryTimer); gridRetryTimer = null; }
+  (gridAutoCall = true, gridConnect());
+}
+window.addEventListener("online", gridRetryNow);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) gridRetryNow(); });
 let gridLoggedIn = false;          // session state, from /me/session — no token held client-side
 let gridAccounts = [];             // [{account_id, account_type, currency, ...}]
 
@@ -28463,13 +28479,15 @@ let gridAccounts = [];             // [{account_id, account_type, currency, ...}
 //   token null:    url is a one-time OTP URL, already authorized on open
 // This works for BOTH real (DOT...) and virtual/demo (VRTC...) accounts.
 async function gridConnect(){
+  const isAuto = gridAutoCall; gridAutoCall = false;
   if (gridConnecting) return;
-  if (!gridLoggedIn){ alert("Login with Deriv first."); return; }
+  if (!gridLoggedIn){ if (!isAuto) alert("Login with Deriv first."); else gridScheduleRetry(); return; }
   if (gridWs && window.__mfxDebug) window.__mfxDebug.recordReconnect(); // a prior connection existed — this call is a reconnect, not the first
   const sel    = $("gridAcctPick");
   const acctId = sel && sel.value;
-  if (!acctId){ alert("Pick an account first."); return; }
+  if (!acctId){ if (!isAuto) alert("Pick an account first."); return; }
 
+  gridWantConn = true;
   gridDiag(null);
   gridConnecting = true;
   gridConnState("connecting");
@@ -28494,6 +28512,7 @@ async function gridConnect(){
         ? `Cannot reach <code>${BACKEND_URL}/ws/otp</code>.`
         : `Backend: <b>${e.message||"unknown"}</b>. Log out and log in again.`
     }`, true);
+    gridScheduleRetry();
     return;
   }
 
@@ -28501,6 +28520,7 @@ async function gridConnect(){
   catch(e){
     gridConnecting = false; gridConnState("off");
     gridDiag("<b>Cannot open WebSocket:</b> " + (e.message||""), true);
+    gridScheduleRetry();
     return;
   }
 
@@ -28553,7 +28573,8 @@ async function gridConnect(){
     gridConnState("off");
     if (window.__mfxDebug) window.__mfxDebug.setConnectionStatus('closed');
     if (gridArmed) gridDisarm("connection closed");
-    if (ev && ev.code && ev.code !== 1000)
+    if (gridWantConn) gridScheduleRetry();
+    else if (ev && ev.code && ev.code !== 1000)
       gridDiag(`<b>WebSocket closed</b> (code ${ev.code}). Click Connect again.`, true);
   };
 }
@@ -28562,6 +28583,7 @@ async function gridConnect(){
 function gridWsSubscribeAndInit(acctId){
   gridConnecting = false;
   gridAuthed = true;
+  gridRetryN = 0;
   gridConnState("on");
   gridDiag(null);
 
@@ -28612,6 +28634,8 @@ async function gridLogout(){
 }
 
 function gridDisconnect(){
+  gridWantConn = false; gridRetryN = 0;
+  if (gridRetryTimer){ clearTimeout(gridRetryTimer); gridRetryTimer = null; }
   if (gridArmed) gridDisarm("disconnected");
   if (typeof digAutoArmed !== "undefined" && digAutoArmed) digDisarmAuto("disconnected");
   try { if (gridWs){ gridWs.onclose = null; gridWs.close(); } } catch(_){}
@@ -32960,7 +32984,7 @@ try {
   </div>
 </div>
 
-<script type="module" src="src/bazu/page.js?v=14"></script>
+<script type="module" src="src/bazu/page.js?v=15"></script>
 <script type="module" src="src/trading/fiveTickSignalEngine.js"></script>
 <script type="module" src="src/trading/multiplierHelpers.js"></script>
 <script type="module" src="src/trading/gridSetHelper.js"></script>

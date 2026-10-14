@@ -6,7 +6,7 @@
  */
 import { findSwingPoints } from '../../mtf/src/analysis/swingPoints.js';
 import { detectOrderBlock } from '../../mtf/src/analysis/zonePatterns.js';
-import { clusterZones } from './structure.js?v=14';
+import { clusterZones } from './structure.js?v=15';
 
 const LB = 2;
 const band = (price, atr, k) => ({ low: price - k * atr, high: price + k * atr });
@@ -41,15 +41,14 @@ function dayLevels(h1, atr, cfg) {
   return [['resistance', hi], ['support', lo], ['level', op]].map(([kind, p]) => ({ ...band(p, atr, cfg.zoneK), mid: p, kind, touches: 2, strength: 2, fresh: true, flipped: false, tf: 'D1', overlap: 0 }));
 }
 
-/** Zones from M5 (setup) plus M15/H1 (context); a zone gains `overlap` for every higher-timeframe zone it intersects. */
-export function buildZones(frames, cfg) {
-  const m5 = zonesFrom(frames.M5, 'M5', cfg), m15 = zonesFrom(frames.M15, 'M15', cfg), h1 = zonesFrom(frames.H1, 'H1', cfg);
-  const atr = frames.M5.length ? frames.M5[frames.M5.length - 1].atr : NaN;
-  const all = [...m5, ...m15, ...h1, ...dayLevels(frames.H1, atr, cfg)];
-  for (const z of m5) for (const h of [...m15, ...h1]) if (z.low <= h.high && z.high >= h.low) z.overlap++;
+/** Zones from the setup frame plus context/bias frames (names from config roles); a setup zone gains `overlap` per higher-timeframe zone it intersects. */
+export function buildZones(frames, cfg, roles) {
+  const setup = zonesFrom(frames.setup, roles.setup, cfg), ctx = zonesFrom(frames.context, roles.context, cfg), bias = roles.bias === roles.context ? [] : zonesFrom(frames.bias, roles.bias, cfg);
+  const atr = frames.setup.length ? frames.setup[frames.setup.length - 1].atr : NaN;
+  const all = [...setup, ...ctx, ...bias, ...dayLevels(frames.H1 || [], atr, cfg)];
+  for (const z of setup) for (const h of [...ctx, ...bias]) if (z.low <= h.high && z.high >= h.low) z.overlap++;
   return all;
 }
-
 /** Zones whose band lies within tolAtr * atr of price. */
 export const zonesNear = (zones, price, atr, tolAtr = 0.75) => zones.filter((z) => price >= z.low - tolAtr * atr && price <= z.high + tolAtr * atr);
 

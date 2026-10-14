@@ -7,15 +7,18 @@
  * -> Execution (execution.js). The UI only calls commands and reads `state`.
  */
 
-import { parseActiveSymbols, parseContractsFor, pickDurations, durationAllowed } from './universe.js?v=14';
-import { durationKey } from './validation.js?v=14';
-import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=14';
-import { predict3m } from './predict3m.js?v=14';
-import { threeMinuteDuration } from './config3m.js?v=14';
-import { decimalsFromPip } from './timeframes.js?v=14';
-import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=14';
-import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=14';
-import { wilson } from './stats.js?v=14';
+import { parseActiveSymbols, parseContractsFor, pickDurations, durationAllowed } from './universe.js?v=15';
+import { durationKey } from './validation.js?v=15';
+import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=15';
+import { predict3m } from './predict3m.js?v=15';
+import { configFor } from './config3m.js?v=15';
+import { allowedDurations, durationLabel } from './duration3m.js?v=15';
+import { resolveRecord } from './calibration3m.js?v=15';
+import { backfill, mergeCandles, parseCandles } from './backfill3m.js?v=15';
+import { decimalsFromPip } from './timeframes.js?v=15';
+import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=15';
+import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=15';
+import { wilson } from './stats.js?v=15';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;
@@ -25,7 +28,7 @@ const TRADES_KEY = 'bazu_trades_v1';
 export const state = {
   status: 'idle', mode: 'manual', running: false, stake: 1, curStake: 1, martingale: 1, limits: { ...DEFAULT_LIMITS },
   markets: new Map(), trades: [], log: [], scan: { done: 0, total: 0, active: false }, realConfirmed: false,
-  selected: null, signals: new Map(),
+  selected: null, signals: new Map(), manualKey: null, records: [], vetoStats: {}, backfill: null,
 };
 
 const listeners = new Set();
@@ -92,8 +95,7 @@ export async function discover() {
         const cf = await send({ contracts_for: s.symbol });
         const rf = parseContractsFor(cf);
         if (rf) {
-          const d3 = threeMinuteDuration(durationAllowed, rf.ranges), durations = d3 ? [d3] : [];
-          state.markets.set(s.symbol, { ...s, ranges: rf.ranges, durations, dp: decimalsFromPip(s.pip), prices: [], epochs: [], last: null, lastEpoch: null, tickCount: 0, status: 'discovered', signal: null, historyLoaded: false });
+          state.markets.set(s.symbol, { ...s, ranges: rf.ranges, dp: decimalsFromPip(s.pip), prices: [], epochs: [], last: null, lastEpoch: null, tickCount: 0, status: 'discovered', signal: null, historyLoaded: false });
         }
       } catch (e) { log(`contracts_for ${s.symbol}: ${e.message}`, 'warn'); }
       state.scan.done++; emit();
@@ -103,6 +105,7 @@ export async function discover() {
   log(`Universe: ${state.markets.size} synthetic indices offer Rise/Fall (of ${syms.length} active)`);
   await Promise.all([...state.markets.keys()].map((sym) => send({ ticks: sym, subscribe: 1 }).catch(() => {})));
   state.status = 'live'; emit();
+  backfillAll().catch((e) => log('backfill: ' + e.message, 'warn'));
   const q = [...state.markets.keys()];
   for (let w = 0; w < 4; w++) (async () => { while (q.length) { try { await loadHistory(q.shift()); } catch (e) { log('history: ' + e.message, 'warn'); } } })();
 }
@@ -136,7 +139,7 @@ let sWorker = null;
 const jobs = new Map();
 let jobSeq = 0;
 function mkWorker() {
-  const w = new Worker(new URL('./worker.js?v=14', import.meta.url), { type: 'module' });
+  const w = new Worker(new URL('./worker.js?v=15', import.meta.url), { type: 'module' });
   w.onmessage = (ev) => { const j = jobs.get(ev.data.id); if (!j) return; jobs.delete(ev.data.id); ev.data.type === 'error' ? j.reject(new Error(ev.data.error)) : j.resolve(ev.data); };
   w.onerror = (e) => { log(`worker error: ${e.message}`, 'bad'); for (const j of jobs.values()) j.reject(new Error('worker failed')); jobs.clear(); };
   return w;
@@ -158,21 +161,42 @@ export function ensureCandles(m, tf) {
     .finally(() => { candleBusy.delete(k); emit(); });
 }
 
-// ---------- remote candles for the 3-minute path (M1/M5/M15/H1), throttled ----------
-const REMOTE = [['M1', 60, 500, 60000], ['M5', 300, 300, 300000], ['M15', 900, 150, 600000], ['H1', 3600, 120, 1800000]];
+// ---------- remote candles: full startup backfill, then small incremental refreshes ----------
 const remoteBusy = new Set();
-let remoteSlots = 3;
+let remoteSlots = 2;
 export function ensureRemote(m) {
-  const store = (m.remote ||= {}), at = (m.remoteAt ||= {});
-  for (const [k, secs, count, ttl] of REMOTE) {
-    const key = m.symbol + k;
+  const cfg = configFor(m.symbol), store = (m.remote ||= {}), at = (m.remoteAt ||= {});
+  for (const k of cfg.BACKFILL_FRAMES) {
+    const secs = cfg.FRAMES[k], key = m.symbol + k, ttl = Math.max(60000, secs * 1000);
     if (remoteBusy.has(key) || (store[k] && Date.now() - (at[k] || 0) < ttl) || remoteSlots <= 0) continue;
     remoteBusy.add(key); remoteSlots--;
-    send({ ticks_history: m.symbol, style: 'candles', granularity: secs, count, end: 'latest' })
-      .then((r) => { store[k] = (r.candles || []).map((x) => ({ epoch: Number(x.epoch), open: +x.open, high: +x.high, low: +x.low, close: +x.close })); at[k] = Date.now(); })
+    send({ ticks_history: m.symbol, style: 'candles', granularity: secs, count: store[k] ? 10 : cfg.BACKFILL_COUNT, end: 'latest' })
+      .then((r) => { store[k] = mergeCandles(store[k], parseCandles(r)); at[k] = Date.now(); })
       .catch((e) => { at[k] = Date.now() - ttl + 15000; log(`candles ${k} ${m.symbol}: ${e.message}`, 'warn'); })
       .finally(() => { remoteBusy.delete(key); remoteSlots++; });
   }
+}
+export async function backfillAll() {
+  const syms = [...state.markets.keys()], t0 = Date.now();
+  const stats = await backfill({
+    symbols: syms, send, cfg: configFor('R_100'),
+    onFrame: (sym, k, cs) => { if (!cs) return; const m = state.markets.get(sym); (m.remote ||= {})[k] = mergeCandles(m.remote[k], cs); (m.remoteAt ||= {})[k] = Date.now(); },
+  });
+  state.backfill = { requests: stats.requests, failed: stats.failed, ms: Date.now() - t0 };
+  log(`Candle backfill: ${stats.requests} requests, ${stats.failed} failed, ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+}
+// ---------- veto statistics (per market) ----------
+const vetoKey = (v) => String(v).replace(/[\d.]+/g, '#');
+function recordEval(sym, res) {
+  const s = (state.vetoStats[sym] ||= { evals: 0, tradable: 0, vetoes: {} });
+  s.evals++;
+  if (!res.wait) s.tradable++;
+  for (const v of res.vetoes || []) { const k = vetoKey(v); s.vetoes[k] = (s.vetoes[k] || 0) + 1; }
+}
+export function vetoSummary() {
+  const tot = { evals: 0, tradable: 0, vetoes: {} };
+  for (const s of Object.values(state.vetoStats)) { tot.evals += s.evals; tot.tradable += s.tradable; for (const [k, v] of Object.entries(s.vetoes)) tot.vetoes[k] = (tot.vetoes[k] || 0) + v; }
+  return tot;
 }
 // ---------- predictions ----------
 const quoteCache = new Map();
@@ -187,22 +211,59 @@ async function quoteFor(sym, d, type) {
   return q;
 }
 
+// ---------- allowed durations, signal records (calibration / shadow log; records only, never a gate) ----------
+function allowedFor(m) {
+  const n = m.epochs.length, k = Math.min(n - 1, 200);
+  const tickSecs = k > 0 ? (m.epochs[n - 1] - m.epochs[n - 1 - k]) / k : NaN;
+  const key = tickSecs.toFixed(2);
+  if (m.allowedKey !== key) { m.allowedKey = key; m.allowedList = allowedDurations(m.ranges, tickSecs, configFor(m.symbol), durationAllowed); }
+  return m.allowedList;
+}
+const REC_KEY = 'bazu_calib_v1', REC_KEEP = 600;
+function loadRecords() { try { state.records = JSON.parse(localStorage.getItem(REC_KEY) || '[]'); } catch { state.records = []; } }
+function saveRecords() { try { localStorage.setItem(REC_KEY, JSON.stringify(state.records.slice(-REC_KEEP))); } catch { /* quota */ } }
+loadRecords();
+let recSeq = 0;
+function logRecord(m, pred, sig) {
+  const rec = pred.record; if (!rec) return null;
+  const cfg = configFor(m.symbol), last = [...state.records].reverse().find((x) => x.symbol === m.symbol);
+  if (last && rec.at - last.at < cfg.LOG_MIN_GAP_S) return last.id;
+  const r = { ...rec, id: `${m.symbol}-${rec.at}-${++recSeq}`, breakEven: sig.quote ? sig.quote.ask / sig.quote.payout : null, taken: false, realised: null, shadow: {} };
+  state.records.push(r); if (state.records.length > REC_KEEP * 2) state.records.splice(0, REC_KEEP);
+  return r.id;
+}
+function resolveRecords(m) {
+  const cfg = configFor(m.symbol); let ch = false;
+  for (const r of state.records) {
+    if (r.symbol !== m.symbol || r.done) continue;
+    const prev = JSON.stringify([r.realised, r.shadow]);
+    r.done = resolveRecord(r, m.prices, m.epochs, cfg);
+    if (prev !== JSON.stringify([r.realised, r.shadow])) ch = true;
+  }
+  if (ch) saveRecords();
+}
+export function setManualDuration(key) { state.manualKey = key || null; log(key ? `Manual duration: ${key}` : 'Duration: automatic (signal lifetime)'); emit(); }
+export function allowedKeys() { const s = new Set(); state.markets.forEach((m) => (m.allowedList || []).forEach((d) => s.add(durationLabel(d)))); return [...s]; }
+
 const lastActedEpoch = new Map();
 let sigTimer = null, sigBusy = false;
-async function signalTick() {
+export async function signalTick() {
   if (sigBusy) return; sigBusy = true;
   try {
     for (const m of state.markets.values()) {
       if (!m.historyLoaded) { loadHistory(m.symbol).catch(() => {}); }
-      if (m.prices.length < 300 || !m.durations.length) continue;
-      const d = m.durations[0];
+      if (m.prices.length < 300) continue;
       ensureRemote(m);
+      const allowed = allowedFor(m);
       let r;
-      try { r = predict3m({ symbol: m.symbol, prices: m.prices.slice(-6000), epochs: m.epochs.slice(-6000), remote: m.remote || {}, decisionEpoch: m.epochs[m.epochs.length - 1] }); } catch (e) { log('predict ' + m.symbol + ': ' + e.message, 'warn'); continue; }
+      try { r = predict3m({ symbol: m.symbol, prices: m.prices.slice(-6000), epochs: m.epochs.slice(-6000), remote: m.remote || {}, decisionEpoch: m.epochs[m.epochs.length - 1], allowed, manualKey: state.manualKey }); } catch (e) { log('predict ' + m.symbol + ': ' + e.message, 'warn'); continue; }
+      recordEval(m.symbol, r);
       r = { result: r, lastEpoch: r.decisionTs };
-      let q = null;
-      if (r.result && !r.result.wait && r.result.strength >= r.result.minStrength) { try { q = await quoteFor(m.symbol, d, r.result.direction > 0 ? 'CALL' : 'PUT'); } catch { /* no quote */ } }
-      const sig = { ...buildTradeSignal({ symbol: m.symbol, prediction: r.result, duration: durationKey(d), quote: q }), epoch: r.lastEpoch, durationObj: d };
+      let q = null; const d = r.result.duration && allowed.find((x) => durationLabel(x) === r.result.duration.key);
+      if (d && !r.result.wait && r.result.strength >= r.result.minStrength) { try { q = await quoteFor(m.symbol, d, r.result.direction > 0 ? 'CALL' : 'PUT'); } catch { /* no quote */ } }
+      const sig = { ...buildTradeSignal({ symbol: m.symbol, prediction: r.result, duration: d ? durationKey(d) : null, quote: q }), epoch: r.lastEpoch, durationObj: d || null };
+      sig.recId = logRecord(m, r.result, sig);
+      resolveRecords(m);
       m.signal = sig; state.signals.set(m.symbol, sig);
       emit();
       if (state.running && state.mode === 'auto' && state.martingale <= 1 && modeMayAct('auto', sig)) await autoTrade(m, sig);
@@ -278,7 +339,7 @@ export async function placeOrder({ symbol, contractType, duration, source = 'man
     emit(); return { ok: true, trade: t };
   } catch (e) { log(`${symbol} order failed: ${e.message}`, 'bad'); return { ok: false, reason: e.message }; }
 }
-export const placeSignal = (sig, source = 'semi') => placeOrder({ symbol: sig.market, contractType: sig.contractType, duration: sig.durationObj, source, signal: sig });
+export const placeSignal = (sig, source = 'semi') => { const r = state.records.find((x) => x.id === sig.recId); if (r) { r.taken = true; saveRecords(); } return placeOrder({ symbol: sig.market, contractType: sig.contractType, duration: sig.durationObj, source, signal: sig }); };
 
 function onContract(c) {
   const t = state.trades.find((x) => x.id === String(c.contract_id));

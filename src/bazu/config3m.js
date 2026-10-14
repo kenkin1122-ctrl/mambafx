@@ -1,12 +1,11 @@
 /**
  * src/bazu/config3m.js  (pure)
- * Configuration for BAZU's 3-minute Rise/Fall decision path. Every weight, threshold and
+ * Configuration for BAZU's Rise/Fall decision path (duration = expected signal lifetime). Every weight, threshold and
  * enabled flag lives here (per market class) so it can be tuned without touching code.
  * Nothing here is shared with the 5-Tick Signal Engine or the research/validation modules.
  */
 
 export const TARGET = Object.freeze({
-  durationSec: 180,
   // Deriv Rise/Fall: exit must be strictly above entry for Rise (below for Fall). A tie loses.
   tiesWin: false,
 });
@@ -24,6 +23,42 @@ export const BASE_CONFIG = Object.freeze({
   ROOM_FACTOR: 1,          // nearest opposing zone must be farther than ROOM_FACTOR * sigma * sqrt(T)
   NOISE_FACTOR: 0.5,       // invalidation closer than NOISE_FACTOR * one-minute sigma is noise
   ATR_PERIOD: 14,
+  // ---- contract duration = expected signal lifetime ----
+  DURATION_MODE: 'lifetime',   // lifetime | fixed (fixed uses DEFAULT_DURATION_S)
+  DEFAULT_DURATION_S: 180,
+  MIN_DURATION_S: 5, MAX_DURATION_S: 1200, SKIP_FACTOR: 1.5, ALLOW_1_TICK: false,
+  SNAP: 'nearest',             // nearest (log scale) | round_up | round_down
+  COMBINE: 'median',           // median | min | mean
+  OU_FRACTION: 0.7,            // E4 reversion fraction f
+  EWMA_LAMBDA: 0.94,           // sigma^2 EWMA decay per tick
+  MAX_TRIGGER_MULTIPLE: 20,    // lifetime cap = this x trigger timeframe length
+  INVALIDATION_ATR: 1,         // b fallback when no supportive zone: this x setup ATR
+  SPIKE_COOLDOWN_T_FRAC: 0.5,  // spike cooldown = this x chosen duration T
+  SPIKE_CAP_FRAC: 0.5, SPIKE_CAP_MIN_S: 10, SPIKE_INTENSITY_K: 0.5, JUMP_MEAN_S: 1200,
+  PATTERN_MULTIPLE: { default: 3, byPlaybook: { breakout: 4, 'trending pullback': 3, 'fakeout reversal': 3, 'liquidity sweep': 3, 'range fade': 3 }, byPattern: { engulfing: 3, pinBar: 3, displacement: 2, star: 4 } },
+  ESTIMATORS: { 'trending pullback': ['E1', 'E3'], breakout: ['E1', 'E3', 'E5'], 'range fade': ['E1', 'E4'], 'liquidity sweep': ['E1', 'E5'], 'fakeout reversal': ['E1', 'E5'] },
+  CLASS_ESTIMATORS: { boomcrash: ['E6'], jump: ['E6'] },
+  TICK_GRID: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+  SEC_GRID: [15, 30, 45, 60, 90, 120, 150, 180, 240, 300, 360, 420, 480, 540, 600, 720, 900, 1080, 1200],
+  FRAMES: { S10: 10, S30: 30, M1: 60, M3: 180, M5: 300, M15: 900, H1: 3600 },
+  BUCKETS: { tick: { maxS: 15 }, short: { maxS: 90 }, mid: { maxS: 300 }, long: { maxS: Infinity } },
+  DEFAULT_BUCKET: 'mid',
+  // timeframe roles by duration bucket (frame names are keys of FRAMES)
+  ROLES: {
+    tick: { trigger: 'S10', setup: 'S30', context: 'M1', bias: 'M5' },
+    short: { trigger: 'S30', setup: 'M1', context: 'M5', bias: 'M15' },
+    mid: { trigger: 'M1', setup: 'M5', context: 'M15', bias: 'H1' },
+    long: { trigger: 'M5', setup: 'M15', context: 'H1', bias: 'H1' },
+  },
+  FLOW_MAX_FRAME_S: 300,
+  ROOM_CHECK: 'rr',         // lifetime mode only: 'rr' = RR_MIN + MIN_TARGET_MOVE checks; 'legacy' = room-to-run vs sigma*sqrt(T)
+  RR_MIN: 1.0,             // target distance / invalidation distance
+  MIN_TARGET_MOVE: 1.0,    // target distance in sigma units of one trigger-frame (sigma * sqrt(trigger secs))
+  BACKFILL_FRAMES: ['M1', 'M3', 'M5', 'M15', 'H1'],
+  BACKFILL_COUNT: 300,     // candles per frame at startup
+  BACKFILL_CONCURRENCY: 3,
+  BACKFILL_GAP_MS: 250,    // min spacing between history requests (<= 4/s)
+  LOG_MIN_GAP_S: 30,
   zoneK: 0.5,              // zone band width = zoneK * ATR
   EXTENDED_ATR: 1.5, EXTENDED_N: 6,
   SPIKE_ATR: 4, SPIKE_COOLDOWN: 3, SPIKE_DUE_FRAC: 0.6,
@@ -77,14 +112,6 @@ export function configFor(symbol, overrides) {
 export function spikeInterval(symbol) {
   const m = /(?:BOOM|CRASH)(\d+)/i.exec(symbol || '');
   return m ? Number(m[1]) : null;
-}
-
-/** 3-minute duration check against Deriv's allowed ranges; falls back to the shortest allowed 1m-or-longer duration. */
-export function threeMinuteDuration(durationAllowedFn, ranges, secs = TARGET.durationSec) {
-  const d = { unit: 's', n: secs };
-  if (durationAllowedFn(ranges, d)) return d;
-  const m = { unit: 'm', n: Math.round(secs / 60) };
-  return durationAllowedFn(ranges, m) ? m : null;
 }
 
 /** Settle a Rise/Fall contract: entry = first tick after purchase, exit = tick at expiry. Ties lose (as on Deriv). */
