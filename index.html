@@ -2282,6 +2282,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       <button class="btn primary" id="bzConnect">Connect</button>
       <label class="mu" style="font-size:12px">Stake <input id="bzStake" type="number" min="0.35" step="0.05" value="1" style="width:70px"></label>
       <label class="mu" style="font-size:12px" title="Auto = duration from the signal's expected lifetime; picking one is a manual override">Duration <select id="bzDur"><option value="">Auto (lifetime)</option></select></label>
+      <label class="mu" style="font-size:12px" title="Place the opposite of the predicted direction (predict Rise, trade Fall). Analysis is unchanged."><input id="bzReverse" type="checkbox" checked> Reverse trade</label>
       <label class="mu" style="font-size:12px" title="Multiply the stake after each loss; 1 = off">Martingale x <input id="bzMart" type="number" min="1" step="0.1" value="1" style="width:60px"></label>
       <label class="mu" style="font-size:12px"><input id="bzRealOk" type="checkbox"> I confirm trading REAL money with BAZU (stake capped)</label>
     </div>
