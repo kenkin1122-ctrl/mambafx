@@ -18,7 +18,9 @@ import { backfill, mergeCandles, parseCandles } from './backfill3m.js?v=15';
 import { decimalsFromPip } from './timeframes.js?v=15';
 import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=15';
 import { start as perfStart, mark as perfMark, startMonitors } from './perf3m.js?v=15';
-import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=15';
+import { accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=15';
+import { createBook, S as SS } from './signalBook3m.js?v=15';
+import { createChoke } from './choke3m.js?v=15';
 import { wilson } from './stats.js?v=15';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
@@ -30,6 +32,7 @@ export const state = {
   status: 'idle', mode: 'manual', running: false, stake: 1, curStake: 1, martingale: 1, reverse: true, limits: { ...DEFAULT_LIMITS },
   markets: new Map(), trades: [], log: [], scan: { done: 0, total: 0, active: false }, realConfirmed: false,
   selected: null, signals: new Map(), manualKey: null, records: [], vetoStats: {}, backfill: null,
+  contra: { directional: 0, opposing: 0, tradable: 0, tradableOpposing: 0, byPlaybook: {} },
 };
 
 if (typeof window !== 'undefined') window.__bzState = state;
@@ -80,7 +83,7 @@ function onTick(t) {
   if (last != null && t.epoch <= last) return;
   m.prices.push(t.quote); m.epochs.push(t.epoch);
   if (m.prices.length > MAX_TICKS) { m.prices.splice(0, 1500); m.epochs.splice(0, 1500); }
-  m.last = t.quote; m.lastEpoch = t.epoch; m.tickCount++;
+  m.last = t.quote; m.lastEpoch = t.epoch; m.lastTickAt = Date.now(); m.tickCount++;
   emit();
 }
 
@@ -195,6 +198,12 @@ function recordEval(sym, res) {
   s.evals++;
   if (!res.wait) s.tradable++;
   for (const v of res.vetoes || []) { const k = vetoKey(v); s.vetoes[k] = (s.vetoes[k] || 0) + 1; }
+  if (res.direction && res.momentum?.available) {
+    const c = state.contra; c.directional++;
+    const opp = res.momentum.opposes60s === true;
+    if (opp) { c.opposing++; c.byPlaybook[res.playbook] = (c.byPlaybook[res.playbook] || 0) + 1; }
+    if (!res.wait) { c.tradable++; if (opp) c.tradableOpposing++; }
+  }
 }
 export function vetoSummary() {
   const tot = { evals: 0, tradable: 0, vetoes: {} };
@@ -266,6 +275,24 @@ function reconcileOpen() {
   if (changed) { saveTrades(); log('Unsettled trades marked stale (no result from Deriv); they no longer block new trades', 'warn'); }
 }
 const yieldUi = () => new Promise((res) => setTimeout(res, 0));
+// ---------- signal book + single purchase gate ----------
+const book = createBook({ cfgFor: (sym) => configFor(sym) });
+export const signalBook = book;
+const marketNow = (sym) => { const m = state.markets.get(sym); return m && m.epochs.length ? m.epochs[m.epochs.length - 1] + (Date.now() - (m.lastTickAt || Date.now())) / 1000 : Date.now() / 1000; };
+function predictFor(m, wall = true) {
+  const n = m.epochs.length;
+  return predict3m({ symbol: m.symbol, prices: m.prices.slice(-6000), epochs: m.epochs.slice(-6000), remote: m.remote || {}, decisionEpoch: m.epochs[n - 1], allowed: allowedFor(m), manualKey: state.manualKey, wallNow: wall ? marketNow(m.symbol) : null });
+}
+const choke = createChoke({
+  book, cfgFor: (sym) => configFor(sym), now: marketNow, log: (msg, kind) => log(msg, kind),
+  predictNow: (sym) => { const m = state.markets.get(sym); return m && m.prices.length >= 300 ? predictFor(m) : null; },
+  account: accountInfo, riskState, limits: state.limits, realConfirmed: () => state.realConfirmed,
+  durationFor: (sig) => { const m = state.markets.get(sig.symbol); return (m?.allowedList || []).find((x) => durationLabel(x) === sig.durationKey) || null; },
+});
+const NOISY = new Set([SS.ARMED, SS.DETECTED]);
+function logEvents(events) {
+  for (const e of events) if (e.to && !NOISY.has(e.to) && e.to !== SS.EXECUTING) log(`${e.symbol} signal ${e.id || ''} ${e.from || ''} -> ${e.to}${e.kind ? ' [' + e.kind + ']' : ''}: ${e.reason}`, e.to === SS.TRIGGERED || e.to === SS.EXECUTED ? 'ok' : 'info');
+}
 export async function signalTick() {
   if (sigBusy) return; sigBusy = true; startMonitors(); reconcileOpen();
   const endPass = perfStart('signalTick');
@@ -278,12 +305,13 @@ export async function signalTick() {
       ensureRemote(m);
       const allowed = allowedFor(m);
       let r;
-      const endP = perfStart('predict3m'); try { r = predict3m({ symbol: m.symbol, prices: m.prices.slice(-6000), epochs: m.epochs.slice(-6000), remote: m.remote || {}, decisionEpoch: m.epochs[m.epochs.length - 1], allowed, manualKey: state.manualKey }); } catch (e) { endP(); log('predict ' + m.symbol + ': ' + e.message, 'warn'); continue; } endP();
+      const endP = perfStart('predict3m'); try { r = predictFor(m); } catch (e) { endP(); log('predict ' + m.symbol + ': ' + e.message, 'warn'); continue; } endP();
       recordEval(m.symbol, r);
+      const obs = book.observe(m.symbol, r, r.decisionTs); logEvents(obs.events);
       r = { result: r, lastEpoch: r.decisionTs };
       let q = null; const d = r.result.duration && allowed.find((x) => durationLabel(x) === r.result.duration.key);
       if (d && !r.result.wait && r.result.strength >= r.result.minStrength) { try { q = await quoteFor(m.symbol, d, r.result.direction > 0 ? 'CALL' : 'PUT'); } catch { /* no quote */ } }
-      const sig = { ...buildTradeSignal({ symbol: m.symbol, prediction: r.result, duration: d ? durationKey(d) : null, quote: q }), epoch: r.lastEpoch, durationObj: d || null };
+      const sig = { ...buildTradeSignal({ symbol: m.symbol, prediction: r.result, duration: d ? durationKey(d) : null, quote: q, bookSignal: book.active(m.symbol) }), epoch: r.lastEpoch, durationObj: d || null };
       const endR = perfStart('records'); sig.recId = logRecord(m, r.result, sig);
       resolveRecords(m); endR();
       m.signal = sig; state.signals.set(m.symbol, sig);
@@ -297,17 +325,12 @@ export async function signalTick() {
 let bestBusy = false;
 async function autoTradeBest() {
   if (bestBusy || state.trades.some((t) => t.status === 'open')) return;
-  const fresh = Date.now() / 1000 - 90;
-  const cand = [...state.markets.values()].map((m) => m.signal && { m, sig: m.signal }).filter((x) => x && modeMayAct('auto', x.sig) && x.sig.epoch > fresh && lastActedEpoch.get(x.m.symbol) !== x.sig.epoch).sort((a, b) => b.sig.strength - a.sig.strength);
+  const cand = [...state.markets.values()].map((m) => m.signal && { m, sig: m.signal }).filter((x) => x && modeMayAct('auto', x.sig)).sort((a, b) => b.sig.strength - a.sig.strength);
   if (!cand.length) return;
   bestBusy = true;
   try { await autoTrade(cand[0].m, cand[0].sig); } finally { bestBusy = false; }
 }
-async function autoTrade(m, sig) {
-  if (lastActedEpoch.get(m.symbol) === sig.epoch) return;
-  lastActedEpoch.set(m.symbol, sig.epoch);
-  await placeSignal(sig, 'auto');
-}
+async function autoTrade(m, sig) { await placeSignal(sig, 'auto'); }
 
 let paused = false;
 export function pause() {
@@ -348,28 +371,36 @@ function riskState() {
   return { open, todayPnl, lastTradeAt, balance: accountInfo().balance };
 }
 
-/** Manual (from ticket) or signal-driven order. Returns {ok, reason}. */
-export async function placeOrder({ symbol, contractType, duration, source = 'manual', signal = null, stake = nextStake() }) {
-  const acc = accountInfo();
-  if (!acc.connected) return { ok: false, reason: 'Connect a Deriv account first' };
-  const m = state.markets.get(symbol);
-  const risk = checkOrder({ stake, market: symbol, isReal: acc.isReal, realConfirmed: state.realConfirmed, now: Date.now() }, riskState(), state.limits);
-  if (!risk.ok) { log(`${symbol} blocked: ${risk.reason}`, 'warn'); return risk; }
-  try {
-    const res = await buyRiseFall({ symbol, contractType, stake, duration });
-    const t = {
-      id: String(res.buy.contract_id), market: symbol, name: m?.name, contractType, direction: contractType === 'CALL' ? 'Rise' : 'Fall',
-      duration: durationKey(duration), stake, buyPrice: res.buy.buy_price, payout: res.buy.payout ?? res.proposal.payout,
-      entry: null, exit: null, profit: null, status: 'open', isReal: res.isReal, source, ts: Date.now(),
-      predicted: signal?.predicted ?? null, strength: signal?.strength ?? null, drivers: signal?.drivers || [],
-    };
-    state.trades.unshift(t); saveTrades(); watchContracts(onContract); requestContractUpdate(t.id);
-    log(`${source} ${t.direction}${t.predicted && t.predicted !== t.direction ? ` (predicted ${t.predicted}, reversed)` : ''} ${symbol} ${t.duration} @ ${t.stake} (${t.isReal ? 'REAL' : 'DEMO'})`, 'ok');
-    emit(); return { ok: true, trade: t };
-  } catch (e) { log(`${symbol} order failed: ${e.message}`, 'bad'); return { ok: false, reason: e.message }; }
+function recordTrade({ res, symbol, contractType, duration, stake, source, signal, m }) {
+  const t = {
+    id: String(res.buy.contract_id), market: symbol, name: m?.name, contractType, direction: contractType === 'CALL' ? 'Rise' : 'Fall',
+    duration: durationKey(duration), stake, buyPrice: res.buy.buy_price, payout: res.buy.payout ?? res.proposal.payout,
+    entry: null, exit: null, profit: null, status: 'open', isReal: res.isReal, source, ts: Date.now(),
+    predicted: signal?.predicted ?? null, strength: signal?.strength ?? null, drivers: signal?.drivers || [], signalId: signal?.signalId || null,
+  };
+  state.trades.unshift(t); saveTrades(); watchContracts(onContract); requestContractUpdate(t.id);
+  log(`${source} ${t.direction}${t.predicted && t.predicted !== t.direction ? ` (predicted ${t.predicted}, reversed)` : ''} ${symbol} ${t.duration} @ ${t.stake} (${t.isReal ? 'REAL' : 'DEMO'})`, 'ok');
+  emit(); return t;
 }
-export const placeSignal = (sig, source = 'semi') => { const r = state.records.find((x) => x.id === sig.recId); if (r) { r.taken = true; saveRecords(); } const flip = state.reverse && (sig.contractType === 'CALL' || sig.contractType === 'PUT'); const contractType = flip ? (sig.contractType === 'CALL' ? 'PUT' : 'CALL') : sig.contractType; return placeOrder({ symbol: sig.market, contractType, duration: sig.durationObj, source, signal: { ...sig, predicted: sig.contractType === 'CALL' ? 'Rise' : 'Fall' } }); };
-
+/** Manual ticket order. Goes through the choke point; gate findings must be confirmed (`confirmed: true`). */
+export async function placeOrder({ symbol, contractType, duration, source = 'manual', stake = nextStake(), confirmed = false }) {
+  const m = state.markets.get(symbol);
+  const r = await choke.manual({ symbol, contractType, duration, stake, confirmed });
+  if (!r.ok) { if (!r.needsConfirm) log(`${symbol} blocked: ${r.reason}`, 'warn'); return r; }
+  return { ok: true, trade: recordTrade({ res: r.res, symbol, contractType, duration, stake, source, signal: null, m }) };
+}
+/** Signal-driven order: every purchase passes the signal book and the choke point. */
+export async function placeSignal(sig, source = 'semi') {
+  if (!sig?.signalId) return { ok: false, reason: 'no triggered signal to execute' };
+  const rec = state.records.find((x) => x.id === sig.recId); if (rec) { rec.taken = true; saveRecords(); }
+  const flip = state.reverse && (sig.contractType === 'CALL' || sig.contractType === 'PUT');
+  const stake = nextStake();
+  const r = await choke.execute({ signalId: sig.signalId, stake, reverse: flip, source });
+  logEvents(book.log().slice(-3));
+  if (!r.ok) { if (rec) { rec.taken = false; saveRecords(); } return r; }
+  const t = recordTrade({ res: r.res, symbol: sig.market, contractType: r.contractType, duration: sig.durationObj, stake, source, signal: { ...sig, predicted: sig.contractType === 'CALL' ? 'Rise' : 'Fall' }, m: state.markets.get(sig.market) });
+  return { ok: true, trade: t };
+}
 function onContract(c) {
   const t = state.trades.find((x) => x.id === String(c.contract_id));
   if (!t) return;

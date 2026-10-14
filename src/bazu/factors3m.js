@@ -9,7 +9,7 @@ import { findSwingPoints } from '../../mtf/src/analysis/swingPoints.js';
 
 const closes = (c) => c.map((x) => x.close);
 const sgn = (x, dead = 0) => (x > dead ? 1 : x < -dead ? -1 : 0);
-const V = (group, vote, reason) => ({ group, vote, reason });
+const V = (group, vote, reason, na = false) => (na ? { group, vote, reason, na: true } : { group, vote, reason });
 const f2 = (x, d = 2) => (Number.isFinite(x) ? x.toFixed(d) : 'n/a');
 
 export function mtfTrend({ frames }) {
@@ -22,36 +22,36 @@ export function mtfTrend({ frames }) {
   }
   const sum = votes.reduce((a, [, v]) => a + v, 0);
   const vote = votes.length >= 2 ? sgn(sum, votes.length / 3) : 0;
-  return V('trend', vote, `EMA20 slope ${votes.map(([k, v]) => `${k}${v > 0 ? '+' : v < 0 ? '-' : '0'}`).join(' ')}`);
+  return V('trend', vote, `EMA20 slope ${votes.map(([k, v]) => `${k}${v > 0 ? '+' : v < 0 ? '-' : '0'}`).join(' ')}`, votes.length < 2);
 }
 export function macd({ frames }) {
   const h = macdHist(closes(frames.setup)), a = frames.setup.at(-1)?.atr;
-  return V('trend', Number.isFinite(h) && a > 0 ? sgn(h / a, 0.01) : 0, `setup MACD hist ${f2(h, 4)}`);
+  return V('trend', Number.isFinite(h) && a > 0 ? sgn(h / a, 0.01) : 0, `setup MACD hist ${f2(h, 4)}`, !(Number.isFinite(h) && a > 0));
 }
 export function adxFactor({ frames, cfg }) {
   const r = adx(frames.setup);
   const vote = r.adx >= cfg.ADX_TREND ? sgn(r.plusDI - r.minusDI, 2) : 0;
-  return V('trend', vote, `setup ADX ${f2(r.adx, 0)} DI diff ${f2(r.plusDI - r.minusDI, 0)}`);
+  return V('trend', vote, `setup ADX ${f2(r.adx, 0)} DI diff ${f2(r.plusDI - r.minusDI, 0)}`, !Number.isFinite(r.adx));
 }
 export function stoch({ frames, cfg }) {
   const s = stochastic(frames.setup);
-  return V('momentum', s.k <= cfg.STOCH_OS && s.k > s.d ? 1 : s.k >= cfg.STOCH_OB && s.k < s.d ? -1 : 0, `setup Stoch K ${f2(s.k, 0)}`);
+  return V('momentum', s.k <= cfg.STOCH_OS && s.k > s.d ? 1 : s.k >= cfg.STOCH_OB && s.k < s.d ? -1 : 0, `setup Stoch K ${f2(s.k, 0)}`, !Number.isFinite(s.k));
 }
 export function rsiFactor({ frames, cfg }) {
   const r = rsi(closes(frames.setup));
-  return V('momentum', r <= cfg.RSI_OS ? 1 : r >= cfg.RSI_OB ? -1 : 0, `setup RSI ${f2(r, 0)}`);
+  return V('momentum', r <= cfg.RSI_OS ? 1 : r >= cfg.RSI_OB ? -1 : 0, `setup RSI ${f2(r, 0)}`, !Number.isFinite(r));
 }
 export function cciFactor({ frames }) {
   const c = cci(frames.setup);
-  return V('momentum', c <= -100 ? 1 : c >= 100 ? -1 : 0, `setup CCI ${f2(c, 0)}`);
+  return V('momentum', c <= -100 ? 1 : c >= 100 ? -1 : 0, `setup CCI ${f2(c, 0)}`, !Number.isFinite(c));
 }
 
 /** HH/HL (up), LH/LL (down), with break of structure / change of character on the latest closed candle. */
 export function structureState(cs) {
-  if (cs.length < 20) return { trend: 0, bos: 0, choch: 0 };
+  if (cs.length < 20) return { trend: 0, bos: 0, choch: 0, na: true };
   const sw = findSwingPoints(cs, 2).filter((s) => s.index + 2 <= cs.length - 1);
   const hi = sw.filter((s) => s.type === 'high').slice(-2), lo = sw.filter((s) => s.type === 'low').slice(-2);
-  if (hi.length < 2 || lo.length < 2) return { trend: 0, bos: 0, choch: 0 };
+  if (hi.length < 2 || lo.length < 2) return { trend: 0, bos: 0, choch: 0, na: true };
   const up = hi[1].price > hi[0].price && lo[1].price > lo[0].price;
   const dn = hi[1].price < hi[0].price && lo[1].price < lo[0].price;
   const trend = up ? 1 : dn ? -1 : 0, last = cs.at(-1).close;
@@ -62,7 +62,7 @@ export function structureState(cs) {
 }
 export function structure({ frames }) {
   const s = structureState(frames.setup);
-  return V('structure', s.choch || s.bos || s.trend, `setup structure ${s.trend > 0 ? 'HH/HL' : s.trend < 0 ? 'LH/LL' : 'mixed'}${s.bos ? ' BOS' : ''}${s.choch ? ' CHoCH' : ''}`);
+  return V('structure', s.choch || s.bos || s.trend, `setup structure ${s.trend > 0 ? 'HH/HL' : s.trend < 0 ? 'LH/LL' : 'mixed'}${s.bos ? ' BOS' : ''}${s.choch ? ' CHoCH' : ''}`, !!s.na);
 }
 
 export function zonesFactor({ zones, price, atr }) {
@@ -78,7 +78,7 @@ export function zonesFactor({ zones, price, atr }) {
 
 export function volatility({ frames }) {
   const b = bollinger(closes(frames.setup));
-  if (!Number.isFinite(b.pos)) return V('volatility', 0, 'insufficient data');
+  if (!Number.isFinite(b.pos)) return V('volatility', 0, 'insufficient data', true);
   if (b.squeeze) return V('volatility', 0, 'Bollinger squeeze: no edge until expansion');
   const vote = b.expansion ? sgn(b.pos, 0.5) : b.pos <= -1 ? 1 : b.pos >= 1 ? -1 : 0;
   return V('volatility', vote, `BB ${b.expansion ? 'expansion' : 'regular'} pos ${f2(b.pos, 1)}`);
@@ -87,7 +87,7 @@ export function volatility({ frames }) {
 /** Signed tick delta over 1/3/5 minutes, intensity vs the 20-bar average, absorption (high intensity, no progress). */
 export function tickFlow({ frames }) {
   const arr = frames.forming ? [...frames.trigger, frames.forming] : frames.trigger;
-  if (arr.length < 6) return V('flow', 0, 'insufficient flow data');
+  if (arr.length < 6) return V('flow', 0, 'insufficient flow data', true);
   const prev = arr.slice(-21, -1), avgN = prev.reduce((a, c) => a + (c.n || 0), 0) / Math.max(1, prev.length);
   const sum = (k) => arr.slice(-k).reduce((a, c) => a + (c.delta || 0), 0);
   const d1 = sum(1), d3 = sum(3), d5 = sum(5), cur = arr.at(-1);
@@ -100,7 +100,7 @@ export function tickFlow({ frames }) {
 export const hurstFactor = ({ stat }) => V('stat', 0, `Hurst ${f2(stat?.hurst)} (${stat?.hurst > 0.55 ? 'trending' : stat?.hurst < 0.45 ? 'mean-reverting' : 'random'}; regime input)`);
 export const varianceRatioFactor = ({ stat }) => V('stat', 0, `variance ratio ${f2(stat?.vr)} (regime input)`);
 export const ouHalfLife = ({ stat }) => V('stat', 0, `OU half-life ${Number.isFinite(stat?.halfLifeSec) ? stat.halfLifeSec.toFixed(0) + 's' : 'n/a'} (regime input)`);
-export const kalman = ({ stat }) => V('stat', Number.isFinite(stat?.kalSlope) ? sgn(stat.kalSlope, 0.05) : 0, `Kalman slope ${f2(stat?.kalSlope)}`);
+export const kalman = ({ stat }) => V('stat', Number.isFinite(stat?.kalSlope) ? sgn(stat.kalSlope, 0.05) : 0, `Kalman slope ${f2(stat?.kalSlope)}`, !Number.isFinite(stat?.kalSlope));
 export const cusum = ({ stat }) => V('stat', 0, `CUSUM ${f2(stat?.cusum)} (change flag, regime input)`);
 
 /** Boom/Crash/Jump: spikeInfo is computed in predict (bias = direction of the drift between spikes). */
@@ -109,7 +109,7 @@ export const spike = ({ spikeInfo }) => V('spike', spikeInfo ? spikeInfo.bias : 
 /** Range Break: structural only - near a range edge leans back inside. */
 export function rangeBreak({ frames, price, atr }) {
   const c = frames.setup.slice(-30);
-  if (c.length < 20 || !(atr > 0)) return V('structure', 0, 'insufficient data');
+  if (c.length < 20 || !(atr > 0)) return V('structure', 0, 'insufficient data', true);
   const hi = Math.max(...c.map((x) => x.high)), lo = Math.min(...c.map((x) => x.low));
   const vote = price >= hi - 0.25 * atr ? -1 : price <= lo + 0.25 * atr ? 1 : 0;
   return V('structure', vote, `range ${f2(lo)}-${f2(hi)}, edge ${vote > 0 ? 'low' : vote < 0 ? 'high' : 'none'}`);

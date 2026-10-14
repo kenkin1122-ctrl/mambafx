@@ -31,8 +31,13 @@ function call(msg, timeoutMs = 8000) {
 
 export function durationFields(d) { return { duration: d.n, duration_unit: d.unit }; }
 
-/** proposal -> buy, atomically on the live proposal id/ask_price. Resolves with Deriv's buy response. */
-export async function buyRiseFall({ symbol, contractType, stake, duration }) {
+/**
+ * proposal -> buy, atomically on the live proposal id/ask_price. Resolves with Deriv's buy response.
+ * Only src/bazu/choke3m.js may call this. `guard` is mandatory: it runs after the proposal and immediately before the buy,
+ * and must throw to cancel (the choke point uses it to re-check the cancellation token).
+ */
+export async function buyRiseFall({ symbol, contractType, stake, duration, guard }) {
+  if (typeof guard !== 'function') throw new Error('buyRiseFall requires a guard (use the choke point)');
   const acc = accountInfo();
   const pmsg = { proposal: 1, amount: stake, basis: 'stake', contract_type: contractType, currency: acc.currency, ...durationFields(duration), underlying_symbol: symbol };
   let proposal;
@@ -43,6 +48,7 @@ export async function buyRiseFall({ symbol, contractType, stake, duration }) {
     }
   }
   if (!proposal?.id) throw new Error('No proposal id from Deriv');
+  guard({ proposal });
   let buy;
   try {
     buy = await call({ buy: proposal.id, price: proposal.ask_price });

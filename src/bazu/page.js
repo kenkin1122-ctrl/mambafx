@@ -51,7 +51,10 @@ function onAction(e) {
   const sym = b.dataset.sym, m = E.state.markets.get(sym);
   if (b.dataset.act === 'buy') {
     const d = m.durations.find((x) => `${x.n}${x.unit}` === (document.getElementById('bzTkDur')?.value || ''));
-    E.placeOrder({ symbol: sym, contractType: b.dataset.type, duration: d || m.durations[0], source: 'manual' }).then((r) => { if (!r.ok) alert(r.reason); });
+    E.placeOrder({ symbol: sym, contractType: b.dataset.type, duration: d || m.durations[0], source: 'manual' }).then((r) => {
+      if (r.needsConfirm && confirm('Gate findings:\n- ' + r.findings.join('\n- ') + '\n\nPlace this manual order anyway?')) return E.placeOrder({ symbol: sym, contractType: b.dataset.type, duration: d || m.durations[0], source: 'manual', confirmed: true }).then((r2) => { if (!r2.ok) alert(r2.reason); });
+      if (!r.ok && !r.needsConfirm) alert(r.reason);
+    });
   } else if (b.dataset.act === 'confirm' && m.signal) {
     E.placeSignal(m.signal, 'semi').then((r) => { if (!r.ok) alert(r.reason); });
   }
@@ -121,6 +124,14 @@ function lifetimeHtml(sig) {
   const est = Object.entries(L.estimators || {}).map(([k, v]) => `${k} ${v == null ? '<span class="mu">not applicable</span>' : secFmt(v)}`).join(' · ');
   return `<div class="note num">Expected lifetime ${secFmt(L.lifetime)}${L.cappedBy ? ` (capped by ${esc(L.cappedBy)})` : ''} → duration ${esc(sig.duration || 'WAIT')}${sig.manual ? ' (manual duration)' : ''} · break-even ${sig.breakEven == null ? '—' : pct(sig.breakEven, 1)} · ${est}</div>`;
 }
+function reasoningHtml(sig) {
+  if (!sig.families && !sig.momentum) return '';
+  const mo = sig.momentum, fa = sig.familyAgreement, st = sig.signalState;
+  const fam = Object.entries(sig.families || {}).map(([k, f]) => `${esc(k)} ${f.available === false ? 'n/a' : (f.vote > 0 ? '+' : f.vote < 0 ? '-' : '0')}`).join(', ');
+  const ver = (sig.verdicts || []).map((v) => `${esc(v.kind)}: ${esc(v.reason)}`).join('; ');
+  return `<div class="note"><b>Momentum</b> ${mo ? esc(mo.state) + (mo.available === false ? ' (unavailable)' : '') : 'n/a'}${mo?.opposes60s ? ' · opposes the last 60 s' : ''} · <b>Regime</b> ${esc(sig.regime || 'n/a')} · <b>State</b> ${esc(st || 'none')}${sig.entry?.trigger ? ' · trigger ' + esc(sig.entry.trigger) : ''}${sig.provisional ? ' (provisional)' : ''}</div>`
+    + `<div class="note">Families: ${fam || 'n/a'}${fa ? ` · ${fa.agree}/${fa.available} agree, ${fa.oppose} oppose` : ''}</div>${ver ? `<div class="note">${ver}</div>` : ''}`;
+}
 function syncDur(S) {
   const sel = $('bzDur'); if (!sel) return;
   const keys = E.allowedKeys(), want = ['', ...keys].join('|');
@@ -128,7 +139,12 @@ function syncDur(S) {
   if (document.activeElement !== sel) sel.value = S.manualKey || '';
 }
 function vetoHtml(S) {
-  const T = E.vetoSummary(), rate = T.evals ? T.tradable / T.evals : null;
+  const C = S.contra, T0 = E.vetoSummary();
+  const contra = C && C.directional ? `<div class="note num">Momentum contradictions: ${C.opposing}/${C.directional} directional evaluations opposed the last 60 s (${pct(C.opposing / C.directional, 1)}) · among tradable: ${C.tradableOpposing}/${C.tradable}${Object.keys(C.byPlaybook).length ? ' · by playbook: ' + Object.entries(C.byPlaybook).map(([k, v]) => esc(k) + ' ' + v).join(', ') : ''}</div>` : '';
+  return vetoHtml0(S, T0) + contra;
+}
+function vetoHtml0(S, T) {
+  const rate = T.evals ? T.tradable / T.evals : null;
   const top = Object.entries(T.vetoes).sort((a, b) => b[1] - a[1]);
   const perMarket = Object.entries(S.vetoStats).map(([sym, s]) => ({ sym, ...s, top: Object.entries(s.vetoes).sort((a, b) => b[1] - a[1]).slice(0, 3) })).sort((a, b) => b.evals - a.evals);
   return `<div class="panel"><h3>Veto analysis <span class="mu">(live evaluations this session)</span></h3>
@@ -176,7 +192,7 @@ function renderLive(S) {
   $('bzSignal').innerHTML = sig && sig.direction ? `<div class="sig ${sig.gate === GATE.OK ? (sig.direction === 'Rise' ? 'ok' : 'bad') : ''}">
       <div class="row"><b class="${sig.direction === 'Rise' ? 'up' : 'dn'}" style="font-size:18px">${esc(sig.direction)}</b><span class="pill">${esc(sig.duration)}${sig.manual ? ' · manual duration' : ''}</span><span class="pill ${sig.gate === GATE.OK ? (sig.direction === 'Rise' ? 'ok' : 'bad') : 'warn'}">${esc(sig.gate)}</span>${sig.proxy ? '<span class="pill proxy">uses proxy</span>' : ''}</div>
       <div class="note num">Signal strength ${pct(sig.strength, 0)} · ${sig.agree}/${sig.total} analysis features agree${sig.quote ? ` · Deriv quote: stake ${sig.quote.ask}, payout ${sig.quote.payout}` : ''}</div>
-      ${lifetimeHtml(sig)}<div class="note"><b>${esc(sig.playbook || 'analysis')}</b>${sig.provisional ? ' (provisional trigger)' : ''} · ${esc(sig.reason || '')}</div>${(sig.reasons || []).length ? `<div class="note">${sig.reasons.map(esc).join('; ')}</div>` : ''}<div class="note">Drivers: ${(sig.drivers || []).map(esc).join(', ') || '-'}. Decided ${sig.decisionTs ? new Date(sig.decisionTs * 1000).toLocaleTimeString() : ''} for a ${esc(sig.duration)} Rise/Fall (exit vs entry; a tie loses). Score is a rule-based confluence, not a win probability.</div></div>`
+      ${lifetimeHtml(sig)}${reasoningHtml(sig)}<div class="note"><b>${esc(sig.playbook || 'analysis')}</b>${sig.provisional ? ' (provisional trigger)' : ''} · ${esc(sig.reason || '')}</div>${(sig.reasons || []).length ? `<div class="note">${sig.reasons.map(esc).join('; ')}</div>` : ''}<div class="note">Drivers: ${(sig.drivers || []).map(esc).join(', ') || '-'}. Decided ${sig.decisionTs ? new Date(sig.decisionTs * 1000).toLocaleTimeString() : ''} for a ${esc(sig.duration)} Rise/Fall (exit vs entry; a tie loses). Score is a rule-based confluence, not a win probability.</div></div>`
     : `<div class="sig"><b>${esc(E.marketGate(m).label)}</b><div class="note">Collecting ticks to analyse this market.</div></div>`;
 }
 

@@ -16,6 +16,8 @@ import { statRegime, emaSlope, adx } from './ta3m.js?v=15';
 import { buildZones, zonesNear, supportiveKinds, roomToRun, extendedMove, confirmed, breakoutState, liquiditySweep, expectedMove } from './context3m.js?v=15';
 import * as D from './duration3m.js?v=15';
 import { lapTimer } from './perf3m.js?v=15';
+import { momentumReading, oscillatorExtreme, zoneTouchExtreme, confirmedTurn, opposesRecentMove } from './momentum3m.js?v=15';
+import { regimeOf, familyVotes, agreement, momentumGate, VERDICT } from './confluence3m.js?v=15';
 
 const MIN_BARS = { trigger: 30, setup: 30, context: 20 };
 
@@ -99,15 +101,21 @@ const keyOf = (d) => D.durationLabel(d);
  * allowed = allowed durations for the market [{unit,n,secs}] (default: config grid, no contracts_for filter).
  * manualKey = a duration label (e.g. '5m') chosen by the user; it overrides the lifetime duration and is tagged manual.
  */
-export function predict3m({ symbol, prices, epochs, remote = {}, decisionEpoch, overrides, logPatterns = true, allowed = null, manualKey = null }) {
+export function predict3m({ symbol, prices, epochs, remote = {}, decisionEpoch, overrides, logPatterns = true, allowed = null, manualKey = null, wallNow = null }) {
   const lap = lapTimer('predict'), cfg = configFor(symbol, overrides), now = decisionEpoch ?? epochs[epochs.length - 1];
-  const blank = () => ({ wait: true, direction: 0, strength: 0, up: 0, down: 0, total: 0, drivers: [], proxy: false, decisionTs: now, durationSec: null, duration: null, manual: false, lifetime: null, playbook: null, vetoes: [], reasons: [], factors: {}, patterns: [], provisional: false, minStrength: cfg.SCORE_MIN, marketClass: marketClass(symbol), bucket: null, record: null });
-  const fail = (why) => { const o = blank(); o.vetoes.push(why); o.reason = why; return o; };
+  const blank = () => ({ wait: true, direction: 0, strength: 0, up: 0, down: 0, total: 0, drivers: [], proxy: false, decisionTs: now, durationSec: null, duration: null, manual: false, lifetime: null, playbook: null, vetoes: [], reasons: [], factors: {}, patterns: [], provisional: false, minStrength: cfg.SCORE_MIN, marketClass: marketClass(symbol),   bucket: null, record: null, verdicts: [], setup: null, regime: null, momentum: null, families: null, votes: [], mode: cfg.CONFLUENCE_MODE });
+    const fam = cfg.CONFLUENCE_MODE === 'families';
+    const fail = (why, kind = VERDICT.DATA) => { const o = blank(); o.vetoes.push(why); o.reason = why; if (fam) o.verdicts.push({ kind, reason: why }); return o; };
   if (!prices.length) return fail('no ticks');
   const n = epochs.filter((e) => e <= now).length;
   prices = prices.slice(0, n); epochs = epochs.slice(0, n);
   const stat = statRegime(prices, epochs, cfg.EWMA_LAMBDA);
   if (!stat) return fail('warming up: not enough ticks');
+  if (fam) {
+    for (let i = Math.max(1, epochs.length - 600); i < epochs.length; i++) if (!(epochs[i] >= epochs[i - 1])) return fail('tick timestamps inconsistent (non-monotonic)');
+    if (!(stat.sigma2PerSec > 0) || !Number.isFinite(stat.sigma2PerSec)) return fail('volatility estimate unavailable');
+    if (wallNow != null && wallNow - epochs.at(-1) > cfg.STALE_TICK_MS / 1000) return fail(`no ticks for ${Math.round(wallNow - epochs.at(-1))}s`);
+  }
   lap('slice+stat');
   const allow = allowed || D.allowedDurations(null, stat.tickSecs, cfg, () => true);
   const cls = marketClass(symbol);
@@ -119,7 +127,7 @@ export function predict3m({ symbol, prices, epochs, remote = {}, decisionEpoch, 
   function analyse(bucket) {
     const roles = cfg.ROLES[bucket], out = blank();
     out.bucket = bucket; out.roles = roles;
-    const wait = (why) => { out.vetoes.push(why); out.reason = why; return out; };
+    const wait = (why, kind = /^(warming|ATR)/.test(why) ? VERDICT.DATA : null) => { out.vetoes.push(why); out.reason = why; if (fam && kind) out.verdicts.push({ kind, reason: why }); return out; };
     const names = [...new Set([roles.trigger, roles.setup, roles.context, roles.bias, 'H1'])];
     const raw = buildFrames({ remote, prices, epochs, decisionEpoch: now, cfg, names, formingSecs: cfg.FRAMES[roles.trigger] });
     const frames = { trigger: raw[roles.trigger], setup: raw[roles.setup], context: raw[roles.context], bias: raw[roles.bias], H1: raw.H1, forming: raw.forming };
@@ -127,6 +135,7 @@ export function predict3m({ symbol, prices, epochs, remote = {}, decisionEpoch, 
     for (const [k, need] of Object.entries(MIN_BARS)) if (frames[k].length < need) return wait(`warming up: ${roles[k]} ${frames[k].length}/${need} candles`);
     const price = prices.at(-1), atr = frames.setup.at(-1).atr, trigSecs = cfg.FRAMES[roles.trigger];
     if (!(atr > 0)) return wait('ATR unavailable');
+    if (fam && now - (frames.trigger.at(-1).epoch + trigSecs) > cfg.CANDLE_STALE_BARS * trigSecs) return wait(`candle history stale: last closed ${roles.trigger} candle ${Math.round(now - frames.trigger.at(-1).epoch)}s old`, VERDICT.DATA);
     const zones = buildZones(frames, cfg, roles), spikeInfo = spikeContext(symbol, frames, prices, epochs, cfg, stat.tickSecs);
     lap('zones+spike');
     const factors = runFactors({ frames, cfg, stat, zones, price, atr, symbol, spikeInfo });
@@ -227,15 +236,49 @@ export function predict3m({ symbol, prices, epochs, remote = {}, decisionEpoch, 
     }
     if (brk.state === 'fakeout' && brk.direction === -dir && top.playbook === 'breakout') vetoes.push('fakeout/trap against break');
     if (top.playbook === 'trending pullback' && flowF?.absorption) vetoes.push('absorption against continuation');
-    if (ag.total && (dir > 0 ? ag.up : ag.down) < cfg.AGREE_MIN) vetoes.push(`only ${dir > 0 ? ag.up : ag.down} factors agree (need ${cfg.AGREE_MIN})`);
-    if (top.score < cfg.SCORE_MIN) vetoes.push(`score ${top.score.toFixed(2)} < ${cfg.SCORE_MIN}`);
+    if (!fam && ag.total && (dir > 0 ? ag.up : ag.down) < cfg.AGREE_MIN) vetoes.push(`only ${dir > 0 ? ag.up : ag.down} factors agree (need ${cfg.AGREE_MIN})`);
+    let finalScore = top.score;
+    const verdicts = out.verdicts;
+    if (fam) {
+      const vd = (kind, reason) => { vetoes.push(reason); verdicts.push({ kind, reason }); };
+      const regime = regimeOf({ adxRes: a5, hurst: stat.hurst, volRatio: null, cusum: stat.cusum, cfg });
+      const momentum = momentumReading({ frames, prices, epochs, now, cfg, stat, T, trigSecs });
+      const fv = familyVotes({ factors, regime, momentum, setupCandles: frames.setup, cfg });
+      const agr = agreement(fv.families, dir, cfg);
+      const tframes = { ...frames, setupSecs: cfg.FRAMES[roles.setup] };
+      const extreme = oscillatorExtreme({ dir, candles: frames.trigger, trigSecs, cfg }) || zoneTouchExtreme({ candles: frames.trigger, zone: top.zone, trigSecs, cfg });
+      const turn = confirmedTurn({ dir, frames: tframes, prices, epochs, trigSecs, zones, atr, extreme, cfg });
+      const oscTxt = extreme && extreme.kind === 'oscillator' ? extreme.reason : null;
+      const gate = momentumGate({ momentum, dir, playbook: top.playbook, turn, oscReading: oscTxt, cfg });
+      const counter = cfg.COUNTER_TREND.includes(top.playbook);
+      if (regime.type === 'unknown') vd(VERDICT.DATA, `regime: ${regime.reason}`);
+      if (agr.dataWait) vd(VERDICT.DATA, agr.dataWait);
+      else for (const r of agr.reasons) vd(VERDICT.REJECTED, r);
+      if (gate.verdict) vd(gate.verdict.kind, gate.verdict.reason);
+      if (counter && !turn.confirmed && !gate.verdict) vd(VERDICT.DELAYED, `${top.playbook} needs a confirmed turn: ${turn.reason}`);
+      const trigName = top.pattern || (top.playbook === 'breakout' ? 'breakout' : top.playbook === 'fakeout reversal' ? 'fakeout' : top.playbook === 'liquidity sweep' ? 'sweep' : null);
+      const entryTrigger = trigName || (counter && turn.confirmed ? turn.trigger : null);
+      if (cfg.REQUIRE_TRIGGER && !entryTrigger) vd(VERDICT.DELAYED, 'no configured trigger has fired yet');
+      finalScore = Math.max(0, top.score + gate.scoreDelta);
+      Object.assign(out, {
+        regime, momentum: { ...momentum, state: gate.state, scoreDelta: gate.scoreDelta, opposes60s: opposesRecentMove(momentum.ret60z, dir, cfg) }, families: fv.families, votes: fv.votes, familyAgreement: agr,
+        entry: { playbook: top.playbook, trigger: entryTrigger, counterTrend: counter, extreme: extreme && { ts: extreme.ts, kind: extreme.kind, reason: extreme.reason }, turn },
+      });
+    }
+    if (finalScore < cfg.SCORE_MIN) { vetoes.push(`score ${finalScore.toFixed(2)} < ${cfg.SCORE_MIN}`); if (fam) verdicts.push({ kind: VERDICT.REJECTED, reason: vetoes.at(-1) }); }
+    if (fam) for (const v of vetoes) if (!verdicts.some((x) => x.reason === v)) verdicts.push({ kind: VERDICT.REJECTED, reason: v });
 
     const d = top.life.duration;
     Object.assign(out, {
-      direction: dir, strength: Math.min(1, top.score), up: ag.up, down: ag.down, total: ag.total, drivers: ag.drivers.slice(0, 4), playbook: top.playbook, provisional: top.prov, vetoes,
-      reasons: [top.why, ...top.trigR], score: top.score, parts: { location: top.loc, structure: top.str, trigger: top.trig, flow: top.flowS, timing: top.timing },
+      direction: dir, strength: Math.min(1, finalScore), up: ag.up, down: ag.down, total: ag.total, drivers: ag.drivers.slice(0, 4), playbook: top.playbook, provisional: top.prov, vetoes,
+      reasons: [top.why, ...top.trigR], score: finalScore, parts: { location: top.loc, structure: top.str, trigger: top.trig, flow: top.flowS, timing: top.timing },
       lifetime: top.life, duration: d ? { unit: d.unit, n: d.n, secs: d.secs, key: keyOf(d) } : null, durationSec: d ? d.secs : null, manual: top.life.manual,
+      decisionPrice: price, sigmaT: expectedMove(stat.sigmaPerSec, T), invalid: top.life.invalid, target: top.life.target, candleId: frames.trigger.at(-1).epoch,
     });
+    if (fam) {
+      const q = !verdicts.some((v) => v.kind === VERDICT.REJECTED || v.kind === VERDICT.DATA), delayed = verdicts.filter((v) => v.kind === VERDICT.DELAYED);
+      out.setup = { dir, playbook: top.playbook, qualifies: q, triggered: q && !delayed.length, trigger: out.entry.trigger, delayReason: delayed.map((v) => v.reason).join('; ') || null };
+    }
     out.wait = vetoes.length > 0;
     out.reason = out.wait ? vetoes.join('; ') : `${top.playbook}: ${top.why}`;
     if (d && top.life.target != null) {
