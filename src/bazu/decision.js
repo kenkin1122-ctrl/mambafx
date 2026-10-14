@@ -7,10 +7,13 @@
 
 import { MIN_STRENGTH } from './predict.js?v=15';
 
-export const GATE = Object.freeze({ OK: 'tradable', WEAK: 'weak signal', NO_QUOTE: 'awaiting Deriv quote', NO_DATA: 'waiting for data' });
+export const GATE = Object.freeze({ OK: 'tradable', WEAK: 'weak signal', ARMED: 'armed: waiting for trigger', NO_QUOTE: 'awaiting Deriv quote', NO_DATA: 'waiting for data' });
 
-/** Build a trade signal from a prediction and the quote Deriv gave. Tradable when strength >= MIN_STRENGTH. */
-export function buildTradeSignal({ symbol, prediction, duration, quote, now = Date.now() }) {
+/**
+ * Build a trade signal from a prediction and the quote Deriv gave. Tradable when strength >= MIN_STRENGTH.
+ * In families mode a signal is tradable only while its book entry is TRIGGERED (`bookSignal`, from signalBook3m).
+ */
+export function buildTradeSignal({ symbol, prediction, duration, quote, now = Date.now(), bookSignal = null }) {
   if (!prediction) return { gate: GATE.NO_DATA, market: symbol };
   const min = prediction.minStrength ?? MIN_STRENGTH;
   const up = prediction.direction > 0;
@@ -20,8 +23,11 @@ export function buildTradeSignal({ symbol, prediction, duration, quote, now = Da
     drivers: prediction.drivers, proxy: prediction.proxy, quote, at: now,
     playbook: prediction.playbook, reason: prediction.reason, vetoes: prediction.vetoes, reasons: prediction.reasons, parts: prediction.parts, patterns: prediction.patterns, factors: prediction.factors, decisionTs: prediction.decisionTs, provisional: prediction.provisional, durationSec: prediction.durationSec,
     lifetime: prediction.lifetime, manual: !!prediction.manual, breakEven: quote && quote.payout > 0 ? quote.ask / quote.payout : null,
+    mode: prediction.mode, regime: prediction.regime, momentum: prediction.momentum, entry: prediction.entry, families: prediction.families, familyAgreement: prediction.familyAgreement, votes: prediction.votes, verdicts: prediction.verdicts, setup: prediction.setup,
+    signalId: bookSignal?.id || null, signalState: bookSignal?.state || null, signalReason: bookSignal?.lastReason || null, signalHistory: bookSignal?.history || null,
   };
-  if (prediction.wait || !duration) return { ...base, gate: GATE.WEAK };
+  if (prediction.wait || !duration) return { ...base, gate: prediction.mode === 'families' && prediction.setup?.qualifies && bookSignal && duration ? GATE.ARMED : GATE.WEAK };
+  if (prediction.mode === 'families' && bookSignal?.state !== 'TRIGGERED') return { ...base, gate: GATE.ARMED };
   if (!quote || !(quote.ask > 0) || !(quote.payout > 0)) return { ...base, gate: GATE.NO_QUOTE };
   return { ...base, gate: prediction.strength >= min ? GATE.OK : GATE.WEAK };
 }

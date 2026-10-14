@@ -19,8 +19,47 @@ export const BASE_CONFIG = Object.freeze({
   weights: { location: 0.30, structure: 0.25, trigger: 0.25, flow: 0.10, timing: 0.10 },
   SCORE_MIN: 0.45,
   AGREE_MIN: 3,
+  // ---- Change Order 8: price-action confirmation, family confluence, dynamic signals ----
+  CONFLUENCE_MODE: 'families', // families | legacy (legacy = the old "AGREE_MIN of N features" rule, no momentum gate; kept for replay)
+  FAMILIES_AGREE_MIN: 3,       // agreeing families needed (of the families available for the market class)
+  AGREE_RATIO_MIN: 0.6,        // agreeing share of non-neutral families
+  FAMILY_VOTE_MIN: 0.34,       // a family votes when its weighted share for one side reaches this
+  FAMILY_OPPOSE_STRONG: 0.6,   // a family score this far against the trade counts as strongly opposing
+  FAMILY_OF: { mtfTrend: 'trend', macd: 'trend', adx: 'trend', kalman: 'trend', rsi: 'oscillator', stoch: 'oscillator', cci: 'oscillator', structure: 'structure', zones: 'structure', rangeBreak: 'structure', stepStructure: 'structure', volatility: 'volatility', tickFlow: 'flow', spike: 'spike' },
+  // momentum (immediate price action), all measures are causal
+  MOM_CANDLES: 5,              // completed candles in the candle-direction / strength readings (5 to 10)
+  MOM_RET_BARS: [3, 5, 10],    // net change over the last k ticks and k bars, in sigma units
+  MOM_VEL_T_FRAC: 0.5, MOM_VEL_MIN_S: 5, MOM_VEL_MAX_S: 120, // tick-velocity window = clamp(frac x T, min, max)
+  MOM_EMA_FAST: 9, MOM_EMA_SLOW: 21,
+  MOM_TICKS_DELTA: 20,         // ticks in the signed tick-delta proxy
+  MOM_WEIGHTS: { candles: 1, persistence: 0.8, retBars: 1, retTicks: 0.6, velocity: 1, swing: 0.8, body: 0.6, emaSlope: 1, emaCross: 0.5, tickDelta: 0.4 },
+  MOM_MIN_MEASURES: 4,         // fewer available measures -> momentum unavailable (WAIT, never zero)
+  MOM_VOTE_MIN: 0.25,          // |score| needed for the momentum family to vote
+  MOM_ALIGNED: 0.25, MOM_OPPOSE_MOD: 0.25, MOM_OPPOSE_STRONG: 0.5,
+  MOM_BONUS: 0.05, MOM_PENALTY: 0.08, // score adjustment: aligned bonus, opposing_moderate penalty
+  MOM_VOL_FAST: 1.8, MOM_VOL_SUBDUED: 0.5,  // recent / long volatility ratio bounds
+  MOMENTUM_OPPOSE_SIGMA: 1.0, CONTRADICT_WINDOW_S: 60, // contradiction = last-window move against the trade by more than this many sigma
+  ADX_TRANSITION: 18, VOL_CHANGE_RATIO: 1.6, PERSIST_MIN: 3,
+  OSC_REGIME_WEIGHT: { range: 1, trend: 0.5, transition: 0 }, // oscillator weight by regime (trend: votes with the trend, never reverses)
+  // reversal / confirmed turn
+  COUNTER_TREND: ['range fade', 'liquidity sweep', 'fakeout reversal'],
+  EXTREME_LOOKBACK: 12, TURN_LOOKBACK: 3, TURN_MIN_GAP_CANDLES: 1,
+  TURN_WICK_FRAC: 0.5, SHRINK_BODY_FRAC: 0.6, TICK_FLIP_K: 8,
+  TURN_TRIGGERS: ['choch', 'rejection', 'sweepReclaim', 'shrinking', 'tickFlip'],
+  REQUIRE_TRIGGER: true,       // a configured trigger (pattern, breakout, confirmed turn) is needed to execute
+  // dynamic signal state machine
+  ARM_MAX_WAIT_S: { mult: 3, min: 30, max: 300 },     // armed -> triggered window = clamp(mult x T, min, max)
+  SIGNAL_MAX_AGE_S: { mult: 6, min: 60, max: 900 },   // signal age limit = clamp(mult x T, min, max)
+  EXEC_MAX_DELAY_S: 15,        // a TRIGGERED signal must be executed within this many seconds
+  FORMING_MAX_HZ: 0.5,         // provisional (intrabar) re-evaluations per second at most
+  REJECT_LOG_GAP_S: 60,        // do not log the same rejected setup more often than this
+  // pre-trade recheck and data freshness
+  RECHECK_MAX_SIGMA: 1.0,      // cancel if price moved this many sigma(T) against the trade since the decision
+  STALE_TICK_MS: 5000, CANDLE_STALE_BARS: 3, MAX_ESTIMATE_AGE_S: 30,
+  DEMO_ONLY: true,             // Bazu-originated and manual orders are refused on a real account while true
+  MAX_OPEN_PER_MARKET: 1,
   MAX_CHASE_ATR: 2,
-  ROOM_FACTOR: 1,          // nearest opposing zone must be farther than ROOM_FACTOR * sigma * sqrt(T)
+  ROOM_FACTOR: 1,           // nearest opposing zone must be farther than ROOM_FACTOR * sigma * sqrt(T)
   NOISE_FACTOR: 0.5,       // invalidation closer than NOISE_FACTOR * one-minute sigma is noise
   ATR_PERIOD: 14,
   // ---- contract duration = expected signal lifetime ----
