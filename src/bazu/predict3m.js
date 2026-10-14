@@ -188,9 +188,16 @@ export function predict3m({ symbol, prices, epochs, remote = {}, decisionEpoch, 
     for (const c of cands) {
       const move = expectedMove(stat.sigmaPerSec, c.T);
       const flowS = flowF ? (flowF.vote === c.dir ? 1 : flowF.vote === 0 ? 0.4 : 0) : 0.4;
-      const room = roomToRun(zones, price, c.dir), roomOk = !Number.isFinite(move) || room >= cfg.ROOM_FACTOR * move;
+      const room = roomToRun(zones, price, c.dir);
+      const rrMode = cfg.DURATION_MODE === 'lifetime' && cfg.ROOM_CHECK === 'rr' && !c.life.manual;
+      let roomOk, roomWhy = 'no room to run vs expected move over the contract duration';
+      if (rrMode) {
+        const { a, b } = c.life, unit = Math.sqrt(stat.sigma2PerSec * trigSecs);
+        roomOk = a == null || (a / b >= cfg.RR_MIN && a >= cfg.MIN_TARGET_MOVE * unit);
+        if (!roomOk) roomWhy = a / b < cfg.RR_MIN ? `reward/risk ${(a / b).toFixed(2)} < RR_MIN ${cfg.RR_MIN}` : `target < ${cfg.MIN_TARGET_MOVE} sigma`;
+      } else roomOk = !Number.isFinite(move) || room >= cfg.ROOM_FACTOR * move;
       const timing = !Number.isFinite(move) ? 0.5 : Math.min(1, Number.isFinite(room) ? room / (2 * Math.max(move, 1e-12)) : 1);
-      Object.assign(c, { flowS, roomOk, timing, move });
+      Object.assign(c, { flowS, roomOk, roomWhy, timing, move });
       c.score = W.location * c.loc + W.structure * (c.str - (biasSlope === -c.dir ? 0.15 : 0)) + W.trigger * c.trig + W.flow * flowS + W.timing * timing;
     }
     cands.sort((a, b) => b.score - a.score);
@@ -204,7 +211,7 @@ export function predict3m({ symbol, prices, epochs, remote = {}, decisionEpoch, 
     }
     const last = frames.setup.at(-1);
     if (last.patternOk && PATTERNS.doji(frames.setup, frames.setup.length - 1, cfg).present && !near.length) vetoes.push('mid-range doji');
-    if (!top.roomOk) vetoes.push('no room to run vs expected move over the contract duration');
+    if (!top.roomOk) vetoes.push(top.roomWhy);
     if (ep && Math.abs(ep.dist) > cfg.MAX_CHASE_ATR && Math.sign(ep.dist) === dir) vetoes.push(`chasing: ${Math.abs(ep.dist).toFixed(1)} ATR from EMA20`);
     const zone = near.find((z) => supportiveKinds(dir).includes(z.kind));
     if (zone && Number.isFinite(noiseTrig)) { const inval = dir > 0 ? price - zone.low : zone.high - price; if (inval >= 0 && inval < cfg.NOISE_FACTOR * noiseTrig) vetoes.push('invalidation inside trigger-frame noise'); }

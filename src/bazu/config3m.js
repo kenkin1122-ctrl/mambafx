@@ -51,6 +51,13 @@ export const BASE_CONFIG = Object.freeze({
     long: { trigger: 'M5', setup: 'M15', context: 'H1', bias: 'H1' },
   },
   FLOW_MAX_FRAME_S: 300,
+  ROOM_CHECK: 'rr',         // lifetime mode only: 'rr' = RR_MIN + MIN_TARGET_MOVE checks; 'legacy' = room-to-run vs sigma*sqrt(T)
+  RR_MIN: 1.0,             // target distance / invalidation distance
+  MIN_TARGET_MOVE: 1.0,    // target distance in sigma units of one trigger-frame (sigma * sqrt(trigger secs))
+  BACKFILL_FRAMES: ['M1', 'M3', 'M5', 'M15', 'H1'],
+  BACKFILL_COUNT: 300,     // candles per frame at startup
+  BACKFILL_CONCURRENCY: 3,
+  BACKFILL_GAP_MS: 250,    // min spacing between history requests (<= 4/s)
   LOG_MIN_GAP_S: 30,
   zoneK: 0.5,              // zone band width = zoneK * ATR
   EXTENDED_ATR: 1.5, EXTENDED_N: 6,

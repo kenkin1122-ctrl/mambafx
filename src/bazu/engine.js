@@ -14,6 +14,7 @@ import { predict3m } from './predict3m.js?v=15';
 import { configFor } from './config3m.js?v=15';
 import { allowedDurations, durationLabel } from './duration3m.js?v=15';
 import { resolveRecord } from './calibration3m.js?v=15';
+import { backfill, mergeCandles, parseCandles } from './backfill3m.js?v=15';
 import { decimalsFromPip } from './timeframes.js?v=15';
 import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=15';
 import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=15';
@@ -27,7 +28,7 @@ const TRADES_KEY = 'bazu_trades_v1';
 export const state = {
   status: 'idle', mode: 'manual', running: false, stake: 1, curStake: 1, martingale: 1, limits: { ...DEFAULT_LIMITS },
   markets: new Map(), trades: [], log: [], scan: { done: 0, total: 0, active: false }, realConfirmed: false,
-  selected: null, signals: new Map(), manualKey: null, records: [],
+  selected: null, signals: new Map(), manualKey: null, records: [], vetoStats: {}, backfill: null,
 };
 
 const listeners = new Set();
@@ -104,6 +105,7 @@ export async function discover() {
   log(`Universe: ${state.markets.size} synthetic indices offer Rise/Fall (of ${syms.length} active)`);
   await Promise.all([...state.markets.keys()].map((sym) => send({ ticks: sym, subscribe: 1 }).catch(() => {})));
   state.status = 'live'; emit();
+  backfillAll().catch((e) => log('backfill: ' + e.message, 'warn'));
   const q = [...state.markets.keys()];
   for (let w = 0; w < 4; w++) (async () => { while (q.length) { try { await loadHistory(q.shift()); } catch (e) { log('history: ' + e.message, 'warn'); } } })();
 }
@@ -159,21 +161,42 @@ export function ensureCandles(m, tf) {
     .finally(() => { candleBusy.delete(k); emit(); });
 }
 
-// ---------- remote candles for the 3-minute path (M1/M5/M15/H1), throttled ----------
-const REMOTE = [['M1', 60, 500, 60000], ['M5', 300, 300, 300000], ['M15', 900, 150, 600000], ['H1', 3600, 120, 1800000]];
+// ---------- remote candles: full startup backfill, then small incremental refreshes ----------
 const remoteBusy = new Set();
-let remoteSlots = 3;
+let remoteSlots = 2;
 export function ensureRemote(m) {
-  const store = (m.remote ||= {}), at = (m.remoteAt ||= {});
-  for (const [k, secs, count, ttl] of REMOTE) {
-    const key = m.symbol + k;
+  const cfg = configFor(m.symbol), store = (m.remote ||= {}), at = (m.remoteAt ||= {});
+  for (const k of cfg.BACKFILL_FRAMES) {
+    const secs = cfg.FRAMES[k], key = m.symbol + k, ttl = Math.max(60000, secs * 1000);
     if (remoteBusy.has(key) || (store[k] && Date.now() - (at[k] || 0) < ttl) || remoteSlots <= 0) continue;
     remoteBusy.add(key); remoteSlots--;
-    send({ ticks_history: m.symbol, style: 'candles', granularity: secs, count, end: 'latest' })
-      .then((r) => { store[k] = (r.candles || []).map((x) => ({ epoch: Number(x.epoch), open: +x.open, high: +x.high, low: +x.low, close: +x.close })); at[k] = Date.now(); })
+    send({ ticks_history: m.symbol, style: 'candles', granularity: secs, count: store[k] ? 10 : cfg.BACKFILL_COUNT, end: 'latest' })
+      .then((r) => { store[k] = mergeCandles(store[k], parseCandles(r)); at[k] = Date.now(); })
       .catch((e) => { at[k] = Date.now() - ttl + 15000; log(`candles ${k} ${m.symbol}: ${e.message}`, 'warn'); })
       .finally(() => { remoteBusy.delete(key); remoteSlots++; });
   }
+}
+export async function backfillAll() {
+  const syms = [...state.markets.keys()], t0 = Date.now();
+  const stats = await backfill({
+    symbols: syms, send, cfg: configFor('R_100'),
+    onFrame: (sym, k, cs) => { if (!cs) return; const m = state.markets.get(sym); (m.remote ||= {})[k] = mergeCandles(m.remote[k], cs); (m.remoteAt ||= {})[k] = Date.now(); },
+  });
+  state.backfill = { requests: stats.requests, failed: stats.failed, ms: Date.now() - t0 };
+  log(`Candle backfill: ${stats.requests} requests, ${stats.failed} failed, ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+}
+// ---------- veto statistics (per market) ----------
+const vetoKey = (v) => String(v).replace(/[\d.]+/g, '#');
+function recordEval(sym, res) {
+  const s = (state.vetoStats[sym] ||= { evals: 0, tradable: 0, vetoes: {} });
+  s.evals++;
+  if (!res.wait) s.tradable++;
+  for (const v of res.vetoes || []) { const k = vetoKey(v); s.vetoes[k] = (s.vetoes[k] || 0) + 1; }
+}
+export function vetoSummary() {
+  const tot = { evals: 0, tradable: 0, vetoes: {} };
+  for (const s of Object.values(state.vetoStats)) { tot.evals += s.evals; tot.tradable += s.tradable; for (const [k, v] of Object.entries(s.vetoes)) tot.vetoes[k] = (tot.vetoes[k] || 0) + v; }
+  return tot;
 }
 // ---------- predictions ----------
 const quoteCache = new Map();
@@ -224,7 +247,7 @@ export function allowedKeys() { const s = new Set(); state.markets.forEach((m) =
 
 const lastActedEpoch = new Map();
 let sigTimer = null, sigBusy = false;
-async function signalTick() {
+export async function signalTick() {
   if (sigBusy) return; sigBusy = true;
   try {
     for (const m of state.markets.values()) {
@@ -234,6 +257,7 @@ async function signalTick() {
       const allowed = allowedFor(m);
       let r;
       try { r = predict3m({ symbol: m.symbol, prices: m.prices.slice(-6000), epochs: m.epochs.slice(-6000), remote: m.remote || {}, decisionEpoch: m.epochs[m.epochs.length - 1], allowed, manualKey: state.manualKey }); } catch (e) { log('predict ' + m.symbol + ': ' + e.message, 'warn'); continue; }
+      recordEval(m.symbol, r);
       r = { result: r, lastEpoch: r.decisionTs };
       let q = null; const d = r.result.duration && allowed.find((x) => durationLabel(x) === r.result.duration.key);
       if (d && !r.result.wait && r.result.strength >= r.result.minStrength) { try { q = await quoteFor(m.symbol, d, r.result.direction > 0 ? 'CALL' : 'PUT'); } catch { /* no quote */ } }

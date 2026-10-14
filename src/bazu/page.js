@@ -120,12 +120,21 @@ function syncDur(S) {
   if (sel.dataset.k !== want) { sel.dataset.k = want; sel.innerHTML = '<option value="">Auto (lifetime)</option>' + keys.map((k) => `<option value="${esc(k)}">${esc(k)}</option>`).join(''); }
   if (document.activeElement !== sel) sel.value = S.manualKey || '';
 }
+function vetoHtml(S) {
+  const T = E.vetoSummary(), rate = T.evals ? T.tradable / T.evals : null;
+  const top = Object.entries(T.vetoes).sort((a, b) => b[1] - a[1]);
+  const perMarket = Object.entries(S.vetoStats).map(([sym, s]) => ({ sym, ...s, top: Object.entries(s.vetoes).sort((a, b) => b[1] - a[1]).slice(0, 3) })).sort((a, b) => b.evals - a.evals);
+  return `<div class="panel"><h3>Veto analysis <span class="mu">(live evaluations this session)</span></h3>
+    <div class="note num">Evaluations ${T.evals} · tradable ${T.tradable} · tradable rate ${pct(rate, 1)}${top[0] ? ` · most common veto: <b>${esc(top[0][0])}</b> (${top[0][1]})` : ''}${S.backfill ? ` · backfill ${S.backfill.requests} requests, ${(S.backfill.ms / 1000).toFixed(0)}s` : ''}</div>
+    <table><tr><th>Veto reason</th><th>Count</th><th>Share of evaluations</th></tr>${top.slice(0, 12).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${v}</td><td class="num">${pct(v / T.evals, 1)}</td></tr>`).join('') || '<tr><td colspan="3" class="mu">no evaluations yet</td></tr>'}</table>
+    <div class="scroll" style="max-height:220px"><table><tr><th>Market</th><th>Evals</th><th>Tradable rate</th><th>Top vetoes</th></tr>${perMarket.map((m) => `<tr><td>${esc(m.sym)}</td><td class="num">${m.evals}</td><td class="num">${pct(m.tradable / m.evals, 1)}</td><td class="mu">${m.top.map(([k, v]) => `${esc(k)} (${v})`).join('; ')}</td></tr>`).join('')}</table></div></div>`;
+}
 function renderCalib(S) {
   const recs = S.records, sum = calibrationSummary(recs), acc = accuracyByDuration(recs);
   const dist = (e) => e.dist.map((d) => `${d.label}: ${d.count}`).join(' · ');
   const rows = (o) => Object.entries(o).map(([k, e]) => `<tr><td>${esc(k)}</td><td class="num">${e.n}</td><td class="num">${secFmt(e.medianErrorS)}</td><td class="num">${e.medianRatio == null ? '—' : e.medianRatio.toFixed(2) + 'x'}</td><td class="mu">${dist(e)}</td></tr>`).join('') || '<tr><td colspan="5" class="mu">no resolved records yet</td></tr>';
   const head = '<tr><th></th><th>N</th><th>Median error (pred − real)</th><th>Median pred/real</th><th>Error distribution</th></tr>';
-  $('bzCalib').innerHTML = `<div class="panel"><h3>Lifetime calibration <span class="mu">(a record, not a gate)</span></h3>
+  $('bzCalib').innerHTML = vetoHtml(S) + `<div class="panel" style="margin-top:10px"><h3>Lifetime calibration <span class="mu">(a record, not a gate)</span></h3>
     <div class="note num">Signals logged ${recs.length} · resolved ${sum.resolved} · target first ${sum.targetFirst} · invalidation first ${sum.invalidFirst} · neither within max ${sum.neither} · target touched within chosen duration but contract lost ${sum.touchedButLost} of ${sum.targetTouchedInDur}</div>
     <h4>By playbook</h4><table>${head}${rows(sum.byPlaybook)}</table><h4>By estimator</h4><table>${head}${rows(sum.byEstimator)}</table></div>
     <div class="panel" style="margin-top:10px"><h3>Accuracy by chosen duration <span class="mu">(shadow outcomes, ties lose)</span></h3>
