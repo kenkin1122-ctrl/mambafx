@@ -2,6 +2,7 @@
  * src/bazu/page.js
  * BAZU page view. Sends commands to engine.js and renders its state — NO trading rules here.
  */
+import { start as perfStart } from './perf3m.js?v=15';
 import * as E from './engine.js?v=15';
 import { clusterZones } from './structure.js?v=15';
 import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=15';
@@ -83,6 +84,9 @@ function whyNoTrade(S, acc) {
 }
 
 function render() {
+  const endRender = perfStart('render'); try { renderNow(); } finally { endRender(); }
+}
+function renderNow() {
   if (!ready || document.hidden || !document.getElementById('page-bazu')?.classList.contains('active')) return;
   const S = E.state; let M; try { M = E.metrics(); } catch (e) { console.error('BAZU metrics', e); M = { account: accountInfo(), openStake: 0, potentialPayout: 0, sessionPnl: 0, closed: 0, win: {}, exposure: 'ok', markets: S.markets.size, tradable: 0, failed: 0 }; }
   const acc = M.account;

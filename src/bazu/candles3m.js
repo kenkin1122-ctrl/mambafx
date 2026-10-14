@@ -89,20 +89,34 @@ export function formingCandle(prices, epochs, secs, decisionEpoch) {
  * Tick-flow (intensity / signed delta) is attached to frames up to cfg.FLOW_MAX_FRAME_S. The forming candle uses
  * `formingSecs` and only ticks <= decisionEpoch.
  */
+/*
+ * Closed candles never change once their bucket has ended, so each frame (closed candles + tick flow + ATR/geometry
+ * enrichment) is cached per `remote` object and rebuilt only when its inputs change: a new bucket closes, the remote
+ * candle arrays are replaced, the tick buffer start moves (trim / history load) or the relevant config changes.
+ * Output is identical to the uncached build (see tests/bazu/perf.test.mjs).
+ */
+const FRAME_CACHE = new WeakMap();
+let cacheOn = true;
+export const setFrameCache = (on) => { cacheOn = !!on; };
+
 export function buildFrames({ remote, prices, epochs, decisionEpoch, cfg, names, formingSecs }) {
   const F = cfg.FRAMES, base = F.M1, frames = {};
-  const m1 = mergeByEpoch(remote.M1 || [], prices.length ? bucketCandles(prices, epochs, base) : []);
+  const store = cacheOn && remote && typeof remote === 'object' ? (FRAME_CACHE.get(remote) || FRAME_CACHE.set(remote, new Map()).get(remote)) : null;
+  const t0 = epochs.length ? epochs[0] : 0, sig = `${cfg.FLOW_MAX_FRAME_S}|${cfg.ATR_PERIOD}|${cfg.SPIKE_ATR}|${cfg.SPIKE_COOLDOWN}|${base}`;
+  let m1 = null;
+  const getM1 = () => m1 || (m1 = mergeByEpoch(remote.M1 || [], prices.length ? bucketCandles(prices, epochs, base) : []));
   for (const k of names) {
-    const secs = F[k];
-    const src = secs < base ? (prices.length ? bucketCandles(prices, epochs, secs) : []) : secs === base ? m1 : mergeByEpoch(remote[k] || [], aggregate(m1, secs));
+    const secs = F[k], idx = Math.floor(decisionEpoch / secs), rk = remote[k] || null, rm = remote.M1 || null, hit = store && store.get(k);
+    if (hit && hit.idx === idx && hit.t0 === t0 && hit.sig === sig && hit.rk === rk && hit.rm === rm && hit.secs === secs) { frames[k] = hit.value; continue; }
+    const src = secs < base ? (prices.length ? bucketCandles(prices, epochs, secs) : []) : secs === base ? getM1() : mergeByEpoch(remote[k] || [], aggregate(getM1(), secs));
     const closed = closedOnly(src, secs, decisionEpoch);
     if (secs <= cfg.FLOW_MAX_FRAME_S) attachTickFlow(closed, prices, epochs, secs);
     frames[k] = enrich(closed, cfg);
+    if (store) store.set(k, { idx, t0, sig, rk, rm, secs, value: frames[k] });
   }
   frames.forming = formingSecs ? formingCandle(prices, epochs, formingSecs, decisionEpoch) : null;
   return frames;
-}
-function mergeByEpoch(remote, local) {
+}function mergeByEpoch(remote, local) {
   const map = new Map(remote.map((c) => [c.epoch, c]));
   for (const c of local) if (!map.has(c.epoch)) map.set(c.epoch, c);
   return [...map.values()].sort((a, b) => a.epoch - b.epoch);

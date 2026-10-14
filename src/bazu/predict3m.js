@@ -15,6 +15,7 @@ import { runFactors, structureState } from './factors3m.js?v=15';
 import { statRegime, emaSlope, adx } from './ta3m.js?v=15';
 import { buildZones, zonesNear, supportiveKinds, roomToRun, extendedMove, confirmed, breakoutState, liquiditySweep, expectedMove } from './context3m.js?v=15';
 import * as D from './duration3m.js?v=15';
+import { lapTimer } from './perf3m.js?v=15';
 
 const MIN_BARS = { trigger: 30, setup: 30, context: 20 };
 
@@ -99,7 +100,7 @@ const keyOf = (d) => D.durationLabel(d);
  * manualKey = a duration label (e.g. '5m') chosen by the user; it overrides the lifetime duration and is tagged manual.
  */
 export function predict3m({ symbol, prices, epochs, remote = {}, decisionEpoch, overrides, logPatterns = true, allowed = null, manualKey = null }) {
-  const cfg = configFor(symbol, overrides), now = decisionEpoch ?? epochs[epochs.length - 1];
+  const lap = lapTimer('predict'), cfg = configFor(symbol, overrides), now = decisionEpoch ?? epochs[epochs.length - 1];
   const blank = () => ({ wait: true, direction: 0, strength: 0, up: 0, down: 0, total: 0, drivers: [], proxy: false, decisionTs: now, durationSec: null, duration: null, manual: false, lifetime: null, playbook: null, vetoes: [], reasons: [], factors: {}, patterns: [], provisional: false, minStrength: cfg.SCORE_MIN, marketClass: marketClass(symbol), bucket: null, record: null });
   const fail = (why) => { const o = blank(); o.vetoes.push(why); o.reason = why; return o; };
   if (!prices.length) return fail('no ticks');
@@ -107,6 +108,7 @@ export function predict3m({ symbol, prices, epochs, remote = {}, decisionEpoch, 
   prices = prices.slice(0, n); epochs = epochs.slice(0, n);
   const stat = statRegime(prices, epochs, cfg.EWMA_LAMBDA);
   if (!stat) return fail('warming up: not enough ticks');
+  lap('slice+stat');
   const allow = allowed || D.allowedDurations(null, stat.tickSecs, cfg, () => true);
   const cls = marketClass(symbol);
 
@@ -121,14 +123,18 @@ export function predict3m({ symbol, prices, epochs, remote = {}, decisionEpoch, 
     const names = [...new Set([roles.trigger, roles.setup, roles.context, roles.bias, 'H1'])];
     const raw = buildFrames({ remote, prices, epochs, decisionEpoch: now, cfg, names, formingSecs: cfg.FRAMES[roles.trigger] });
     const frames = { trigger: raw[roles.trigger], setup: raw[roles.setup], context: raw[roles.context], bias: raw[roles.bias], H1: raw.H1, forming: raw.forming };
+    lap('frames');
     for (const [k, need] of Object.entries(MIN_BARS)) if (frames[k].length < need) return wait(`warming up: ${roles[k]} ${frames[k].length}/${need} candles`);
     const price = prices.at(-1), atr = frames.setup.at(-1).atr, trigSecs = cfg.FRAMES[roles.trigger];
     if (!(atr > 0)) return wait('ATR unavailable');
     const zones = buildZones(frames, cfg, roles), spikeInfo = spikeContext(symbol, frames, prices, epochs, cfg, stat.tickSecs);
+    lap('zones+spike');
     const factors = runFactors({ frames, cfg, stat, zones, price, atr, symbol, spikeInfo });
+    lap('factors');
     out.factors = factors;
     if (logPatterns) out.patterns = [...runPatterns(frames.trigger, frames.trigger.length - 1, cfg), ...runPatterns(frames.setup, frames.setup.length - 1, cfg)];
 
+    lap('patterns');
     const noiseTrig = expectedMove(stat.sigmaPerSec, trigSecs);
     const flowF = factors.tickFlow, ctx = { frames, cfg, zones, atr, price, flow: { avgN: 0 }, names: roles };
     const m5 = structureState(frames.setup), m15 = structureState(frames.context), a5 = adx(frames.setup), a15 = adx(frames.context);
@@ -240,6 +246,7 @@ export function predict3m({ symbol, prices, epochs, remote = {}, decisionEpoch, 
   }
 
   let res = analyse(bucket0);
+  lap('analyse-rest');
   if (res.duration && D.bucketOf(res.duration.secs, cfg) !== bucket0) res = analyse(D.bucketOf(res.duration.secs, cfg));
   return res;
 }

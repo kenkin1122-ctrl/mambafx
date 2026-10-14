@@ -17,6 +17,7 @@ import { resolveRecord } from './calibration3m.js?v=15';
 import { backfill, mergeCandles, parseCandles } from './backfill3m.js?v=15';
 import { decimalsFromPip } from './timeframes.js?v=15';
 import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=15';
+import { start as perfStart, mark as perfMark, startMonitors } from './perf3m.js?v=15';
 import { buyRiseFall, accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=15';
 import { wilson } from './stats.js?v=15';
 
@@ -31,10 +32,11 @@ export const state = {
   selected: null, signals: new Map(), manualKey: null, records: [], vetoStats: {}, backfill: null,
 };
 
+if (typeof window !== 'undefined') window.__bzState = state;
 const listeners = new Set();
 export const onChange = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
 let dirty = false;
-function emit() { if (dirty) return; dirty = true; setTimeout(() => { dirty = false; listeners.forEach((f) => { try { f(state); } catch (e) { console.error(e); } }); }, 1000); }
+function emit() { if (dirty) return; dirty = true; setTimeout(() => { dirty = false; const end = perfStart('ui.listeners'); listeners.forEach((f) => { try { f(state); } catch (e) { console.error(e); } }); end(); }, 1000); }
 function log(msg, kind = 'info') { state.log.unshift({ t: Date.now(), msg, kind }); state.log.length = Math.min(state.log.length, 200); emit(); }
 
 // ---------- public socket ----------
@@ -50,10 +52,11 @@ function openWs() {
     ws.onerror = () => reject(new Error('BAZU feed socket error'));
     ws.onclose = () => { state.status = 'reconnecting'; wsReady = null; emit(); setTimeout(() => { if (state.markets.size) reconnect(); }, 3000); };
     ws.onmessage = (ev) => {
-      const m = JSON.parse(ev.data);
+      const t0 = performance.now(), m = JSON.parse(ev.data);
       const w = m.req_id && waiting.get(m.req_id);
       if (w) { waiting.delete(m.req_id); m.error ? w.reject(new Error(m.error.message)) : w.resolve(m); }
       if (m.msg_type === 'tick' && m.tick) onTick(m.tick);
+      perfMark(m.msg_type === 'tick' ? 'ws.tick' : 'ws.other', performance.now() - t0);
     };
   });
   return wsReady;
@@ -247,29 +250,34 @@ export function allowedKeys() { const s = new Set(); state.markets.forEach((m) =
 
 const lastActedEpoch = new Map();
 let sigTimer = null, sigBusy = false;
+const SLICE_MS = 8;
+const yieldUi = () => new Promise((res) => setTimeout(res, 0));
 export async function signalTick() {
-  if (sigBusy) return; sigBusy = true;
+  if (sigBusy) return; sigBusy = true; startMonitors();
+  const endPass = perfStart('signalTick');
   try {
-    for (const m of state.markets.values()) {
+    let sliceT = performance.now();
+    for (const m of [...state.markets.values()]) {
+      if (performance.now() - sliceT > SLICE_MS) { await yieldUi(); sliceT = performance.now(); }
       if (!m.historyLoaded) { loadHistory(m.symbol).catch(() => {}); }
       if (m.prices.length < 300) continue;
       ensureRemote(m);
       const allowed = allowedFor(m);
       let r;
-      try { r = predict3m({ symbol: m.symbol, prices: m.prices.slice(-6000), epochs: m.epochs.slice(-6000), remote: m.remote || {}, decisionEpoch: m.epochs[m.epochs.length - 1], allowed, manualKey: state.manualKey }); } catch (e) { log('predict ' + m.symbol + ': ' + e.message, 'warn'); continue; }
+      const endP = perfStart('predict3m'); try { r = predict3m({ symbol: m.symbol, prices: m.prices.slice(-6000), epochs: m.epochs.slice(-6000), remote: m.remote || {}, decisionEpoch: m.epochs[m.epochs.length - 1], allowed, manualKey: state.manualKey }); } catch (e) { endP(); log('predict ' + m.symbol + ': ' + e.message, 'warn'); continue; } endP();
       recordEval(m.symbol, r);
       r = { result: r, lastEpoch: r.decisionTs };
       let q = null; const d = r.result.duration && allowed.find((x) => durationLabel(x) === r.result.duration.key);
       if (d && !r.result.wait && r.result.strength >= r.result.minStrength) { try { q = await quoteFor(m.symbol, d, r.result.direction > 0 ? 'CALL' : 'PUT'); } catch { /* no quote */ } }
       const sig = { ...buildTradeSignal({ symbol: m.symbol, prediction: r.result, duration: d ? durationKey(d) : null, quote: q }), epoch: r.lastEpoch, durationObj: d || null };
-      sig.recId = logRecord(m, r.result, sig);
-      resolveRecords(m);
+      const endR = perfStart('records'); sig.recId = logRecord(m, r.result, sig);
+      resolveRecords(m); endR();
       m.signal = sig; state.signals.set(m.symbol, sig);
       emit();
       if (state.running && state.mode === 'auto' && state.martingale <= 1 && modeMayAct('auto', sig)) await autoTrade(m, sig);
     }
     if (state.running && state.mode === 'auto' && state.martingale > 1) await autoTradeBest();
-  } finally { sigBusy = false; emit(); }
+  } finally { sigBusy = false; endPass(); emit(); }
 }
 /** Martingale mode: one trade at a time, always on the strongest tradable market. */
 let bestBusy = false;
