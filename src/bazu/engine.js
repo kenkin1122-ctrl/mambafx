@@ -251,9 +251,23 @@ export function allowedKeys() { const s = new Set(); state.markets.forEach((m) =
 const lastActedEpoch = new Map();
 let sigTimer = null, sigBusy = false;
 const SLICE_MS = 8;
+const UNIT_S = { t: 2, s: 1, m: 60, h: 3600, d: 86400 };
+const STALE_ASK_MS = 20000, STALE_GIVEUP_MS = 120000;
+const endMs = (t) => { const mt = /^(\d+)([tsmhd])$/.exec(String(t.duration || '')); return t.ts + (mt ? Number(mt[1]) * UNIT_S[mt[2]] * 1000 : 0); };
+/** Open trades past expiry: ask Deriv again; give up (status 'stale') so they never block new trades. */
+function reconcileOpen() {
+  const now = Date.now(); let changed = false;
+  for (const t of state.trades) {
+    if (t.status !== 'open') continue;
+    const over = now - endMs(t);
+    if (over > STALE_GIVEUP_MS) { t.status = 'stale'; changed = true; }
+    else if (over > STALE_ASK_MS) requestContractUpdate(t.id);
+  }
+  if (changed) { saveTrades(); log('Unsettled trades marked stale (no result from Deriv); they no longer block new trades', 'warn'); }
+}
 const yieldUi = () => new Promise((res) => setTimeout(res, 0));
 export async function signalTick() {
-  if (sigBusy) return; sigBusy = true; startMonitors();
+  if (sigBusy) return; sigBusy = true; startMonitors(); reconcileOpen();
   const endPass = perfStart('signalTick');
   try {
     let sliceT = performance.now();
@@ -319,6 +333,12 @@ export function confirmReal(v) { state.realConfirmed = !!v; emit(); }
 function loadTrades() { try { state.trades = JSON.parse(localStorage.getItem(TRADES_KEY) || '[]'); } catch { state.trades = []; } }
 function saveTrades() { try { localStorage.setItem(TRADES_KEY, JSON.stringify(state.trades.slice(0, 500))); } catch { /* quota */ } }
 loadTrades();
+const PNL_KEY = 'bazu_pnl_reset_v1';
+let pnlReset = { demo: 0, real: 0 };
+try { pnlReset = { ...pnlReset, ...JSON.parse(localStorage.getItem(PNL_KEY) || '{}') }; } catch { /* default */ }
+/** Zero the P/L counter of one account kind ('demo' | 'real'); trades stay in history. */
+export function resetPnl(kind) { if (kind !== 'demo' && kind !== 'real') return; pnlReset[kind] = Date.now(); try { localStorage.setItem(PNL_KEY, JSON.stringify(pnlReset)); } catch { /* quota */ } log('P/L reset (' + kind + ')', 'ok'); emit(); }
+const pnlOf = (isReal) => state.trades.filter((t) => t.status === 'closed' && !!t.isReal === isReal && t.ts >= pnlReset[isReal ? 'real' : 'demo']);
 
 function riskState() {
   const open = state.trades.filter((t) => t.status === 'open');
@@ -356,7 +376,7 @@ function onContract(c) {
   if (c.entry_tick != null) t.entry = c.entry_tick;
   if (c.payout != null) t.payout = c.payout;
   if (c.bid_price != null) t.bid = Number(c.bid_price);
-  if (c.is_sold || c.status === 'sold' || c.is_expired) {
+  if (c.is_sold || c.status === 'sold' || c.status === 'won' || c.status === 'lost' || c.is_expired) {
     t.exit = c.exit_tick ?? c.sell_spot ?? t.exit; t.profit = Number(c.profit);
     t.status = 'closed'; t.result = t.profit > 0 ? 'win' : 'loss'; saveTrades();
     if (t.profit > 0) state.curStake = state.stake; else if (state.martingale > 1 && t.profit < 0) state.curStake = +(Number(t.stake) * state.martingale).toFixed(2);
@@ -370,21 +390,21 @@ export function attachAccount() {
   attachedWs = window.gridWs;
   watchContracts(onContract);
   state.trades.forEach((t) => { if (t.status === 'open' && !/^\d+$/.test(String(t.id))) { t.status = 'closed'; t.result = 'unknown'; } });
-  state.trades.filter((t) => t.status === 'open').forEach((t) => requestContractUpdate(t.id));
+  state.trades.filter((t) => t.status === 'open' || t.status === 'stale').forEach((t) => requestContractUpdate(t.id));
 }
 
 // ---------- derived metrics (all from recorded Deriv data) ----------
 export function metrics() {
   const acc = accountInfo();
   const open = state.trades.filter((t) => t.status === 'open');
-  const closed = state.trades.filter((t) => t.status === 'closed');
+  const closed = pnlOf(!!acc.isReal);
   const wins = closed.filter((t) => t.profit > 0).length;
   const openStake = open.reduce((a, t) => a + (Number(t.buyPrice) || Number(t.stake) || 0), 0);
   const known = open.filter((t) => t.bid != null);
   const settleNow = known.length === open.length && open.length ? known.reduce((a, t) => a + Number(t.bid), 0) : null;
   return {
     account: acc, openStake, settleNow, potentialPayout: open.reduce((a, t) => a + (Number(t.payout) || 0), 0),
-    sessionPnl: closed.reduce((a, t) => a + (Number(t.profit) || 0), 0), closed: closed.length, wins, win: wilson(wins, closed.length),
+    sessionPnl: closed.reduce((a, t) => a + (Number(t.profit) || 0), 0), demoPnl: pnlOf(false).reduce((a, t) => a + (Number(t.profit) || 0), 0), realPnl: pnlOf(true).reduce((a, t) => a + (Number(t.profit) || 0), 0), closed: closed.length, wins, win: wilson(wins, closed.length),
     exposure: exposureLevel(openStake, acc.balance),
     markets: state.markets.size, tradable: [...state.markets.values()].filter((m) => m.signal?.gate === GATE.OK).length,
     failed: closed.length - wins,

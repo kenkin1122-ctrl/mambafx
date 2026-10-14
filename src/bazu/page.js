@@ -33,6 +33,7 @@ function bindOnce() {
   $('bzDur').onchange = (e) => E.setManualDuration(e.target.value);
   $('bzStake').onchange = (e) => E.setStake(e.target.value);
   $('bzReverse').onchange = (e) => E.setReverse(e.target.checked);
+  $('bzMetrics').addEventListener('click', (e) => { const b = e.target.closest && e.target.closest('[data-bzreset]'); if (b) E.resetPnl(b.dataset.bzreset); });
   $('bzMart').onchange = (e) => E.setMartingale(e.target.value);
   $('bzRealOk').onchange = (e) => E.confirmReal(e.target.checked);
   $('bzLogin').onclick = () => (typeof window.gridStartLogin === 'function' ? window.gridStartLogin() : alert('Login is on the Grid page'));
@@ -103,7 +104,8 @@ function renderNow() {
     mk('Open stake', Number(M.openStake).toFixed(2)),
     mk('If settled now', M.settleNow == null ? '—' : Number(M.settleNow).toFixed(2)),
     mk('Potential payout', Number(M.potentialPayout).toFixed(2)),
-    mk('Session P/L', money(M.sessionPnl), M.sessionPnl > 0 ? 'ok' : M.sessionPnl < 0 ? 'bad' : ''),
+    mk('🟢 Demo P/L <button data-bzreset=\"demo\" title=\"Reset demo P/L to zero\">reset</button>', money(M.demoPnl || 0), M.demoPnl > 0 ? 'ok' : M.demoPnl < 0 ? 'bad' : ''),
+    mk('🔴 Real P/L <button data-bzreset=\"real\" title=\"Reset real P/L to zero\">reset</button>', money(M.realPnl || 0), M.realPnl > 0 ? 'ok' : M.realPnl < 0 ? 'bad' : ''),
     mk('Win rate', M.closed ? `${pct(M.win.p, 0)} <span class="mu" style="font-size:11px">n=${M.closed}</span>` : '—'),
     mk('Capital exposure', M.exposure.toUpperCase(), M.exposure),
     mk('Markets', M.markets), mk('Strong signals', M.tradable), mk('Completed', M.closed), mk('Failed', M.failed),
