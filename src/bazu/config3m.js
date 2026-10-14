@@ -56,8 +56,10 @@ export const BASE_CONFIG = Object.freeze({
   MIN_TARGET_MOVE: 1.0,    // target distance in sigma units of one trigger-frame (sigma * sqrt(trigger secs))
   BACKFILL_FRAMES: ['M1', 'M3', 'M5', 'M15', 'H1'],
   BACKFILL_COUNT: 300,     // candles per frame at startup
-  BACKFILL_CONCURRENCY: 3,
-  BACKFILL_GAP_MS: 250,    // min spacing between history requests (<= 4/s)
+  BACKFILL_CONCURRENCY: 2,
+  BACKFILL_RETRIES: 3,       // retries per frame on rate-limit/timeout
+  BACKFILL_RETRY_MS: 2000,  // back-off step (x attempt number)
+  BACKFILL_GAP_MS: 400,    // min spacing between history requests (<= 2.5/s)
   LOG_MIN_GAP_S: 30,
   zoneK: 0.5,              // zone band width = zoneK * ATR
   EXTENDED_ATR: 1.5, EXTENDED_N: 6,

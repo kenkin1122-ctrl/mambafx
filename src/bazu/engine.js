@@ -107,7 +107,7 @@ export async function discover() {
   state.status = 'live'; emit();
   backfillAll().catch((e) => log('backfill: ' + e.message, 'warn'));
   const q = [...state.markets.keys()];
-  for (let w = 0; w < 4; w++) (async () => { while (q.length) { try { await loadHistory(q.shift()); } catch (e) { log('history: ' + e.message, 'warn'); } } })();
+  for (let w = 0; w < 2; w++) (async () => { while (q.length) { try { await loadHistory(q.shift()); } catch (e) { log('history: ' + e.message, 'warn'); } } })();
 }
 
 const histBusy = new Map();
@@ -183,7 +183,7 @@ export async function backfillAll() {
     onFrame: (sym, k, cs) => { if (!cs) return; const m = state.markets.get(sym); (m.remote ||= {})[k] = mergeCandles(m.remote[k], cs); (m.remoteAt ||= {})[k] = Date.now(); },
   });
   state.backfill = { requests: stats.requests, failed: stats.failed, ms: Date.now() - t0 };
-  log(`Candle backfill: ${stats.requests} requests, ${stats.failed} failed, ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+  log(`Candle backfill: ${stats.requests} requests, ${stats.failed} failed after retries${stats.failed ? " (missing frames are re-fetched in the background)" : ""}, ${((Date.now() - t0) / 1000).toFixed(0)}s`, stats.failed ? "warn" : "info");
 }
 // ---------- veto statistics (per market) ----------
 const vetoKey = (v) => String(v).replace(/[\d.]+/g, '#');

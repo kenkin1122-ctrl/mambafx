@@ -27,13 +27,18 @@ export async function backfill({ symbols, send, cfg = configFor('R_100'), store,
     while (jobs.length) {
       const { sym, k } = jobs.shift();
       const wait = gateAt - now(); gateAt = Math.max(now(), gateAt) + cfg.BACKFILL_GAP_MS; if (wait > 0) await sleep(wait);
-      stats.requests++;
-      try {
-        const r = await send({ ticks_history: sym, style: 'candles', granularity: cfg.FRAMES[k], count: cfg.BACKFILL_COUNT, end: 'latest' });
-        const cs = parseCandles(r);
-        if (store) { const s = (store[sym] ||= {}); s[k] = mergeCandles(s[k], cs); }
-        onFrame && onFrame(sym, k, cs);
-      } catch (e) { stats.failed++; onFrame && onFrame(sym, k, null, e); }
+      let done = false, err = null;
+      for (let attempt = 0; attempt <= (cfg.BACKFILL_RETRIES ?? 0) && !done; attempt++) {
+        if (attempt) await sleep(cfg.BACKFILL_RETRY_MS * attempt);
+        stats.requests++;
+        try {
+          const r = await send({ ticks_history: sym, style: 'candles', granularity: cfg.FRAMES[k], count: cfg.BACKFILL_COUNT, end: 'latest' });
+          const cs = parseCandles(r);
+          if (store) { const s = (store[sym] ||= {}); s[k] = mergeCandles(s[k], cs); }
+          onFrame && onFrame(sym, k, cs); done = true;
+        } catch (e) { err = e; }
+      }
+      if (!done) { stats.failed++; onFrame && onFrame(sym, k, null, err); }
       if (--left[sym] === 0) stats.readyAt[sym] = now() - stats.startedAt;
     }
   };
