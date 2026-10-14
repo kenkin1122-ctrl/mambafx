@@ -34,7 +34,7 @@ export function decideAt(d, k, { allowed, overrides, cfg }) {
   return predict3m({ symbol: d.symbol, prices: d.prices.slice(0, k + 1), epochs: d.epochs.slice(0, k + 1), remote: visibleRemote(d.remote, cfg.FRAMES, d.epochs[k]), decisionEpoch: d.epochs[k], allowed, overrides });
 }
 
-function settle(d, k, durSec) {
+export function settle(d, k, durSec) {
   const i = k + 1; if (i >= d.prices.length) return null;
   const due = d.epochs[i] + durSec;
   let j = i; while (j < d.prices.length && d.epochs[j] < due) j++;
@@ -109,4 +109,18 @@ export async function replayChunked(datasets, opts, { budgetMs = 8, yieldFn = ()
     out[mode] = summarise(runs);
   }
   return out;
+}
+
+/**
+ * Replay sanity check: a naive strategy (dir = +1 | -1 | function(k)) through the SAME settle/win rule.
+ * Always-Rise, always-Fall and random must land near 50% (wins + ties-lost); anything else means a replay bug.
+ */
+export function baselineStrategy(d, dirFn, durSec, { startAt = 1500, step = 25 } = {}) {
+  let n = 0, wins = 0, ties = 0;
+  for (let k = startAt; k < d.prices.length - 2; k += step) {
+    const s = settle(d, k, durSec); if (!s) continue;
+    const dir = typeof dirFn === 'function' ? dirFn(k) : dirFn, diff = s.exit - s.entry;
+    n++; if (diff === 0) ties++; if (diff * dir > 0) wins++;
+  }
+  return { n, wins, ties, hitRate: n ? wins / n : null, ci: n ? wilson(wins, n) : null };
 }

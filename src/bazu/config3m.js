@@ -56,7 +56,6 @@ export const BASE_CONFIG = Object.freeze({
   // pre-trade recheck and data freshness
   RECHECK_MAX_SIGMA: 1.0,      // cancel if price moved this many sigma(T) against the trade since the decision
   STALE_TICK_MS: 5000, CANDLE_STALE_BARS: 3, MAX_ESTIMATE_AGE_S: 30,
-  DEMO_ONLY: true,             // Bazu-originated and manual orders are refused on a real account while true
   MAX_OPEN_PER_MARKET: 1,
   MAX_CHASE_ATR: 2,
   ROOM_FACTOR: 1,           // nearest opposing zone must be farther than ROOM_FACTOR * sigma * sqrt(T)

@@ -39,19 +39,19 @@ test('RR check is strict about RR_MIN in lifetime mode', () => {
 });
 
 test('backfill: 5 frames per market, concurrency and gap honoured, merge dedupes', async () => {
-  const symbols = ['A', 'B', 'C'], seen = []; let inflight = 0, maxIn = 0, last = 0, minGap = Infinity;
+  const symbols = ['A', 'B', 'C'], seen = []; let inflight = 0, maxIn = 0, last = null, minGap = Infinity, clock = 0;
   const send = async (req) => {
-    const t = Date.now(); if (last) minGap = Math.min(minGap, t - last); last = t;
+    const t = clock; if (last !== null) minGap = Math.min(minGap, t - last); last = t;
     inflight++; maxIn = Math.max(maxIn, inflight); seen.push(req);
-    await new Promise((r) => setTimeout(r, 5)); inflight--;
+    await Promise.resolve(); inflight--;
     return { candles: [{ epoch: 1, open: 1, high: 2, low: 0, close: 1 }, { epoch: 1, open: 1, high: 2, low: 0, close: 1 }] };
   };
   const store = {}, c = { ...cfg, BACKFILL_GAP_MS: 20 };
-  const res = await backfill({ symbols, send, cfg: c, store, onFrame: () => {} });
+  const res = await backfill({ symbols, send, cfg: c, store, onFrame: () => {}, now: () => clock, sleep: async (ms) => { clock += ms; } });
   assert.equal(res.failed, 0);
   assert.equal(res.requests, symbols.length * c.BACKFILL_FRAMES.length);
   assert.ok(maxIn <= c.BACKFILL_CONCURRENCY);
-  assert.ok(minGap >= 10, `gap ${minGap}`);
+  assert.ok(minGap >= c.BACKFILL_GAP_MS, `gap ${minGap}`);
   assert.equal(requestCount(symbols.length, c), res.requests);
   assert.equal(mergeCandles([{ epoch: 1, close: 1 }], [{ epoch: 1, close: 2 }, { epoch: 2, close: 3 }]).length, 2);
 });

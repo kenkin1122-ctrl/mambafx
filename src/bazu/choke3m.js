@@ -3,7 +3,7 @@
  * THE single purchase gate. Every Bazu-originated order (auto, semi-auto confirm, retry, recovery, any fallback) and every
  * manual ticket order reaches Deriv only through this module: it is the only importer of buyRiseFall (enforced by a
  * structural test). For a signal it re-checks, under the book's compare-and-set claim and on every attempt:
- *   demo account -> claim -> validity (state/age/armed window/invalidation) -> data freshness -> pre-trade recheck
+ *   account connected -> claim -> validity (state/age/armed window/invalidation) -> data freshness -> pre-trade recheck
  *   (momentum gate, family agreement, adverse drift, direction flip) -> risk limits -> proposal -> guard -> buy.
  * A retry re-runs all of it; no earlier approval is reused.
  */
@@ -54,7 +54,6 @@ export function createChoke(deps) {
     const refuse = (stage, reason) => { log(`${sig0?.symbol || signalId} not executed (${stage}): ${reason}`, 'warn'); return { ok: false, stage, reason }; };
     const acc = deps.account(), cfg0 = sig0 && deps.cfgFor(sig0.symbol);
     if (!acc.connected) return refuse('account', 'Connect a Deriv account first');
-    if (cfg0?.DEMO_ONLY && acc.isReal) return refuse('demo', 'DEMO_ONLY: Bazu orders are refused on a real account');
     const claim = deps.book.beginExecution(signalId, t);
     if (!claim.ok) return refuse('claim', claim.reason);
     const sig = claim.signal, release = (reason) => { deps.book.finishExecution(signalId, false, { reason }, t); };
@@ -86,11 +85,10 @@ export function createChoke(deps) {
     }
   }
 
-  /** Manual ticket order: needs no signal, still passes demo + risk. Gate findings are returned and must be confirmed. */
+  /** Manual ticket order: needs no signal, still passes the account + risk checks. Gate findings are returned and must be confirmed. */
   async function manual({ symbol, contractType, duration, stake, confirmed = false }) {
     const acc = deps.account(), cfg = deps.cfgFor(symbol);
     if (!acc.connected) return { ok: false, stage: 'account', reason: 'Connect a Deriv account first' };
-    if (cfg.DEMO_ONLY && acc.isReal) return { ok: false, stage: 'demo', reason: 'DEMO_ONLY: Bazu orders are refused on a real account' };
     const risk = checkOrder({ stake, market: symbol, isReal: acc.isReal, realConfirmed: deps.realConfirmed(), now: now() * 1000 }, deps.riskState(), deps.limits);
     if (!risk.ok) return { ok: false, stage: 'risk', reason: risk.reason };
     const findings = [];

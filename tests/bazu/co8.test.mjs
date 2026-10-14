@@ -114,9 +114,9 @@ test('recheck cancels on flipped direction, strong opposing momentum, drift and 
     assert.equal(r.ok, false, name); assert.equal(e.bought.length, 0, name);
     assert.equal(e.book.get(signal.id).state, S.INVALIDATED, name);
   }
-  const e = mkEnv({ account: () => ({ connected: true, isReal: true, balance: 10 }) }); const { signal } = e.book.observe('R_100', mkPred(), 1000);
+  const e = mkEnv({ account: () => ({ connected: true, isReal: true, balance: 10 }), realConfirmed: () => true }); const { signal } = e.book.observe('R_100', mkPred(), 1000);
   const r = await e.choke.execute({ signalId: signal.id, stake: 1 });
-  assert.equal(r.ok, false); assert.match(r.reason, /DEMO_ONLY/);
+  assert.equal(r.ok, true, 'real accounts trade too (risk checks permitting)');
 });
 test('stale trigger expires and DATA verdicts neither execute nor become zero-valued', async () => {
   const e = mkEnv(); const { signal } = e.book.observe('R_100', mkPred(), 1000);
@@ -214,4 +214,19 @@ test('signal duration appears in proposal and buy requests; manual override chan
     const p2 = sent.find((x) => x.proposal);
     assert.equal(p2.duration, 5); assert.equal(p2.duration_unit, 'm');
   } finally { delete globalThis.window; }
+});
+
+// ---- j: replay sanity: naive strategies land near 50% with the tie rule applied ----
+test('always-Rise, always-Fall and random replays land near 50% and sum to 1 minus ties', async () => {
+  const { baselineStrategy } = await import('../../src/bazu/replay3m.js');
+  const { rng } = await import('./support3m.mjs');
+  const w = regimeWalk(60000, 21, 0.35), flat = w.p.map((x) => x), d = { symbol: 'R_100', prices: flat, epochs: w.e };
+  // zero-drift random walk: no directional edge
+  const r = rng(99), p = [1000]; for (let i = 1; i < 60000; i++) p.push(+(p[i - 1] + (r() - 0.5)).toFixed(2));
+  const dz = { symbol: 'R_100', prices: p, epochs: w.e };
+  const up = baselineStrategy(dz, 1, 60, { step: 7 }), dn = baselineStrategy(dz, -1, 60, { step: 7 });
+  const rr = rng(5), rnd = baselineStrategy(dz, () => (rr() < 0.5 ? 1 : -1), 60, { step: 7 });
+  for (const s of [up, dn, rnd]) assert.ok(Math.abs(s.hitRate - 0.5) < 0.03, `hit ${s.hitRate}`);
+  assert.equal(up.wins + dn.wins + up.ties, up.n);
+  assert.ok(d.prices.length > 0);
 });
