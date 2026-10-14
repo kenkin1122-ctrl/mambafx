@@ -31,6 +31,7 @@ function bindOnce() {
   $('bzStop').onclick = () => { E.setRunning(false); };
   $('bzDur').onchange = (e) => E.setManualDuration(e.target.value);
   $('bzStake').onchange = (e) => E.setStake(e.target.value);
+  $('bzReverse').onchange = (e) => E.setReverse(e.target.checked);
   $('bzMart').onchange = (e) => E.setMartingale(e.target.value);
   $('bzRealOk').onchange = (e) => E.confirmReal(e.target.checked);
   $('bzLogin').onclick = () => (typeof window.gridStartLogin === 'function' ? window.gridStartLogin() : alert('Login is on the Grid page'));

@@ -26,7 +26,7 @@ const MAX_TICKS = 6000;
 const TRADES_KEY = 'bazu_trades_v1';
 
 export const state = {
-  status: 'idle', mode: 'manual', running: false, stake: 1, curStake: 1, martingale: 1, limits: { ...DEFAULT_LIMITS },
+  status: 'idle', mode: 'manual', running: false, stake: 1, curStake: 1, martingale: 1, reverse: true, limits: { ...DEFAULT_LIMITS },
   markets: new Map(), trades: [], log: [], scan: { done: 0, total: 0, active: false }, realConfirmed: false,
   selected: null, signals: new Map(), manualKey: null, records: [], vetoStats: {}, backfill: null,
 };
@@ -302,6 +302,7 @@ export function startLoop() { if (!sigTimer) sigTimer = setInterval(signalTick, 
 export function setRunning(on) { state.running = !!on; if (on) startLoop(); log(on ? `Engine started (${state.mode})` : 'Engine stopped'); emit(); }
 export function setMode(m) { state.mode = m; log(`Mode: ${m}`); emit(); }
 export function setStake(v) { state.stake = Math.max(0.35, Number(v) || 1); state.curStake = state.stake; emit(); }
+export function setReverse(on) { state.reverse = !!on; log(on ? 'Reverse mode ON: trades the opposite of the prediction' : 'Reverse mode OFF: trades the predicted direction'); emit(); }
 export function setMartingale(v) { const n = Number(v); state.martingale = n > 1 ? n : 1; state.curStake = state.stake; emit(); }
 const nextStake = () => +(Math.max(0.35, state.curStake || state.stake)).toFixed(2);
 export function confirmReal(v) { state.realConfirmed = !!v; emit(); }
@@ -332,14 +333,14 @@ export async function placeOrder({ symbol, contractType, duration, source = 'man
       id: String(res.buy.contract_id), market: symbol, name: m?.name, contractType, direction: contractType === 'CALL' ? 'Rise' : 'Fall',
       duration: durationKey(duration), stake, buyPrice: res.buy.buy_price, payout: res.buy.payout ?? res.proposal.payout,
       entry: null, exit: null, profit: null, status: 'open', isReal: res.isReal, source, ts: Date.now(),
-      strength: signal?.strength ?? null, drivers: signal?.drivers || [],
+      predicted: signal?.predicted ?? null, strength: signal?.strength ?? null, drivers: signal?.drivers || [],
     };
     state.trades.unshift(t); saveTrades(); watchContracts(onContract); requestContractUpdate(t.id);
-    log(`${source} ${t.direction} ${symbol} ${t.duration} @ ${t.stake} (${t.isReal ? 'REAL' : 'DEMO'})`, 'ok');
+    log(`${source} ${t.direction}${t.predicted && t.predicted !== t.direction ? ` (predicted ${t.predicted}, reversed)` : ''} ${symbol} ${t.duration} @ ${t.stake} (${t.isReal ? 'REAL' : 'DEMO'})`, 'ok');
     emit(); return { ok: true, trade: t };
   } catch (e) { log(`${symbol} order failed: ${e.message}`, 'bad'); return { ok: false, reason: e.message }; }
 }
-export const placeSignal = (sig, source = 'semi') => { const r = state.records.find((x) => x.id === sig.recId); if (r) { r.taken = true; saveRecords(); } return placeOrder({ symbol: sig.market, contractType: sig.contractType, duration: sig.durationObj, source, signal: sig }); };
+export const placeSignal = (sig, source = 'semi') => { const r = state.records.find((x) => x.id === sig.recId); if (r) { r.taken = true; saveRecords(); } const flip = state.reverse && (sig.contractType === 'CALL' || sig.contractType === 'PUT'); const contractType = flip ? (sig.contractType === 'CALL' ? 'PUT' : 'CALL') : sig.contractType; return placeOrder({ symbol: sig.market, contractType, duration: sig.durationObj, source, signal: { ...sig, predicted: sig.contractType === 'CALL' ? 'Rise' : 'Fall' } }); };
 
 function onContract(c) {
   const t = state.trades.find((x) => x.id === String(c.contract_id));
