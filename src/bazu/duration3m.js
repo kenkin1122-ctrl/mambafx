@@ -54,7 +54,10 @@ export function lifetime({ raw, playbook, marketClass, triggerSecs, cfg }) {
   const use = applicableEstimators(playbook, marketClass, cfg);
   const estimators = {};
   for (const k of ['E1', 'E2', 'E3', 'E4', 'E5', 'E6']) estimators[k] = use.includes(k) && pos(raw[k]) ? raw[k] : null;
-  const combined = combine(['E1', 'E2', 'E3', 'E4', 'E5'].map((k) => estimators[k]), cfg.COMBINE);
+  // P3: versioned correction factors, future predictions only, flag default OFF. estimators stays RAW so records and calibration are never rewritten.
+  const corr = cfg.ESTIMATOR_CORRECTION ? (cfg.CORRECTIONS?.factors?.[playbook] || {}) : {};
+  const used = {}; for (const k of ['E1', 'E2', 'E3', 'E4', 'E5']) used[k] = pos(estimators[k]) && pos(corr[k]) ? estimators[k] * corr[k] : estimators[k];
+  const combined = combine(['E1', 'E2', 'E3', 'E4', 'E5'].map((k) => used[k]), cfg.COMBINE);
   if (combined == null) return { estimators, combined: null, lifetime: null, cappedBy: null, reason: 'no lifetime estimator applies' };
   let life = combined, cappedBy = null;
   if (pos(estimators.E6) && estimators.E6 < life) { life = estimators.E6; cappedBy = 'E6'; }
