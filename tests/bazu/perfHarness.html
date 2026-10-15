@@ -1,0 +1,110 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>BAZU signal logger benchmark</title>
+<pre id="result">running</pre>
+<script type="module">
+import { findSignal } from './siglogSupport3m.mjs';
+import { configFor } from '../../src/bazu/config3m.js';
+import { createLogger } from '../../src/bazu/siglogRuntime3m.js';
+import { openStore } from '../../src/bazu/siglogStore3m.js';
+import { buildSignalPackage } from '../../src/bazu/reports3m.js';
+
+const output = document.getElementById('result');
+const symbols = Array.from({ length: 20 }, (_, i) => `R_100_BENCH_${String(i + 1).padStart(2, '0')}`);
+const markets = new Map(), fixtures = [];
+const longTasks = [];
+const ms = (fn) => { const t = performance.now(); fn(); return performance.now() - t; };
+const stats = (xs) => {
+  const sorted = xs.slice().sort((a, b) => a - b);
+  return { n: xs.length, mean_ms: xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length), p95_ms: sorted[Math.floor(sorted.length * 0.95)] || 0, max_ms: sorted.at(-1) || 0 };
+};
+const round = (v) => Math.round(v * 1000) / 1000;
+try {
+  const fallback = findSignal({ seed: 7, symbol: 'R_100', from: 6000 });
+  if (!fallback) throw new Error('baseline synthetic signal fixture is missing');
+  for (let i = 0; i < symbols.length; i++) {
+    const f = { ...fallback, pred: { ...fallback.pred }, sig: { ...fallback.sig, signalHistory: [] } };
+    f.symbol = symbols[i];
+    f.sig.market = symbols[i];
+    f.cfg = configFor(symbols[i]);
+    f.sig.signalId = `benchmark-book-${i}`;
+    f.sig.signalState = 'TRIGGERED';
+    f.sig.signalHistory = [{ ts: f.sig.decisionTs, from: 'ARMED', to: 'TRIGGERED', reason: 'benchmark fixture' }];
+    const m = { symbol: f.symbol, name: f.symbol, prices: f.w.p.slice(0, f.k), epochs: f.w.e.slice(0, f.k), remote: f.remote };
+    markets.set(f.symbol, m);
+    fixtures.push({ f, m });
+  }
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const observer = PerformanceObserver.supportedEntryTypes.includes('longtask')
+    ? new PerformanceObserver((list) => longTasks.push(...list.getEntries().map((e) => e.duration)))
+    : null;
+  observer?.observe({ type: 'longtask' });
+
+  let clock = 1700000000000;
+  const disabled = createLogger({ store: openStore({ idb: null }), now: () => clock, configForMarket: (symbol) => configFor(symbol, { SIGNAL_LOGGING_ENABLED: false }) });
+  const enabledStore = openStore({ idb: null });
+  const storeWrites = [], put = enabledStore.put.bind(enabledStore);
+  enabledStore.put = (record) => { storeWrites.push(record.signal_id); return put(record); };
+  const enabled = createLogger({ store: enabledStore, getMarket: (symbol) => markets.get(symbol), now: () => clock });
+  const onTimes = [], offTimes = [];
+  const decisions = fixtures.map(({ f }) => JSON.stringify(f.sig));
+  for (let pass = 0; pass < 5; pass++) {
+    for (let i = 0; i < fixtures.length; i++) {
+      const { f, m } = fixtures[i], trade = { id: `off-${pass}-${i}`, isReal: false };
+      offTimes.push(ms(() => disabled.onBuy(trade, f.sig, m)));
+    }
+  }
+  const enqueueStart = performance.now();
+  for (let i = 0; i < fixtures.length; i++) {
+    const { f, m } = fixtures[i], trade = { id: `on-${i}`, isReal: false };
+    onTimes.push(ms(() => enabled.onBuy(trade, f.sig, m)));
+  }
+  const enqueueElapsed = performance.now() - enqueueStart;
+  for (let i = 0; i < 80 && enabled.stat.written < fixtures.length; i++) await new Promise((resolve) => setTimeout(resolve, 50));
+  if (enabled.stat.written !== fixtures.length) throw new Error(`only ${enabled.stat.written}/${fixtures.length} records built`);
+  if (fixtures.some(({ f }, i) => JSON.stringify(f.sig) !== decisions[i])) throw new Error('logger mutated a signal');
+
+  const tickTimesOn = [], tickTimesOff = [];
+  for (let second = 0; second < 300; second++) {
+    clock = second * 1000;
+    for (let market = 0; market < symbols.length; market++) {
+      for (let tick = 0; tick < 10; tick++) {
+        tickTimesOn.push(ms(() => enabled.tick()));
+        tickTimesOff.push(ms(() => disabled.tick()));
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  const [schema, readme, dataDictionary] = await Promise.all(['signal.schema.json', 'README.md', 'data_dictionary.md'].map(async (file) => {
+    const response = await fetch(`../../reports/${file}`);
+    if (!response.ok) throw new Error(`cannot read reports/${file}: ${response.status}`);
+    return file.endsWith('.json') ? response.json() : response.text();
+  }));
+  longTasks.length = 0;
+  const exportStart = performance.now();
+  const pack = await buildSignalPackage(enabledStore.all(), { schema, readme, dataDictionary });
+  const exportElapsed = performance.now() - exportStart;
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  output.textContent = JSON.stringify({
+    workload: 'synthetic deterministic fixtures, 20 symbols, 300 virtual seconds, 10 logger.tick calls/symbol/second',
+    signals: fixtures.length,
+    queue_capture_total_ms: round(enqueueElapsed),
+    logger_onbuy_on: stats(onTimes),
+    logger_onbuy_off: stats(offTimes),
+    tick_hook_on: stats(tickTimesOn),
+    tick_hook_off: stats(tickTimesOff),
+    build_records: enabled.stat.written,
+    stored_records: enabledStore.count(),
+    traded_records: enabledStore.all().filter((r) => r.traded).length,
+    distinct_record_ids: new Set(storeWrites).size,
+    duplicate_record_ids: storeWrites.length - new Set(storeWrites).size,
+    export: { records: pack.count, zip_bytes: pack.zip.byteLength, elapsed_ms: round(exportElapsed) },
+    main_thread_long_task_count_during_export: longTasks.length,
+    observed_main_thread_long_task_max_ms: round(Math.max(0, ...longTasks)),
+    decision_mutation_detected: false,
+  }, null, 2);
+  observer?.disconnect();
+} catch (error) {
+  output.textContent = JSON.stringify({ error: error.stack || String(error) });
+}
+</script>

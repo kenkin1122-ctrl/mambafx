@@ -1,0 +1,4 @@
+"rank","account_type","market","playbook","contracts_n","wins","losses","ties","win_rate","wilson_95_low","wilson_95_high","most_common_duration","sample_status"
+"1","demo","R_100","","30","18","11","1","0.6","0.42320360253322475","0.7540937188319815","10t","ranked"
+"1","real","R_100","","30","14","15","1","0.4666666666666667","0.30232388907699753","0.638577003801267","10t","ranked"
+"","shadow","R_100","","1","1","0","0","1","0.20654931437723745","1","10t","low sample"

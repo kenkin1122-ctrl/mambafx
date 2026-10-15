@@ -1,0 +1,1279 @@
+{
+  "report": "BAZU Calibration",
+  "generated_utc": "2026-10-15T20:30:37.299Z",
+  "lifetime_by_playbook": {
+    "breakout": {
+      "n": 30,
+      "median_error_s": 0,
+      "median_error_ci95": [
+        -4.5,
+        2
+      ],
+      "censored_n": 0
+    }
+  },
+  "lifetime_by_estimator": {
+    "E1": {
+      "n": 30,
+      "median_error_s": -1,
+      "median_error_ci95": [
+        -4,
+        2
+      ],
+      "censored_n": 0
+    },
+    "E2": {
+      "n": 30,
+      "median_error_s": 0,
+      "median_error_ci95": [
+        -3,
+        3
+      ],
+      "censored_n": 0
+    },
+    "E3": {
+      "n": 30,
+      "median_error_s": 1,
+      "median_error_ci95": [
+        -2,
+        4
+      ],
+      "censored_n": 0
+    },
+    "E4": {
+      "n": 30,
+      "median_error_s": 2,
+      "median_error_ci95": [
+        -1,
+        5
+      ],
+      "censored_n": 0
+    },
+    "E5": {
+      "n": 30,
+      "median_error_s": 3,
+      "median_error_ci95": [
+        0,
+        6
+      ],
+      "censored_n": 0
+    },
+    "E6": {
+      "n": 30,
+      "median_error_s": 4,
+      "median_error_ci95": [
+        1,
+        7
+      ],
+      "censored_n": 0
+    }
+  },
+  "target_touched_but_contract_lost": {
+    "n": 0,
+    "target_touched_in_duration_n": 18
+  },
+  "hit_rate_by_duration": {
+    "demo · 10t": {
+      "n": 30,
+      "wins": 18,
+      "rate": 0.6,
+      "ci95": [
+        0.42320360253322475,
+        0.7540937188319815
+      ]
+    },
+    "real · 10t": {
+      "n": 30,
+      "wins": 14,
+      "rate": 0.4666666666666667,
+      "ci95": [
+        0.30232388907699753,
+        0.638577003801267
+      ]
+    }
+  },
+  "hit_rate_by_momentum_state": {
+    "demo · aligned": {
+      "n": 30,
+      "wins": 18,
+      "rate": 0.6,
+      "ci95": [
+        0.42320360253322475,
+        0.7540937188319815
+      ]
+    },
+    "real · aligned": {
+      "n": 30,
+      "wins": 14,
+      "rate": 0.4666666666666667,
+      "ci95": [
+        0.30232388907699753,
+        0.638577003801267
+      ]
+    }
+  },
+  "hit_rate_by_trigger_type": {
+    "demo · breakout": {
+      "n": 30,
+      "wins": 18,
+      "rate": 0.6,
+      "ci95": [
+        0.42320360253322475,
+        0.7540937188319815
+      ]
+    },
+    "real · breakout": {
+      "n": 30,
+      "wins": 14,
+      "rate": 0.4666666666666667,
+      "ci95": [
+        0.30232388907699753,
+        0.638577003801267
+      ]
+    }
+  },
+  "family_agreement_level": {
+    "demo · 3 agreeing families": {
+      "n": 30,
+      "wins": 18,
+      "rate": 0.6,
+      "ci95": [
+        0.42320360253322475,
+        0.7540937188319815
+      ]
+    },
+    "real · 3 agreeing families": {
+      "n": 30,
+      "wins": 14,
+      "rate": 0.4666666666666667,
+      "ci95": [
+        0.30232388907699753,
+        0.638577003801267
+      ]
+    }
+  },
+  "veto_audit": {
+    "vetoed": {
+      "n": 10,
+      "wins": 6,
+      "rate": 0.6,
+      "ci95": [
+        0.31267376973365824,
+        0.8318196702937638
+      ]
+    },
+    "allowed": {
+      "n": 20,
+      "wins": 12,
+      "rate": 0.6,
+      "ci95": [
+        0.3865815007622531,
+        0.781193467627183
+      ]
+    },
+    "definition": "Hypothetical chosen-duration outcomes from the existing calibration records, grouped by features.wait. Records are sampled under the existing logging cadence; this is descriptive, not a counterfactual causal estimate."
+  },
+  "expiry_probability_curve": {
+    "n": 60,
+    "brier": null,
+    "brier50": null,
+    "nMin": 200,
+    "curve": [
+      {
+        "lo": 0,
+        "hi": 1,
+        "n": 60,
+        "predicted": 0.42000000000000004,
+        "observed": 0.5333333333333333,
+        "observed_ci95": [
+          0.4089342702715789,
+          0.6537209395856151
+        ]
+      }
+    ],
+    "brier_ci95": {
+      "n": 60,
+      "mean": 0.2612666666666666,
+      "ci95": [
+        0.2411533333333334,
+        0.28097666666666654
+      ]
+    },
+    "brier50_ci95": {
+      "n": 60,
+      "mean": 0.25,
+      "ci95": [
+        0.25,
+        0.25
+      ]
+    },
+    "by_account_type": {
+      "demo": {
+        "n": 30,
+        "brier": null,
+        "brier50": null,
+        "curve": [
+          {
+            "lo": 0,
+            "hi": 1,
+            "n": 30,
+            "predicted": 0.42,
+            "observed": 0.6,
+            "observed_ci95": [
+              0.42320360253322475,
+              0.7540937188319815
+            ]
+          }
+        ],
+        "brier_ci95": {
+          "n": 30,
+          "mean": 0.27259999999999995,
+          "ci95": [
+            0.2442466666666667,
+            0.30131666666666657
+          ]
+        },
+        "brier50_ci95": {
+          "n": 30,
+          "mean": 0.25,
+          "ci95": [
+            0.25,
+            0.25
+          ]
+        }
+      },
+      "real": {
+        "n": 30,
+        "brier": null,
+        "brier50": null,
+        "curve": [
+          {
+            "lo": 0,
+            "hi": 1,
+            "n": 30,
+            "predicted": 0.42,
+            "observed": 0.4666666666666667,
+            "observed_ci95": [
+              0.30232388907699753,
+              0.638577003801267
+            ]
+          }
+        ],
+        "brier_ci95": {
+          "n": 30,
+          "mean": 0.2499333333333333,
+          "ci95": [
+            0.22258666666666665,
+            0.27847666666666676
+          ]
+        },
+        "brier50_ci95": {
+          "n": 30,
+          "mean": 0.25,
+          "ci95": [
+            0.25,
+            0.25
+          ]
+        }
+      }
+    },
+    "source": "existing analytic live-contract estimator; probability snapshotted at half-time and compared with Deriv result"
+  },
+  "decision_to_entry_latency_s_by_account_type": {
+    "demo": {
+      "n": 30,
+      "median": 1,
+      "ci95": [
+        1,
+        1
+      ]
+    },
+    "real": {
+      "n": 30,
+      "median": 1,
+      "ci95": [
+        1,
+        1
+      ]
+    }
+  },
+  "slippage_points_by_account_type": {
+    "demo": {
+      "n": 30,
+      "median": -0.04539999999997235,
+      "ci95": [
+        -0.04539999999997235,
+        -0.04539999999997235
+      ]
+    },
+    "real": {
+      "n": 30,
+      "median": -0.04539999999997235,
+      "ci95": [
+        -0.04539999999997235,
+        -0.04539999999997235
+      ]
+    }
+  },
+  "data_quality": {
+    "stale_or_missing_tick_field_occurrences": 240,
+    "censored_outcomes": 0,
+    "missing_or_unimplemented_field_occurrences": 1920,
+    "counts_are_reasoned_field_occurrences": true
+  },
+  "aggregate_dissent": [
+    {
+      "factor_or_family": "mtfTrend",
+      "vote_group": "agreed",
+      "account_type": "demo",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 18,
+        "rate": 0.6,
+        "ci95": [
+          0.42320360253322475,
+          0.7540937188319815
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 11,
+        "rate": 0.36666666666666664,
+        "ci95": [
+          0.21873920806100708,
+          0.5448643634520511
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "macd",
+      "vote_group": "agreed",
+      "account_type": "demo",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 18,
+        "rate": 0.6,
+        "ci95": [
+          0.42320360253322475,
+          0.7540937188319815
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 11,
+        "rate": 0.36666666666666664,
+        "ci95": [
+          0.21873920806100708,
+          0.5448643634520511
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "adx",
+      "vote_group": "neutral",
+      "account_type": "demo",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 18,
+        "rate": 0.6,
+        "ci95": [
+          0.42320360253322475,
+          0.7540937188319815
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 11,
+        "rate": 0.36666666666666664,
+        "ci95": [
+          0.21873920806100708,
+          0.5448643634520511
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "stoch",
+      "vote_group": "neutral",
+      "account_type": "demo",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 18,
+        "rate": 0.6,
+        "ci95": [
+          0.42320360253322475,
+          0.7540937188319815
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 11,
+        "rate": 0.36666666666666664,
+        "ci95": [
+          0.21873920806100708,
+          0.5448643634520511
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "rsi",
+      "vote_group": "neutral",
+      "account_type": "demo",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 18,
+        "rate": 0.6,
+        "ci95": [
+          0.42320360253322475,
+          0.7540937188319815
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 11,
+        "rate": 0.36666666666666664,
+        "ci95": [
+          0.21873920806100708,
+          0.5448643634520511
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "cci",
+      "vote_group": "dissented",
+      "account_type": "demo",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 18,
+        "rate": 0.6,
+        "ci95": [
+          0.42320360253322475,
+          0.7540937188319815
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 11,
+        "rate": 0.36666666666666664,
+        "ci95": [
+          0.21873920806100708,
+          0.5448643634520511
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "structure",
+      "vote_group": "agreed",
+      "account_type": "demo",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 18,
+        "rate": 0.6,
+        "ci95": [
+          0.42320360253322475,
+          0.7540937188319815
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 11,
+        "rate": 0.36666666666666664,
+        "ci95": [
+          0.21873920806100708,
+          0.5448643634520511
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "zones",
+      "vote_group": "dissented",
+      "account_type": "demo",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 18,
+        "rate": 0.6,
+        "ci95": [
+          0.42320360253322475,
+          0.7540937188319815
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 11,
+        "rate": 0.36666666666666664,
+        "ci95": [
+          0.21873920806100708,
+          0.5448643634520511
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "volatility",
+      "vote_group": "neutral",
+      "account_type": "demo",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 18,
+        "rate": 0.6,
+        "ci95": [
+          0.42320360253322475,
+          0.7540937188319815
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 11,
+        "rate": 0.36666666666666664,
+        "ci95": [
+          0.21873920806100708,
+          0.5448643634520511
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "tickFlow",
+      "vote_group": "agreed",
+      "account_type": "demo",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 18,
+        "rate": 0.6,
+        "ci95": [
+          0.42320360253322475,
+          0.7540937188319815
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 11,
+        "rate": 0.36666666666666664,
+        "ci95": [
+          0.21873920806100708,
+          0.5448643634520511
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "kalman",
+      "vote_group": "agreed",
+      "account_type": "demo",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 18,
+        "rate": 0.6,
+        "ci95": [
+          0.42320360253322475,
+          0.7540937188319815
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 11,
+        "rate": 0.36666666666666664,
+        "ci95": [
+          0.21873920806100708,
+          0.5448643634520511
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "momentum",
+      "vote_group": "agreed",
+      "account_type": "demo",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 18,
+        "rate": 0.6,
+        "ci95": [
+          0.42320360253322475,
+          0.7540937188319815
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 11,
+        "rate": 0.36666666666666664,
+        "ci95": [
+          0.21873920806100708,
+          0.5448643634520511
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "family:trend",
+      "vote_group": "agreed",
+      "account_type": "demo",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 18,
+        "rate": 0.6,
+        "ci95": [
+          0.42320360253322475,
+          0.7540937188319815
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 11,
+        "rate": 0.36666666666666664,
+        "ci95": [
+          0.21873920806100708,
+          0.5448643634520511
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "family:oscillator",
+      "vote_group": "neutral",
+      "account_type": "demo",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 18,
+        "rate": 0.6,
+        "ci95": [
+          0.42320360253322475,
+          0.7540937188319815
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 11,
+        "rate": 0.36666666666666664,
+        "ci95": [
+          0.21873920806100708,
+          0.5448643634520511
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "family:structure",
+      "vote_group": "neutral",
+      "account_type": "demo",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 18,
+        "rate": 0.6,
+        "ci95": [
+          0.42320360253322475,
+          0.7540937188319815
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 11,
+        "rate": 0.36666666666666664,
+        "ci95": [
+          0.21873920806100708,
+          0.5448643634520511
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "family:volatility",
+      "vote_group": "neutral",
+      "account_type": "demo",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 18,
+        "rate": 0.6,
+        "ci95": [
+          0.42320360253322475,
+          0.7540937188319815
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 11,
+        "rate": 0.36666666666666664,
+        "ci95": [
+          0.21873920806100708,
+          0.5448643634520511
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "family:flow",
+      "vote_group": "agreed",
+      "account_type": "demo",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 18,
+        "rate": 0.6,
+        "ci95": [
+          0.42320360253322475,
+          0.7540937188319815
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 11,
+        "rate": 0.36666666666666664,
+        "ci95": [
+          0.21873920806100708,
+          0.5448643634520511
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "family:momentum",
+      "vote_group": "agreed",
+      "account_type": "demo",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 18,
+        "rate": 0.6,
+        "ci95": [
+          0.42320360253322475,
+          0.7540937188319815
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 11,
+        "rate": 0.36666666666666664,
+        "ci95": [
+          0.21873920806100708,
+          0.5448643634520511
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "mtfTrend",
+      "vote_group": "agreed",
+      "account_type": "real",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 14,
+        "rate": 0.4666666666666667,
+        "ci95": [
+          0.30232388907699753,
+          0.638577003801267
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 15,
+        "rate": 0.5,
+        "ci95": [
+          0.33154125640533766,
+          0.6684587435946623
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "macd",
+      "vote_group": "agreed",
+      "account_type": "real",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 14,
+        "rate": 0.4666666666666667,
+        "ci95": [
+          0.30232388907699753,
+          0.638577003801267
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 15,
+        "rate": 0.5,
+        "ci95": [
+          0.33154125640533766,
+          0.6684587435946623
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "adx",
+      "vote_group": "neutral",
+      "account_type": "real",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 14,
+        "rate": 0.4666666666666667,
+        "ci95": [
+          0.30232388907699753,
+          0.638577003801267
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 15,
+        "rate": 0.5,
+        "ci95": [
+          0.33154125640533766,
+          0.6684587435946623
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "stoch",
+      "vote_group": "neutral",
+      "account_type": "real",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 14,
+        "rate": 0.4666666666666667,
+        "ci95": [
+          0.30232388907699753,
+          0.638577003801267
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 15,
+        "rate": 0.5,
+        "ci95": [
+          0.33154125640533766,
+          0.6684587435946623
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "rsi",
+      "vote_group": "neutral",
+      "account_type": "real",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 14,
+        "rate": 0.4666666666666667,
+        "ci95": [
+          0.30232388907699753,
+          0.638577003801267
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 15,
+        "rate": 0.5,
+        "ci95": [
+          0.33154125640533766,
+          0.6684587435946623
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "cci",
+      "vote_group": "dissented",
+      "account_type": "real",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 14,
+        "rate": 0.4666666666666667,
+        "ci95": [
+          0.30232388907699753,
+          0.638577003801267
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 15,
+        "rate": 0.5,
+        "ci95": [
+          0.33154125640533766,
+          0.6684587435946623
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "structure",
+      "vote_group": "agreed",
+      "account_type": "real",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 14,
+        "rate": 0.4666666666666667,
+        "ci95": [
+          0.30232388907699753,
+          0.638577003801267
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 15,
+        "rate": 0.5,
+        "ci95": [
+          0.33154125640533766,
+          0.6684587435946623
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "zones",
+      "vote_group": "dissented",
+      "account_type": "real",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 14,
+        "rate": 0.4666666666666667,
+        "ci95": [
+          0.30232388907699753,
+          0.638577003801267
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 15,
+        "rate": 0.5,
+        "ci95": [
+          0.33154125640533766,
+          0.6684587435946623
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "volatility",
+      "vote_group": "neutral",
+      "account_type": "real",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 14,
+        "rate": 0.4666666666666667,
+        "ci95": [
+          0.30232388907699753,
+          0.638577003801267
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 15,
+        "rate": 0.5,
+        "ci95": [
+          0.33154125640533766,
+          0.6684587435946623
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "tickFlow",
+      "vote_group": "agreed",
+      "account_type": "real",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 14,
+        "rate": 0.4666666666666667,
+        "ci95": [
+          0.30232388907699753,
+          0.638577003801267
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 15,
+        "rate": 0.5,
+        "ci95": [
+          0.33154125640533766,
+          0.6684587435946623
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "kalman",
+      "vote_group": "agreed",
+      "account_type": "real",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 14,
+        "rate": 0.4666666666666667,
+        "ci95": [
+          0.30232388907699753,
+          0.638577003801267
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 15,
+        "rate": 0.5,
+        "ci95": [
+          0.33154125640533766,
+          0.6684587435946623
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "momentum",
+      "vote_group": "agreed",
+      "account_type": "real",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 14,
+        "rate": 0.4666666666666667,
+        "ci95": [
+          0.30232388907699753,
+          0.638577003801267
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 15,
+        "rate": 0.5,
+        "ci95": [
+          0.33154125640533766,
+          0.6684587435946623
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "family:trend",
+      "vote_group": "agreed",
+      "account_type": "real",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 14,
+        "rate": 0.4666666666666667,
+        "ci95": [
+          0.30232388907699753,
+          0.638577003801267
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 15,
+        "rate": 0.5,
+        "ci95": [
+          0.33154125640533766,
+          0.6684587435946623
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "family:oscillator",
+      "vote_group": "neutral",
+      "account_type": "real",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 14,
+        "rate": 0.4666666666666667,
+        "ci95": [
+          0.30232388907699753,
+          0.638577003801267
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 15,
+        "rate": 0.5,
+        "ci95": [
+          0.33154125640533766,
+          0.6684587435946623
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "family:structure",
+      "vote_group": "neutral",
+      "account_type": "real",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 14,
+        "rate": 0.4666666666666667,
+        "ci95": [
+          0.30232388907699753,
+          0.638577003801267
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 15,
+        "rate": 0.5,
+        "ci95": [
+          0.33154125640533766,
+          0.6684587435946623
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "family:volatility",
+      "vote_group": "neutral",
+      "account_type": "real",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 14,
+        "rate": 0.4666666666666667,
+        "ci95": [
+          0.30232388907699753,
+          0.638577003801267
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 15,
+        "rate": 0.5,
+        "ci95": [
+          0.33154125640533766,
+          0.6684587435946623
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "family:flow",
+      "vote_group": "agreed",
+      "account_type": "real",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 14,
+        "rate": 0.4666666666666667,
+        "ci95": [
+          0.30232388907699753,
+          0.638577003801267
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 15,
+        "rate": 0.5,
+        "ci95": [
+          0.33154125640533766,
+          0.6684587435946623
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    },
+    {
+      "factor_or_family": "family:momentum",
+      "vote_group": "agreed",
+      "account_type": "real",
+      "outcome_type": "traded",
+      "actual": {
+        "n": 30,
+        "wins": 14,
+        "rate": 0.4666666666666667,
+        "ci95": [
+          0.30232388907699753,
+          0.638577003801267
+        ]
+      },
+      "opposite_direction_hypothetical": {
+        "n": 30,
+        "wins": 15,
+        "rate": 0.5,
+        "ci95": [
+          0.33154125640533766,
+          0.6684587435946623
+        ]
+      },
+      "insufficient_sample": false,
+      "note": "observational comparison; not causal"
+    }
+  ],
+  "limitations": [
+    "The sample may be small and overlapping signals are not independent.",
+    "Demo and real outcomes are identified separately; one account type is not evidence of live performance.",
+    "Shadow results use first tick after decision, duration-specific tick exit rules, and ties as losses.",
+    "A per-trade attribution is anecdotal; aggregate group rates with small N are not evidence."
+  ],
+  "meta": {
+    "signal_records": 60,
+    "resolved_signal_records": 60,
+    "calibration_records": 30,
+    "closed_contracts": 60
+  },
+  "sample_notice": "Synthetic fixtures only; not live Deriv results or evidence of a trading edge.",
+  "filters": {
+    "from": "2023-11-15",
+    "to": "2023-11-15"
+  }
+}
