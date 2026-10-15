@@ -23,6 +23,7 @@ import { createBook, S as SS } from './signalBook3m.js?v=15';
 import { createChoke } from './choke3m.js?v=15';
 import { createSupervisor } from './reconnect3m.js?v=15';
 import { wilson } from './stats.js?v=15';
+import { expiryProbBaseline, sigmaPerTick, reliabilityCurve, brier } from './expiry3m.js?v=15';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;
@@ -444,6 +445,7 @@ function onContract(c) {
   const t = state.trades.find((x) => x.id === String(c.contract_id));
   if (!t) return;
   if (c.entry_tick != null) t.entry = c.entry_tick;
+  if (c.entry_tick_time != null || c.date_start != null) t.entryEpoch = Number(c.entry_tick_time ?? c.date_start);
   if (c.payout != null) t.payout = c.payout;
   if (c.bid_price != null) t.bid = Number(c.bid_price);
   if (c.is_sold || c.status === 'sold' || c.status === 'won' || c.status === 'lost' || c.is_expired) {
@@ -453,6 +455,30 @@ function onContract(c) {
     log(`${t.market} ${t.direction}${t.strength != null ? ` (${Math.round(t.strength * 100)}%)` : ''} ${t.result.toUpperCase()} ${t.profit >= 0 ? '+' : ''}${t.profit}`, t.profit > 0 ? 'ok' : 'bad');
   }
   emit();
+}
+/**
+ * P1/P2: model estimate of P(win at expiry) for an open contract (analytic baseline, drift 0), updated on every tick.
+ * Returns null when any input is missing. Also snapshots the probability once half the contract has elapsed so it can be
+ * calibrated against the settled outcome.
+ */
+export function expiryInfo(t) {
+  const m = state.markets.get(t.market);
+  if (!t || t.status !== 'open' || !m || t.entry == null || t.entryEpoch == null || m.epochs.length < 30) return null;
+  const n = m.epochs.length, k = Math.min(200, n - 1), tickSecs = (m.epochs[n - 1] - m.epochs[n - 1 - k]) / k;
+  const mm = /^(\d+)([tsmhd])$/.exec(String(t.duration)); if (!mm || !(tickSecs > 0)) return null;
+  const total = Number(mm[1]), unit = mm[2];
+  let totalTicks, tau;
+  if (unit === 't') { let el = 0; for (let i = n - 1; i >= 0 && m.epochs[i] > t.entryEpoch; i--) el++; totalTicks = total; tau = total - el; }
+  else { const secs = total * UNIT_S[unit]; totalTicks = secs / tickSecs; tau = (t.entryEpoch + secs - m.epochs[n - 1]) / tickSecs; }
+  const p = expiryProbBaseline({ dir: t.direction === 'Rise' ? 1 : -1, spot: m.prices[n - 1], entry: Number(t.entry), tau: Math.max(0, tau), sigma: sigmaPerTick(m.prices) });
+  if (p != null && t.pMid == null && tau <= totalTicks / 2) { t.pMid = p; saveTrades(); }
+  return p == null ? null : { p, tauTicks: Math.max(0, tau), model: 'baseline' };
+}
+/** Calibration of the live-contract probability: pairs of (probability at half time, settled outcome). */
+export function expiryCalibration() {
+  const done = state.trades.filter((t) => t.status === 'closed' && t.pMid != null && (t.result === 'win' || t.result === 'loss'));
+  const probs = done.map((t) => t.pMid), ys = done.map((t) => (t.result === 'win' ? 1 : 0));
+  return { n: done.length, nMin: configFor('R_100').EXPIRY_N_MIN, curve: reliabilityCurve(probs, ys, 5), brier: brier(probs, ys), brier50: brier(probs.map(() => 0.5), ys) };
 }
 let attachedWs = null;
 export function attachAccount() {

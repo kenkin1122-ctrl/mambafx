@@ -11,6 +11,7 @@ import { wilson } from './stats.js?v=15';
 import { accountInfo } from './execution.js?v=15';
 import { GATE } from './decision.js?v=15';
 import { calibrationSummary, accuracyByDuration } from './calibration3m.js?v=15';
+import { liveContractText } from './expiry3m.js?v=15';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -157,7 +158,7 @@ function renderCalib(S) {
   const dist = (e) => e.dist.map((d) => `${d.label}: ${d.count}`).join(' · ');
   const rows = (o) => Object.entries(o).map(([k, e]) => `<tr><td>${esc(k)}</td><td class="num">${e.n}</td><td class="num">${secFmt(e.medianErrorS)}</td><td class="num">${e.medianRatio == null ? '—' : e.medianRatio.toFixed(2) + 'x'}</td><td class="mu">${dist(e)}</td></tr>`).join('') || '<tr><td colspan="5" class="mu">no resolved records yet</td></tr>';
   const head = '<tr><th></th><th>N</th><th>Median error (pred − real)</th><th>Median pred/real</th><th>Error distribution</th></tr>';
-  $('bzCalib').innerHTML = vetoHtml(S) + `<div class="panel" style="margin-top:10px"><h3>Lifetime calibration <span class="mu">(a record, not a gate)</span></h3>
+  $('bzCalib').innerHTML = vetoHtml(S) + calibCurveHtml() + `<div class="panel" style="margin-top:10px"><h3>Lifetime calibration <span class="mu">(a record, not a gate)</span></h3>
     <div class="note num">Signals logged ${recs.length} · resolved ${sum.resolved} · target first ${sum.targetFirst} · invalidation first ${sum.invalidFirst} · neither within max ${sum.neither} · target touched within chosen duration but contract lost ${sum.touchedButLost} of ${sum.targetTouchedInDur}</div>
     <h4>By playbook</h4><table>${head}${rows(sum.byPlaybook)}</table><h4>By estimator</h4><table>${head}${rows(sum.byEstimator)}</table></div>
     <div class="panel" style="margin-top:10px"><h3>Accuracy by chosen duration <span class="mu">(shadow outcomes, ties lose)</span></h3>
@@ -239,6 +240,17 @@ function renderAccuracy(S) {
     <div class="panel" style="margin-top:10px"><h3>Trade log</h3><div class="scroll">${tradesTable(S.trades.filter((t) => t.status === 'closed'))}</div></div>`;
 }
 
+function liveContractsHtml(S) {
+  const open = S.trades.filter((t) => t.status === 'open'); if (!open.length) return '';
+  const cal = E.expiryCalibration();
+  return open.map((t) => { let info = null; try { info = E.expiryInfo(t); } catch { /* data missing */ } return `<div class="note">${esc(t.market)} ${esc(t.direction)} ${esc(t.duration)}: ${esc(liveContractText(info ? info.p : null, cal))}</div>`; }).join('');
+}
+function calibCurveHtml() {
+  const c = E.expiryCalibration(), f = (x) => (x == null ? '-' : (x * 100).toFixed(1) + '%');
+  return `<div class="panel" style="margin-top:10px"><h3>Expiry probability calibration <span class="mu">(analytic model, probability at half time vs settled outcome)</span></h3>
+    <div class="note">${c.n >= c.nMin ? `Calibrated on ${c.n} outcomes.` : `Uncalibrated: ${c.n}/${c.nMin} outcomes.`} Brier ${c.brier == null ? '-' : c.brier.toFixed(4)} vs constant 50%: ${c.brier50 == null ? '-' : c.brier50.toFixed(4)}.</div>
+    <table><tr><th>Predicted bin</th><th>N</th><th>Mean predicted</th><th>Observed</th></tr>${c.curve.map((r) => `<tr><td>${(r.lo * 100).toFixed(0)}-${(r.hi * 100).toFixed(0)}%</td><td class="num">${r.n}</td><td class="num">${f(r.predicted)}</td><td class="num">${f(r.observed)}</td></tr>`).join('')}</table></div>`;
+}
 function tradesTable(list) {
   if (!list.length) return '<div class="note">No trades yet.</div>';
   return `<table><tr><th>Time</th><th>Market</th><th>Side</th><th>Dur</th><th>Stake</th><th>Entry</th><th>Exit</th><th>P/L</th><th>Acct</th><th>Src</th></tr>${list.map((t) => `<tr><td class="num">${new Date(t.ts).toLocaleTimeString()}</td><td>${esc(t.market)}</td><td class="${t.direction === 'Rise' ? 'up' : 'dn'}">${esc(t.direction)}</td><td>${esc(t.duration)}</td><td class="num">${t.stake}</td><td class="num">${fmtPrice(t.entry, E.state.markets.get(t.market)?.dp)}</td><td class="num">${fmtPrice(t.exit, E.state.markets.get(t.market)?.dp)}</td><td class="num ${t.profit > 0 ? 'up' : t.profit < 0 ? 'dn' : ''}">${t.profit == null ? t.status : money(t.profit)}</td><td>${t.isReal ? '🔴' : '🟢'}</td><td>${esc(t.source)}</td></tr>`).join('')}</table>`;
@@ -255,7 +267,7 @@ function renderExec(S, acc) {
       <button class="btn buy" data-act="buy" data-type="CALL" data-sym="${esc(m.symbol)}" ${acc.connected ? '' : 'disabled'}>Rise</button><button class="btn sell" data-act="buy" data-type="PUT" data-sym="${esc(m.symbol)}" ${acc.connected ? '' : 'disabled'}>Fall</button></div>
       <div class="note">Stake ${S.curStake || S.stake}${S.martingale > 1 ? ' (martingale x' + S.martingale + ')' : ''} · ${acc.connected ? (acc.isReal ? '🔴 REAL account (requires the confirm checkbox; stake capped)' : '🟢 DEMO account') : 'connect an account to trade'}. Orders go through Deriv proposal → buy; entry, payout, exit and P/L are Deriv's.</div>` : '<div class="note">Select a market on the Live tab.</div>'}</div>
     </div><div>
-    <div class="panel"><h3>Open positions</h3>${tradesTable(S.trades.filter((t) => t.status === 'open'))}</div>
+    <div class="panel"><h3>Open positions</h3>${tradesTable(S.trades.filter((t) => t.status === 'open'))}${liveContractsHtml(S)}</div>
     <div class="panel" style="margin-top:10px"><h3>Event log</h3><div class="log">${S.log.map((l) => `<div class="${l.kind === 'bad' ? 'dn' : l.kind === 'ok' ? 'up' : l.kind === 'warn' ? '' : 'mu'}">${new Date(l.t).toLocaleTimeString()} · ${esc(l.msg)}</div>`).join('')}</div></div>
     <div class="panel note" style="margin-top:10px">No stake or trade-count limits are applied. REAL accounts require the confirmation tick.</div></div></div>`;
 }

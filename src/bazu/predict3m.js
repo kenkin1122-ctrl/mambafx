@@ -17,6 +17,7 @@ import { buildZones, zonesNear, supportiveKinds, roomToRun, extendedMove, confir
 import * as D from './duration3m.js?v=15';
 import { lapTimer } from './perf3m.js?v=15';
 import { momentumReading, oscillatorExtreme, zoneTouchExtreme, confirmedTurn, opposesRecentMove } from './momentum3m.js?v=15';
+import { sigmaPerTick, tickFlowProxy } from './expiry3m.js?v=15';
 import { regimeOf, familyVotes, agreement, momentumGate, VERDICT } from './confluence3m.js?v=15';
 
 const MIN_BARS = { trigger: 30, setup: 30, context: 20 };
@@ -38,6 +39,8 @@ export function spikeContext(symbol, frames, prices, epochs, cfg, tickSecs) {
   };
 }
 
+const wickAgainst = (c, dir) => { const r = c.high - c.low; return r > 0 ? (dir > 0 ? c.high - Math.max(c.open, c.close) : Math.min(c.open, c.close) - c.low) / r : null; };
+const shortMomentum = (prices, dir, n = 20) => { const s = sigmaPerTick(prices); return s && prices.length > n ? ((prices.at(-1) - prices.at(-1 - n)) * dir) / (s * Math.sqrt(n)) : null; };
 const emaPos = (cs, atr) => {
   if (cs.length < 25 || !(atr > 0)) return null;
   const k = 2 / 21; let e = cs[0].close;
@@ -284,7 +287,8 @@ export function predict3m({ symbol, prices, epochs, remote = {}, decisionEpoch, 
     if (d && top.life.target != null) {
       const sd = [d, ...D.neighbours(allow, d)].map((x) => ({ unit: x.unit, n: x.n, key: keyOf(x) }));
       out.record = { symbol, playbook: top.playbook, dir, at: now, entry: price, target: top.life.target, invalid: top.life.invalid, predicted: top.life.lifetime, estimators: top.life.estimators, durSec: d.secs, durKey: keyOf(d), shadowDs: sd, bucket, manual: top.life.manual,
-        features: { price, atr, adx: a5.adx, adxCtx: a15.adx, sigmaPerSec: stat.sigmaPerSec, sigma2PerSec: stat.sigma2PerSec, hurst: stat.hurst, halfLifeSec: stat.halfLifeSec, a: top.life.a, b: top.life.b, score: finalScore, strength: Math.min(1, finalScore), trigSecs, wait: out.wait } };
+        features: { price, atr, adx: a5.adx, adxCtx: a15.adx, sigmaPerSec: stat.sigmaPerSec, sigma2PerSec: stat.sigma2PerSec, hurst: stat.hurst, halfLifeSec: stat.halfLifeSec, a: top.life.a, b: top.life.b, score: finalScore, strength: Math.min(1, finalScore), trigSecs, wait: out.wait,
+          emaDist: ep ? ep.dist * dir : null, wickAgainst: wickAgainst(last, dir), flowProxy: tickFlowProxy(prices, dir), flowLabel: 'proxy', momentum: shortMomentum(prices, dir), tauTicks: d.unit === 't' ? d.n : d.secs / Math.max(1e-9, (epochs.at(-1) - epochs[Math.max(0, epochs.length - 201)]) / Math.min(200, epochs.length - 1)) } };
     }
     return out;
   }
