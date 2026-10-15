@@ -283,7 +283,8 @@ export function predict3m({ symbol, prices, epochs, remote = {}, decisionEpoch, 
     out.reason = out.wait ? vetoes.join('; ') : `${top.playbook}: ${top.why}`;
     if (d && top.life.target != null) {
       const sd = [d, ...D.neighbours(allow, d)].map((x) => ({ unit: x.unit, n: x.n, key: keyOf(x) }));
-      out.record = { symbol, playbook: top.playbook, dir, at: now, entry: price, target: top.life.target, invalid: top.life.invalid, predicted: top.life.lifetime, estimators: top.life.estimators, durSec: d.secs, durKey: keyOf(d), shadowDs: sd, bucket, manual: top.life.manual };
+      out.record = { symbol, playbook: top.playbook, dir, at: now, entry: price, target: top.life.target, invalid: top.life.invalid, predicted: top.life.lifetime, estimators: top.life.estimators, durSec: d.secs, durKey: keyOf(d), shadowDs: sd, bucket, manual: top.life.manual,
+        features: { price, atr, adx: a5.adx, adxCtx: a15.adx, sigmaPerSec: stat.sigmaPerSec, sigma2PerSec: stat.sigma2PerSec, hurst: stat.hurst, halfLifeSec: stat.halfLifeSec, a: top.life.a, b: top.life.b, score: finalScore, strength: Math.min(1, finalScore), trigSecs, wait: out.wait } };
     }
     return out;
   }
