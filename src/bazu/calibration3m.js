@@ -6,6 +6,7 @@
  */
 import { settle } from './config3m.js?v=15';
 import { wilson } from './stats.js?v=15';
+import { pathStats } from './estimators3m.js?v=15';
 
 const firstIdxAfter = (epochs, t) => { let lo = 0, hi = epochs.length; while (lo < hi) { const m = (lo + hi) >> 1; if (epochs[m] > t) hi = m; else lo = m + 1; } return lo; };
 
@@ -51,13 +52,17 @@ export function resolveRecord(rec, prices, epochs, cfg) {
     const r = firstTouch({ prices, epochs, at: rec.at, dir: rec.dir, target: rec.target, invalid: rec.invalid, maxSecs: cfg.MAX_DURATION_S });
     if (r.kind != null) rec.realised = r;
   }
+  if (!rec.path && rec.entry != null) {
+    const ps = pathStats({ prices, epochs, at: rec.at, dir: rec.dir, entry: rec.entry, target: rec.target, invalid: rec.invalid, maxSecs: cfg.MAX_DURATION_S, durSecs: rec.durSec });
+    if (ps.complete) rec.path = ps;
+  }
   rec.shadow = rec.shadow || {};
   for (const d of rec.shadowDs) {
     if (rec.shadow[d.key]) continue;
     const o = shadowOutcome({ prices, epochs, at: rec.at, dir: rec.dir, d });
     if (o) rec.shadow[d.key] = o;
   }
-  return !!(rec.realised && rec.realised.kind != null) && rec.shadowDs.every((d) => rec.shadow[d.key]);
+  return !!(rec.realised && rec.realised.kind != null) && (!rec.features || !!rec.path) && rec.shadowDs.every((d) => rec.shadow[d.key]);
 }
 
 const median = (a) => { const s = a.filter(Number.isFinite).sort((x, y) => x - y); if (!s.length) return null; const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
