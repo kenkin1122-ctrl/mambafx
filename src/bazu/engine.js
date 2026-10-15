@@ -12,6 +12,7 @@ import { durationKey } from './validation.js?v=15';
 import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=15';
 import { predict3m } from './predict3m.js?v=15';
 import { configFor } from './config3m.js?v=15';
+import { hysteresisPass } from './filters3m.js?v=15';
 import { allowedDurations, durationLabel } from './duration3m.js?v=15';
 import { resolveRecord } from './calibration3m.js?v=15';
 import { backfill, mergeCandles, parseCandles } from './backfill3m.js?v=15';
@@ -333,6 +334,15 @@ const NOISY = new Set([SS.ARMED, SS.DETECTED]);
 function logEvents(events) {
   for (const e of events) if (e.to && !NOISY.has(e.to) && e.to !== SS.EXECUTING) log(`${e.symbol} signal ${e.id || ''} ${e.from || ''} -> ${e.to}${e.kind ? ' [' + e.kind + ']' : ''}: ${e.reason}`, e.to === SS.TRIGGERED || e.to === SS.EXECUTED ? 'ok' : 'info');
 }
+const wasTradable = new Map();
+/** P9: separate enter/exit strength thresholds for the tradable state (no-op while both offsets are 0). */
+function applyHysteresis(sym, res) {
+  const cfg = configFor(sym), min = res.minStrength;
+  if (!(min > 0) || !(cfg.HYST_ENTER_EXTRA || cfg.HYST_EXIT_SLACK)) { wasTradable.set(sym, !res.wait && res.strength >= (min ?? 0)); return; }
+  const ok = !res.wait && hysteresisPass({ strength: res.strength, wasTradable: !!wasTradable.get(sym), min, cfg });
+  wasTradable.set(sym, ok);
+  res.minStrength = ok ? Math.min(min, res.strength) : Math.max(min, res.strength + 1e-9);
+}
 export async function signalTick() {
   if (sigBusy) return; sigBusy = true; startMonitors(); reconcileOpen();
   const endPass = perfStart('signalTick');
@@ -347,6 +357,7 @@ export async function signalTick() {
       let r;
       const endP = perfStart('predict3m'); try { r = predictFor(m); } catch (e) { endP(); log('predict ' + m.symbol + ': ' + e.message, 'warn'); continue; } endP();
       recordEval(m.symbol, r);
+      applyHysteresis(m.symbol, r);
       const obs = book.observe(m.symbol, r, r.decisionTs); logEvents(obs.events);
       r = { result: r, lastEpoch: r.decisionTs };
       let q = null; const d = r.result.duration && allowed.find((x) => durationLabel(x) === r.result.duration.key);

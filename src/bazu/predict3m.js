@@ -18,6 +18,7 @@ import * as D from './duration3m.js?v=15';
 import { lapTimer } from './perf3m.js?v=15';
 import { momentumReading, oscillatorExtreme, zoneTouchExtreme, confirmedTurn, opposesRecentMove } from './momentum3m.js?v=15';
 import { sigmaPerTick, tickFlowProxy } from './expiry3m.js?v=15';
+import { breakoutFilters, failedFilters, rangeFadeExp, roomChecks, volatilityFilter } from './filters3m.js?v=15';
 import { regimeOf, familyVotes, agreement, momentumGate, VERDICT } from './confluence3m.js?v=15';
 
 const MIN_BARS = { trigger: 30, setup: 30, context: 20 };
@@ -172,6 +173,7 @@ export function predict3m({ symbol, prices, epochs, remote = {}, decisionEpoch, 
         const osc = [factors.rsi, factors.stoch, factors.cci].filter((f) => f && f.vote === dir).length;
         if (osc > 0 || flowF?.absorption || sweep.direction === dir) add(dir, 'range fade', locScore, 0.5 + 0.15 * osc, trig(), `fade ${bestZ.kind} edge${osc ? ', oscillator extreme' : ''}${flowF?.absorption ? ', absorption' : ''}`, bestZ);
       }
+      if (cfg.RANGE_FADE_EXP && bestZ && ['support', 'demand', 'resistance', 'supply'].includes(bestZ.kind) && rangeFadeExp({ adxVal: a5.adx, dir, zone: bestZ, price, candle: frames.setup.at(-1), cfg }).ok) add(dir, 'range fade exp', locScore, 0.5, trig(), 'experimental fade: ADX low, price at zone edge, rejection wick', bestZ);
       if (cfg.playbooks.breakout && brk.state === 'confirmed' && brk.direction === dir) add(dir, 'breakout', 0.8, m5.bos === dir || m5.choch === dir ? 1 : 0.6, { score: 0.7, reasons: [brk.reason], provisional: false }, brk.reason, brk.zone);
       if (brk.state === 'fakeout' && brk.direction === dir) add(dir, 'fakeout reversal', 0.7, 0.6, { score: 0.7, reasons: [brk.reason], provisional: false }, brk.reason, brk.zone);
       if (sweep.present && sweep.direction === dir) add(dir, 'liquidity sweep', 0.7, 0.6, { score: 0.7, reasons: [sweep.reason], provisional: false }, sweep.reason);
@@ -223,14 +225,23 @@ export function predict3m({ symbol, prices, epochs, remote = {}, decisionEpoch, 
     const ag = agreeCount(factors, dir);
 
     if (top.life.waitReason && !top.life.manual) vetoes.push(top.life.waitReason);
-    if (top.playbook !== 'breakout' && top.playbook !== 'range fade' && m15.trend === -dir && a15.adx >= cfg.ADX_TREND) {
+    if (top.playbook !== 'breakout' && top.playbook !== 'range fade' && top.playbook !== 'range fade exp' && m15.trend === -dir && a15.adx >= cfg.ADX_TREND) {
       const htf = near.some((z) => z.tf !== roles.setup || z.overlap > 0);
       if (!(top.playbook === 'fakeout reversal' || (m5.choch === dir && htf))) vetoes.push('context frame strongly opposes');
     }
     const last = frames.setup.at(-1);
     if (last.patternOk && PATTERNS.doji(frames.setup, frames.setup.length - 1, cfg).present && !near.length) vetoes.push('mid-range doji');
     if (!top.roomOk) vetoes.push(top.roomWhy);
-    if (ep && Math.abs(ep.dist) > cfg.MAX_CHASE_ATR && Math.sign(ep.dist) === dir) vetoes.push(`chasing: ${Math.abs(ep.dist).toFixed(1)} ATR from EMA20`);
+    out.zoneMid = top.zone?.mid ?? null;
+    const brkF = top.playbook === 'breakout' ? breakoutFilters({ cs: frames.setup, zone: top.zone, dir, atr, prices, epochs, zones, price, cfg }) : null;
+    if (brkF) for (const k of failedFilters(brkF, cfg.BREAKOUT_FILTERS)) vetoes.push('breakout filter ' + k + ': ' + brkF[k].reason);
+    const roomN = roomChecks({ move: top.move, room: roomToRun(zones, price, dir), atr, price, dir, target: top.life.target, invalid: top.life.invalid, cfg });
+    { const opp = zones.filter((z) => (dir > 0 ? z.low > price : z.high < price) && ['resistance', 'supply', 'support', 'demand'].includes(z.kind)).sort((a, b) => (dir > 0 ? a.low - b.low : b.high - a.high))[0];
+      out.roomInfo = { text: roomN.text, fired: roomN.fired, sigmaT: top.move, price, dir, zone: opp ? { low: opp.low, high: opp.high } : null, lifetimeDerived: cfg.DURATION_MODE === 'lifetime' }; }
+    if (cfg.ROOM_NAMED && roomN.fired) vetoes.push('room check ' + roomN.fired + ': ' + roomN.checks.find((c) => c.name === roomN.fired).text);
+    const lastC = frames.setup.at(-1), volF = volatilityFilter({ rangeATR: lastC?.rangeATR, adxVal: a5.adx, momentumAligned: ep ? Math.sign(ep.dist) === dir : false, cfg });
+    if (cfg.VOL_FILTER) { if (volF.high && !volF.allow) vetoes.push(volF.label); }
+    else if (ep && Math.abs(ep.dist) > cfg.MAX_CHASE_ATR && Math.sign(ep.dist) === dir) vetoes.push(`chasing: ${Math.abs(ep.dist).toFixed(1)} ATR from EMA20`);
     const zone = near.find((z) => supportiveKinds(dir).includes(z.kind));
     if (zone && Number.isFinite(noiseTrig)) { const inval = dir > 0 ? price - zone.low : zone.high - price; if (inval >= 0 && inval < cfg.NOISE_FACTOR * noiseTrig) vetoes.push('invalidation inside trigger-frame noise'); }
     if (spikeInfo) {
@@ -286,7 +297,7 @@ export function predict3m({ symbol, prices, epochs, remote = {}, decisionEpoch, 
     out.reason = out.wait ? vetoes.join('; ') : `${top.playbook}: ${top.why}`;
     if (d && top.life.target != null) {
       const sd = [d, ...D.neighbours(allow, d)].map((x) => ({ unit: x.unit, n: x.n, key: keyOf(x) }));
-      out.record = { symbol, playbook: top.playbook, dir, at: now, entry: price, target: top.life.target, invalid: top.life.invalid, predicted: top.life.lifetime, estimators: top.life.estimators, durSec: d.secs, durKey: keyOf(d), shadowDs: sd, bucket, manual: top.life.manual,
+      out.record = { filters: { breakout: brkF, room: roomN, vol: volF }, symbol, playbook: top.playbook, dir, at: now, entry: price, target: top.life.target, invalid: top.life.invalid, predicted: top.life.lifetime, estimators: top.life.estimators, durSec: d.secs, durKey: keyOf(d), shadowDs: sd, bucket, manual: top.life.manual,
         features: { price, atr, adx: a5.adx, adxCtx: a15.adx, sigmaPerSec: stat.sigmaPerSec, sigma2PerSec: stat.sigma2PerSec, hurst: stat.hurst, halfLifeSec: stat.halfLifeSec, a: top.life.a, b: top.life.b, score: finalScore, strength: Math.min(1, finalScore), trigSecs, wait: out.wait,
           emaDist: ep ? ep.dist * dir : null, wickAgainst: wickAgainst(last, dir), flowProxy: tickFlowProxy(prices, dir), flowLabel: 'proxy', momentum: shortMomentum(prices, dir), tauTicks: d.unit === 't' ? d.n : d.secs / Math.max(1e-9, (epochs.at(-1) - epochs[Math.max(0, epochs.length - 201)]) / Math.min(200, epochs.length - 1)) } };
     }

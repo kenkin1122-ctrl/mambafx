@@ -105,6 +105,18 @@ export const BASE_CONFIG = Object.freeze({
   ESTIMATOR_CORRECTION: false, // P3 flag (default OFF): apply CORRECTIONS.factors to E1..E5 before combining
   EXPIRY_LEARNED: false,   // P2 flag (default OFF): use the shipped learned expiry model instead of the analytic baseline for the decision-time record
   EXPIRY_N_MIN: 200,       // live-contract probability is labelled 'uncalibrated' until this many (probability, outcome) pairs exist
+  // P4-P9 (all default OFF; verdicts are always recorded in record.filters for shadow analysis)
+  BREAKOUT_FILTERS: { penetration: false, closeConfirm: false, retestHold: false, tickFlow: false, distance: false, intensity: false },
+  BRK_PENETRATION_ATR: 0.5, BRK_FLOW_TICKS: 60, BRK_FLOW_MIN: 0.1, BRK_ROOM_ATR: 1, BRK_INTENSITY_MIN: 1.2,
+  RANGE_FADE_EXP: false,   // P5: experimental playbook 'range fade exp'
+  RFX_ADX_MAX: 20, RFX_EDGE_FRAC: 0.2, RFX_WICK: 0.5,
+  ADVERSE_K: 1.0, ADVERSE_VETO: false, ADVERSE_THRESHOLD: 0.4, // P6 (veto only with a validated model)
+  ROOM_NAMED: false,       // P7: named room checks veto (numbers are always recorded)
+  NOROOM_FRAC: 0.8, AVAIL_ATR: 1,
+  VOL_FILTER: false,       // P8: regime-dependent volatility filter replaces MAX_CHASE_ATR
+  VOL_RANGE_ATR: 1.5, VOL_TRANSITION_ALLOW: false,
+  COOLDOWN_ON: false, COOLDOWN_S: 120, // P9
+  HYST_ENTER_EXTRA: 0, HYST_EXIT_SLACK: 0,
   zoneK: 0.5,              // zone band width = zoneK * ATR
   EXTENDED_ATR: 1.5, EXTENDED_N: 6,
   SPIKE_ATR: 4, SPIKE_COOLDOWN: 3, SPIKE_DUE_FRAC: 0.6,

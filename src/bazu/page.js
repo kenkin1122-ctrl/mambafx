@@ -193,7 +193,7 @@ function renderLive(S) {
   $('bzSignal').innerHTML = sig && sig.direction ? `<div class="sig ${sig.gate === GATE.OK ? (sig.direction === 'Rise' ? 'ok' : 'bad') : ''}">
       <div class="row"><b class="${sig.direction === 'Rise' ? 'up' : 'dn'}" style="font-size:18px">${esc(sig.direction)}</b><span class="pill">${esc(sig.duration)}${sig.manual ? ' · manual duration' : ''}</span><span class="pill ${sig.gate === GATE.OK ? (sig.direction === 'Rise' ? 'ok' : 'bad') : 'warn'}">${esc(sig.gate)}</span>${sig.proxy ? '<span class="pill proxy">uses proxy</span>' : ''}</div>
       <div class="note num">Signal strength ${pct(sig.strength, 0)} · ${sig.agree}/${sig.total} analysis features agree${sig.quote ? ` · Deriv quote: stake ${sig.quote.ask}, payout ${sig.quote.payout}` : ''}</div>
-      ${lifetimeHtml(sig)}${reasoningHtml(sig)}<div class="note"><b>${esc(sig.playbook || 'analysis')}</b>${sig.provisional ? ' (provisional trigger)' : ''} · ${esc(sig.reason || '')}</div>${(sig.reasons || []).length ? `<div class="note">${sig.reasons.map(esc).join('; ')}</div>` : ''}<div class="note">Drivers: ${(sig.drivers || []).map(esc).join(', ') || '-'}. Decided ${sig.decisionTs ? new Date(sig.decisionTs * 1000).toLocaleTimeString() : ''} for a ${esc(sig.duration)} Rise/Fall (exit vs entry; a tie loses). Score is a rule-based confluence, not a win probability.</div></div>`
+      ${lifetimeHtml(sig)}${reasoningHtml(sig)}${roomHtml(sig)}<div class="note"><b>${esc(sig.playbook || 'analysis')}</b>${sig.provisional ? ' (provisional trigger)' : ''} · ${esc(sig.reason || '')}</div>${(sig.reasons || []).length ? `<div class="note">${sig.reasons.map(esc).join('; ')}</div>` : ''}<div class="note">Drivers: ${(sig.drivers || []).map(esc).join(', ') || '-'}. Decided ${sig.decisionTs ? new Date(sig.decisionTs * 1000).toLocaleTimeString() : ''} for a ${esc(sig.duration)} Rise/Fall (exit vs entry; a tie loses). Score is a rule-based confluence, not a win probability.</div></div>`
     : `<div class="sig"><b>${esc(E.marketGate(m).label)}</b><div class="note">Collecting ticks to analyse this market.</div></div>`;
 }
 
@@ -221,6 +221,11 @@ function drawChart(m) {
     ctx.fillRect(x + 1, Math.min(y(c.open), y(c.close)), Math.max(1, cw - 2), Math.max(1, Math.abs(y(c.open) - y(c.close))));
   });
   const lastPx = m.last ?? candles[candles.length - 1].close;
+  const ri = m.signal?.roomInfo;
+  if (ri && Number.isFinite(ri.sigmaT)) {
+    ctx.fillStyle = 'rgba(76,141,255,.12)'; ctx.fillRect(0, y(ri.price + ri.sigmaT), W - 52, Math.max(1, y(ri.price - ri.sigmaT) - y(ri.price + ri.sigmaT)));
+    if (ri.zone) { ctx.fillStyle = 'rgba(246,190,70,.18)'; ctx.fillRect(0, y(ri.zone.high), W - 52, Math.max(1, y(ri.zone.low) - y(ri.zone.high))); }
+  }
   ctx.strokeStyle = '#4C8DFF'; ctx.lineWidth = 1; ctx.setLineDash([]);
   ctx.beginPath(); ctx.moveTo(0, y(lastPx)); ctx.lineTo(W - 52, y(lastPx)); ctx.stroke();
   ctx.fillStyle = '#EAECEF'; ctx.font = '11px ui-monospace,Consolas,monospace';
@@ -240,6 +245,10 @@ function renderAccuracy(S) {
     <div class="panel" style="margin-top:10px"><h3>Trade log</h3><div class="scroll">${tradesTable(S.trades.filter((t) => t.status === 'closed'))}</div></div>`;
 }
 
+function roomHtml(sig) {
+  const r = sig.roomInfo; if (!r) return '';
+  return `<div class="note"><b>Room</b> ${esc(r.text)}${r.lifetimeDerived ? ' · in lifetime mode the duration is derived from the same distances' : ''}${r.fired ? ' · fired: ' + esc(r.fired) : ''}</div>`;
+}
 function liveContractsHtml(S) {
   const open = S.trades.filter((t) => t.status === 'open'); if (!open.length) return '';
   const cal = E.expiryCalibration();

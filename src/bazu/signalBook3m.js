@@ -11,6 +11,7 @@
  * opposite direction exists only once the new setup qualifies on its own evidence. Once EXECUTED the signal is final.
  */
 import { VERDICT } from './confluence3m.js?v=15';
+import { cooldownBlocks } from './filters3m.js?v=15';
 
 export const S = Object.freeze({ DETECTED: 'DETECTED', ARMED: 'ARMED', TRIGGERED: 'TRIGGERED', EXECUTING: 'EXECUTING', EXECUTED: 'EXECUTED', REJECTED: 'REJECTED', EXPIRED: 'EXPIRED', INVALIDATED: 'INVALIDATED' });
 export const FINAL = new Set([S.EXECUTED, S.REJECTED, S.EXPIRED, S.INVALIDATED]);
@@ -28,6 +29,7 @@ export const scaled = (spec, T) => clamp(spec.mult * T, spec.min, spec.max);
 export function createBook({ cfgFor, maxLog = 400 }) {
   const signals = new Map(), activeBySym = new Map(), finals = new Set(), log = [], rejectedAt = new Map(), lastProv = new Map();
   let seq = 0;
+  const lastMade = new Map(); // P9 cooldown memory (gates only NEW signals)
 
   const note = (e) => { log.push(e); if (log.length > maxLog) log.splice(0, log.length - maxLog); return e; };
   const keyOf = (sym, dir, playbook, candleId) => `${sym}|${dir}|${playbook}|${candleId}`;
@@ -39,6 +41,7 @@ export function createBook({ cfgFor, maxLog = 400 }) {
     const ev = { ts, id: sig.id, symbol: sig.symbol, from, to, reason, kind, dir: sig.dir };
     sig.history.push(ev); if (sig.history.length > 60) sig.history.shift();
     note(ev);
+    if (to === S.INVALIDATED) { const lm = lastMade.get(sig.symbol); if (lm && lm.id === sig.id) lm.invalidated = true; }
     if (FINAL.has(to)) { finals.add(sig.key); if (activeBySym.get(sig.symbol) === sig.id) activeBySym.delete(sig.symbol); }
     return { ok: true, event: ev };
   }
@@ -99,7 +102,10 @@ export function createBook({ cfgFor, maxLog = 400 }) {
       return { signal: null, events };
     }
     if (finals.has(keyOf(symbol, setup.dir, setup.playbook, pred.candleId))) return { signal: null, events };
+    const cd = cooldownBlocks({ last: lastMade.get(symbol), now: ts, cfg, setup: { playbook: setup.playbook, zoneMid: pred.zoneMid ?? null, dir: setup.dir }, durSec: pred.durationSec });
+    if (cd.blocked) return { signal: null, events };
     const sig = create(symbol, pred, ts);
+    lastMade.set(symbol, { id: sig.id, at: ts, playbook: setup.playbook, zoneMid: pred.zoneMid ?? null, dir: setup.dir, invalidated: false });
     ev(transition(sig, S.ARMED, setup.triggered ? 'qualified' : `DELAYED: ${setup.delayReason}`, ts, setup.triggered ? null : VERDICT.DELAYED));
     if (setup.triggered && !pred.provisional) { sig.trigger = setup.trigger; ev(transition(sig, S.TRIGGERED, `trigger: ${setup.trigger || 'playbook'}`, ts)); }
     return { signal: sig, events };
