@@ -5,6 +5,8 @@
  * Nothing here is shared with the 5-Tick Signal Engine or the research/validation modules.
  */
 
+import { CORRECTIONS } from './corrections3m.js?v=15';
+
 export const TARGET = Object.freeze({
   // Deriv Rise/Fall: exit must be strictly above entry for Rise (below for Fall). A tie loses.
   tiesWin: false,
@@ -99,6 +101,8 @@ export const BASE_CONFIG = Object.freeze({
   BACKFILL_RETRY_MS: 2000,  // back-off step (x attempt number)
   BACKFILL_GAP_MS: 400,    // min spacing between history requests (<= 2.5/s)
   LOG_MIN_GAP_S: 30,
+  CORRECTIONS,
+  ESTIMATOR_CORRECTION: false, // P3 flag (default OFF): apply CORRECTIONS.factors to E1..E5 before combining
   EXPIRY_LEARNED: false,   // P2 flag (default OFF): use the shipped learned expiry model instead of the analytic baseline for the decision-time record
   EXPIRY_N_MIN: 200,       // live-contract probability is labelled 'uncalibrated' until this many (probability, outcome) pairs exist
   zoneK: 0.5,              // zone band width = zoneK * ATR
