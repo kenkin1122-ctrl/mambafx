@@ -21,6 +21,7 @@ import { start as perfStart, mark as perfMark, startMonitors } from './perf3m.js
 import { accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=15';
 import { createBook, S as SS } from './signalBook3m.js?v=15';
 import { createChoke } from './choke3m.js?v=15';
+import { createSupervisor } from './reconnect3m.js?v=15';
 import { wilson } from './stats.js?v=15';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
@@ -49,12 +50,19 @@ let wsReady = null;
 
 function openWs() {
   if (wsReady) return wsReady;
+  const sock = new WebSocket(WS_URL);
+  ws = sock;
   wsReady = new Promise((resolve, reject) => {
-    ws = new WebSocket(WS_URL);
-    ws.onopen = () => { state.status = 'live'; emit(); resolve(); };
-    ws.onerror = () => reject(new Error('BAZU feed socket error'));
-    ws.onclose = () => { state.status = 'reconnecting'; wsReady = null; emit(); setTimeout(() => { if (state.markets.size) reconnect(); }, 3000); };
-    ws.onmessage = (ev) => {
+    sock.onopen = () => { state.status = 'live'; emit(); resolve(); link.start(); };
+    sock.onerror = () => reject(new Error('BAZU feed socket error'));
+    sock.onclose = () => {
+      if (ws !== sock) return;
+      state.status = 'reconnecting'; wsReady = null; ws = null;
+      for (const [id, w] of [...waiting]) { waiting.delete(id); w.reject(new Error('socket closed')); }
+      reject(new Error('socket closed')); emit(); link.notifyClosed();
+    };
+    sock.onmessage = (ev) => {
+      link.touch();
       const t0 = performance.now(), m = JSON.parse(ev.data);
       const w = m.req_id && waiting.get(m.req_id);
       if (w) { waiting.delete(m.req_id); m.error ? w.reject(new Error(m.error.message)) : w.resolve(m); }
@@ -62,6 +70,7 @@ function openWs() {
       perfMark(m.msg_type === 'tick' ? 'ws.tick' : 'ws.other', performance.now() - t0);
     };
   });
+  wsReady.catch(() => {});
   return wsReady;
 }
 function send(msg, timeoutMs = 15000) {
@@ -69,13 +78,43 @@ function send(msg, timeoutMs = 15000) {
     const id = ++reqSeq;
     const t = setTimeout(() => { waiting.delete(id); reject(new Error('timeout')); }, timeoutMs);
     waiting.set(id, { resolve: (m) => { clearTimeout(t); resolve(m); }, reject: (e) => { clearTimeout(t); reject(e); } });
-    ws.send(JSON.stringify({ ...msg, req_id: id }));
+    try { ws.send(JSON.stringify({ ...msg, req_id: id })); } catch (e) { clearTimeout(t); waiting.delete(id); reject(e); }
   }));
 }
-async function reconnect() {
-  try { await openWs(); for (const sym of state.markets.keys()) await send({ ticks: sym, subscribe: 1 }); log('Feed reconnected'); } catch { /* retried by onclose */ }
-}
 
+/** After every (re)connect: restore tick subscriptions, fill the tick gap, and re-read open-contract state. */
+async function resync() {
+  const syms = [...state.markets.keys()];
+  await Promise.all(syms.map((sym) => send({ ticks: sym, subscribe: 1 }).catch(() => {})));
+  const now = Date.now();
+  for (const sym of syms) {
+    const m = state.markets.get(sym);
+    if (!m || m.lastEpoch == null || now - (m.lastTickAt || 0) < 5000) continue;
+    try {
+      const r = await send({ ticks_history: sym, start: m.lastEpoch + 1, end: 'latest', count: 1000, style: 'ticks' });
+      const pr = r.history?.prices || [], tm = r.history?.times || [];
+      for (let i = 0; i < pr.length; i++) onTick({ symbol: sym, quote: Number(pr[i]), epoch: Number(tm[i]) });
+    } catch { /* a failed gap fill is covered by the next evaluation's freshness checks */ }
+    await new Promise((res) => setTimeout(res, 150));
+  }
+  attachedWs = null;
+  if (typeof window !== 'undefined' && window.gridWs) attachAccount();
+  reconcileOpen();
+  if (state.markets.size) log('Feed (re)connected, subscriptions and gaps restored');
+}
+const link = createSupervisor({
+  connect: async () => { await openWs(); await resync(); },
+  ping: () => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ ping: 1 })); },
+  forceClose: () => { try { ws && ws.close(); } catch { /* already closed */ } },
+  wanted: () => state.markets.size > 0,
+  now: () => Date.now(), schedule: (fn, ms) => setTimeout(fn, ms), cancel: (id) => clearTimeout(id),
+  onState: (s, info) => { if (s === 'stale') log(`Feed silent for ${Math.round(info.silentMs / 1000)}s, forcing a reconnect`, 'warn'); if (s === 'reconnecting') { state.status = 'reconnecting'; emit(); } if (s === 'up') { state.status = 'live'; emit(); } },
+});
+export const feedLink = link;
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => link.kick());
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) link.kick(); });
+}
 function onTick(t) {
   const m = state.markets.get(t.symbol);
   if (!m) return;
@@ -109,7 +148,7 @@ export async function discover() {
   }));
   state.scan.active = false;
   log(`Universe: ${state.markets.size} synthetic indices offer Rise/Fall (of ${syms.length} active)`);
-  await Promise.all([...state.markets.keys()].map((sym) => send({ ticks: sym, subscribe: 1 }).catch(() => {})));
+  await Promise.all([...state.markets.keys()].map((sym) => send({ ticks: sym, subscribe: 1 }).catch(() => {}))); link.start();
   state.status = 'live'; emit();
   backfillAll().catch((e) => log('backfill: ' + e.message, 'warn'));
   const q = [...state.markets.keys()];

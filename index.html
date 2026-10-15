@@ -28564,6 +28564,7 @@ async function gridConnect(){
   };
   gridWs.onmessage = ev => {
     let msg; try { msg = JSON.parse(ev.data); } catch(_){ return; }
+    window.__gridLastMsgAt = Date.now();
     if (window.__mfxDebug) window.__mfxDebug.recordIncoming(msg.req_id ?? null, msg);
     gridHandleMsg(msg);
   };
@@ -28607,9 +28608,13 @@ function gridWsSubscribeAndInit(acctId){
   const cur = $("gridCurrency"); if (cur) cur.value = gridCurrency;
 
   if (gridPing) clearInterval(gridPing);
+  window.__gridLastMsgAt = Date.now();
   gridPing = setInterval(() => {
-    if (gridWs && gridWs.readyState === WebSocket.OPEN)
+    if (gridWs && gridWs.readyState === WebSocket.OPEN){
+      // half-open socket: no frame (not even a pong) for 45 s -> close it so the auto-reconnect runs
+      if (Date.now() - window.__gridLastMsgAt > 45000){ try { gridWs.close(); } catch(_){} return; }
       gridWs.send(JSON.stringify({ ping: 1 }));
+    }
   }, 20000);
 
   if (typeof digUpdateConnStatus  === "function") digUpdateConnStatus();
