@@ -99,6 +99,8 @@ export const BASE_CONFIG = Object.freeze({
   BACKFILL_RETRY_MS: 2000,  // back-off step (x attempt number)
   BACKFILL_GAP_MS: 400,    // min spacing between history requests (<= 2.5/s)
   LOG_MIN_GAP_S: 30,
+  EXPIRY_LEARNED: false,   // P2 flag (default OFF): use the shipped learned expiry model instead of the analytic baseline for the decision-time record
+  EXPIRY_N_MIN: 200,       // live-contract probability is labelled 'uncalibrated' until this many (probability, outcome) pairs exist
   zoneK: 0.5,              // zone band width = zoneK * ATR
   EXTENDED_ATR: 1.5, EXTENDED_N: 6,
   SPIKE_ATR: 4, SPIKE_COOLDOWN: 3, SPIKE_DUE_FRAC: 0.6,
