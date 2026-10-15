@@ -37,6 +37,12 @@
 #page-bazu .bz-tabs button{background:none;border:0;color:var(--bz-muted);padding:8px 14px;cursor:pointer;font-weight:600;font-size:13px;border-bottom:2px solid transparent}
 #page-bazu .bz-tabs button.on{color:var(--bz-text);border-color:var(--bz-blue)}
 #page-bazu .bz-pane{display:none}#page-bazu .bz-pane.on{display:block}
+#page-bazu .report-dates,#page-bazu .report-filters,#page-bazu .report-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0}
+#page-bazu .report-dates label,#page-bazu .report-filters label{display:flex;align-items:center;gap:5px;color:var(--bz-muted);font-size:11px}
+#page-bazu .report-dates input[type=date]{background:var(--bz-card);color:var(--bz-text);border:1px solid var(--bz-line);border-radius:8px;padding:5px 8px;font-size:12px}
+#page-bazu .report-actions button{background:var(--bz-card);color:var(--bz-text);border:1px solid var(--bz-line);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:11px}
+#page-bazu .report-actions button:hover{border-color:var(--bz-blue)}
+#page-bazu tr.low-sample td{color:#707985;background:rgba(132,142,156,.06)}
 #page-bazu .bz-cols{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1.3fr);gap:12px}
 @media(max-width:1000px){#page-bazu .bz-cols{grid-template-columns:1fr}}
 #page-bazu .panel{background:var(--bz-panel);border:1px solid var(--bz-line);border-radius:12px;padding:12px}

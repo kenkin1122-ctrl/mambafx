@@ -23,7 +23,7 @@ export function buildTradeSignal({ symbol, prediction, duration, quote, now = Da
     drivers: prediction.drivers, proxy: prediction.proxy, quote, at: now,
     playbook: prediction.playbook, reason: prediction.reason, vetoes: prediction.vetoes, reasons: prediction.reasons, parts: prediction.parts, patterns: prediction.patterns, factors: prediction.factors, decisionTs: prediction.decisionTs, provisional: prediction.provisional, durationSec: prediction.durationSec,
     lifetime: prediction.lifetime, roomInfo: prediction.roomInfo || null, manual: !!prediction.manual, breakEven: quote && quote.payout > 0 ? quote.ask / quote.payout : null,
-    mode: prediction.mode, regime: prediction.regime, momentum: prediction.momentum, entry: prediction.entry, families: prediction.families, familyAgreement: prediction.familyAgreement, votes: prediction.votes, verdicts: prediction.verdicts, setup: prediction.setup,
+    mode: prediction.mode, regime: prediction.regime, momentum: prediction.momentum, entry: prediction.entry, families: prediction.families, familyAgreement: prediction.familyAgreement, votes: prediction.votes, verdicts: prediction.verdicts, setup: prediction.setup, candidateScores: prediction.candidateScores || [],
     signalId: bookSignal?.id || null, signalState: bookSignal?.state || null, signalReason: bookSignal?.lastReason || null, signalHistory: bookSignal?.history || null,
   };
   if (prediction.wait || !duration) return { ...base, gate: prediction.mode === 'families' && prediction.setup?.qualifies && bookSignal && duration ? GATE.ARMED : GATE.WEAK };

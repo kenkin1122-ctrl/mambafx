@@ -101,6 +101,13 @@ export const BASE_CONFIG = Object.freeze({
   BACKFILL_RETRY_MS: 2000,  // back-off step (x attempt number)
   BACKFILL_GAP_MS: 400,    // min spacing between history requests (<= 2.5/s)
   LOG_MIN_GAP_S: 30,
+  // Reporting / signal log (records only; none of these feed the decision)
+  SIGNAL_LOGGING_ENABLED: true, SIGNAL_LOG_INCLUDE_UNTRADED: false,
+  SIGNAL_LOG_MAX_RECORDS: 5000, SIGNAL_LOG_RETENTION_DAYS: 60,
+  MIN_N_FOR_RANK: 30,
+  REVERSAL_WINDOW_S: 900, REVERSAL_MIN_ATR: 0.5,
+  NEAR_NEUTRAL_FRAC: 0.15,    // E2: a neutral reading within this fraction of its threshold is "non-trivial"
+  NEAR_MISS_FRAC: 0.15,       // E2: a check within this fraction of its threshold is a near miss
   CORRECTIONS,
   ESTIMATOR_CORRECTION: false, // P3 flag (default OFF): apply CORRECTIONS.factors to E1..E5 before combining
   EXPIRY_LEARNED: false,   // P2 flag (default OFF): use the shipped learned expiry model instead of the analytic baseline for the decision-time record

@@ -1,0 +1,72 @@
+{
+  "report": "BAZU Performance log",
+  "view": "market",
+  "filters": {
+    "from": "2023-11-15",
+    "to": "2023-11-15",
+    "minN": 30
+  },
+  "columns": [
+    "rank",
+    "account_type",
+    "market",
+    "playbook",
+    "contracts_n",
+    "wins",
+    "losses",
+    "ties",
+    "win_rate",
+    "wilson_95_low",
+    "wilson_95_high",
+    "most_common_duration",
+    "sample_status"
+  ],
+  "rows": [
+    {
+      "rank": 1,
+      "account_type": "demo",
+      "market": "R_100",
+      "playbook": "",
+      "contracts_n": 30,
+      "wins": 18,
+      "losses": 11,
+      "ties": 1,
+      "win_rate": 0.6,
+      "wilson_95_low": 0.42320360253322475,
+      "wilson_95_high": 0.7540937188319815,
+      "most_common_duration": "10t",
+      "sample_status": "ranked"
+    },
+    {
+      "rank": 1,
+      "account_type": "real",
+      "market": "R_100",
+      "playbook": "",
+      "contracts_n": 30,
+      "wins": 14,
+      "losses": 15,
+      "ties": 1,
+      "win_rate": 0.4666666666666667,
+      "wilson_95_low": 0.30232388907699753,
+      "wilson_95_high": 0.638577003801267,
+      "most_common_duration": "10t",
+      "sample_status": "ranked"
+    },
+    {
+      "rank": null,
+      "account_type": "shadow",
+      "market": "R_100",
+      "playbook": "",
+      "contracts_n": 1,
+      "wins": 1,
+      "losses": 0,
+      "ties": 0,
+      "win_rate": 1,
+      "wilson_95_low": 0.20654931437723745,
+      "wilson_95_high": 1,
+      "most_common_duration": "10t",
+      "sample_status": "low sample"
+    }
+  ],
+  "note": "Win rate = wins / (wins + losses + ties). Ties count as non-wins. Low-sample rows are unranked. Demo, real, and shadow outcomes remain separate. Synthetic fixtures only; not live Deriv results or evidence of a trading edge."
+}

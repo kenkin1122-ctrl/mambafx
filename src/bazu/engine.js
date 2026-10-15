@@ -9,9 +9,9 @@
 
 import { parseActiveSymbols, parseContractsFor, pickDurations, durationAllowed } from './universe.js?v=15';
 import { durationKey } from './validation.js?v=15';
-import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=15';
-import { predict3m } from './predict3m.js?v=15';
-import { configFor } from './config3m.js?v=15';
+import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=16';
+import { predict3m } from './predict3m.js?v=16';
+import { configFor } from './config3m.js?v=16';
 import { hysteresisPass } from './filters3m.js?v=15';
 import { allowedDurations, durationLabel } from './duration3m.js?v=15';
 import { resolveRecord } from './calibration3m.js?v=15';
@@ -25,6 +25,7 @@ import { createChoke } from './choke3m.js?v=15';
 import { createSupervisor } from './reconnect3m.js?v=15';
 import { wilson } from './stats.js?v=15';
 import { expiryProbBaseline, sigmaPerTick, reliabilityCurve, brier } from './expiry3m.js?v=15';
+import { createLogger } from './siglogRuntime3m.js?v=16';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;
@@ -39,6 +40,18 @@ export const state = {
 };
 
 if (typeof window !== 'undefined') window.__bzState = state;
+const signalLogger = createLogger({
+  getMarket: (symbol) => state.markets.get(symbol),
+  getTrades: () => state.trades,
+});
+signalLogger.store.ready.then(() => { emit(); }).catch((e) => console.error('BAZU signal-log database initialization failed', e));
+export const signalLogRecords = () => signalLogger.store.all();
+export const signalLogStatus = () => ({
+  ...signalLogger.stat, ...signalLogger.store.stat,
+  loggerLastError: signalLogger.stat.lastError, storageLastError: signalLogger.store.stat.lastError,
+  pending: signalLogger.pendingCount(),
+});
+export const signalLogStore = signalLogger.store;
 const listeners = new Set();
 export const onChange = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
 let dirty = false;
@@ -125,6 +138,7 @@ function onTick(t) {
   m.prices.push(t.quote); m.epochs.push(t.epoch);
   if (m.prices.length > MAX_TICKS) { m.prices.splice(0, 1500); m.epochs.splice(0, 1500); }
   m.last = t.quote; m.lastEpoch = t.epoch; m.lastTickAt = Date.now(); m.tickCount++;
+  signalLogger.tick();
   emit();
 }
 
@@ -368,6 +382,7 @@ export async function signalTick() {
       m.signal = sig; state.signals.set(m.symbol, sig);
       emit();
       if (state.running && state.mode === 'auto' && state.martingale <= 1 && modeMayAct('auto', sig)) await autoTrade(m, sig);
+      if (sig.gate === GATE.OK && sig.signalState === SS.TRIGGERED) signalLogger.onSignal(sig, m, { rec: r.result.record, minStrength: r.result.minStrength });
     }
     if (state.running && state.mode === 'auto' && state.martingale > 1) await autoTradeBest();
   } finally { sigBusy = false; endPass(); emit(); }
@@ -428,7 +443,9 @@ function recordTrade({ res, symbol, contractType, duration, stake, source, signa
     duration: durationKey(duration), stake, buyPrice: res.buy.buy_price, payout: res.buy.payout ?? res.proposal.payout,
     entry: null, exit: null, profit: null, status: 'open', isReal: res.isReal, source, ts: Date.now(),
     predicted: signal?.predicted ?? null, strength: signal?.strength ?? null, drivers: signal?.drivers || [], signalId: signal?.signalId || null,
+    playbook: signal?.playbook || null,
   };
+  if (signal) signalLogger.onBuy(t, { ...signal, contractType, direction: contractType === 'CALL' ? 'Rise' : 'Fall' }, m, { rec: state.records.find((r) => r.id === signal.recId), minStrength: signal.minStrength });
   state.trades.unshift(t); saveTrades(); watchContracts(onContract); requestContractUpdate(t.id);
   log(`${source} ${t.direction}${t.predicted && t.predicted !== t.direction ? ` (predicted ${t.predicted}, reversed)` : ''} ${symbol} ${t.duration} @ ${t.stake} (${t.isReal ? 'REAL' : 'DEMO'})`, 'ok');
   emit(); return t;
@@ -457,11 +474,21 @@ function onContract(c) {
   if (!t) return;
   if (c.entry_tick != null) t.entry = c.entry_tick;
   if (c.entry_tick_time != null || c.date_start != null) t.entryEpoch = Number(c.entry_tick_time ?? c.date_start);
+  if (c.exit_tick_time != null || c.date_expiry != null) t.exitEpoch = Number(c.exit_tick_time ?? c.date_expiry);
   if (c.payout != null) t.payout = c.payout;
   if (c.bid_price != null) t.bid = Number(c.bid_price);
   if (c.is_sold || c.status === 'sold' || c.status === 'won' || c.status === 'lost' || c.is_expired) {
     t.exit = c.exit_tick ?? c.sell_spot ?? t.exit; t.profit = Number(c.profit);
-    t.status = 'closed'; t.result = t.profit > 0 ? 'win' : 'loss'; saveTrades();
+    t.status = 'closed'; t.derivStatus = String(c.status || (c.is_expired ? 'expired' : 'unknown')).toLowerCase();
+    t.settledAt = Date.now();
+    t.result = t.entry != null && t.exit != null && Number(t.entry) === Number(t.exit)
+      ? 'tie'
+      : t.derivStatus === 'won' ? 'win'
+        : t.derivStatus === 'lost' ? 'loss'
+          : Number.isFinite(t.profit) ? t.profit > 0 ? 'win' : t.profit < 0 ? 'loss' : 'tie'
+            : 'unknown';
+    saveTrades();
+    signalLogger.tick();
     if (t.profit > 0) state.curStake = state.stake; else if (state.martingale > 1 && t.profit < 0) state.curStake = +(Number(t.stake) * state.martingale).toFixed(2);
     log(`${t.market} ${t.direction}${t.strength != null ? ` (${Math.round(t.strength * 100)}%)` : ''} ${t.result.toUpperCase()} ${t.profit >= 0 ? '+' : ''}${t.profit}`, t.profit > 0 ? 'ok' : 'bad');
   }
@@ -486,10 +513,20 @@ export function expiryInfo(t) {
   return p == null ? null : { p, tauTicks: Math.max(0, tau), model: 'baseline' };
 }
 /** Calibration of the live-contract probability: pairs of (probability at half time, settled outcome). */
-export function expiryCalibration() {
-  const done = state.trades.filter((t) => t.status === 'closed' && t.pMid != null && (t.result === 'win' || t.result === 'loss'));
-  const probs = done.map((t) => t.pMid), ys = done.map((t) => (t.result === 'win' ? 1 : 0));
-  return { n: done.length, nMin: configFor('R_100').EXPIRY_N_MIN, curve: reliabilityCurve(probs, ys, 5), brier: brier(probs, ys), brier50: brier(probs.map(() => 0.5), ys) };
+export function expiryCalibration({ from, to, includeSamples = false } = {}) {
+  const done = state.trades.filter((t) => {
+    const ts = t.settledAt || t.ts;
+    return t.status === 'closed' && t.pMid != null && (t.result === 'win' || t.result === 'loss' || t.result === 'tie') &&
+      (!from || ts >= Date.parse(`${from}T00:00:00Z`)) && (!to || ts < Date.parse(`${to}T00:00:00Z`) + 86400000);
+  });
+  const summarize = (items) => {
+    const probs = items.map((t) => t.pMid), ys = items.map((t) => (t.result === 'win' ? 1 : 0));
+    return { n: items.length, curve: reliabilityCurve(probs, ys, 5), brier: brier(probs, ys), brier50: brier(probs.map(() => 0.5), ys), ...(includeSamples ? { samples: items.map((t, i) => ({ probability: probs[i], outcome: ys[i] })) } : {}) };
+  };
+  return {
+    ...summarize(done), nMin: configFor('R_100').EXPIRY_N_MIN,
+    by_account_type: Object.fromEntries(['demo', 'real'].map((type) => [type, summarize(done.filter((t) => (t.isReal ? 'real' : 'demo') === type))])),
+  };
 }
 let attachedWs = null;
 export function attachAccount() {

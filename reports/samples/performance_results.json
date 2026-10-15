@@ -1,0 +1,59 @@
+{
+  "measured_utc_date": "2026-10-15",
+  "environment": {
+    "browser": "Microsoft Edge 155 (Chromium)",
+    "browser_user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36 Edg/155.0.0.0",
+    "long_task_observer_available": true
+  },
+  "workload": {
+    "type": "synthetic deterministic fixtures",
+    "symbols": 20,
+    "virtual_seconds": 300,
+    "tick_hook_calls_per_symbol_per_second": 10,
+    "tick_hook_calls_enabled": 60000,
+    "tick_hook_calls_disabled": 60000,
+    "records_built": 20,
+    "records_stored": 20,
+    "distinct_record_ids": 20,
+    "duplicate_record_ids": 0,
+    "decision_mutation_detected": false,
+    "limitations": "All labels reuse one deterministic synthetic tick path; this measures logger and export overhead, not live-market throughput or trading performance."
+  },
+  "logger": {
+    "queue_capture_total_ms": 20.5,
+    "onbuy_enabled": {
+      "n": 20,
+      "mean_ms": 1.02,
+      "p95_ms": 6.6,
+      "max_ms": 6.6
+    },
+    "onbuy_disabled": {
+      "n": 100,
+      "mean_ms": 0.134,
+      "p95_ms": 0.3,
+      "max_ms": 0.5
+    },
+    "tick_hook_enabled": {
+      "n": 60000,
+      "mean_ms": 0.001063,
+      "p95_ms": 0,
+      "max_ms": 1.7,
+      "note": "p95 is below the browser timer resolution and is not evidence of zero work."
+    },
+    "tick_hook_disabled": {
+      "n": 60000,
+      "mean_ms": 0.000972,
+      "p95_ms": 0,
+      "max_ms": 1.4,
+      "note": "p95 is below the browser timer resolution and is not evidence of zero work."
+    }
+  },
+  "export": {
+    "records": 20,
+    "zip_bytes": 2124445,
+    "elapsed_ms": 500,
+    "main_thread_long_task_count": 0,
+    "observed_main_thread_long_task_max_ms": 0,
+    "long_task_threshold_ms": 50
+  }
+}

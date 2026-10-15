@@ -3,15 +3,17 @@
  * BAZU page view. Sends commands to engine.js and renders its state — NO trading rules here.
  */
 import { start as perfStart } from './perf3m.js?v=15';
-import * as E from './engine.js?v=15';
+import * as E from './engine.js?v=16';
 import { clusterZones } from './structure.js?v=15';
 import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=15';
 import { findSwingPoints } from '../../mtf/src/analysis/swingPoints.js';
 import { wilson } from './stats.js?v=15';
 import { accountInfo } from './execution.js?v=15';
-import { GATE } from './decision.js?v=15';
+import { GATE } from './decision.js?v=16';
 import { calibrationSummary, accuracyByDuration } from './calibration3m.js?v=15';
 import { liveContractText } from './expiry3m.js?v=15';
+import { performanceRows, performanceReport, reportCsv, printableHtml, calibrationReport, buildSignalPackage, downloadBlob, savePackageToFolder } from './reports3m.js?v=16';
+import { BASE_CONFIG } from './config3m.js?v=16';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -19,6 +21,10 @@ const pct = (x, d = 1) => (x == null || !Number.isFinite(x) ? '—' : (x * 100).
 const ci = (w) => (w && w.n ? `${pct(w.p)} <span class="mu">[${pct(w.lo)}–${pct(w.hi)}] n=${w.n}</span>` : '<span class="mu">no data</span>');
 const money = (x) => (x == null || !Number.isFinite(x) ? '—' : (x >= 0 ? '+' : '') + Number(x).toFixed(2));
 let tab = 'live', ready = false, tfKey = '10t';
+const reportFilters = {
+  perf: { view: 'market', sort: 'rate', marketClass: 'all', durationBucket: 'all', playbook: 'all', accountType: 'all', outcomeType: 'all', minN: BASE_CONFIG.MIN_N_FOR_RANK, from: '', to: '' },
+  calib: { from: '', to: '' }, signal: { from: '', to: '' },
+};
 
 function bindOnce() {
   $('bzTabs').onclick = (e) => { const t = e.target.dataset.t; if (!t) return; tab = t; [...$('bzTabs').children].forEach((b) => b.classList.toggle('on', b.dataset.t === t)); document.querySelectorAll('#page-bazu .bz-pane').forEach((p) => p.classList.toggle('on', p.id === 'bzp-' + t)); render(); };
@@ -35,6 +41,8 @@ function bindOnce() {
   $('bzStake').onchange = (e) => E.setStake(e.target.value);
   $('bzReverse').onchange = (e) => E.setReverse(e.target.checked);
   $('bzMetrics').addEventListener('click', (e) => { const b = e.target.closest && e.target.closest('[data-bzreset]'); if (b) E.resetPnl(b.dataset.bzreset); });
+  document.getElementById('page-bazu').addEventListener('change', onReportChange);
+  document.getElementById('page-bazu').addEventListener('click', onReportAction);
   $('bzMart').onchange = (e) => E.setMartingale(e.target.value);
   $('bzRealOk').onchange = (e) => E.confirmReal(e.target.checked);
   $('bzLogin').onclick = () => (typeof window.gridStartLogin === 'function' ? window.gridStartLogin() : alert('Login is on the Grid page'));
@@ -114,7 +122,7 @@ function renderNow() {
     mk('Capital exposure', M.exposure.toUpperCase(), M.exposure),
     mk('Markets', M.markets), mk('Strong signals', M.tradable), mk('Completed', M.closed), mk('Failed', M.failed),
   ].join(''); } catch (e) { console.error('BAZU metrics', e); }
-  const part = { live: () => renderLive(S), accuracy: () => renderAccuracy(S), perf: () => renderPerf(S), exec: () => renderExec(S, acc), calib: () => renderCalib(S) }[tab] || (() => renderExec(S, acc));
+  const part = { live: () => renderLive(S), accuracy: () => renderAccuracy(S), perf: () => renderPerf(S), exec: () => renderExec(S, acc), calib: () => renderCalib(S), signal: () => renderSignalLog() }[tab] || (() => renderExec(S, acc));
   syncDur(S);
   try { part(); } catch (e) { console.error('BAZU render', e); }
 }
@@ -154,27 +162,118 @@ function vetoHtml0(S, T) {
     <div class="scroll" style="max-height:220px"><table><tr><th>Market</th><th>Evals</th><th>Tradable rate</th><th>Top vetoes</th></tr>${perMarket.map((m) => `<tr><td>${esc(m.sym)}</td><td class="num">${m.evals}</td><td class="num">${pct(m.tradable / m.evals, 1)}</td><td class="mu">${m.top.map(([k, v]) => `${esc(k)} (${v})`).join('; ')}</td></tr>`).join('')}</table></div></div>`;
 }
 function renderCalib(S) {
-  const recs = S.records, sum = calibrationSummary(recs), acc = accuracyByDuration(recs);
+  const range = reportFilters.calib, inRange = (ts) => withinDateRange(ts * 1000, range);
+  const recs = S.records.filter((r) => inRange(r.at)), sum = calibrationSummary(recs), acc = accuracyByDuration(recs);
   const dist = (e) => e.dist.map((d) => `${d.label}: ${d.count}`).join(' · ');
   const rows = (o) => Object.entries(o).map(([k, e]) => `<tr><td>${esc(k)}</td><td class="num">${e.n}</td><td class="num">${secFmt(e.medianErrorS)}</td><td class="num">${e.medianRatio == null ? '—' : e.medianRatio.toFixed(2) + 'x'}</td><td class="mu">${dist(e)}</td></tr>`).join('') || '<tr><td colspan="5" class="mu">no resolved records yet</td></tr>';
   const head = '<tr><th></th><th>N</th><th>Median error (pred − real)</th><th>Median pred/real</th><th>Error distribution</th></tr>';
-  $('bzCalib').innerHTML = vetoHtml(S) + calibCurveHtml() + `<div class="panel" style="margin-top:10px"><h3>Lifetime calibration <span class="mu">(a record, not a gate)</span></h3>
+  $('bzCalib').innerHTML = `${dateControls('calib')}<div class="report-actions"><button data-report-export="calib" data-format="csv">Download CSV</button><button data-report-export="calib" data-format="json">Download JSON</button><button data-report-export="calib" data-format="html">Print HTML / PDF</button><span id="calibExportStatus" class="mu"></span></div>` + vetoHtml(S) + calibCurveHtml(range) + `<div class="panel" style="margin-top:10px"><h3>Lifetime calibration <span class="mu">(a record, not a gate)</span></h3>
     <div class="note num">Signals logged ${recs.length} · resolved ${sum.resolved} · target first ${sum.targetFirst} · invalidation first ${sum.invalidFirst} · neither within max ${sum.neither} · target touched within chosen duration but contract lost ${sum.touchedButLost} of ${sum.targetTouchedInDur}</div>
     <h4>By playbook</h4><table>${head}${rows(sum.byPlaybook)}</table><h4>By estimator</h4><table>${head}${rows(sum.byEstimator)}</table></div>
     <div class="panel" style="margin-top:10px"><h3>Accuracy by chosen duration <span class="mu">(shadow outcomes, ties lose)</span></h3>
     <table><tr><th>Duration</th><th>Hit rate (95% CI)</th><th>Mean break-even</th></tr>${acc.map((a) => `<tr><td>${esc(a.key)}</td><td>${ci(a.ci)}</td><td class="num">${pct(a.breakEven, 1)}</td></tr>`).join('') || '<tr><td colspan="3" class="mu">no resolved records yet</td></tr>'}</table></div>`;
 }
 function renderPerf(S) {
-  const by = new Map();
-  S.trades.filter((t) => t.status === 'closed' && t.result !== 'unknown' && Number.isFinite(t.profit)).forEach((t) => { if (!by.has(t.market)) by.set(t.market, []); by.get(t.market).push(t); });
-  const rows = [...by.entries()].map(([mk, ts]) => {
-    const wins = ts.filter((t) => t.profit > 0), ws = wins.filter((t) => t.strength != null);
-    const bands = {}; ws.forEach((t) => { const b = Math.floor(t.strength * 10) * 10; bands[b] = (bands[b] || 0) + 1; });
-    const top = Object.entries(bands).sort((a, b) => b[1] - a[1])[0];
-    return { mk, n: ts.length, w: wilson(wins.length, ts.length), pnl: ts.reduce((a, t) => a + t.profit, 0), avgS: ws.length ? ws.reduce((a, t) => a + t.strength, 0) / ws.length : null, top: top ? `${top[0]}-${+top[0] + 10}% (${top[1]} of ${ws.length} wins)` : '—', last: Math.max(...ts.map((t) => t.ts)) };
-  }).sort((a, b) => b.w.p - a.w.p || b.n - a.n);
-  const when = (x) => new Date(x).toLocaleTimeString();
-  $('bzPerf').innerHTML = rows.length ? `<div class="panel"><h3>Performance log <span class="mu">(markets ranked by win rate, real Deriv settlements)</span></h3><div class="scroll"><table><tr><th>#</th><th>Market</th><th>Win rate (95% CI)</th><th>Trades</th><th>Net P/L</th><th>Avg strength of wins</th><th>Most wins at strength</th><th>Last trade</th></tr>${rows.map((r, i) => `<tr><td>${i + 1}</td><td>${esc(r.mk)}</td><td>${ci(r.w)}</td><td class="num">${r.n}</td><td class="num ${r.pnl >= 0 ? 'up' : 'dn'}">${money(r.pnl)}</td><td class="num">${r.avgS == null ? '—' : pct(r.avgS, 0)}</td><td>${r.top}</td><td class="mu">${when(r.last)}</td></tr>`).join('')}</table></div><div class="note">${esc(rows[0].mk)} leads with ${pct(rows[0].w.p, 0)} wins over ${rows[0].n} trades; most of its wins came at strength ${rows[0].top}. Small samples are noisy - check the interval.</div></div>` : '<div class="note">No completed trades yet.</div>';
+  const f = reportFilters.perf, signals = E.signalLogRecords(), options = (items, value) => [...new Set(items.filter(Boolean))].sort().map((x) => `<option value="${esc(x)}" ${x === value ? 'selected' : ''}>${esc(x)}</option>`).join('');
+  const rows = performanceRows({ trades: S.trades, signals, view: f.view, filters: f, minN: f.minN, sort: f.sort });
+  const tableRows = rows.map((r) => `<tr class="${r.lowSample ? 'low-sample' : ''}"><td>${r.rank ?? '—'}</td><td>${esc(r.accountType)}</td><td>${esc(r.market ?? (f.view === 'playbook' ? '—' : r.key))}</td><td>${esc(r.playbook ?? (f.view === 'playbook' ? r.key : '—'))}</td><td class="num">${r.n}</td><td class="num">${r.wins}</td><td class="num">${r.losses}</td><td class="num">${r.ties}</td><td class="num">${pct(r.rate)} <span class="mu">[${pct(r.ci95[0])}–${pct(r.ci95[1])}]</span></td><td>${esc(r.commonDuration || '—')}</td><td>${r.lowSample ? '<span class="mu">low sample</span>' : ''}</td></tr>`).join('');
+  const markets = [...S.markets.keys(), ...signals.map((r) => r.market)];
+  const playbooks = [...signals.map((r) => r.A?.playbook), ...S.trades.map((t) => t.playbook)];
+  $('bzPerf').innerHTML = `${dateControls('perf')}<div class="report-filters">
+    <label>View <select data-report-filter="perf" data-key="view"><option value="market" ${f.view === 'market' ? 'selected' : ''}>By market</option><option value="playbook" ${f.view === 'playbook' ? 'selected' : ''}>By playbook</option><option value="market-playbook" ${f.view === 'market-playbook' ? 'selected' : ''}>Market × playbook</option></select></label>
+    <label>Sort <select data-report-filter="perf" data-key="sort"><option value="rate" ${f.sort === 'rate' ? 'selected' : ''}>Win rate</option><option value="lower" ${f.sort === 'lower' ? 'selected' : ''}>Wilson lower bound</option></select></label>
+    <label>Minimum N to rank <input type="number" min="1" max="100000" step="1" data-report-filter="perf" data-key="minN" value="${f.minN}"></label>
+    <label>Market class <select data-report-filter="perf" data-key="marketClass">${options(['all','volatility','boomcrash','jump','step','rangebreak','bullbear'], f.marketClass)}</select></label>
+    <label>Duration <select data-report-filter="perf" data-key="durationBucket">${options(['all','<1m','1–5m','5–15m','15–60m','>=1h','tick-duration','unknown'], f.durationBucket)}</select></label>
+    <label>Playbook <select data-report-filter="perf" data-key="playbook">${options(['all', ...playbooks], f.playbook)}</select></label>
+    <label>Account type <select data-report-filter="perf" data-key="accountType">${options(['all','demo','real','shadow'], f.accountType)}</select></label>
+    <label>Outcomes <select data-report-filter="perf" data-key="outcomeType">${options(['all','traded','shadow'], f.outcomeType)}</select></label>
+  </div><div class="report-actions"><button data-report-export="perf" data-format="csv">Download CSV</button><button data-report-export="perf" data-format="json">Download JSON</button><button data-report-export="perf" data-format="html">Print HTML / PDF</button><span id="perfExportStatus" class="mu"></span></div>
+    <div class="panel"><h3>Performance log <span class="mu">(Deriv settlements and explicitly separate shadow outcomes; win rate ranks)</span></h3>
+    <div class="note">Ranking threshold: MIN_N_FOR_RANK = ${f.minN}. Ties count as non-wins. Monetary results and totals are not included.</div>
+    <div class="scroll"><table><tr><th>Rank</th><th>Account</th><th>Market</th><th>Playbook</th><th>Contracts (N)</th><th>Wins</th><th>Losses</th><th>Ties</th><th>Win rate (95% Wilson CI)</th><th>Most common duration</th><th>Sample</th></tr>${tableRows || '<tr><td colspan="11" class="mu">No settled outcomes match these filters.</td></tr>'}</table></div></div>`;
+}
+
+function renderSignalLog() {
+  const all = E.signalLogRecords(), range = reportFilters.signal;
+  const records = all.filter((r) => withinDateRange(r.decision_time_epoch_ms, range)).sort((a, b) => b.decision_time_epoch_ms - a.decision_time_epoch_ms), status = E.signalLogStatus();
+  const rows = records.slice(0, 50).map((r) => `<tr><td>${esc(r.decision_time_iso)}</td><td>${esc(r.market)}</td><td>${esc(r.A?.playbook)}</td><td>${esc(r.A?.direction)}</td><td>${esc(r.A?.duration?.key)}</td><td>${r.traded ? 'traded' : 'shadow'}</td><td>${esc(r.F?.result || (r.F?.pending ? 'pending' : '—'))}</td><td>${esc(r.signal_id)}</td></tr>`).join('');
+  $('bzSignalLog').innerHTML = `${dateControls('signal')}<div class="report-actions"><button data-report-export="signal" data-format="zip">Download ZIP package</button><button data-report-export="signal" data-format="ndjson">Download NDJSON</button><button data-report-export="signal" data-format="folder">Save to folder</button><span id="signalExportStatus" class="mu"></span></div>
+    <div class="panel"><h3>Signal log <span class="mu">(decision-time record plus append-only settlement and post-trade context)</span></h3>
+    <div class="note">Showing ${records.length} of ${all.length} stored · pending ${status.pending} · store ${esc(status.mode)} · write errors ${status.writeErrors || 0} · logger errors ${status.errors || 0}. A-E are point-in-time; F-G are hindsight.${status.storageLastError ? `<br>Storage error: ${esc(status.storageLastError)}` : ''}${status.loggerLastError ? `<br>Logger error: ${esc(status.loggerLastError)}` : ''}</div>
+    <div class="scroll"><table><tr><th>Decision UTC</th><th>Market</th><th>Playbook</th><th>Direction</th><th>Duration</th><th>Type</th><th>Outcome</th><th>Signal UUID</th></tr>${rows || '<tr><td colspan="8" class="mu">No signal-log records yet. Untraded triggered signals are excluded by default.</td></tr>'}</table></div></div>`;
+}
+
+function dateControls(name) {
+  const f = reportFilters[name];
+  return `<div class="report-dates"><label>From (UTC) <input type="date" data-report-filter="${name}" data-key="from" value="${esc(f.from)}"></label><label>To (UTC) <input type="date" data-report-filter="${name}" data-key="to" value="${esc(f.to)}"></label></div>`;
+}
+function withinDateRange(ts, range) {
+  return Number.isFinite(ts) && (!range.from || ts >= Date.parse(`${range.from}T00:00:00Z`)) &&
+    (!range.to || ts < Date.parse(`${range.to}T00:00:00Z`) + 86400000);
+}
+
+function onReportChange(e) {
+  const el = e.target.closest('[data-report-filter]');
+  if (!el) return;
+  const { reportFilter, key } = el.dataset;
+  if (!reportFilters[reportFilter] || !Object.hasOwn(reportFilters[reportFilter], key)) return;
+  reportFilters[reportFilter][key] = key === 'minN' ? Math.max(1, Math.min(100000, Math.trunc(Number(el.value) || BASE_CONFIG.MIN_N_FOR_RANK))) : el.value;
+  render();
+}
+
+async function reportDownload(type, format) {
+  const statusId = type === 'perf' ? 'perfExportStatus' : type === 'calib' ? 'calibExportStatus' : 'signalExportStatus';
+  const status = document.getElementById(statusId);
+  const range = reportFilters[type];
+  if (status) status.textContent = 'Preparing export…';
+  try {
+    if (type === 'perf') {
+      const rows = performanceRows({ trades: E.state.trades, signals: E.signalLogRecords(), view: reportFilters.perf.view, filters: range, minN: reportFilters.perf.minN, sort: reportFilters.perf.sort });
+      const report = performanceReport(rows, reportFilters.perf.view, range), name = 'bazu-performance';
+      if (format === 'csv') downloadBlob(`${name}.csv`, 'text/csv;charset=utf-8', reportCsv(report));
+      else if (format === 'json') downloadBlob(`${name}.json`, 'application/json', JSON.stringify(report, null, 2));
+      else downloadBlob(`${name}.html`, 'text/html;charset=utf-8', printableHtml('BAZU Performance log', report));
+    } else {
+      const signals = E.signalLogRecords().filter((r) => (!range.from || r.decision_time_epoch_ms >= Date.parse(`${range.from}T00:00:00Z`)) && (!range.to || r.decision_time_epoch_ms < Date.parse(`${range.to}T00:00:00Z`) + 86400000));
+      if (type === 'calib') {
+        const records = E.state.records.filter((r) => (!range.from || r.at * 1000 >= Date.parse(`${range.from}T00:00:00Z`)) && (!range.to || r.at * 1000 < Date.parse(`${range.to}T00:00:00Z`) + 86400000));
+        const trades = E.state.trades.filter((t) => withinDateRange(t.settledAt || t.ts, range));
+        const report = calibrationReport({ records, signalRecords: signals, trades, expiryCurve: E.expiryCalibration({ ...range, includeSamples: true }) });
+        report.filters = { from: range.from || null, to: range.to || null };
+        if (format === 'json') downloadBlob('bazu-calibration.json', 'application/json', JSON.stringify(report, null, 2));
+        else {
+          const flat = flattenReport(report), table = { columns: ['section', 'result'], rows: flat };
+          if (format === 'csv') downloadBlob('bazu-calibration.csv', 'text/csv;charset=utf-8', reportCsv(table));
+          else downloadBlob('bazu-calibration.html', 'text/html;charset=utf-8', printableHtml('BAZU Calibration report', table));
+        }
+      } else {
+        const [schema, readme, dictionary] = await Promise.all(['signal.schema.json','README.md','data_dictionary.md'].map(async (f) => {
+          const r = await fetch(`reports/${f}`); if (!r.ok) throw new Error(`Could not load reports/${f}: HTTP ${r.status}`); return f.endsWith('.json') ? r.json() : r.text();
+        }));
+        const pack = await buildSignalPackage(signals, { from: range.from, to: range.to, schema, readme, dataDictionary: dictionary });
+        if (format === 'zip') downloadBlob('bazu-signal-package.zip', 'application/zip', pack.zip);
+        else if (format === 'ndjson') downloadBlob('bazu-signals.ndjson', 'application/x-ndjson;charset=utf-8', pack.ndjson);
+        else await savePackageToFolder(pack.entries);
+      }
+    }
+    if (status) status.textContent = 'Export ready.';
+  } catch (err) {
+    console.error('BAZU report export failed', err);
+    if (status) status.textContent = `Export failed: ${err.message}`;
+  }
+}
+function flattenReport(report, prefix = '', out = []) {
+  for (const [k, v] of Object.entries(report || {})) {
+    const path = prefix ? `${prefix}.${k}` : k;
+    if (v && typeof v === 'object' && !Array.isArray(v)) flattenReport(v, path, out);
+    else out.push({ section: path, result: Array.isArray(v) ? JSON.stringify(v) : v });
+  }
+  return out;
+}
+function onReportAction(e) {
+  const b = e.target.closest('[data-report-export]');
+  if (b) reportDownload(b.dataset.reportExport, b.dataset.format);
 }
 
 function renderLive(S) {
@@ -254,8 +353,8 @@ function liveContractsHtml(S) {
   const cal = E.expiryCalibration();
   return open.map((t) => { let info = null; try { info = E.expiryInfo(t); } catch { /* data missing */ } return `<div class="note">${esc(t.market)} ${esc(t.direction)} ${esc(t.duration)}: ${esc(liveContractText(info ? info.p : null, cal))}</div>`; }).join('');
 }
-function calibCurveHtml() {
-  const c = E.expiryCalibration(), f = (x) => (x == null ? '-' : (x * 100).toFixed(1) + '%');
+function calibCurveHtml(range = {}) {
+  const c = E.expiryCalibration(range), f = (x) => (x == null ? '-' : (x * 100).toFixed(1) + '%');
   return `<div class="panel" style="margin-top:10px"><h3>Expiry probability calibration <span class="mu">(analytic model, probability at half time vs settled outcome)</span></h3>
     <div class="note">${c.n >= c.nMin ? `Calibrated on ${c.n} outcomes.` : `Uncalibrated: ${c.n}/${c.nMin} outcomes.`} Brier ${c.brier == null ? '-' : c.brier.toFixed(4)} vs constant 50%: ${c.brier50 == null ? '-' : c.brier50.toFixed(4)}.</div>
     <table><tr><th>Predicted bin</th><th>N</th><th>Mean predicted</th><th>Observed</th></tr>${c.curve.map((r) => `<tr><td>${(r.lo * 100).toFixed(0)}-${(r.hi * 100).toFixed(0)}%</td><td class="num">${r.n}</td><td class="num">${f(r.predicted)}</td><td class="num">${f(r.observed)}</td></tr>`).join('')}</table></div>`;

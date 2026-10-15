@@ -8,7 +8,7 @@
  * exit = tick at expiry. Only CLOSED candles feed patterns; the forming trigger candle is provisional and built
  * only from ticks <= decisionEpoch.
  */
-import { configFor, marketClass, spikeInterval } from './config3m.js?v=15';
+import { configFor, marketClass, spikeInterval } from './config3m.js?v=16';
 import { buildFrames } from './candles3m.js?v=15';
 import { PATTERNS, runPatterns, fibPullback } from './patterns3m.js?v=15';
 import { runFactors, structureState } from './factors3m.js?v=15';
@@ -285,6 +285,7 @@ export function predict3m({ symbol, prices, epochs, remote = {}, decisionEpoch, 
     const d = top.life.duration;
     Object.assign(out, {
       direction: dir, strength: Math.min(1, finalScore), up: ag.up, down: ag.down, total: ag.total, drivers: ag.drivers.slice(0, 4), playbook: top.playbook, provisional: top.prov, vetoes,
+      candidateScores: cands.map((c) => ({ direction: c.dir, playbook: c.playbook, score: c === top ? finalScore : c.score })),
       reasons: [top.why, ...top.trigR], score: finalScore, parts: { location: top.loc, structure: top.str, trigger: top.trig, flow: top.flowS, timing: top.timing },
       lifetime: top.life, duration: d ? { unit: d.unit, n: d.n, secs: d.secs, key: keyOf(d) } : null, durationSec: d ? d.secs : null, manual: top.life.manual,
       decisionPrice: price, sigmaT: expectedMove(stat.sigmaPerSec, T), invalid: top.life.invalid, target: top.life.target, candleId: frames.trigger.at(-1).epoch,

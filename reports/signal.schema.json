@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kenkin1122-ctrl.github.io/mambafx/reports/signal.schema.json",
+  "title": "MambaFX BAZU signal record",
+  "description": "Decision-time sections A-E are immutable. Sections F-G are append-only hindsight. Null values require a reason in the nearest section's null_reasons map; validateRecord performs this cross-field check.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "signal_id",
+    "schema_version",
+    "null_reasons",
+    "software",
+    "config_hash",
+    "config",
+    "flags",
+    "decision_time_iso",
+    "decision_time_epoch_ms",
+    "created_iso",
+    "created_epoch_ms",
+    "contract_id",
+    "market",
+    "market_class",
+    "traded",
+    "account_type",
+    "tick_interval_s",
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G"
+  ],
+  "properties": {
+    "signal_id": { "type": "string", "format": "uuid" },
+    "schema_version": { "type": "string" },
+    "null_reasons": { "type": "object", "additionalProperties": { "type": "string" } },
+    "software": {
+      "type": "object",
+      "required": ["build_id", "commit"],
+      "properties": {
+        "build_id": { "type": ["string", "null"] },
+        "commit": { "type": ["string", "null"] }
+      }
+    },
+    "config_hash": { "type": "string", "minLength": 1 },
+    "config": { "type": "object" },
+    "flags": { "type": "object" },
+    "decision_time_iso": { "type": "string", "format": "date-time" },
+    "decision_time_epoch_ms": { "type": "integer" },
+    "created_iso": { "type": "string", "format": "date-time" },
+    "created_epoch_ms": { "type": "integer" },
+    "contract_id": { "type": ["string", "null"] },
+    "market": { "type": "string", "minLength": 1 },
+    "market_name": { "type": ["string", "null"] },
+    "market_class": { "type": "string" },
+    "traded": { "type": "boolean" },
+    "account_type": { "enum": ["demo", "real", null] },
+    "tick_interval_s": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+    "A": { "$ref": "#/$defs/signalMetadata" },
+    "B": { "$ref": "#/$defs/marketConditions" },
+    "C": { "$ref": "#/$defs/marketState" },
+    "D": { "$ref": "#/$defs/marketStructure" },
+    "E": { "$ref": "#/$defs/prediction" },
+    "F": { "$ref": "#/$defs/settlement" },
+    "G": { "$ref": "#/$defs/postTrade" }
+  },
+  "$defs": {
+    "decisionSection": {
+      "type": "object",
+      "required": ["available_at_decision", "null_reasons"],
+      "properties": {
+        "available_at_decision": { "const": true },
+        "null_reasons": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "hindsightSection": {
+      "type": "object",
+      "required": ["available_at_decision", "null_reasons"],
+      "properties": {
+        "available_at_decision": { "const": false },
+        "null_reasons": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "signalMetadata": {
+      "allOf": [
+        { "$ref": "#/$defs/decisionSection" },
+        {
+          "required": ["timestamp_decision_iso", "timestamp_decision_epoch_ms", "timestamp_entry_iso", "timestamp_entry_epoch_ms", "playbook", "direction", "duration", "duration_mode", "score", "state_transitions", "trigger", "display_label"],
+          "properties": {
+            "timestamp_decision_iso": { "type": "string", "format": "date-time" },
+            "timestamp_decision_epoch_ms": { "type": "integer" },
+            "timestamp_entry_iso": { "type": ["string", "null"] },
+            "timestamp_entry_epoch_ms": { "type": ["integer", "null"] },
+            "direction": { "enum": ["Rise", "Fall"] },
+            "duration": { "type": "object", "required": ["key", "seconds", "deriv_unit"] },
+            "duration_mode": { "type": "object", "required": ["mode", "why"] },
+            "score": { "type": "object", "required": ["value", "label"] },
+            "state_transitions": { "type": "array" }
+          }
+        }
+      ]
+    },
+    "marketConditions": {
+      "allOf": [
+        { "$ref": "#/$defs/decisionSection" },
+        { "required": ["candles", "roles", "indicators", "tick_flow_ratio_60s", "tick_intensity", "tick_gap_max_60s_s", "seconds_since_last_tick"] }
+      ]
+    },
+    "marketState": {
+      "allOf": [
+        { "$ref": "#/$defs/decisionSection" },
+        { "required": ["price_at_decision", "current_candle", "momentum_60s_points", "momentum_300s_points", "immediate_momentum", "regime", "volatility_regime", "decision_to_entry"] }
+      ]
+    },
+    "marketStructure": {
+      "allOf": [
+        { "$ref": "#/$defs/decisionSection" },
+        { "required": ["nearest_support", "nearest_resistance", "zones", "target", "invalidation", "room_ratio", "room_points", "checks"] }
+      ]
+    },
+    "prediction": {
+      "allOf": [
+        { "$ref": "#/$defs/decisionSection" },
+        { "required": ["prediction", "e2", "e3", "e4", "inputs"] }
+      ]
+    },
+    "settlement": {
+      "allOf": [
+        { "$ref": "#/$defs/hindsightSection" },
+        { "required": ["finalised", "contract", "entry", "exit", "result", "censored", "first_touch", "hindsight", "hypothetical_outcomes"] }
+      ]
+    },
+    "postTrade": {
+      "allOf": [
+        { "$ref": "#/$defs/hindsightSection" },
+        { "required": ["finalised", "candles_after_expiry", "price_5m_after", "price_15m_after", "regime_5m_after", "reversal_atr", "did_reverse", "reversal"] }
+      ]
+    }
+  }
+}
