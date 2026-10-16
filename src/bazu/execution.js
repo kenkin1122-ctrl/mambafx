@@ -15,6 +15,8 @@ export function accountInfo() {
     isReal: !window.gridIsVirtual, // unknown is treated as REAL so guards apply
     isDemo: !!window.gridIsVirtual,
     balance: window.gridBalance, currency: window.gridCurrency || 'USD', loginId: window.gridLoginId,
+    scopes: Array.isArray(window.gridScopes) ? window.gridScopes : null,
+    accountType: window.gridIsVirtual === true ? 'demo' : 'real',
   };
 }
 

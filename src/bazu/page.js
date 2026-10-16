@@ -3,7 +3,7 @@
  * BAZU page view. Sends commands to engine.js and renders its state — NO trading rules here.
  */
 import { start as perfStart } from './perf3m.js?v=15';
-import * as E from './engine.js?v=16';
+import * as E from './engine.js?v=17';
 import { clusterZones } from './structure.js?v=15';
 import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=15';
 import { findSwingPoints } from '../../mtf/src/analysis/swingPoints.js';
@@ -44,7 +44,10 @@ function bindOnce() {
   document.getElementById('page-bazu').addEventListener('change', onReportChange);
   document.getElementById('page-bazu').addEventListener('click', onReportAction);
   $('bzMart').onchange = (e) => E.setMartingale(e.target.value);
-  $('bzRealOk').onchange = (e) => E.confirmReal(e.target.checked);
+  $('bzRealOn').onclick = () => openRealDialog({ title: 'Enable REAL trading', phrase: 'REAL MONEY', onOk: (v) => E.enableRealTrading(v) });
+  $('bzRealOff').onclick = () => { E.disableRealTrading(); render(); };
+  $('bzRealAutoOn').onclick = () => openRealDialog({ title: 'Enable REAL Auto / Semi-auto', phrase: 'REAL AUTO', onOk: (v) => E.enableRealAuto(v) });
+  $('bzRealAutoOff').onclick = () => { E.disableRealAuto(); render(); };
   $('bzLogin').onclick = () => (typeof window.gridStartLogin === 'function' ? window.gridStartLogin() : alert('Login is on the Grid page'));
   $('bzConnect').onclick = () => {
     const pick = document.getElementById('gridAcctPick'), v = $('bzAcctSel').value;
@@ -55,13 +58,40 @@ function bindOnce() {
   document.getElementById('page-bazu').addEventListener('click', onAction);
 }
 
+function openRealDialog({ title, phrase, onOk }) {
+  const acc = accountInfo(), L = E.realMode.view().limits;
+  let dlg = $('bzRealDlg');
+  if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'bzRealDlg'; document.body.appendChild(dlg); }
+  const suffix = acc.loginId ? '••••' + esc(String(acc.loginId).slice(-4)) : 'unknown';
+  dlg.innerHTML = `<h3 style="margin-top:0">${esc(title)}</h3>
+    <div>Account type: <b>${acc.connected ? (acc.isReal ? 'REAL' : 'DEMO') : 'not connected'}</b> · login ${suffix}</div>
+    <ul class="mu" style="font-size:12px;padding-left:18px">
+      <li>Max stake ${L.REAL_MAX_STAKE}</li><li>Max open contracts ${L.REAL_MAX_OPEN_CONTRACTS}</li><li>Max exposure ${L.REAL_MAX_EXPOSURE_PCT}% of balance</li>
+      <li>Session loss cap ${L.REAL_SESSION_LOSS_CAP}</li><li>Daily loss cap ${L.REAL_DAILY_LOSS_CAP}</li><li>Max trades per day ${L.REAL_MAX_TRADES_PER_DAY}</li>
+      <li>Cooldown ${Math.round(L.REAL_COOLDOWN_MS / 60000)} min after ${L.REAL_LOSS_STREAK_N} consecutive losses</li></ul>
+    <div class="note">Live money. This applies to this page session only and is never saved. Type <b>${esc(phrase)}</b> to confirm.</div>
+    <input id="bzRealPhrase" autocomplete="off" style="width:100%;margin:8px 0">
+    <div id="bzRealErr" class="dn" style="min-height:1.2em"></div>
+    <div class="row"><button class="btn" id="bzRealCancel">Cancel</button><button class="btn primary" id="bzRealOk">Confirm</button></div>`;
+  dlg.querySelector('#bzRealCancel').onclick = () => dlg.close();
+  dlg.querySelector('#bzRealOk').onclick = () => {
+    const r = onOk(dlg.querySelector('#bzRealPhrase').value);
+    if (r.ok) { dlg.close(); render(); } else dlg.querySelector('#bzRealErr').textContent = r.reason;
+  };
+  if (!dlg.open) dlg.showModal();
+}
+
 function onAction(e) {
   const b = e.target.closest('[data-act]'); if (!b) return;
   const sym = b.dataset.sym, m = E.state.markets.get(sym);
   if (b.dataset.act === 'buy') {
     const d = m.durations.find((x) => `${x.n}${x.unit}` === (document.getElementById('bzTkDur')?.value || ''));
-    E.placeOrder({ symbol: sym, contractType: b.dataset.type, duration: d || m.durations[0], source: 'manual' }).then((r) => {
-      if (r.needsConfirm && confirm('Gate findings:\n- ' + r.findings.join('\n- ') + '\n\nPlace this manual order anyway?')) return E.placeOrder({ symbol: sym, contractType: b.dataset.type, duration: d || m.durations[0], source: 'manual', confirmed: true }).then((r2) => { if (!r2.ok) alert(r2.reason); });
+    const acc = accountInfo(), rv = E.realMode.view();
+    const ticketConfirmed = !acc.isReal || rv.auto || confirm(`REAL ACCOUNT - LIVE MONEY (login ••••${String(acc.loginId || '').slice(-4)})\n${b.dataset.type === 'CALL' ? 'Rise' : 'Fall'} ${sym} ${d ? d.n + d.unit : ''}\nStake ${E.state.curStake || E.state.stake} (cap ${rv.limits.REAL_MAX_STAKE}); loss caps: session ${rv.limits.REAL_SESSION_LOSS_CAP}, daily ${rv.limits.REAL_DAILY_LOSS_CAP}\n\nPlace this order?`);
+    if (!ticketConfirmed) return;
+    const base = { symbol: sym, contractType: b.dataset.type, duration: d || m.durations[0], source: 'manual', ticketConfirmed };
+    E.placeOrder(base).then((r) => {
+      if (r.needsConfirm && confirm('Gate findings:\n- ' + r.findings.join('\n- ') + '\n\nPlace this manual order anyway?')) return E.placeOrder({ ...base, confirmed: true }).then((r2) => { if (!r2.ok) alert(r2.reason); });
       if (!r.ok && !r.needsConfirm) alert(r.reason);
     });
   } else if (b.dataset.act === 'confirm' && m.signal) {
@@ -70,7 +100,7 @@ function onAction(e) {
 }
 
 export function bazuPageInit() {
-  if (!ready) { bindOnce(); ready = true; E.onChange(render); setInterval(() => { syncAccounts(); if (accountInfo().connected) E.attachAccount(); }, 3000); }
+  if (!ready) { bindOnce(); ready = true; E.onChange(render); setInterval(() => { syncAccounts(); E.realMode.monitor(accountInfo()); if (accountInfo().connected) E.attachAccount(); }, 3000); }
   E.resume(); syncAccounts(); render();
   if (!E.state.markets.size && E.state.status === 'idle') E.discover().then(() => E.startLoop()).catch((e) => { E.state.status = 'error: ' + e.message; render(); });
 }
@@ -90,7 +120,8 @@ function whyNoTrade(S, acc) {
   if (!acc.connected) return '⚠ No Deriv account connected - log in, pick an account and press Connect. Trades cannot be placed until then.';
   if (!S.running) return 'Bot stopped - press Start to trade automatically (Auto mode).';
   if (S.mode !== 'auto') return 'Mode is ' + S.mode + ' - choose Auto for automatic trades.';
-  if (!acc.isDemo && !S.realConfirmed) return '⚠ REAL account: tick the real-money confirmation to allow trades.';
+  if (acc.isReal && !E.realMode.isEnabledFor(acc)) return '⚠ REAL account in demo-only mode: press "Enable real trading" (per session) to allow real orders.';
+  if (acc.isReal && !E.realMode.isAutoEnabledFor(acc)) return '⚠ REAL account: Auto/Semi-auto needs its own opt-in ("Enable real Auto")' + (E.realMode.view().reason ? ' · ' + E.realMode.view().reason : '') + '.';
   const last = S.log.find((l) => /blocked|failed/.test(l.msg));
   const open = S.trades.filter((t) => t.status === 'open').length;
   return 'Auto trading ON (' + (acc.isDemo ? 'DEMO' : 'REAL') + ') - waiting for a signal with strength >= 20%. Open: ' + open + (last ? ' · last issue: ' + last.msg : '');
@@ -106,8 +137,18 @@ function renderNow() {
   $('bzStatus').textContent = S.status + (S.scan.active ? ` · ${S.scan.phase} ${S.scan.done}/${S.scan.total}` : '');
   $('bzDot').className = 'dot' + (S.status === 'live' ? ' live' : '');
   const pill = $('bzAcctPill');
-  pill.textContent = acc.connected ? (acc.isReal ? '🔴 REAL' : '🟢 DEMO') : 'NOT CONNECTED';
+  const rv = E.realMode.view(), realOn = acc.connected && acc.isReal && E.realMode.isEnabledFor(acc), sfx = acc.loginId ? '••••' + String(acc.loginId).slice(-4) : '';
+  pill.textContent = acc.connected ? (acc.isReal ? '🔴 REAL' : '🟢 DEMO') + (sfx ? ' ' + sfx : '') : 'NOT CONNECTED';
   pill.className = 'pill ' + (acc.connected ? (acc.isReal ? 'real' : 'demo') : '');
+  const banner = $('bzRealBanner');
+  banner.style.display = acc.connected && acc.isReal ? '' : 'none';
+  banner.className = 'bz-real-banner' + (realOn ? '' : ' off');
+  banner.textContent = realOn ? `REAL ACCOUNT - LIVE MONEY (${sfx})${rv.auto ? ' · AUTO ON' : ''}` : `Real account ${sfx} connected - demo-only mode: real orders are refused until you enable real trading`;
+  $('bzRealOn').style.display = acc.connected && acc.isReal && !realOn ? '' : 'none';
+  $('bzRealOff').style.display = realOn ? '' : 'none';
+  $('bzRealAutoOn').style.display = realOn && !rv.auto ? '' : 'none';
+  $('bzRealAutoOff').style.display = realOn && rv.auto ? '' : 'none';
+  [...$('bzMode').children].forEach((b) => b.classList.toggle('on', b.dataset.m === S.mode));
   $('bzWhy').textContent = whyNoTrade(S, acc);
   $('bzStart').disabled = S.running; $('bzStop').disabled = !S.running;
   const mk = (l, v, c = '') => `<div class="m ${c}"><div class="l">${l}</div><div class="v num">${v}</div></div>`;
@@ -373,9 +414,9 @@ function renderExec(S, acc) {
     <div class="panel"><h3>Quick routing <span class="mu">(strong signals)</span></h3>${tiles.length ? tiles.map((x) => `<div class="sig ok"><div class="row"><b>${esc(x.symbol)}</b><b class="${x.signal.direction === 'Rise' ? 'up' : 'dn'}">${esc(x.signal.direction)}</b><span class="pill">${esc(x.signal.duration)}</span><span class="num">strength ${pct(x.signal.strength, 0)}</span>${S.mode === 'semi' ? `<button class="btn primary" data-act="confirm" data-sym="${esc(x.symbol)}">Confirm trade</button>` : ''}</div></div>`).join('') : '<div class="note">No strong signals right now. Semi-auto/Auto act only on signals above the minimum strength.</div>'}</div>
     <div class="panel" style="margin-top:10px"><h3>Order ticket</h3>${m ? `<div class="row"><b>${esc(m.symbol)}</b><select id="bzTkDur">${m.durations.map((d) => `<option>${d.n}${d.unit}</option>`).join('')}</select>
       <button class="btn buy" data-act="buy" data-type="CALL" data-sym="${esc(m.symbol)}" ${acc.connected ? '' : 'disabled'}>Rise</button><button class="btn sell" data-act="buy" data-type="PUT" data-sym="${esc(m.symbol)}" ${acc.connected ? '' : 'disabled'}>Fall</button></div>
-      <div class="note">Stake ${S.curStake || S.stake}${S.martingale > 1 ? ' (martingale x' + S.martingale + ')' : ''} · ${acc.connected ? (acc.isReal ? '🔴 REAL account (requires the confirm checkbox; stake capped)' : '🟢 DEMO account') : 'connect an account to trade'}. Orders go through Deriv proposal → buy; entry, payout, exit and P/L are Deriv's.</div>` : '<div class="note">Select a market on the Live tab.</div>'}</div>
+      <div class="note">Stake ${S.curStake || S.stake}${S.martingale > 1 ? ' (martingale x' + S.martingale + ')' : ''} · ${acc.connected ? (acc.isReal ? `🔴 REAL ACCOUNT - LIVE MONEY (${acc.loginId ? '••••' + esc(String(acc.loginId).slice(-4)) : '?'}): needs "Enable real trading", an extra confirm click, and stays within the REAL_* limits` : '🟢 DEMO account') : 'connect an account to trade'}. Orders go through Deriv proposal → buy; entry, payout, exit and P/L are Deriv's.</div>` : '<div class="note">Select a market on the Live tab.</div>'}</div>
     </div><div>
     <div class="panel"><h3>Open positions</h3>${tradesTable(S.trades.filter((t) => t.status === 'open'))}${liveContractsHtml(S)}</div>
     <div class="panel" style="margin-top:10px"><h3>Event log</h3><div class="log">${S.log.map((l) => `<div class="${l.kind === 'bad' ? 'dn' : l.kind === 'ok' ? 'up' : l.kind === 'warn' ? '' : 'mu'}">${new Date(l.t).toLocaleTimeString()} · ${esc(l.msg)}</div>`).join('')}</div></div>
-    <div class="panel note" style="margin-top:10px">No stake or trade-count limits are applied. REAL accounts require the confirmation tick.</div></div></div>`;
+    <div class="panel note" style="margin-top:10px">Demo: no stake or trade-count limits. REAL accounts: per-session opt-in, extra confirm click and the REAL_* limits (see Enable real trading).</div></div></div>`;
 }

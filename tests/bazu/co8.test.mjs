@@ -116,7 +116,8 @@ test('recheck cancels on flipped direction, strong opposing momentum, drift and 
   }
   const e = mkEnv({ account: () => ({ connected: true, isReal: true, balance: 10 }), realConfirmed: () => true }); const { signal } = e.book.observe('R_100', mkPred(), 1000);
   const r = await e.choke.execute({ signalId: signal.id, stake: 1 });
-  assert.equal(r.ok, true, 'real accounts trade too (risk checks permitting)');
+  assert.equal(r.ok, false, 'a real account is refused unless the real-mode controller opts in (see accountModes.test.mjs)');
+  assert.equal(e.bought.length, 0);
 });
 test('stale trigger expires and DATA verdicts neither execute nor become zero-valued', async () => {
   const e = mkEnv(); const { signal } = e.book.observe('R_100', mkPred(), 1000);

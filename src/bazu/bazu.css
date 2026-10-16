@@ -67,3 +67,7 @@
 #page-bazu .log{font-size:11px;max-height:220px;overflow:auto}
 #page-bazu .log div{padding:2px 0;border-bottom:1px solid var(--bz-line)}
 #page-bazu .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+#page-bazu .bz-real-banner{background:#b00020;color:#fff;font-weight:800;letter-spacing:.04em;text-align:center;padding:8px 12px;border-radius:6px;margin:6px 0}
+#page-bazu .bz-real-banner.off{background:#4a3b00;color:#ffd866;font-weight:700}
+dialog#bzRealDlg{background:var(--bz-card,#14181f);color:inherit;border:2px solid #b00020;border-radius:8px;max-width:440px}
+dialog#bzRealDlg::backdrop{background:rgba(0,0,0,.6)}

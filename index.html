@@ -2284,9 +2284,13 @@ table.an-table tbody tr:last-child td{border-bottom:none}
       <label class="mu" style="font-size:12px" title="Auto = duration from the signal's expected lifetime; picking one is a manual override">Duration <select id="bzDur"><option value="">Auto (lifetime)</option></select></label>
       <label class="mu" style="font-size:12px" title="Place the opposite of the predicted direction (predict Rise, trade Fall). Analysis is unchanged."><input id="bzReverse" type="checkbox" checked> Reverse trade</label>
       <label class="mu" style="font-size:12px" title="Multiply the stake after each loss; 1 = off">Martingale x <input id="bzMart" type="number" min="1" step="0.1" value="1" style="width:60px"></label>
-      <label class="mu" style="font-size:12px"><input id="bzRealOk" type="checkbox"> I confirm trading REAL money with BAZU (stake capped)</label>
+      <button class="btn" id="bzRealOn" title="Per session only; Bazu starts demo-only on every page load">Enable real trading</button>
+      <button class="btn" id="bzRealOff" style="display:none">Disable real trading</button>
+      <button class="btn" id="bzRealAutoOn" style="display:none" title="Separate opt-in for Auto and Semi-auto on the real account">Enable real Auto</button>
+      <button class="btn" id="bzRealAutoOff" style="display:none">Disable real Auto</button>
     </div>
   </div>
+  <div class="bz-real-banner" id="bzRealBanner" style="display:none" role="alert"></div>
   <div class="note" id="bzWhy" style="margin:6px 0"></div>
 <div class="bz-metrics" id="bzMetrics"></div>
   <div class="bz-tabs" id="bzTabs">
@@ -32991,7 +32995,7 @@ try {
   </div>
 </div>
 
-<script type="module" src="src/bazu/page.js?v=16"></script>
+<script type="module" src="src/bazu/page.js?v=17"></script>
 <script type="module" src="src/trading/fiveTickSignalEngine.js"></script>
 <script type="module" src="src/trading/multiplierHelpers.js"></script>
 <script type="module" src="src/trading/gridSetHelper.js"></script>
