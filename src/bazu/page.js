@@ -14,6 +14,7 @@ import { calibrationSummary, accuracyByDuration } from './calibration3m.js?v=15'
 import { liveContractText } from './expiry3m.js?v=15';
 import { performanceRows, performanceReport, reportCsv, printableHtml, calibrationReport, buildSignalPackage, downloadBlob, savePackageToFolder } from './reports3m.js?v=16';
 import { BASE_CONFIG } from './config3m.js?v=16';
+import { distributionRows, distributionCsv } from './distribution3m.js?v=17';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -163,7 +164,7 @@ function renderNow() {
     mk('Capital exposure', M.exposure.toUpperCase(), M.exposure),
     mk('Markets', M.markets), mk('Strong signals', M.tradable), mk('Completed', M.closed), mk('Failed', M.failed),
   ].join(''); } catch (e) { console.error('BAZU metrics', e); }
-  const part = { live: () => renderLive(S), accuracy: () => renderAccuracy(S), perf: () => renderPerf(S), exec: () => renderExec(S, acc), calib: () => renderCalib(S), signal: () => renderSignalLog() }[tab] || (() => renderExec(S, acc));
+  const part = { live: () => renderLive(S), accuracy: () => renderAccuracy(S), perf: () => renderPerf(S), exec: () => renderExec(S, acc), calib: () => renderCalib(S), signal: () => renderSignalLog(), dist: () => renderDist(S) }[tab] || (() => renderExec(S, acc));
   syncDur(S);
   try { part(); } catch (e) { console.error('BAZU render', e); }
 }
@@ -201,6 +202,19 @@ function vetoHtml0(S, T) {
     <div class="note num">Evaluations ${T.evals} · tradable ${T.tradable} · tradable rate ${pct(rate, 1)}${top[0] ? ` · most common veto: <b>${esc(top[0][0])}</b> (${top[0][1]})` : ''}${S.backfill ? ` · backfill ${S.backfill.requests} requests, ${(S.backfill.ms / 1000).toFixed(0)}s` : ''}</div>
     <table><tr><th>Veto reason</th><th>Count</th><th>Share of evaluations</th></tr>${top.slice(0, 12).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${v}</td><td class="num">${pct(v / T.evals, 1)}</td></tr>`).join('') || '<tr><td colspan="3" class="mu">no evaluations yet</td></tr>'}</table>
     <div class="scroll" style="max-height:220px"><table><tr><th>Market</th><th>Evals</th><th>Tradable rate</th><th>Top vetoes</th></tr>${perMarket.map((m) => `<tr><td>${esc(m.sym)}</td><td class="num">${m.evals}</td><td class="num">${pct(m.tradable / m.evals, 1)}</td><td class="mu">${m.top.map(([k, v]) => `${esc(k)} (${v})`).join('; ')}</td></tr>`).join('')}</table></div></div>`;
+}
+function renderDist(S) {
+  const rows = distributionRows(S.markets), pc = (v) => (v == null ? '-' : (v * 100).toFixed(1) + '%'), n2 = (v, d = 3) => (v == null || Number.isNaN(v) ? '-' : v.toFixed(d));
+  const body = rows.map((r) => {
+    const all = r.windows[r.windows.length - 1], w100 = r.windows[0], c1 = r.candles[0], t = r.trend;
+    return `<tr><td>${esc(r.symbol)}</td><td>${r.ticks}</td><td>${pc(w100.riseShare)}</td><td>${pc(all.riseShare)} <span class="mu">(${pc(all.lo)}-${pc(all.hi)})</span></td><td>${all.up}/${all.down}/${all.flat}</td><td>${all.longestUp}/${all.longestDown}</td><td>${pc(c1.riseShare)} <span class="mu">(n=${c1.n})</span></td><td>${n2(t.varianceRatio)}</td><td>${n2(t.autocorr1)}</td><td>${n2(t.runsZ, 2)}</td><td>${n2(t.hurst)}</td></tr>`;
+  }).join('');
+  $('bzDist').innerHTML = `<div class="panel"><h3>Market Rise/Fall distribution <span class="mu">descriptive only - no trading decision uses this</span></h3>
+<div class="note">Share of up ticks among non-flat ticks with Wilson 95% interval, over buffered ticks. VR(5) below 1 suggests mean reversion, above 1 persistence.</div>
+<div style="margin:8px 0"><button id="bzDistCsv">Export CSV</button> <button id="bzDistJson">Export JSON</button></div>
+<table class="bz-table"><thead><tr><th>Market</th><th>Ticks</th><th>Rise% last 100</th><th>Rise% all (95% CI)</th><th>Up/Down/Flat</th><th>Longest up/down</th><th>Rise% 1m candles</th><th>VR(5)</th><th>AC(1)</th><th>Runs z</th><th>Hurst</th></tr></thead><tbody>${body || '<tr><td colspan="11">No tick data yet.</td></tr>'}</tbody></table></div>`;
+  $('bzDistCsv').onclick = () => downloadBlob('distribution.csv', 'text/csv', distributionCsv(rows));
+  $('bzDistJson').onclick = () => downloadBlob('distribution.json', 'application/json', JSON.stringify(rows, null, 1));
 }
 function renderCalib(S) {
   const range = reportFilters.calib, inRange = (ts) => withinDateRange(ts * 1000, range);
