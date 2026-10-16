@@ -8,7 +8,7 @@
  */
 
 import { predict3m } from './predict3m.js?v=15';
-import { configFor } from './config3m.js?v=15';
+import { configFor } from './config3m.js?v=17';
 import { wilson } from './stats.js?v=15';
 
 /** FNV-1a 32-bit hash of a string or number array; identifies a dataset or config. */

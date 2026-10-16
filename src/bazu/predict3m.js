@@ -8,7 +8,7 @@
  * exit = tick at expiry. Only CLOSED candles feed patterns; the forming trigger candle is provisional and built
  * only from ticks <= decisionEpoch.
  */
-import { configFor, marketClass, spikeInterval } from './config3m.js?v=16';
+import { configFor, marketClass, spikeInterval } from './config3m.js?v=17';
 import { buildFrames } from './candles3m.js?v=15';
 import { PATTERNS, runPatterns, fibPullback } from './patterns3m.js?v=15';
 import { runFactors, structureState } from './factors3m.js?v=15';

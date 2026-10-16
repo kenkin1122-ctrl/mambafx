@@ -11,7 +11,7 @@ import { parseActiveSymbols, parseContractsFor, pickDurations, durationAllowed }
 import { durationKey } from './validation.js?v=15';
 import { buildTradeSignal, modeMayAct, GATE } from './decision.js?v=16';
 import { predict3m } from './predict3m.js?v=16';
-import { configFor } from './config3m.js?v=16';
+import { configFor } from './config3m.js?v=17';
 import { hysteresisPass } from './filters3m.js?v=15';
 import { allowedDurations, durationLabel } from './duration3m.js?v=15';
 import { resolveRecord } from './calibration3m.js?v=15';
@@ -26,7 +26,7 @@ import { createRealMode, REAL_LIMITS_DEFAULT } from './realMode3m.js?v=17';
 import { createSupervisor } from './reconnect3m.js?v=15';
 import { wilson } from './stats.js?v=15';
 import { expiryProbBaseline, sigmaPerTick, reliabilityCurve, brier } from './expiry3m.js?v=15';
-import { createLogger } from './siglogRuntime3m.js?v=16';
+import { createLogger } from './siglogRuntime3m.js?v=17';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;

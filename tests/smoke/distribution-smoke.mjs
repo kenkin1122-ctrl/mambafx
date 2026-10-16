@@ -27,11 +27,14 @@ try {
   await call('Runtime.enable'); await call('Page.enable');
   await call('Page.navigate', { url: base });
   await sleep(4000);
+  for (let i = 0; i < 80 && (await evalJs('typeof window.bazuPageInit')) !== 'function'; i++) await sleep(250);
   await evalJs("showPage('bazu')"); await sleep(1500);
   await evalJs("document.querySelector('#bzTabs [data-t=dist]').click()"); await sleep(1500);
   const text = await evalJs("document.getElementById('bzDist').innerText");
   const tabOn = await evalJs("document.getElementById('bzp-dist').classList.contains('on')");
+  const live = await evalJs("document.querySelector('#bzTabs [data-t=live]').click(); document.getElementById('bzSignal') ? 'ok' : 'missing'");
   const fails = [];
+  if (live !== 'ok') fails.push('live signal panel missing');
   if (!tabOn) fails.push('distribution pane not active (' + (await evalJs("[typeof window.bazuPageInit, document.getElementById('page-bazu').className, document.querySelector('#bzTabs [data-t=dist]') ? 'btn' : 'nobtn'].join()")) + ')');
   if (!/Market Rise\/Fall distribution/.test(text || '')) fails.push('distribution content missing');
   const real = errors.filter((e) => !/WebSocket|ERR_|Failed to load resource|net::|engineOnTick is not defined/i.test(e));
