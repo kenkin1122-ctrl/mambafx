@@ -26,7 +26,7 @@ import { createRealMode, REAL_LIMITS_DEFAULT } from './realMode3m.js?v=17';
 import { createSupervisor } from './reconnect3m.js?v=15';
 import { wilson } from './stats.js?v=15';
 import { expiryProbBaseline, sigmaPerTick, reliabilityCurve, brier } from './expiry3m.js?v=15';
-import { createLogger } from './siglogRuntime3m.js?v=18';
+import { createLogger } from './siglogRuntime3m.js?v=19';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;

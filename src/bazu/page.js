@@ -3,7 +3,7 @@
  * BAZU page view. Sends commands to engine.js and renders its state — NO trading rules here.
  */
 import { start as perfStart } from './perf3m.js?v=15';
-import * as E from './engine.js?v=19';
+import * as E from './engine.js?v=20';
 import { clusterZones } from './structure.js?v=15';
 import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=15';
 import { findSwingPoints } from '../../mtf/src/analysis/swingPoints.js';
@@ -12,7 +12,7 @@ import { accountInfo } from './execution.js?v=15';
 import { GATE } from './decision.js?v=16';
 import { calibrationSummary, accuracyByDuration } from './calibration3m.js?v=15';
 import { liveContractText } from './expiry3m.js?v=15';
-import { performanceRows, performanceReport, reportCsv, printableHtml, calibrationReport, buildSignalPackage, downloadBlob, savePackageToFolder } from './reports3m.js?v=18';
+import { performanceRows, performanceReport, reportCsv, printableHtml, calibrationReport, buildSignalPackage, downloadBlob, savePackageToFolder } from './reports3m.js?v=19';
 import { BASE_CONFIG, configFor } from './config3m.js?v=17';
 import { analyseMtf } from './mtf3m.js?v=18';
 import { distributionRows, distributionCsv } from './distribution3m.js?v=17';
