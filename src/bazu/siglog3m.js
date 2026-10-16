@@ -516,6 +516,9 @@ function reasonCovered(reasons, rel) {
   return Object.keys(reasons).some((r) => {
     if (r === rel || rel.startsWith(r + '.')) return true;
     if (!r.includes('*')) return false;
+    // array indices are stripped from the validated path, so a ".*" index segment may match nothing
+    const noIdx = r.replace(/\.\*(?=\.|$)/g, '');
+    if (noIdx === rel || rel.startsWith(noIdx + '.')) return true;
     const re = new RegExp('^' + r.split('*').map((x) => x.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[^.]+') + '(\\..*)?$');
     return re.test(rel);
   });

@@ -73,3 +73,12 @@ test('NaN diagnostics never break record validation; invalid records are skipped
   assert.equal(pack.count, 1);
   assert.equal(pack.skipped.length, 1);
 });
+
+test('nulls inside array elements are covered by wildcard reasons (state_transitions.from, hypothetical_outcomes)', () => {
+  const f = findSignal({});
+  const rec = buildRecord({ sig: f.sig, cfg: f.cfg, symbol: f.symbol, name: f.symbol, prices: f.w.p, epochs: f.w.e, remote: f.remote, trade: null, now: 1700010000000 });
+  rec.A.state_transitions = [{ at_epoch_s: 1, from: null, to: 'ARMED', reason: 'x' }];
+  rec.A.null_reasons['state_transitions.*.from'] = 'first state has no predecessor';
+  rec.F = { ...rec.F, hypothetical_outcomes: [{ duration: '3m', traded_direction: null, opposite_direction: null }], null_reasons: { ...rec.F.null_reasons, 'hypothetical_outcomes.*.traded_direction': 'x', 'hypothetical_outcomes.*.opposite_direction': 'x' } };
+  assert.deepEqual(validateRecord(rec).filter((e) => /state_transitions|hypothetical/.test(e)), []);
+});

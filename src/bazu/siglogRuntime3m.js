@@ -1,6 +1,6 @@
 // Signal logger: connects the engine to the record builder and the store. Logging only - it reads engine state, never changes it.
 // Every entry point swallows its own errors so a logger fault can never reach trading.
-import { buildRecord, finalizeF, finalizeG, gReady, entryExitIdx } from './siglog3m.js?v=18';
+import { buildRecord, finalizeF, finalizeG, gReady, entryExitIdx } from './siglog3m.js?v=19';
 import { openStore } from './siglogStore3m.js?v=16';
 import { configFor } from './config3m.js?v=17';
 
