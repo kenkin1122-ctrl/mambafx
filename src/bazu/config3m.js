@@ -22,6 +22,8 @@ export const BASE_CONFIG = Object.freeze({
   SCORE_MIN: 0.45,
   AGREE_MIN: 3,
   // ---- Change Order 8: price-action confirmation, family confluence, dynamic signals ----
+  MTF_LOG_ONLY: true, // multi-timeframe analysis is logged and shown only; no decision reads it
+  MTF_GATE: false, // reserved: intentionally not consumed by any decision path
   CONFLUENCE_MODE: 'families', // families | legacy (legacy = the old "AGREE_MIN of N features" rule, no momentum gate; kept for replay)
   FAMILIES_AGREE_MIN: 3,       // agreeing families needed (of the families available for the market class)
   AGREE_RATIO_MIN: 0.6,        // agreeing share of non-neutral families

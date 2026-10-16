@@ -12,9 +12,10 @@ import { agreement, regimeOf } from './confluence3m.js?v=15';
 import { shadowOutcome } from './calibration3m.js?v=15';
 import { tickGapsConstant, roomChecks } from './filters3m.js?v=15';
 import { bucketCandles } from './timeframes.js?v=15';
-import { settle, marketClass } from './config3m.js?v=16';
+import { settle, marketClass } from './config3m.js?v=17';
 import { spikeContext } from './predict3m.js?v=16';
 import { expiryProbBaseline, sigmaPerTick } from './expiry3m.js?v=15';
+import { analyseMtf } from './mtf3m.js?v=17';
 
 export const SCHEMA_VERSION = '1.0.0';
 const fin = Number.isFinite;
@@ -389,8 +390,10 @@ export function buildRecord(inp) {
   });
 
   for (const section of [H, A, B, C, D, Eo]) fillNullReasons(section);
+  const mtf = cfg.MTF_LOG_ONLY ? safe(() => analyseMtf({ remote: inp.remote, prices: P, epochs: E, decisionEpoch: dE, cfg, signalDir: dir })) : null;
   return {
     ...H, A, B, C, D, E: Eo,
+    ...(mtf ? { mtf } : {}),
     F: { ...sect(false), pending: true, status: 'pending: filled after the contract settles' },
     G: { ...sect(false), pending: true, status: 'pending: filled after the post-trade window closes', window_end_epoch: null, null_reasons: { window_end_epoch: 'not available: trade not closed yet' } },
     _decision: { epoch: dE, price, dir, atr: fin(atr) ? atr : null, trigger_secs: tsec, bucket, durKey: sig.duration, durSec: sig.durationSec, target: sig.lifetime?.target ?? null, invalid: sig.lifetime?.invalid ?? null, shadowDs: rec?.shadowDs || (dp ? [{ unit: dp.unit, n: dp.n, key: sig.duration }] : []) },

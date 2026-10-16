@@ -4,7 +4,7 @@
  * lifetime calibration (realised first-touch time of the target / invalidation level).
  * Entry = first tick after the decision; exit = tick at expiry (tick count, or first tick at/after expiry time).
  */
-import { settle } from './config3m.js?v=15';
+import { settle } from './config3m.js?v=17';
 import { wilson } from './stats.js?v=15';
 import { pathStats } from './estimators3m.js?v=15';
 

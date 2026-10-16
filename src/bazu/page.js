@@ -3,7 +3,7 @@
  * BAZU page view. Sends commands to engine.js and renders its state — NO trading rules here.
  */
 import { start as perfStart } from './perf3m.js?v=15';
-import * as E from './engine.js?v=17';
+import * as E from './engine.js?v=18';
 import { clusterZones } from './structure.js?v=15';
 import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=15';
 import { findSwingPoints } from '../../mtf/src/analysis/swingPoints.js';
@@ -12,8 +12,9 @@ import { accountInfo } from './execution.js?v=15';
 import { GATE } from './decision.js?v=16';
 import { calibrationSummary, accuracyByDuration } from './calibration3m.js?v=15';
 import { liveContractText } from './expiry3m.js?v=15';
-import { performanceRows, performanceReport, reportCsv, printableHtml, calibrationReport, buildSignalPackage, downloadBlob, savePackageToFolder } from './reports3m.js?v=16';
-import { BASE_CONFIG } from './config3m.js?v=16';
+import { performanceRows, performanceReport, reportCsv, printableHtml, calibrationReport, buildSignalPackage, downloadBlob, savePackageToFolder } from './reports3m.js?v=17';
+import { BASE_CONFIG, configFor } from './config3m.js?v=17';
+import { analyseMtf } from './mtf3m.js?v=17';
 import { distributionRows, distributionCsv } from './distribution3m.js?v=17';
 
 const $ = (id) => document.getElementById(id);
@@ -349,8 +350,20 @@ function renderLive(S) {
       <div class="note num">Signal strength ${pct(sig.strength, 0)} · ${sig.agree}/${sig.total} analysis features agree${sig.quote ? ` · Deriv quote: stake ${sig.quote.ask}, payout ${sig.quote.payout}` : ''}</div>
       ${lifetimeHtml(sig)}${reasoningHtml(sig)}${roomHtml(sig)}<div class="note"><b>${esc(sig.playbook || 'analysis')}</b>${sig.provisional ? ' (provisional trigger)' : ''} · ${esc(sig.reason || '')}</div>${(sig.reasons || []).length ? `<div class="note">${sig.reasons.map(esc).join('; ')}</div>` : ''}<div class="note">Drivers: ${(sig.drivers || []).map(esc).join(', ') || '-'}. Decided ${sig.decisionTs ? new Date(sig.decisionTs * 1000).toLocaleTimeString() : ''} for a ${esc(sig.duration)} Rise/Fall (exit vs entry; a tie loses). Score is a rule-based confluence, not a win probability.</div></div>`
     : `<div class="sig"><b>${esc(E.marketGate(m).label)}</b><div class="note">Collecting ticks to analyse this market.</div></div>`;
+  $('bzSignal').insertAdjacentHTML('beforeend', mtfHtml(m, sig));
 }
 
+const mtfCache = new Map();
+function mtfHtml(m, sig) {
+  const cfg = configFor(m.symbol);
+  if (!cfg.MTF_LOG_ONLY || !m.epochs.length) return '';
+  const dir = sig && sig.direction ? (sig.direction === 'Rise' ? 1 : -1) : 0, key = m.symbol + '|' + dir, hit = mtfCache.get(key), now = Date.now();
+  let r = hit && now - hit.at < 5000 ? hit.r : null;
+  if (!r) { try { r = analyseMtf({ remote: m.remote || {}, prices: m.prices, epochs: m.epochs, decisionEpoch: m.epochs[m.epochs.length - 1], cfg, signalDir: dir }); } catch { return ''; } mtfCache.set(key, { at: now, r }); }
+  const f = (v) => (Number.isFinite(v) ? v.toFixed(2) : '-');
+  const rows = Object.entries(r.frames).map(([k, g]) => `<tr><td>${k}</td><td>${g.n}</td><td>${esc(g.regime)}</td><td>${esc(g.playbook)}</td><td>${g.direction > 0 ? 'up' : g.direction < 0 ? 'down' : '-'}</td><td>${f(g.varianceRatio)}</td><td>${f(g.hurst)}</td><td>${dir && g.regime !== 'insufficient' ? (g.aligned ? 'yes' : 'no') : '-'}</td></tr>`).join('');
+  return `<div class="note" id="bzMtfGrid"><b>Multi-timeframe (shadow, logged only; does not affect the signal)</b>${dir ? ` · ${r.alignedCount}/${r.usedCount} frames aligned` : ''}<table class="bz-table"><thead><tr><th>Frame</th><th>N</th><th>Regime</th><th>Playbook</th><th>Slope</th><th>VR(5)</th><th>Hurst</th><th>Aligned</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
 function drawChart(m) {
   const cv = $('bzChart'), ctx = cv.getContext('2d'), W = cv.width, H = cv.height, tf = timeframe(tfKey);
   ctx.clearRect(0, 0, W, H);

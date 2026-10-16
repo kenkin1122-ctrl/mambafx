@@ -4,7 +4,7 @@
  */
 import { wilson } from './stats.js?v=16';
 import { zipStoreAsync, sha256Hex, utf8 } from './zip3m.js?v=16';
-import { SCHEMA_VERSION, validateRecord } from './siglog3m.js?v=16';
+import { SCHEMA_VERSION, validateRecord } from './siglog3m.js?v=17';
 
 const fin = Number.isFinite;
 const csvCell = (x) => `"${String(x ?? '').replace(/"/g, '""')}"`;

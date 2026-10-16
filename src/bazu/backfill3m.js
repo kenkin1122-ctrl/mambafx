@@ -4,7 +4,7 @@
  * its own frames are in), with bounded concurrency and a minimum gap between requests (Deriv rate limits).
  * `send` is injected (engine's socket, or a test/measurement socket).
  */
-import { configFor } from './config3m.js?v=15';
+import { configFor } from './config3m.js?v=17';
 
 export const parseCandles = (r) => (r.candles || []).map((x) => ({ epoch: Number(x.epoch), open: +x.open, high: +x.high, low: +x.low, close: +x.close }));
 
