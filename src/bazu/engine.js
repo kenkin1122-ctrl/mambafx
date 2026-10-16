@@ -21,7 +21,8 @@ import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=15';
 import { start as perfStart, mark as perfMark, startMonitors } from './perf3m.js?v=15';
 import { accountInfo, watchContracts, requestContractUpdate } from './execution.js?v=15';
 import { createBook, S as SS } from './signalBook3m.js?v=15';
-import { createChoke } from './choke3m.js?v=15';
+import { createChoke } from './choke3m.js?v=17';
+import { createRealMode, REAL_LIMITS_DEFAULT } from './realMode3m.js?v=17';
 import { createSupervisor } from './reconnect3m.js?v=15';
 import { wilson } from './stats.js?v=15';
 import { expiryProbBaseline, sigmaPerTick, reliabilityCurve, brier } from './expiry3m.js?v=15';
@@ -34,7 +35,7 @@ const TRADES_KEY = 'bazu_trades_v1';
 
 export const state = {
   status: 'idle', mode: 'manual', running: false, stake: 1, curStake: 1, martingale: 1, reverse: true, limits: { ...DEFAULT_LIMITS },
-  markets: new Map(), trades: [], log: [], scan: { done: 0, total: 0, active: false }, realConfirmed: false,
+  markets: new Map(), trades: [], log: [], scan: { done: 0, total: 0, active: false },
   selected: null, signals: new Map(), manualKey: null, records: [], vetoStats: {}, backfill: null,
   contra: { directional: 0, opposing: 0, tradable: 0, tradableOpposing: 0, byPlaybook: {} },
 };
@@ -338,10 +339,20 @@ function predictFor(m, wall = true) {
   const n = m.epochs.length;
   return predict3m({ symbol: m.symbol, prices: m.prices.slice(-6000), epochs: m.epochs.slice(-6000), remote: m.remote || {}, decisionEpoch: m.epochs[n - 1], allowed: allowedFor(m), manualKey: state.manualKey, wallNow: wall ? marketNow(m.symbol) : null });
 }
+/** Per-session real-account opt-ins (never persisted: every page load starts demo only). */
+export const realMode = createRealMode({
+  limits: REAL_LIMITS_DEFAULT,
+  onTrip: (reason) => {
+    if (state.mode !== 'manual') state.mode = 'manual';
+    log(`Real-account Auto/Semi-auto disabled: ${reason}. Re-enable it explicitly to resume.`, 'bad'); emit();
+  },
+});
+const dataAgeMs = (sym) => { const m = state.markets.get(sym); return m && m.lastTickAt ? Date.now() - m.lastTickAt : null; };
 const choke = createChoke({
   book, cfgFor: (sym) => configFor(sym), now: marketNow, log: (msg, kind) => log(msg, kind),
   predictNow: (sym) => { const m = state.markets.get(sym); return m && m.prices.length >= 300 ? predictFor(m) : null; },
-  account: accountInfo, riskState, limits: state.limits, realConfirmed: () => state.realConfirmed,
+  account: accountInfo, riskState, limits: state.limits, realConfirmed: () => realMode.isEnabledFor(accountInfo()),
+  real: realMode, trades: () => state.trades, dataAgeMs,
   durationFor: (sig) => { const m = state.markets.get(sig.symbol); return (m?.allowedList || []).find((x) => durationLabel(x) === sig.durationKey) || null; },
 });
 const NOISY = new Set([SS.ARMED, SS.DETECTED]);
@@ -358,7 +369,7 @@ function applyHysteresis(sym, res) {
   res.minStrength = ok ? Math.min(min, res.strength) : Math.max(min, res.strength + 1e-9);
 }
 export async function signalTick() {
-  if (sigBusy) return; sigBusy = true; startMonitors(); reconcileOpen();
+  if (sigBusy) return; sigBusy = true; startMonitors(); reconcileOpen(); realMode.monitor(accountInfo());
   const endPass = perfStart('signalTick');
   try {
     let sliceT = performance.now();
@@ -416,7 +427,10 @@ export function setStake(v) { state.stake = Math.max(0.35, Number(v) || 1); stat
 export function setReverse(on) { state.reverse = !!on; log(on ? 'Reverse mode ON: trades the opposite of the prediction' : 'Reverse mode OFF: trades the predicted direction'); emit(); }
 export function setMartingale(v) { const n = Number(v); state.martingale = n > 1 ? n : 1; state.curStake = state.stake; emit(); }
 const nextStake = () => +(Math.max(0.35, state.curStake || state.stake)).toFixed(2);
-export function confirmReal(v) { state.realConfirmed = !!v; emit(); }
+export function enableRealTrading(phrase) { const r = realMode.enable(accountInfo(), phrase); log(r.ok ? 'Real trading ENABLED for this session (demo-only on reload)' : `Real trading not enabled: ${r.reason}`, r.ok ? 'warn' : 'bad'); emit(); return r; }
+export function disableRealTrading() { const r = realMode.disable(); log('Real trading disabled', 'ok'); emit(); return r; }
+export function enableRealAuto(phrase) { const r = realMode.enableAuto(accountInfo(), phrase); log(r.ok ? 'Real Auto/Semi-auto ENABLED for this session' : `Real Auto not enabled: ${r.reason}`, r.ok ? 'warn' : 'bad'); emit(); return r; }
+export function disableRealAuto() { const r = realMode.disableAuto(); log('Real Auto/Semi-auto disabled', 'ok'); emit(); return r; }
 
 // ---------- trades ----------
 function loadTrades() { try { state.trades = JSON.parse(localStorage.getItem(TRADES_KEY) || '[]'); } catch { state.trades = []; } }
@@ -441,7 +455,7 @@ function recordTrade({ res, symbol, contractType, duration, stake, source, signa
   const t = {
     id: String(res.buy.contract_id), market: symbol, name: m?.name, contractType, direction: contractType === 'CALL' ? 'Rise' : 'Fall',
     duration: durationKey(duration), stake, buyPrice: res.buy.buy_price, payout: res.buy.payout ?? res.proposal.payout,
-    entry: null, exit: null, profit: null, status: 'open', isReal: res.isReal, source, ts: Date.now(),
+    entry: null, exit: null, profit: null, status: 'open', isReal: res.isReal, account_type: res.isReal ? 'real' : 'demo', source, ts: Date.now(),
     predicted: signal?.predicted ?? null, strength: signal?.strength ?? null, drivers: signal?.drivers || [], signalId: signal?.signalId || null,
     playbook: signal?.playbook || null,
   };
@@ -451,9 +465,9 @@ function recordTrade({ res, symbol, contractType, duration, stake, source, signa
   emit(); return t;
 }
 /** Manual ticket order. Goes through the choke point; gate findings must be confirmed (`confirmed: true`). */
-export async function placeOrder({ symbol, contractType, duration, source = 'manual', stake = nextStake(), confirmed = false }) {
+export async function placeOrder({ symbol, contractType, duration, source = 'manual', stake = nextStake(), confirmed = false, ticketConfirmed = false }) {
   const m = state.markets.get(symbol);
-  const r = await choke.manual({ symbol, contractType, duration, stake, confirmed });
+  const r = await choke.manual({ symbol, contractType, duration, stake, confirmed, ticketConfirmed });
   if (!r.ok) { if (!r.needsConfirm) log(`${symbol} blocked: ${r.reason}`, 'warn'); return r; }
   return { ok: true, trade: recordTrade({ res: r.res, symbol, contractType, duration, stake, source, signal: null, m }) };
 }

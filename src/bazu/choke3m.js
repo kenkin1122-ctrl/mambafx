@@ -20,6 +20,19 @@ import { MOMENTUM_STATES } from './momentum3m.js?v=15';
 export function createChoke(deps) {
   const buy = deps.buy || deriBuy, now = () => deps.now(), log = deps.log || (() => {});
 
+  /**
+   * Account-mode gate. Only a confirmed demo account (isReal === false) passes freely; a real or unknown account needs the
+   * per-session opt-ins and the REAL_* limits from the real-mode controller. A missing controller refuses (fail closed).
+   * Returns { ok, reason?, release } - release() frees the in-flight reservation.
+   */
+  function accountGate(acc, { source, stake, symbol, ticketConfirmed }) {
+    if (acc.isReal === false) return { ok: true, release: () => {} };
+    if (!deps.real) return { ok: false, reason: 'Real trading is off (demo only mode)', release: () => {} };
+    const g = deps.real.gate({ source, stake, acc, trades: deps.trades ? deps.trades() : [], dataAgeMs: deps.dataAgeMs ? deps.dataAgeMs(symbol) : null, ticketConfirmed });
+    return g.ok ? { ok: true, release: deps.real.reserve(stake) } : { ...g, release: () => {} };
+  }
+  const tripReal = (acc, reason) => { if (acc.isReal !== false) deps.real?.trip(reason); };
+
   /** Re-evaluate everything that can change between detection and purchase. { ok, cancel, reason }. */
   function recheck(sig, pred) {
     const cfg = deps.cfgFor(sig.symbol);
@@ -57,6 +70,7 @@ export function createChoke(deps) {
     const claim = deps.book.beginExecution(signalId, t);
     if (!claim.ok) return refuse('claim', claim.reason);
     const sig = claim.signal, release = (reason) => { deps.book.finishExecution(signalId, false, { reason }, t); };
+    let freeReservation = () => {};
     try {
       const v = validity(sig, t);
       if (!v.ok) { sig.token.cancelled = true; sig.token.reason = v.reason; deps.book.finishExecution(signalId, false, { reason: v.reason, kind: v.kind }, t); return refuse('validity', v.reason); }
@@ -73,6 +87,9 @@ export function createChoke(deps) {
       if (open >= (cfg0.MAX_OPEN_PER_MARKET ?? Infinity)) { release('open trade on this market'); return refuse('risk', `already ${open} open trade(s) on ${sig.symbol}`); }
       const risk = checkOrder({ stake, market: sig.symbol, isReal: acc.isReal, realConfirmed: deps.realConfirmed(), now: t * 1000 }, deps.riskState(), deps.limits);
       if (!risk.ok) { release(risk.reason); return refuse('risk', risk.reason); }
+      const ag = accountGate(acc, { source, stake, symbol: sig.symbol });
+      if (!ag.ok) { release(ag.reason); return refuse('account', ag.reason); }
+      freeReservation = ag.release;
       const base = sig.dir > 0 ? 'CALL' : 'PUT', contractType = reverse ? (base === 'CALL' ? 'PUT' : 'CALL') : base;
       const duration = deps.durationFor(sig);
       if (!duration) { release('no duration'); return refuse('validity', 'no allowed duration for this signal'); }
@@ -81,12 +98,13 @@ export function createChoke(deps) {
       return { ok: true, res, contractType, signal: sig, source };
     } catch (e) {
       if (deps.book.get(signalId)?.state === S.EXECUTING) deps.book.finishExecution(signalId, false, { reason: e.message }, now());
+      tripReal(acc, `choke error: ${e.message}`);
       return refuse('buy', e.message);
-    }
+    } finally { freeReservation(); }
   }
 
   /** Manual ticket order: needs no signal, still passes the account + risk checks. Gate findings are returned and must be confirmed. */
-  async function manual({ symbol, contractType, duration, stake, confirmed = false }) {
+  async function manual({ symbol, contractType, duration, stake, confirmed = false, ticketConfirmed = false }) {
     const acc = deps.account(), cfg = deps.cfgFor(symbol);
     if (!acc.connected) return { ok: false, stage: 'account', reason: 'Connect a Deriv account first' };
     const risk = checkOrder({ stake, market: symbol, isReal: acc.isReal, realConfirmed: deps.realConfirmed(), now: now() * 1000 }, deps.riskState(), deps.limits);
@@ -102,10 +120,12 @@ export function createChoke(deps) {
       }
     } catch (e) { findings.push(`gate could not be evaluated: ${e.message}`); }
     if (findings.length && !confirmed) return { ok: false, stage: 'confirm', needsConfirm: true, findings, reason: 'gate findings need explicit confirmation' };
+    const ag = accountGate(acc, { source: 'manual', stake, symbol, ticketConfirmed });
+    if (!ag.ok) return { ok: false, stage: 'account', reason: ag.reason };
     try {
       const res = await buy({ symbol, contractType, stake, duration, guard: () => {} });
       return { ok: true, res, contractType, manual: true, findings };
-    } catch (e) { return { ok: false, stage: 'buy', reason: e.message }; }
+    } catch (e) { return { ok: false, stage: 'buy', reason: e.message }; } finally { ag.release(); }
   }
 
   return { execute, manual, recheck, validity };
