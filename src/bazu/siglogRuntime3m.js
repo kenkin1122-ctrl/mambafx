@@ -1,7 +1,7 @@
 // Signal logger: connects the engine to the record builder and the store. Logging only - it reads engine state, never changes it.
 // Every entry point swallows its own errors so a logger fault can never reach trading.
 import { buildRecord, finalizeF, finalizeG, gReady, entryExitIdx } from './siglog3m.js?v=19';
-import { openStore } from './siglogStore3m.js?v=16';
+import { openStore } from './siglogStore3m.js?v=17';
 import { configFor } from './config3m.js?v=17';
 
 const DUR = /^(\d+)([tsmhd])$/;
@@ -9,7 +9,7 @@ const DUR = /^(\d+)([tsmhd])$/;
 export function createLogger({ store = openStore(), getMarket, getTrades = () => [], now = () => Date.now(), buildMeta = () => globalThis.MAMBAFX_BUILD || {}, configForMarket = configFor } = {}) {
   const stat = { errors: 0, lastError: null, written: 0, skipped: 0 };
   const seen = new Set(), pruneAt = { t: 0 }, sweepAt = { t: 0 };
-  const queue = [];
+  const queue = [], QUEUE_MAX = 40, MEM_MAX_RECORDS = 2000;
   let draining = false;
   const cfgOf = (symbol) => configForMarket(symbol);
   const enabled = (symbol) => cfgOf(symbol || 'R_100').SIGNAL_LOGGING_ENABLED !== false;
@@ -27,7 +27,7 @@ export function createLogger({ store = openStore(), getMarket, getTrades = () =>
             store.put(r); stat.written++;
             if (job.onBuilt) job.onBuilt(r);
             const t = now(), cfg = job.input.cfg;
-            if (t - pruneAt.t > 60000) { pruneAt.t = t; store.prune({ maxRecords: cfg.SIGNAL_LOG_MAX_RECORDS, retentionDays: cfg.SIGNAL_LOG_RETENTION_DAYS, now: t }); }
+            if (t - pruneAt.t > 60000) { pruneAt.t = t; store.prune({ maxRecords: Math.min(cfg.SIGNAL_LOG_MAX_RECORDS, MEM_MAX_RECORDS), retentionDays: cfg.SIGNAL_LOG_RETENTION_DAYS, now: t }); }
           } catch (e) { stat.errors++; stat.lastError = String(e && e.message || e); }
         }
       } finally {
@@ -43,6 +43,12 @@ export function createLogger({ store = openStore(), getMarket, getTrades = () =>
     // Capture only bounded, decision-time market data synchronously; expensive frame/indicator work runs in idle time.
     const prices = m.prices.slice(-6000), epochs = m.epochs.slice(-6000), remote = {};
     for (const [k, candles] of Object.entries(m.remote || {})) remote[k] = candles.map((c) => ({ ...c }));
+    // Memory guard: under load the idle drain can lag; drop the oldest untraded jobs rather than growing without bound.
+    while (queue.length >= QUEUE_MAX) {
+      const i = queue.findIndex((j) => !j.input.trade);
+      if (i < 0) break;
+      queue.splice(i, 1); stat.skipped++;
+    }
     queue.push({ input: { sig: s, cfg, symbol: m.symbol, name: m.name, prices, epochs, remote, trade: trade ? { ...trade } : null, rec: rec ? JSON.parse(JSON.stringify(rec)) : null, meta: { ...buildMeta() }, now: now() } });
     scheduleDrain();
   }
