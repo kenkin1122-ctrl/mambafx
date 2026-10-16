@@ -30,12 +30,29 @@ export function openStore({ idb = globalThis.indexedDB, flushDelay = null } = {}
     } catch (e) { stat.writeErrors++; stat.lastError = String(e); resolve(); }
   });
 
-  function load() {
+  // Load only the newest records (bounded memory); older ones are deleted so a huge legacy store can never blow the heap.
+  function load(limit = 2000) {
     return new Promise((res) => {
       try {
-        const r = db.transaction(STORE).objectStore(STORE).getAll();
-        r.onsuccess = () => { for (const rec of r.result || []) if (!mem.has(rec.signal_id)) mem.set(rec.signal_id, rec); res(); };
+        const tx = db.transaction(STORE, 'readwrite'), os = tx.objectStore(STORE);
+        if (typeof os.count !== 'function' || typeof os.index !== 'function') {
+          const g = os.getAll();
+          g.onsuccess = () => { for (const rec of g.result || []) if (!mem.has(rec.signal_id)) mem.set(rec.signal_id, rec); res(); };
+          g.onerror = () => { stat.writeErrors++; stat.lastError = String(g.error || 'read failed'); res(); };
+          return;
+        }
+        let n = 0;
+        const r = os.index('decision_time_epoch_ms').openCursor(null, 'prev');
+        r.onsuccess = () => {
+          const c = r.result;
+          if (!c) return;
+          if (n < limit) { n++; if (!mem.has(c.value.signal_id)) mem.set(c.value.signal_id, c.value); }
+          else c.delete();
+          c.continue();
+        };
         r.onerror = () => { stat.writeErrors++; stat.lastError = String(r.error || 'read failed'); res(); };
+        tx.oncomplete = () => res();
+        tx.onerror = tx.onabort = () => { stat.writeErrors++; stat.lastError = String(tx.error || 'read failed'); res(); };
       } catch (e) { stat.writeErrors++; stat.lastError = String(e); res(); }
     });
   }

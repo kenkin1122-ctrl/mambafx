@@ -11,7 +11,8 @@ export const parseCandles = (r) => (r.candles || []).map((x) => ({ epoch: Number
 /** Merge candle arrays by epoch (later wins), sorted. */
 export function mergeCandles(a, b) {
   const m = new Map(); for (const c of a || []) m.set(c.epoch, c); for (const c of b || []) m.set(c.epoch, c);
-  return [...m.values()].sort((x, y) => x.epoch - y.epoch);
+  const out = [...m.values()].sort((x, y) => x.epoch - y.epoch);
+  return out.length > 1500 ? out.slice(-1500) : out;
 }
 
 /** Requests needed: one per market per frame. */

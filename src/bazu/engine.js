@@ -15,7 +15,7 @@ import { configFor } from './config3m.js?v=17';
 import { hysteresisPass } from './filters3m.js?v=15';
 import { allowedDurations, durationLabel } from './duration3m.js?v=15';
 import { resolveRecord } from './calibration3m.js?v=15';
-import { backfill, mergeCandles, parseCandles } from './backfill3m.js?v=15';
+import { backfill, mergeCandles, parseCandles } from './backfill3m.js?v=16';
 import { decimalsFromPip } from './timeframes.js?v=15';
 import { checkOrder, DEFAULT_LIMITS, exposureLevel } from './risk.js?v=15';
 import { start as perfStart, mark as perfMark, startMonitors } from './perf3m.js?v=15';
@@ -26,7 +26,7 @@ import { createRealMode, REAL_LIMITS_DEFAULT } from './realMode3m.js?v=17';
 import { createSupervisor } from './reconnect3m.js?v=15';
 import { wilson } from './stats.js?v=15';
 import { expiryProbBaseline, sigmaPerTick, reliabilityCurve, brier } from './expiry3m.js?v=15';
-import { createLogger } from './siglogRuntime3m.js?v=19';
+import { createLogger } from './siglogRuntime3m.js?v=20';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;
