@@ -23,12 +23,14 @@ function slopeDir(closes, n = 20) {
   return last > mean ? 1 : last < mean ? -1 : 0;
 }
 
+const clean = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, typeof v === 'number' && !Number.isFinite(v) ? null : v]));
+
 export function analyseFrames(framesByName, signalDir = 0) {
   const grid = {};
   for (const k of MTF_FRAMES) {
     const closes = (framesByName[k] || []).map((c) => c.close).filter(Number.isFinite);
     if (closes.length < MIN_CLOSES) { grid[k] = { n: closes.length, regime: 'insufficient', playbook: 'none', direction: 0, aligned: false }; continue; }
-    const d = trendDiagnostics(closes), regime = classifyRegime(d), direction = slopeDir(closes);
+    const d = clean(trendDiagnostics(closes)), regime = classifyRegime(d), direction = slopeDir(closes);
     grid[k] = { n: closes.length, varianceRatio: d.varianceRatio, autocorr1: d.autocorr1, runsZ: d.runsZ, hurst: d.hurst, regime, playbook: playbookFor(regime), direction, aligned: signalDir ? direction === signalDir : false };
   }
   const used = MTF_FRAMES.filter((k) => grid[k].regime !== 'insufficient');
