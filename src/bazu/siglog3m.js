@@ -15,7 +15,7 @@ import { bucketCandles } from './timeframes.js?v=15';
 import { settle, marketClass } from './config3m.js?v=17';
 import { spikeContext } from './predict3m.js?v=16';
 import { expiryProbBaseline, sigmaPerTick } from './expiry3m.js?v=15';
-import { analyseMtf } from './mtf3m.js?v=17';
+import { analyseMtf } from './mtf3m.js?v=18';
 
 export const SCHEMA_VERSION = '1.0.0';
 const fin = Number.isFinite;
@@ -537,7 +537,7 @@ export function validateRecord(rec) {
     const owner = { name: s, reasons: rec[s].null_reasons || {} };
     for (const [k, x] of Object.entries(rec[s])) { if (k === 'null_reasons') continue; walk(x, `.${k}`, owner); }
   }
-  for (const [k, x] of Object.entries(rec)) if (!['null_reasons', 'config', '_decision', 'A', 'B', 'C', 'D', 'E', 'F', 'G'].includes(k)) walk(x, '.' + k, { name: 'header', reasons: rec.null_reasons || {} });
+  for (const [k, x] of Object.entries(rec)) if (!['null_reasons', 'config', '_decision', 'mtf', 'A', 'B', 'C', 'D', 'E', 'F', 'G'].includes(k)) walk(x, '.' + k, { name: 'header', reasons: rec.null_reasons || {} });
   if (rec.contract_id === null && !rec.null_reasons?.contract_id) errs.push('contract_id null without reason');
   return errs;
 }

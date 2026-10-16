@@ -4,7 +4,7 @@
  */
 import { wilson } from './stats.js?v=16';
 import { zipStoreAsync, sha256Hex, utf8 } from './zip3m.js?v=16';
-import { SCHEMA_VERSION, validateRecord } from './siglog3m.js?v=17';
+import { SCHEMA_VERSION, validateRecord } from './siglog3m.js?v=18';
 
 const fin = Number.isFinite;
 const csvCell = (x) => `"${String(x ?? '').replace(/"/g, '""')}"`;
@@ -248,10 +248,10 @@ export async function buildSignalPackage(records, { from, to, schema, readme, da
   const selected = records.filter((r) => r.traded && (!from || r.decision_time_epoch_ms >= Date.parse(`${from}T00:00:00Z`)) && (!to || r.decision_time_epoch_ms < Date.parse(`${to}T00:00:00Z`) + 86400000));
   const entries = [], manifestFiles = [];
   const summaryHeader = ['signal_id', 'timestamp', 'market', 'playbook', 'direction', 'state', 'score', 'duration', 'adx', 'atr', 'candle_range_atr', 'room_ratio', 'veto_reasons', 'families_agree', 'families_oppose', 'expiry_probability', 'outcome', 'first_touch', 'price_change', 'adverse_excursion', 'break_even', 'win_flag'];
-  const rows = [], ndjsonLines = [];
+  const rows = [], ndjsonLines = [], skipped = [];
   for (const r of selected) {
     const errors = validateRecord(r);
-    if (errors.length) throw new Error(`invalid signal record ${r.signal_id}: ${errors.slice(0, 5).join('; ')}`);
+    if (errors.length) { skipped.push({ signal_id: r.signal_id, errors: errors.slice(0, 5) }); continue; }
     const day = utcDate(r.decision_time_epoch_ms), market = String(r.market).replace(/[^A-Za-z0-9_.-]/g, '_');
     const path = `logs/signals/${day}/${market}/signal_${r.signal_id}.json`, text = JSON.stringify(r, null, 2);
     entries.push({ name: path, data: text }); manifestFiles.push({ path, sha256: await sha256Hex(utf8(text)) });
@@ -270,7 +270,7 @@ export async function buildSignalPackage(records, { from, to, schema, readme, da
   }
   const csv = [summaryHeader.map(csvCell).join(','), ...rows.map((r) => summaryHeader.map((k) => csvCell(r[k])).join(','))].join('\r\n');
   entries.push({ name: 'signals_summary.csv', data: csv });
-  const ndjson = ndjsonLines.join('\n') + (selected.length ? '\n' : '');
+  const ndjson = ndjsonLines.join('\n') + (rows.length ? '\n' : '');
   entries.push({ name: 'signals.ndjson', data: ndjson });
   entries.push({ name: 'schema/signal.schema.json', data: JSON.stringify(schema, null, 2) });
   entries.push({ name: 'README.md', data: readme });
@@ -278,11 +278,11 @@ export async function buildSignalPackage(records, { from, to, schema, readme, da
   for (const f of entries) if (!manifestFiles.some((x) => x.path === f.name)) manifestFiles.push({ path: f.name, sha256: await sha256Hex(utf8(f.data)) });
   const meta = {
     schema_version: SCHEMA_VERSION, build_id: buildId ?? selected[0]?.software?.build_id ?? null,
-    config_hash: configHash ?? selected[0]?.config_hash ?? null, record_count: selected.length,
+    config_hash: configHash ?? selected[0]?.config_hash ?? null, record_count: rows.length, skipped_invalid_records: skipped,
     date_range_utc: { from: from || null, to: to || null }, file_hashes_sha256: manifestFiles,
   };
   entries.push({ name: 'manifest.json', data: JSON.stringify(meta, null, 2) });
-  return { zip: await zipStoreAsync(entries, Date.now(), { yieldControl }), summaryCsv: csv, ndjson, manifest: meta, count: selected.length, entries };
+  return { zip: await zipStoreAsync(entries, Date.now(), { yieldControl }), summaryCsv: csv, ndjson, manifest: meta, count: rows.length, skipped, entries };
 }
 
 export function downloadBlob(name, mime, data) {

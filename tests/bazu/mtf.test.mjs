@@ -59,3 +59,17 @@ test('structural scan: MTF code cannot reach any order path; flags are read only
   }
   assert.ok(!/MTF_GATE/.test(read('siglog3m.js')) && !/MTF_GATE/.test(read('mtf3m.js')));
 });
+
+test('NaN diagnostics never break record validation; invalid records are skipped, not fatal to the export', async () => {
+  const { analyseFrames } = await import('../../src/bazu/mtf3m.js');
+  const flat = Array.from({ length: 80 }, () => ({ close: 100 }));
+  const r = analyseFrames({ M1: flat }, 1);
+  assert.ok(Object.values(r.frames.M1).every((v) => typeof v !== 'number' || Number.isFinite(v)));
+  const { buildSignalPackage } = await import('../../src/bazu/reports3m.js');
+  const f = findSignal({});
+  const good = buildRecord({ sig: f.sig, cfg: f.cfg, symbol: f.symbol, name: f.symbol, prices: f.w.p, epochs: f.w.e, remote: f.remote, trade: { id: 'c1', isReal: false, buyPrice: 1, payout: 1.95, profit: 0.95, entry: 1, entryEpoch: 1, exit: 2, exitEpoch: 2, stake: 1, result: 'win', status: 'closed', predicted: f.sig.direction }, now: 1700010000000 });
+  const bad = { ...JSON.parse(JSON.stringify(good)), signal_id: 'bad', A: undefined };
+  const pack = await buildSignalPackage([good, bad], { schema: {}, readme: '', dataDictionary: '', yieldControl: async () => {} });
+  assert.equal(pack.count, 1);
+  assert.equal(pack.skipped.length, 1);
+});

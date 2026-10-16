@@ -3,7 +3,7 @@
  * BAZU page view. Sends commands to engine.js and renders its state — NO trading rules here.
  */
 import { start as perfStart } from './perf3m.js?v=15';
-import * as E from './engine.js?v=18';
+import * as E from './engine.js?v=19';
 import { clusterZones } from './structure.js?v=15';
 import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=15';
 import { findSwingPoints } from '../../mtf/src/analysis/swingPoints.js';
@@ -12,9 +12,9 @@ import { accountInfo } from './execution.js?v=15';
 import { GATE } from './decision.js?v=16';
 import { calibrationSummary, accuracyByDuration } from './calibration3m.js?v=15';
 import { liveContractText } from './expiry3m.js?v=15';
-import { performanceRows, performanceReport, reportCsv, printableHtml, calibrationReport, buildSignalPackage, downloadBlob, savePackageToFolder } from './reports3m.js?v=17';
+import { performanceRows, performanceReport, reportCsv, printableHtml, calibrationReport, buildSignalPackage, downloadBlob, savePackageToFolder } from './reports3m.js?v=18';
 import { BASE_CONFIG, configFor } from './config3m.js?v=17';
-import { analyseMtf } from './mtf3m.js?v=17';
+import { analyseMtf } from './mtf3m.js?v=18';
 import { distributionRows, distributionCsv } from './distribution3m.js?v=17';
 
 const $ = (id) => document.getElementById(id);
@@ -28,7 +28,31 @@ const reportFilters = {
   calib: { from: '', to: '' }, signal: { from: '', to: '' },
 };
 
+// Live panels re-render on a timer. Skip no-op writes, never clobber a control the user is using, and keep every scroll position.
+function stabilizeRendering() {
+  const native = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+  ['bzMetrics', 'bzCards', 'bzSignal', 'bzAccuracy', 'bzExec', 'bzPerf', 'bzCalib', 'bzSignalLog', 'bzDist'].forEach((id) => {
+    const el = $(id); if (!el) return;
+    let last = null;
+    Object.defineProperty(el, 'innerHTML', {
+      configurable: true, get() { return native.get.call(el); },
+      set(html) {
+        html = String(html);
+        if (html === last) return;
+        const a = document.activeElement;
+        if (a && el.contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) return;
+        last = html;
+        const win = [window.scrollX, window.scrollY], inner = [...el.querySelectorAll('.scroll,.cards,.log')].map((n) => [n.scrollLeft, n.scrollTop]), own = [el.scrollLeft, el.scrollTop];
+        native.set.call(el, html);
+        el.scrollLeft = own[0]; el.scrollTop = own[1];
+        el.querySelectorAll('.scroll,.cards,.log').forEach((n, i) => { if (inner[i]) { n.scrollLeft = inner[i][0]; n.scrollTop = inner[i][1]; } });
+        if (window.scrollY !== win[1] || window.scrollX !== win[0]) window.scrollTo(win[0], win[1]);
+      },
+    });
+  });
+}
 function bindOnce() {
+  stabilizeRendering();
   $('bzTabs').onclick = (e) => { const t = e.target.dataset.t; if (!t) return; tab = t; [...$('bzTabs').children].forEach((b) => b.classList.toggle('on', b.dataset.t === t)); document.querySelectorAll('#page-bazu .bz-pane').forEach((p) => p.classList.toggle('on', p.id === 'bzp-' + t)); render(); };
   $('bzMode').onclick = (e) => { const m = e.target.dataset.m; if (!m) return; E.setMode(m); [...$('bzMode').children].forEach((b) => b.classList.toggle('on', b.dataset.m === m)); };
   $('bzTf').innerHTML = TIMEFRAMES.map((t) => `<button data-tf="${t.key}" class="${t.key === tfKey ? 'on' : ''}">${t.label}</button>`).join('');
@@ -280,7 +304,7 @@ function onReportChange(e) {
 
 async function reportDownload(type, format) {
   const statusId = type === 'perf' ? 'perfExportStatus' : type === 'calib' ? 'calibExportStatus' : 'signalExportStatus';
-  const status = document.getElementById(statusId);
+  const status = document.getElementById(statusId); let skippedNote = '';
   const range = reportFilters[type];
   if (status) status.textContent = 'Preparing export…';
   try {
@@ -308,12 +332,13 @@ async function reportDownload(type, format) {
           const r = await fetch(`reports/${f}`); if (!r.ok) throw new Error(`Could not load reports/${f}: HTTP ${r.status}`); return f.endsWith('.json') ? r.json() : r.text();
         }));
         const pack = await buildSignalPackage(signals, { from: range.from, to: range.to, schema, readme, dataDictionary: dictionary });
+        if (pack.skipped.length) skippedNote = `${pack.skipped.length} invalid record(s) skipped (listed in manifest.json).`;
         if (format === 'zip') downloadBlob('bazu-signal-package.zip', 'application/zip', pack.zip);
         else if (format === 'ndjson') downloadBlob('bazu-signals.ndjson', 'application/x-ndjson;charset=utf-8', pack.ndjson);
         else await savePackageToFolder(pack.entries);
       }
     }
-    if (status) status.textContent = 'Export ready.';
+    if (status) status.textContent = skippedNote ? `Export ready. ${skippedNote}` : 'Export ready.';
   } catch (err) {
     console.error('BAZU report export failed', err);
     if (status) status.textContent = `Export failed: ${err.message}`;
