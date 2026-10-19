@@ -136,6 +136,17 @@ footer{text-align:center;color:var(--muted);font-size:11px;margin-top:22px;line-
 .pagenav button.active{background:linear-gradient(180deg,#1a2740,#141d2e);color:var(--accent);border-color:var(--accent)}
 .page{display:none}
 .page.active{display:block}
+.module-settings-button{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:8px 12px;color:var(--text);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer}
+.module-off-badge{margin-left:6px;padding:2px 6px;border-radius:6px;background:rgba(255,196,77,.16);color:#ffc44d;font-size:9px}
+.module-settings-panel{position:fixed;top:76px;right:20px;z-index:20;width:min(520px,calc(100vw - 32px));max-height:calc(100vh - 100px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 18px 48px rgba(0,0,0,.5)}
+.module-settings-panel[hidden]{display:none}
+.module-switch-row{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.module-switch-row input{margin-top:3px;accent-color:var(--accent)}
+.module-switch-row label{font-size:12px;font-weight:700}
+.module-switch-row small{display:block;color:var(--muted);font-size:10px;line-height:1.6;margin-top:4px;font-weight:400}
+.module-settings-actions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.module-settings-panel pre{white-space:pre-wrap;word-break:break-word;color:var(--muted);font-size:10px;max-height:150px;overflow:auto}
+.modules-disabled-placeholder{display:block}
 
 /* multi-timeframe candle grid */
 .tf-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:16px}
@@ -552,6 +563,7 @@ table.an-table tbody tr:last-child td{border-bottom:none}
 @keyframes mtfPulse{0%{box-shadow:0 0 0 0 rgba(31,223,155,.45)}70%{box-shadow:0 0 0 7px rgba(31,223,155,0)}100%{box-shadow:0 0 0 0 rgba(31,223,155,0)}}
 </style>
 <link rel="stylesheet" href="src/bazu/bazu.css">
+<script src="src/modules/moduleSwitches.js?v=1"></script>
 </head>
 <body>
 <div class="wrap">
@@ -566,8 +578,45 @@ table.an-table tbody tr:last-child td{border-bottom:none}
         <select id="marketSel"></select>
       </div>
       <div class="conn"><span id="dot" class="dot"></span><span id="connText">Connecting…</span></div>
+      <button id="moduleSettingsButton" class="module-settings-button" type="button" aria-expanded="false" aria-controls="moduleSettingsPanel">
+        Modules <span id="modulesOffBadge" class="module-off-badge" hidden></span>
+      </button>
     </div>
   </header>
+
+  <section id="moduleSettingsPanel" class="module-settings-panel" aria-label="Modules settings" hidden>
+    <h2 style="font-size:14px;margin-bottom:6px">Research Modules</h2>
+    <p class="gc-sub">Off stops new work from the selected pages immediately. Turning a group on takes effect after reload. Shared Live Tracker collection remains active for non-listed features.</p>
+    <div class="module-switch-row">
+      <input id="moduleSwitchR1" type="checkbox">
+      <label for="moduleSwitchR1">R1 — Research explorers
+        <small>Database Explorer · Feature Completeness · Positive Event Browser · Snapshot Inspector · Correlation Explorer · Market State Search</small>
+      </label>
+    </div>
+    <div class="module-switch-row">
+      <input id="moduleSwitchR2" type="checkbox">
+      <label for="moduleSwitchR2">R2 — Research tools
+        <small>Experiment Runner · Knowledge Base · Research Validation Suite · Research Workbench</small>
+      </label>
+    </div>
+    <div class="module-switch-row">
+      <input id="moduleSwitchR3" type="checkbox">
+      <label for="moduleSwitchR3">R3 — Research campaigns
+        <small>Phase 8 Campaign · Phase 9 Adaptive · Phase 11 · Ph11 Validation</small>
+      </label>
+    </div>
+    <div class="module-settings-actions">
+      <button id="moduleAllOff" class="gc-btn" type="button">All off</button>
+      <button id="moduleAllOn" class="gc-btn" type="button">All on</button>
+      <button id="moduleApplyReload" class="gc-btn" type="button">Apply and reload</button>
+      <button id="moduleDiagnosticsDownload" class="gc-btn" type="button">Download module diagnostics</button>
+    </div>
+    <div id="moduleSettingsStatus" class="gc-sub" role="status"></div>
+    <details style="margin-top:10px">
+      <summary class="gc-sub">Diagnostics — module states and disabled intervals</summary>
+      <pre id="moduleGapMarkers"></pre>
+    </details>
+  </section>
 
   <nav class="pagenav">
     <button id="navAccounts" onclick="showPage('accounts')">👤 Accounts</button>
@@ -1368,6 +1417,13 @@ table.an-table tbody tr:last-child td{border-bottom:none}
         <button class="gc-btn" onclick="diagClearLog()">Clear log</button>
       </div>
       <pre id="apiDiagOut" style="margin-top:12px;background:#0a0e17;border:1px solid var(--line);border-radius:10px;padding:14px;font-size:11.5px;color:var(--accent);white-space:pre-wrap;word-break:break-all;max-height:600px;overflow-y:auto;display:none"></pre>
+    </div>
+
+    <div class="grid-card" style="margin-bottom:16px">
+      <h2>Modules diagnostics</h2>
+      <div class="gc-sub" style="margin:8px 0">Reports saved and active group states, module-disabled intervals, and the shared collector that remains active for non-listed consumers.</div>
+      <button class="gc-btn" type="button" onclick="window.mfxModuleSwitches.downloadDiagnostics()">Download module diagnostics JSON</button>
+      <pre id="diagModulesReport" style="margin-top:10px;background:#0a0e17;border:1px solid var(--line);border-radius:10px;padding:12px;font-size:10px;white-space:pre-wrap;word-break:break-word;max-height:260px;overflow:auto"></pre>
     </div>
 
     <footer>
@@ -26254,12 +26310,22 @@ function startTfTimers(){
 function showPage(which){
   const pages = { accounts:"page-accounts", live:"page-live", candles:"page-candles", engine:"page-engine", grid:"page-grid", analysis:"page-analysis", features:"page-features", predbot:"page-predbot", oubot:"page-oubot", tracker:"page-tracker", digits:"page-digits", diag:"page-diag", charts:"page-charts", adxbot:"page-adxbot", aggression:"page-aggression", mtf:"page-mtf", njanja:"page-njanja", rfabot:"page-rfabot", bazu:"page-bazu", msdexplorer:"page-msdexplorer", msdfeatures:"page-msdfeatures", msdevents:"page-msdevents", msdinspector:"page-msdinspector", msddistribution:"page-msddistribution", msdcorrelation:"page-msdcorrelation", msdsearch:"page-msdsearch", msdexperiment:"page-msdexperiment", msdknowledge:"page-msdknowledge", msdvalidation:"page-msdvalidation", msdworkbench:"page-msdworkbench", msdphase8:"page-msdphase8", msdphase9:"page-msdphase9", msdphase11:"page-msdphase11", msdphase11validation:"page-msdphase11validation" };
   const navs  = { accounts:"navAccounts", live:"navLive",  candles:"navCandles", engine:"navEngine", grid:"navGrid", analysis:"navAnalysis", features:"navFeatures", predbot:"navPredBot", oubot:"navOuBot", tracker:"navTracker", digits:"navDigits", diag:"navDiag", charts:"navCharts", adxbot:"navAdxBot", aggression:"navAggression", mtf:"navMtf", njanja:"navNjanja", rfabot:"navRfaBot", bazu:"navBazu", msdexplorer:"navMsdExplorer", msdfeatures:"navMsdFeatures", msdevents:"navMsdEvents", msdinspector:"navMsdInspector", msddistribution:"navMsdDistribution", msdcorrelation:"navMsdCorrelation", msdsearch:"navMsdSearch", msdexperiment:"navMsdExperiment", msdknowledge:"navMsdKnowledge", msdvalidation:"navMsdValidation", msdworkbench:"navMsdWorkbench", msdphase8:"navMsdPhase8", msdphase9:"navMsdPhase9", msdphase11:"navMsdPhase11", msdphase11validation:"navMsdPhase11Validation" };
+  window.__mfxCurrentPage = which;
   Object.keys(pages).forEach(k => {
     document.getElementById(pages[k]).classList.toggle("active", k===which);
     const nav = document.getElementById(navs[k]); if (nav) nav.classList.toggle("active", k===which);
   });
   if (which === "bazu" && typeof window.bazuPageInit === "function"){ window.bazuPageInit(); }
   else if (typeof window.bazuPageLeave === "function"){ window.bazuPageLeave(); }
+  const moduleSwitches = window.mfxModuleSwitches;
+  const pageElement = document.getElementById(pages[which]);
+  if (moduleSwitches && pageElement) {
+    if (!moduleSwitches.isPageActive(which)) {
+      moduleSwitches.renderDisabledPage(pageElement, moduleSwitches.getGroupForPage(which));
+      return;
+    }
+    moduleSwitches.restorePage(pageElement);
+  }
   if (which === "candles"){
     if (!candlesPageReady){ candlesPageReady = true; buildTfCards(); connectTfWs(); startTfTimers(); }
     TIMEFRAMES.forEach(tf => drawTfCandles(tf.g));
@@ -26290,6 +26356,7 @@ function showPage(which){
   }
   if (which === "diag"){
     diagUpdateConnStatus();
+    if (window.mfxModuleSwitches) window.mfxModuleSwitches.renderDiagnostics("diagModulesReport");
   }
   if (which === "accounts"){
     acctPageInit();
@@ -26364,6 +26431,14 @@ function showPage(which){
     if (typeof window.ph11ValBoot === "function") window.ph11ValBoot();
   }
 }
+
+window.addEventListener("mfx:modules-changed", () => {
+  if (window.mfxModuleSwitches && !window.mfxModuleSwitches.isGroupActive("R3") && typeof window.ph11Stop === "function") {
+    window.ph11Stop();
+  }
+  const currentPage = window.__mfxCurrentPage;
+  if (currentPage && typeof showPage === "function") showPage(currentPage);
+});
 
 // Overlay toggles redraw every timeframe chart; chips also reflect on/off styling
 ["pa-sr","pa-zones","pa-ob","pa-fvg","pa-liq","pa-bos","pa-eq","pa-vp","pa-ote","pa-trend","pa-amd"].forEach(id => {
@@ -34457,6 +34532,7 @@ window.ph8RefreshReadiness = async function(){
 // ════════════════════════════════════════════════════════════════════════════
 const _origBoot = window.ph8Boot;
 window.ph8Boot = async function(){
+  if (!window.mfxModuleSwitches || !window.mfxModuleSwitches.isGroupActive("R3")) return;
   await _origBoot();
   // Run checklist and pipeline verification in parallel (non-blocking display)
   Promise.all([
@@ -34476,7 +34552,9 @@ window.ph8Boot = async function(){
 // window.ph8Boot — guarantees the seal is built and the status banner is
 // populated on every page load, regardless of which page was shown first.
 // ph8Inited prevents any double-initialisation on a subsequent showPage call.
-window.ph8Boot();
+if (window.mfxModuleSwitches && window.mfxModuleSwitches.isGroupActive("R3")) {
+  window.ph8Boot();
+}
 
 })(); // end Phase 8 Integrity Module
 </script>
@@ -34532,6 +34610,7 @@ function ph9UpdateFunnel(f0, f1, f2, f3, f4) {
 // ── Readiness refresh ─────────────────────────────────────────────────────
 
 async function ph9RefreshReadiness() {
+  if (!window.mfxModuleSwitches || !window.mfxModuleSwitches.isGroupActive("R3")) return;
   try {
     if (typeof window.msdGetAllMarketStates !== 'function') {
       ph9SetText('ph9-readiness-msg', 'MSD engine not loaded yet — readiness unavailable.');
@@ -34569,6 +34648,7 @@ async function ph9RefreshReadiness() {
 let ph9Running = false;
 
 async function ph9RunCampaignUI() {
+  if (!window.mfxModuleSwitches || !window.mfxModuleSwitches.isGroupActive("R3")) return;
   if (ph9Running) return;
   ph9Running = true;
 
@@ -34730,6 +34810,7 @@ function ph9RenderResult(result) {
 let ph9Booted = false;
 
 async function ph9Boot() {
+  if (!window.mfxModuleSwitches || !window.mfxModuleSwitches.isGroupActive("R3")) return;
   if (ph9Booted) {
     // Re-entering page — refresh readiness only
     await ph9RefreshReadiness().catch(e => console.warn('[ph9]', e));
@@ -34745,7 +34826,9 @@ window.ph9RunCampaignUI   = ph9RunCampaignUI;
 window.ph9RefreshReadiness = ph9RefreshReadiness;
 
 // Auto-boot: module scripts run after DOMContentLoaded, so the DOM is ready.
-ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
+if (window.mfxModuleSwitches && window.mfxModuleSwitches.isGroupActive("R3")) {
+  ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
+}
 </script>
 
 <!-- Phase 11 MSD Lab: isolated UI, lazily mounted on first visit to the Phase 11 page -->
@@ -34765,15 +34848,17 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
   import { FamilyRegistry } from "./research/src/governance/FamilyRegistry.js";
   import { CANDIDATE_TYPES } from "./research/src/candidate/Candidate.js";
 
+  const ph11EnabledAtLoad = !!(window.mfxModuleSwitches && window.mfxModuleSwitches.isGroupActive("R3"));
   // The SINGLE canonical Indicator Registry for this whole page -- the
   // exact same registry (and EMA_SLOPE plugin) the demo campaign and the
   // registry-driven campaign candidates both resolve their indicatorName
   // against, at every stage: Readiness, Confirmation, Reproducibility.
   // There is no second lookup table anywhere else in this file.
-  const ph11IndicatorRegistry = new IndicatorRegistry();
-  registerCoreIndicators(ph11IndicatorRegistry);
+  const ph11IndicatorRegistry = ph11EnabledAtLoad ? new IndicatorRegistry() : null;
+  if (ph11IndicatorRegistry) registerCoreIndicators(ph11IndicatorRegistry);
 
   let ph11Handle = null;
+  let ph11ReadinessInterval = null;
   let ph11Orchestrator = null;
   let ph11ResearchConfiguration = null;
   let ph11ScreenedCandidates = [];
@@ -34788,7 +34873,25 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
   let ph11ReplicationHoldoutPrices = [];
   let ph11ProvenanceById = {};     // candidateId -> provenance (from generate())
 
+  function ph11On(id, handler) {
+    if (!ph11EnabledAtLoad) return;
+    const button = document.getElementById(id);
+    if (!button) throw new Error("[phase11] Missing button: " + id);
+    button.addEventListener("click", (event) => {
+      if (!window.mfxModuleSwitches || !window.mfxModuleSwitches.isGroupActive("R3")) return;
+      return handler(event);
+    });
+  }
+
+  window.ph11Stop = function () {
+    if (ph11ReadinessInterval) {
+      clearInterval(ph11ReadinessInterval);
+      ph11ReadinessInterval = null;
+    }
+  };
+
   window.ph11Boot = function () {
+    if (!window.mfxModuleSwitches || !window.mfxModuleSwitches.isGroupActive("R3")) return;
     if (ph11Handle) { ph11Handle.refresh(); return; }
     try { ph11Handle = mountPhase11(document.getElementById("phase11-root")); }
     catch (e) { console.warn("[phase11]", e); }
@@ -34840,7 +34943,7 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
 
   function ph11SetStatus(msg){ const el = document.getElementById("ph11StatusMsg"); if (el) el.textContent = msg; }
 
-  document.getElementById("ph11StartCampaignBtn").addEventListener("click", async () => {
+  ph11On("ph11StartCampaignBtn", async () => {
     ph11SetStatus("Starting campaign…");
     try {
       const hist = (window.__mfxDebug && window.__mfxDebug.getHistory) ? window.__mfxDebug.getHistory(1) : null;
@@ -34870,7 +34973,7 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
     }
   });
 
-  document.getElementById("ph11StartRegistryCampaignBtn").addEventListener("click", async () => {
+  ph11On("ph11StartRegistryCampaignBtn", async () => {
     ph11SetStatus("Starting registry-driven campaign (enumerating the Indicator Registry — 27 indicators x 4 periods)…");
     try {
       const hist = (window.__mfxDebug && window.__mfxDebug.getHistory) ? window.__mfxDebug.getHistory(1) : null;
@@ -34909,7 +35012,7 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
     }
   });
 
-  document.getElementById("ph11ScreenBtn").addEventListener("click", () => {
+  ph11On("ph11ScreenBtn", () => {
     if (!ph11Orchestrator) return;
     ph11SetStatus("Running Round 1 screening (demo scoreFn from live ticks)…");
     try {
@@ -34935,8 +35038,6 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
       ph11SetStatus("Screening failed — see console.");
     }
   });
-
-  let ph11ReadinessInterval = null;
 
   function ph11RenderReadiness(overall){
     const el = document.getElementById("ph11ReadinessPanel");
@@ -34985,7 +35086,7 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
     ph11ReadinessInterval = setInterval(ph11UpdateReadinessNow, 3000);
   }
 
-  document.getElementById("ph11TriageBtn").addEventListener("click", () => {
+  ph11On("ph11TriageBtn", () => {
     if (!ph11Orchestrator || !ph11ScreenedCandidates.length) return;
     ph11SetStatus("Running Round 2 triage…");
     try {
@@ -35013,7 +35114,7 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
     return { log: (line) => { el.textContent += line + "\n"; } };
   }
 
-  document.getElementById("ph11ConfirmBtn").addEventListener("click", async () => {
+  ph11On("ph11ConfirmBtn", async () => {
     if (!ph11Orchestrator || !ph11TriagedCandidates.length) return;
     const progress = ph11ShowProgress();
     ph11SetStatus("Running Round 3 confirmation (fully automated — computing the p-value, not asking for one)…");
@@ -35078,7 +35179,8 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
     ph11SetStatus(`Confirmed: ${confirmedCount}/${ph11TriagedCandidates.length} (fully automated statistical test — see report above).`);
   });
 
-  document.getElementById("ph11ReplicateBtn").addEventListener("click", async () => {
+  if (ph11EnabledAtLoad) document.getElementById("ph11ReplicateBtn").addEventListener("click", async () => {
+    if (!window.mfxModuleSwitches || !window.mfxModuleSwitches.isGroupActive("R3")) return;
     if (!ph11Orchestrator || !ph11ConfirmedResults.length) return;
     if (!ph11ReplicationHoldoutPrices.length) {
       ph11SetStatus("No replication holdout reserved yet — run Confirmation first (it reserves the holdout automatically).");
@@ -35115,7 +35217,7 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
     }
   });
 
-  document.getElementById("ph11PublishBtn").addEventListener("click", async () => {
+  ph11On("ph11PublishBtn", async () => {
     if (!ph11Orchestrator || !ph11ReplicatedResults.length) return;
     ph11SetStatus("Checking publication eligibility (ReproducibilityGate + freeze/SAP/dataset/context checks)…");
     let publishedCount = 0;
@@ -35157,7 +35259,7 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
   // ResearchFreeze reuse + a dedicated, narrow SAP/FamilyRegistry for
   // exactly this one family), so nothing about the existing indicator
   // campaign flow is put at risk.
-  document.getElementById("ph11ConfirmEventProcessBtn").addEventListener("click", async () => {
+  ph11On("ph11ConfirmEventProcessBtn", async () => {
     if (!ph11Orchestrator || !ph11Orchestrator.researchFreeze) {
       ph11SetStatus("Start a campaign first (Confirmation reuses its Research Freeze) before confirming Event Process features.");
       return;
@@ -35266,16 +35368,18 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
   import { IndicatorRegistry } from "./research/src/indicator/IndicatorRegistry.js";
   import { registerCoreIndicators } from "./research/src/indicator/coreIndicators.js";
 
+  const ph11ValEnabledAtLoad = !!(window.mfxModuleSwitches && window.mfxModuleSwitches.isGroupActive("R3"));
   // Same canonical registry SOURCE (indicator/IndicatorRegistry.js +
   // coreIndicators.js) as the campaign script -- module scripts don't
   // share JS scope, so this is its own instance, but there is still only
   // ONE place the indicator formulas themselves are defined.
-  const ph11ValIndicatorRegistry = new IndicatorRegistry();
-  registerCoreIndicators(ph11ValIndicatorRegistry);
+  const ph11ValIndicatorRegistry = ph11ValEnabledAtLoad ? new IndicatorRegistry() : null;
+  if (ph11ValIndicatorRegistry) registerCoreIndicators(ph11ValIndicatorRegistry);
 
   let ph11ValHandle = null;
 
   window.ph11ValBoot = function () {
+    if (!window.mfxModuleSwitches || !window.mfxModuleSwitches.isGroupActive("R3")) return;
     if (ph11ValHandle) return;
     try { ph11ValHandle = mountPhase11Validation(document.getElementById("phase11-validation-root")); }
     catch (e) { console.warn("[phase11-validation]", e); }
@@ -35283,7 +35387,8 @@ ph9Boot().catch(e => console.warn('[ph9 auto-boot]', e));
 
   function ph11ValSetStatus(msg){ const el = document.getElementById("ph11ValStatusMsg"); if (el) el.textContent = msg; }
 
-  document.getElementById("ph11ValRunBtn").addEventListener("click", async () => {
+  if (ph11ValEnabledAtLoad) document.getElementById("ph11ValRunBtn").addEventListener("click", async () => {
+    if (!window.mfxModuleSwitches || !window.mfxModuleSwitches.isGroupActive("R3")) return;
     if (!ph11ValHandle) window.ph11ValBoot();
     ph11ValSetStatus("Running calibration study (independent_prng null, 15 trials)…");
     try {
