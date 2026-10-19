@@ -51,6 +51,9 @@ All pages are in `index.html` (~36K lines). Navigation uses a single-page show/h
 | MTF Structure | `mtf` | Multi-timeframe structure analysis |
 | Njanja Analysis | `njanja` | Multi-timeframe dashboard (11 timeframes) |
 
+### BAZU CRT Demo Strategy
+The CRT analyzer is isolated from BAZU's existing prediction and order decisions. Its playbook scans 1H, 2H, 4H, and 8H parent ranges (prior-candle Mode A and five-candle Mode B), uses Wilder ATR and prior-day/prior-week POIs, and accepts only the 5m MSS trigger; 1m fallback, Turtle Soup, CISD, FVG, and order-block additions are disabled. A 10-signal shadow sample is collected only while an authenticated Deriv Demo account is connected; the panel then generates a five-minute outcome report and a decision-time replay/lookahead audit. Offline validation is required and remains `not-run`; CRT has no order route, and any future execution must fail closed unless validation has passed and the connected account is explicitly identified as demo. No actual Demo collection or report is claimed until the browser confirms the authenticated Demo connection.
+
 ### Bot Pages
 | Page | Key | Description |
 |------|-----|-------------|
