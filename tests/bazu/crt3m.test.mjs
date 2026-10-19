@@ -9,6 +9,7 @@ import {
   createCrtTracker,
   createFractalRouter,
   findMss,
+  htfBiasAllows,
   routeFractals,
   scorePoiConfluence,
   wilderAtr,
@@ -181,6 +182,19 @@ test("CRT tracker retains WATCH setups and emits bounded, structured state trans
   assert.equal(expired.transitions[0].from, "WATCH");
   assert.equal(expired.transitions[0].to, "REJECTED");
   assert.equal(tracker.activeSetups().length, 0);
+});
+
+test("loosened filters: POI limit 0.30 ATR, minimum confluence 1, non-strict HTF alignment", () => {
+  assert.equal(CRT_CONFIG.poi_proximity.default_value, 0.3);
+  assert.equal(CRT_CONFIG.min_confluence_score, 1);
+  assert.equal(CRT_CONFIG.strict_htf_alignment, false);
+  assert.equal(scorePoiConfluence([{ type: "PDL", level: 100, epoch: 1 }], 100.25, 1, 0.3).poiOk, true);
+  assert.equal(htfBiasAllows("LOW", "bullish", "neutral", false), true);
+  assert.equal(htfBiasAllows("LOW", "bullish", "bullish", false), true);
+  assert.equal(htfBiasAllows("LOW", "bullish", "bearish", false), false);
+  assert.equal(htfBiasAllows("LOW", "neutral", "bullish", false), false);
+  assert.equal(htfBiasAllows("LOW", "bearish", "neutral", false), false);
+  assert.equal(htfBiasAllows("LOW", "bullish", "neutral", true), false);
 });
 
 test("CRT shadow analysis is enabled but execution remains fail-closed until offline validation passes", () => {

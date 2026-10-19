@@ -30,12 +30,13 @@ export const CRT_CONFIG = Object.freeze({
   }),
   poi_proximity: Object.freeze({
     unit: "ATR_multiplier",
-    default_value: 0.15,
+    default_value: 0.3,
     min_value: 0.05,
     max_value: 0.3,
   }),
   atr_sanity: Object.freeze({ min_atr_ratio: 0.25, max_atr_ratio: 3, enforce_bounds: true }),
   min_confluence_score: 1,
+  strict_htf_alignment: false,
   fvg_enabled: false,
   order_block_enabled: false,
   fractal_router: Object.freeze({
