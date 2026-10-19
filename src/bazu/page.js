@@ -3,7 +3,7 @@
  * BAZU page view. Sends commands to engine.js and renders its state — NO trading rules here.
  */
 import { start as perfStart } from './perf3m.js?v=15';
-import * as E from './engine.js?v=24';
+import * as E from './engine.js?v=25';
 import { clusterZones } from './structure.js?v=15';
 import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=15';
 import { findSwingPoints } from '../../mtf/src/analysis/swingPoints.js';

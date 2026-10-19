@@ -184,11 +184,17 @@ test("CRT tracker retains WATCH setups and emits bounded, structured state trans
   assert.equal(tracker.activeSetups().length, 0);
 });
 
-test("loosened filters: POI limit 0.30 ATR, minimum confluence 1, non-strict HTF alignment", () => {
-  assert.equal(CRT_CONFIG.poi_proximity.default_value, 0.3);
+test("demo-validation RR minimum is 0.5 and must be reverted to 1.0 before live execution", () => {
+  assert.equal(CRT_CONFIG.min_rr_ratio, 0.5);
+  assert.equal(CRT_CONFIG.validation_status, "not-run");
+});
+
+test("loosened filters: POI limit 1.0 ATR, minimum confluence 1, non-strict HTF alignment", () => {
+  assert.equal(CRT_CONFIG.poi_proximity.default_value, 1.0);
   assert.equal(CRT_CONFIG.min_confluence_score, 1);
   assert.equal(CRT_CONFIG.strict_htf_alignment, false);
-  assert.equal(scorePoiConfluence([{ type: "PDL", level: 100, epoch: 1 }], 100.25, 1, 0.3).poiOk, true);
+  assert.equal(scorePoiConfluence([{ type: "PDL", level: 100, epoch: 1 }], 100.9, 1, 1.0).poiOk, true);
+  assert.equal(scorePoiConfluence([{ type: "PDL", level: 100, epoch: 1 }], 101.1, 1, 1.0).poiOk, false);
   assert.equal(htfBiasAllows("LOW", "bullish", "neutral", false), true);
   assert.equal(htfBiasAllows("LOW", "bullish", "bullish", false), true);
   assert.equal(htfBiasAllows("LOW", "bullish", "bearish", false), false);

@@ -342,6 +342,21 @@ export function scanCrt({ symbol, h1Candles, ltfCandles, decisionEpoch, minTick,
         record.rejectionReason = null;
         record.riskStatus = "PENDING";
         record.riskRejectionReason = null;
+        const entry = trigger.breakCandle.close;
+        const stop = side === "LOW" ? c2.low : c2.high;
+        const tpDistance = side === "LOW" ? common.crt50 - entry : entry - common.crt50;
+        const riskDistance = side === "LOW" ? entry - stop : stop - entry;
+        const rr = riskDistance > 0 ? tpDistance / riskDistance : null;
+        record.rrRatio = rr;
+        record.tpDistance = tpDistance;
+        record.riskDistance = riskDistance;
+        if (!finite(rr) || rr < CRT_CONFIG.min_rr_ratio) {
+          record.signalStatus = "REJECTED";
+          record.rejectionReason = "risk_router_rr_below_minimum";
+          record.riskStatus = "REJECTED";
+          record.riskRejectionReason = "rr_below_minimum";
+          record.rejectionDetail = `passed POI gate (confluence_score=${common.confluenceScore}) but failed Risk Router: RR=${finite(rr) ? rr.toFixed(3) : "n/a"} < min ${CRT_CONFIG.min_rr_ratio}; TP distance=${tpDistance.toFixed(5)} (entry ${entry} to crt50 ${common.crt50}); risk distance=${riskDistance.toFixed(5)}`;
+        }
       } else if (trigger.status === "WAITING") {
         record.signalStatus = "WATCH";
         record.rejectionReason = trigger.reason;
