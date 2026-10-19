@@ -3,7 +3,7 @@
  * BAZU page view. Sends commands to engine.js and renders its state — NO trading rules here.
  */
 import { start as perfStart } from './perf3m.js?v=15';
-import * as E from './engine.js?v=23';
+import * as E from './engine.js?v=24';
 import { clusterZones } from './structure.js?v=15';
 import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=15';
 import { findSwingPoints } from '../../mtf/src/analysis/swingPoints.js';
@@ -390,7 +390,7 @@ function crtHtml(m) {
         ? `collection error: ${esc(status.collection.error)}`
         : status.latest ? 'Demo shadow analysis active' : 'Demo connected; waiting for candle data';
   const rows = (status.latest?.records || []).map((r) =>
-    `<tr><td>${esc(r.timeframe)}</td><td>${esc(r.rangeMode)}</td><td>${esc(r.sweepSide || '—')}</td><td>${esc(r.signalStatus)}</td><td>${esc(r.rejectionReason || r.reason || '—')}</td><td>${Number.isFinite(r.swingLevel) ? fmtPrice(r.swingLevel, m.dp) : '—'}</td><td>${(r.stateTransitions || []).slice(-3).map((t) => `${esc(t.from || 'START')} -&gt; ${esc(t.to)}: ${esc(t.reason || '—')}`).join('<br>')}</td></tr>`
+    `<tr><td>${esc(r.timeframe)}</td><td>${esc(r.rangeMode)}</td><td>${esc(r.sweepSide || '—')}</td><td>${esc(r.signalStatus)}</td><td>${esc(r.rejectionDetail || r.rejectionReason || r.reason || '—')}</td><td>${Number.isFinite(r.swingLevel) ? fmtPrice(r.swingLevel, m.dp) : '—'}</td><td>${(r.stateTransitions || []).slice(-3).map((t) => `${esc(t.from || 'START')} -&gt; ${esc(t.to)}: ${esc(t.reason || '—')}`).join('<br>')}</td></tr>`
   ).join('');
   const base = status.collection.baseRate;
   const audit = status.collection.lookahead;

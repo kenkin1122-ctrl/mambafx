@@ -228,6 +228,12 @@ function rangeFor(variant, parent, index, lookback) {
   };
 }
 
+export function htfBiasAllows(side, h4Bias, dailyBias, strict = CRT_CONFIG.strict_htf_alignment) {
+  const wanted = side === "LOW" ? "bullish" : side === "HIGH" ? "bearish" : "neutral";
+  if (strict) return h4Bias === dailyBias && h4Bias === wanted;
+  return h4Bias === wanted && (dailyBias === wanted || dailyBias === "neutral");
+}
+
 function rejectedRecord(base, reason) {
   return { ...base, signalStatus: "REJECTED", rejectionReason: reason, riskStatus: "REJECTED", riskRejectionReason: null };
 }
@@ -285,7 +291,7 @@ export function scanCrt({ symbol, h1Candles, ltfCandles, decisionEpoch, minTick,
         wickDepthAtr: side === "HIGH" ? (c2.high - range.rangeHigh) / atr : side === "LOW" ? (range.rangeLow - c2.low) / atr : null,
         closeInside: side === "HIGH" || side === "LOW",
         htfBias: { "4H": h4Bias, "1D": dailyBias },
-        htfBiasOk: h4Bias === dailyBias && h4Bias === (side === "LOW" ? "bullish" : side === "HIGH" ? "bearish" : "neutral"),
+        htfBiasOk: htfBiasAllows(side, h4Bias, dailyBias),
         poiOk: !!poi?.poiOk,
         poi: poi?.poi || null,
         poiDistanceAtr: poi?.poiDistanceAtr ?? null,
@@ -316,7 +322,14 @@ export function scanCrt({ symbol, h1Candles, ltfCandles, decisionEpoch, minTick,
       if (!side) { output.push(rejectedRecord(common, "no_sweep_reclaim")); continue; }
       if (side === "BOTH") { output.push(rejectedRecord(common, "both_side_sweep")); continue; }
       if (!atrOk) { output.push(rejectedRecord(common, "atr_sanity_failed")); continue; }
-      if (poi?.confluenceScore < CRT_CONFIG.min_confluence_score) { output.push(rejectedRecord(common, "confluence_score_below_minimum")); continue; }
+      if (!poi || poi.confluenceScore < CRT_CONFIG.min_confluence_score) {
+        const score = poi?.confluenceScore ?? 0;
+        const rejected = rejectedRecord(common, "confluence_score_below_minimum");
+        rejected.confluence_score = score;
+        rejected.rejectionDetail = `confluence_score=${score} < min ${CRT_CONFIG.min_confluence_score}; nearest POI ${common.poiDistanceAtr == null ? "none" : `${common.poiDistanceAtr.toFixed(3)} ATR`} vs limit ${poiProximityMultiplier} ATR`;
+        output.push(rejected);
+        continue;
+      }
       if (!common.htfBiasOk) { output.push(rejectedRecord(common, "htf_bias_conflict_or_neutral")); continue; }
       if (!CRT_CONFIG.trigger_policy.mss_enabled) { output.push(rejectedRecord(common, "trigger_variant_disabled")); continue; }
 
