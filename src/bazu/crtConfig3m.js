@@ -2,6 +2,8 @@ export const CRT_CONFIG = Object.freeze({
   strategy_enabled: true,
   demo_only: true,
   shadow_collection_only: true,
+  live_execution_enabled: false,
+  crt_order_routing: "disabled",
   report_sample_size: 10,
   base_rate_horizon_seconds: 300,
   offline_validation_required: true,
@@ -24,9 +26,9 @@ export const CRT_CONFIG = Object.freeze({
   buffer_multiplier_bounds: Object.freeze({ min: 0.05, max: 0.1 }),
   compression_gate: Object.freeze({
     enabled: true,
-    default_threshold: 0.5,
+    default_threshold: 0.85,
     min_threshold: 0.2,
-    max_threshold: 0.8,
+    max_threshold: 0.85,
   }),
   poi_proximity: Object.freeze({
     unit: "ATR_multiplier",
