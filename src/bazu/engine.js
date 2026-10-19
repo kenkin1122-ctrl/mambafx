@@ -27,6 +27,9 @@ import { createSupervisor } from './reconnect3m.js?v=15';
 import { wilson } from './stats.js?v=15';
 import { expiryProbBaseline, sigmaPerTick, reliabilityCurve, brier } from './expiry3m.js?v=15';
 import { createLogger } from './siglogRuntime3m.js?v=20';
+import { CRT_CONFIG } from './crtConfig3m.js?v=1';
+import { createCrtTracker, crtExecutionAllowed } from './crt3m.js?v=1';
+import { createCrtJournal } from './crtJournal3m.js?v=1';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;
@@ -38,6 +41,8 @@ export const state = {
   markets: new Map(), trades: [], log: [], scan: { done: 0, total: 0, active: false },
   selected: null, signals: new Map(), manualKey: null, records: [], vetoStats: {}, backfill: null,
   contra: { directional: 0, opposing: 0, tradable: 0, tradableOpposing: 0, byPlaybook: {} },
+  crtByMarket: new Map(),
+  crtCollection: { status: 'waiting_for_demo_account', signalsLogged: 0, sampleSize: CRT_CONFIG.report_sample_size, baseRate: null, lookahead: null, error: null },
 };
 
 if (typeof window !== 'undefined') window.__bzState = state;
@@ -226,6 +231,22 @@ export function ensureCandles(m, tf) {
 // ---------- remote candles: full startup backfill, then small incremental refreshes ----------
 const remoteBusy = new Set();
 let remoteSlots = 2;
+const crtTrackers = new Map();
+const crtScanKeys = new Map();
+let crtJournal = null, crtJournalPromise = null;
+function openCrtJournal() {
+  if (!crtJournalPromise) {
+    crtJournalPromise = Promise.resolve().then(() => createCrtJournal()).then(async (journal) => {
+      await journal.ready;
+      crtJournal = journal;
+      return journal;
+    }).catch((error) => {
+      crtJournalPromise = null;
+      throw error;
+    });
+  }
+  return crtJournalPromise;
+}
 export function ensureRemote(m) {
   const cfg = configFor(m.symbol), store = (m.remote ||= {}), at = (m.remoteAt ||= {});
   for (const k of cfg.BACKFILL_FRAMES) {
@@ -237,6 +258,73 @@ export function ensureRemote(m) {
       .catch((e) => { at[k] = Date.now() - ttl + 15000; log(`candles ${k} ${m.symbol}: ${e.message}`, 'warn'); })
       .finally(() => { remoteBusy.delete(key); remoteSlots++; });
   }
+}
+async function refreshCrt(m) {
+  if (!CRT_CONFIG.strategy_enabled || CRT_CONFIG.shadow_collection_only !== true) return;
+  const account = accountInfo();
+  if (!account.connected || account.isReal !== false) {
+    state.crtCollection = {
+      ...state.crtCollection,
+      status: account.isReal ? (account.connected ? 'demo_account_required' : 'waiting_for_demo_account') : 'waiting_for_demo_account',
+    };
+    return;
+  }
+  const decisionEpoch = m.epochs[m.epochs.length - 1];
+  if (!Number.isFinite(decisionEpoch) || !m.remote?.H1?.length || !m.remote?.M5?.length) return;
+  const scanKey = `${m.remote.H1[m.remote.H1.length - 1].epoch}:${m.remote.M5[m.remote.M5.length - 1].epoch}`;
+  if (crtScanKeys.get(m.symbol) === scanKey) return;
+  let tracker = crtTrackers.get(m.symbol);
+  if (!tracker) { tracker = createCrtTracker(); crtTrackers.set(m.symbol, tracker); }
+  const result = tracker.scan({
+    symbol: m.symbol,
+    h1Candles: m.remote.H1,
+    ltfCandles: m.remote.M5,
+    decisionEpoch,
+    minTick: Number(m.pip),
+  });
+  state.crtByMarket.set(m.symbol, { status: 'shadow', scannedAt: decisionEpoch, ...result });
+  try {
+    const journal = await openCrtJournal();
+    const currentAccount = accountInfo();
+    if (!currentAccount.connected || currentAccount.isReal !== false) return;
+    await journal.addQualified(result.records, {
+      symbol: m.symbol,
+      h1Candles: m.remote.H1,
+      ltfCandles: m.remote.M5,
+      decisionEpoch,
+      minTick: Number(m.pip),
+    });
+    crtScanKeys.set(m.symbol, scanKey);
+    await journal.resolveOutcomes(m.symbol, m.remote.M5, decisionEpoch);
+    const reports = await journal.reports();
+    const all = await journal.all();
+    state.crtCollection = {
+      status: 'collecting_demo_shadow',
+      signalsLogged: all.length,
+      sampleSize: CRT_CONFIG.report_sample_size,
+      baseRate: reports.baseRate,
+      lookahead: reports.lookahead,
+      error: null,
+    };
+    emit();
+  } catch (error) {
+    crtScanKeys.delete(m.symbol);
+    state.crtCollection = { ...state.crtCollection, status: 'journal_error', error: String(error?.message || error) };
+    log(`CRT shadow journal error: ${error?.message || error}`, 'bad');
+  }
+}
+export function crtStatus(symbol) {
+  const account = accountInfo();
+  return {
+    enabled: CRT_CONFIG.strategy_enabled && CRT_CONFIG.shadow_collection_only === true && account.connected && account.isReal === false,
+    configured: CRT_CONFIG.strategy_enabled && CRT_CONFIG.shadow_collection_only === true,
+    validationStatus: CRT_CONFIG.validation_status,
+    demoOnly: CRT_CONFIG.demo_only,
+    demoConnected: account.connected && account.isReal === false,
+    executionEligible: crtExecutionAllowed({ account }),
+    latest: state.crtByMarket.get(symbol) || null,
+    collection: state.crtCollection,
+  };
 }
 export async function backfillAll() {
   const syms = [...state.markets.keys()], t0 = Date.now();
@@ -378,6 +466,7 @@ export async function signalTick() {
       if (!m.historyLoaded) { loadHistory(m.symbol).catch(() => {}); }
       if (m.prices.length < 300) continue;
       ensureRemote(m);
+      refreshCrt(m).catch((e) => log(`CRT analysis ${m.symbol}: ${e.message}`, 'warn'));
       const allowed = allowedFor(m);
       let r;
       const endP = perfStart('predict3m'); try { r = predictFor(m); } catch (e) { endP(); log('predict ' + m.symbol + ': ' + e.message, 'warn'); continue; } endP();

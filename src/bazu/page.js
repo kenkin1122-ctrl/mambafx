@@ -3,7 +3,7 @@
  * BAZU page view. Sends commands to engine.js and renders its state — NO trading rules here.
  */
 import { start as perfStart } from './perf3m.js?v=15';
-import * as E from './engine.js?v=21';
+import * as E from './engine.js?v=23';
 import { clusterZones } from './structure.js?v=15';
 import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=15';
 import { findSwingPoints } from '../../mtf/src/analysis/swingPoints.js';
@@ -375,7 +375,32 @@ function renderLive(S) {
       <div class="note num">Signal strength ${pct(sig.strength, 0)} · ${sig.agree}/${sig.total} analysis features agree${sig.quote ? ` · Deriv quote: stake ${sig.quote.ask}, payout ${sig.quote.payout}` : ''}</div>
       ${lifetimeHtml(sig)}${reasoningHtml(sig)}${roomHtml(sig)}<div class="note"><b>${esc(sig.playbook || 'analysis')}</b>${sig.provisional ? ' (provisional trigger)' : ''} · ${esc(sig.reason || '')}</div>${(sig.reasons || []).length ? `<div class="note">${sig.reasons.map(esc).join('; ')}</div>` : ''}<div class="note">Drivers: ${(sig.drivers || []).map(esc).join(', ') || '-'}. Decided ${sig.decisionTs ? new Date(sig.decisionTs * 1000).toLocaleTimeString() : ''} for a ${esc(sig.duration)} Rise/Fall (exit vs entry; a tie loses). Score is a rule-based confluence, not a win probability.</div></div>`
     : `<div class="sig"><b>${esc(E.marketGate(m).label)}</b><div class="note">Collecting ticks to analyse this market.</div></div>`;
-  $('bzSignal').insertAdjacentHTML('beforeend', mtfHtml(m, sig));
+  $('bzSignal').insertAdjacentHTML('beforeend', mtfHtml(m, sig) + crtHtml(m));
+}
+
+function crtHtml(m) {
+  const status = E.crtStatus(m.symbol);
+  const state = !status.configured
+    ? 'disabled in configuration'
+    : !status.demoConnected
+      ? status.collection.status === 'demo_account_required'
+        ? 'stopped: authenticated Demo account required; no collection is occurring'
+        : 'waiting for an authenticated Demo account; no collection is occurring'
+      : status.collection.status === 'journal_error'
+        ? `collection error: ${esc(status.collection.error)}`
+        : status.latest ? 'Demo shadow analysis active' : 'Demo connected; waiting for candle data';
+  const rows = (status.latest?.records || []).map((r) =>
+    `<tr><td>${esc(r.timeframe)}</td><td>${esc(r.rangeMode)}</td><td>${esc(r.sweepSide || '—')}</td><td>${esc(r.signalStatus)}</td><td>${esc(r.rejectionReason || r.reason || '—')}</td><td>${Number.isFinite(r.swingLevel) ? fmtPrice(r.swingLevel, m.dp) : '—'}</td><td>${(r.stateTransitions || []).slice(-3).map((t) => `${esc(t.from || 'START')} -&gt; ${esc(t.to)}: ${esc(t.reason || '—')}`).join('<br>')}</td></tr>`
+  ).join('');
+  const base = status.collection.baseRate;
+  const audit = status.collection.lookahead;
+  const report = base?.status === 'READY'
+    ? `<div class="note"><b>Base-rate report</b> · ${base.outcomesResolved}/${base.signalsLogged} five-minute outcomes resolved · wins ${base.wins}, losses ${base.losses}, ties ${base.ties} · hit rate ${pct(base.hitRate)} · 95% Wilson interval ${pct(base.confidence95.low)}–${pct(base.confidence95.high)}. ${esc(base.limitation)}</div>
+       <div class="note"><b>Lookahead audit</b> · ${esc(audit?.status || 'not run')} · ${audit?.checked || 0}/${audit?.required || status.collection.sampleSize} replay checks · ${audit?.failureCount || 0} failures. ${esc(audit?.method || '')}</div>`
+    : `<div class="note">Demo shadow signals logged: ${status.collection.signalsLogged}/${status.collection.sampleSize}. Base-rate report and lookahead audit will run automatically when the 10-signal sample is complete.</div>`;
+  return `<div class="note" id="bzCrtStatus"><b>CRT demo strategy</b> · ${state} · ${status.demoOnly ? 'demo-only' : 'execution disabled'} · offline validation: ${esc(status.validationStatus)} · CRT order routing is disabled; no orders are sent.
+    ${report}
+    ${rows ? `<table class="bz-table"><thead><tr><th>Frame</th><th>Range</th><th>Sweep</th><th>Status</th><th>Reason</th><th>MSS level</th><th>Transitions</th></tr></thead><tbody>${rows}</tbody></table>` : ''}</div>`;
 }
 
 const mtfCache = new Map();
