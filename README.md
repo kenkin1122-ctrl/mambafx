@@ -155,3 +155,9 @@ Content-Type: application/json
 - **IndexedDB** stores all scientific data locally in the browser
 - **GitHub Pages** compatible — all static assets, no server-side rendering
 - **Cloudflare Worker** handles OAuth (session, token exchange) separately
+
+## Research Module Switches
+
+The Modules panel controls three page groups and stores its settings under the separate `mfx_modules_v1` localStorage key. R1, R2, and R3 default to off. Turning a group off blocks new work from its pages immediately; enabling a group requires reload. The one-time `?modules=off` and `?modules=on` URL overrides set and persist all three groups, then remove the override from the address bar.
+
+The switches do not pause the shared Live Tracker research collector or its `mfx_msd_events` / `mfx_msd_states` writes because the excluded Feature Distribution page consumes that data. Module diagnostics label disabled intervals as page-group intervals, not raw-data collection gaps.
