@@ -177,7 +177,7 @@ export function findMss(candles, { c2CloseEpoch, decisionEpoch, sweepSide, range
     const compressionOk = triggerRange < compressionThreshold * pivotRange && triggerRange < priorRange;
     const candlesWaitedAtConfirmation = closed.filter((x) => barEnd(x, seconds) > c2CloseEpoch && barEnd(x, seconds) <= confirmedAt).length;
     if (candlesWaitedAtConfirmation > maxCandles) continue;
-    if (!compressionOk) return { status: "INVALID", reason: "compression_failed", triggerCandlesWaited: candlesWaitedAtConfirmation, pivot: { epoch: pivot.epoch, high: pivot.high, low: pivot.low, confirmedAt } };
+    if (!compressionOk) return { status: "INVALID", reason: "compression_failed", R_t5: triggerRange, R_pivot: pivotRange, R_t4: priorRange, compressionRatio: pivotRange > 0 ? triggerRange / pivotRange : null, rejectionDetail: `compression_failed: R_t5=${triggerRange} R_pivot=${pivotRange} R_t4=${priorRange}; ratio=${pivotRange > 0 ? (triggerRange / pivotRange).toFixed(3) : "n/a"} (need < ${compressionThreshold} and R_t5 < R_t4)`, triggerCandlesWaited: candlesWaitedAtConfirmation, pivot: { epoch: pivot.epoch, high: pivot.high, low: pivot.low, confirmedAt } };
     let counted = 0;
     for (let j = i + 3; j < closed.length; j++) {
       const candle = closed[j], end = barEnd(candle, seconds);

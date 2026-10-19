@@ -73,6 +73,14 @@ test("MSS compression failure and close outside the swept range reject the setup
   });
   assert.equal(failedCompression.status, "INVALID");
   assert.equal(failedCompression.reason, "compression_failed");
+  assert.equal(failedCompression.R_t5, 6);
+  assert.equal(failedCompression.R_pivot, 10);
+  assert.match(failedCompression.rejectionDetail, /R_t5=6 R_pivot=10/);
+  assert.equal(CRT_CONFIG.compression_gate.default_threshold, 0.85);
+  assert.equal(CRT_CONFIG.min_rr_ratio, 0.5);
+  assert.equal(CRT_CONFIG.shadow_collection_only, true);
+  assert.equal(CRT_CONFIG.live_execution_enabled, false);
+  assert.equal(CRT_CONFIG.crt_order_routing, "disabled");
 
   const invalidated = findMss(mssFixture({ invalidate: true }), {
     c2CloseEpoch: 1500, decisionEpoch: 2700, sweepSide: "LOW", rangeHigh: 120, rangeLow: 90,
