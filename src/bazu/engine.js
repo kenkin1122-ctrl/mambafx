@@ -292,14 +292,16 @@ function crtTradeNote(pkg, ok, reason) {
   crtTradeLog.push({ at: Date.now(), crtId: pkg.crtId, symbol: pkg.symbol, variant: pkg.variant, direction: pkg.direction, ok, reason });
   if (crtTradeLog.length > 100) crtTradeLog.splice(0, crtTradeLog.length - 100);
 }
-async function maybeTradeCrt(m, pkg) {
+async function maybeTradeCrt(m, pkg, manual = false) {
+  // manual mode never trades by itself; semi needs a Confirm click (manual=true); auto trades by itself
+  if (!manual && state.mode !== 'auto') return;
   if (!crtSwitches.isTradeEnabled(m.symbol) || pkg.state !== 'TRIGGERED' || crtTradedIds.has(pkg.crtId) || crtInFlight.has(pkg.crtId)) return;
   const nowEpoch = m.epochs[m.epochs.length - 1];
   const gate = crtTradeGate({
-    pkg, nowEpoch, lastPrice: m.prices[m.prices.length - 1], account: accountInfo(), running: state.running, switches: crtSwitches,
+    pkg, nowEpoch, lastPrice: m.prices[m.prices.length - 1], account: accountInfo(), running: manual || state.running, switches: crtSwitches,
     openCrtTrades: state.trades.filter((t) => t.source === 'crt' && t.status === 'open'), lastOrderEpoch: crtLastOrder, tradedIds: crtTradedIds,
   });
-  if (!gate.ok) { const k = pkg.crtId + gate.reason.replace(/\d+/g, '#'); if (!crtGateSeen.has(k)) { crtGateSeen.add(k); crtTradeNote(pkg, false, gate.reason); } return; }
+  if (!gate.ok) { const k = pkg.crtId + gate.reason.replace(/\d+/g, '#'); if (manual || !crtGateSeen.has(k)) { crtGateSeen.add(k); crtTradeNote(pkg, false, gate.reason); } return; }
   const duration = allowedFor(m).find((d) => durationLabel(d) === pkg.lifetime.duration);
   if (!duration) return;
   crtInFlight.add(pkg.crtId);
@@ -313,6 +315,16 @@ async function maybeTradeCrt(m, pkg) {
     t.playbook = 'CRT'; t.crt = { crtId: pkg.crtId, variant: pkg.variant, parentTimeframe: pkg.parentTimeframe, score: pkg.score, entry: pkg.entry, target: pkg.target, secondTarget: pkg.secondTarget, invalidation: pkg.invalidation, lifetime: pkg.lifetime, configVersion: pkg.configVersion, crtConfigVersion: pkg.crtConfigVersion, label: pkg.label };
     saveTrades(); crtTradeNote(pkg, true, 'executed');
   } catch (e) { crtTradeNote(pkg, false, `error: ${e.message}`); log(`CRT trade error ${m.symbol}: ${e.message}`, 'warn'); } finally { crtInFlight.delete(pkg.crtId); }
+}
+/** Manual / semi-auto: the user presses the button on a specific CRT signal. Same gate and choke point as auto. */
+export async function placeCrt(symbol, crtId) {
+  const m = state.markets.get(symbol);
+  const pkg = m && [...(state.crtSignals.get(symbol) || []), ...(state.crtLtfSignals.get(symbol) || [])].find((p) => p.crtId === crtId);
+  if (!pkg) return { ok: false, reason: 'signal no longer available' };
+  const before = crtTradeLog.length;
+  await maybeTradeCrt(m, pkg, true);
+  const last = crtTradeLog[crtTradeLog.length - 1];
+  return crtTradeLog.length > before && last ? { ok: last.ok, reason: last.reason } : { ok: false, reason: 'not attempted' };
 }
 function crtTradeAll(m, pkgs) { for (const p of pkgs) maybeTradeCrt(m, p).catch(() => {}); }const crtLtfKeys = new Map(), crtLtfSeen = new Set();
 const CRT_LTF_LOG_CAP = 200;

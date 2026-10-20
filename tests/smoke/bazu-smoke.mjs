@@ -35,13 +35,16 @@ const smokePage = `<!doctype html><html><head><meta charset="utf-8"></head><body
   const scripts = [...doc.querySelectorAll("script[type=module]")].map((s) => s.src + s.textContent);
   const page = scripts.join(" ").match(/bazu\\/page\\.js\\?v=\\d+/);
   check(page, "BAZU page module is referenced");
-  const engine = await app.eval("import('/src/bazu/engine.js?v=31')");
+  const engine = await app.eval("import('/src/bazu/engine.js?v=32')");
   const st = engine.crtStatus("R_75");
   check(st.switches.crt_enabled === true, "crt_enabled defaults to true");
   check(st.switches.crt_trade_enabled === false, "crt_trade_enabled defaults to false");
   check(Array.isArray(st.signals) && st.signals.length === 0, "no mapped CRT signals before any scan");
   check(st.executionEligible === false, "CRT execution is not eligible");
   check(st.enabled === true && st.demoOnly === true, "CRT stays shadow and demo-only");
+  const pr = await engine.placeCrt("R_75", "missing");
+  check(pr.ok === false, "placeCrt refuses an unknown signal: " + pr.reason);
+  check(Array.isArray(st.checklist.steps) && st.checklist.complete === false, "checklist is live and incomplete");
   check(app.__errs.length === 0, "no JavaScript or console errors: " + app.__errs.join(" | "));
   out.textContent = "BAZU_SMOKE_PASS " + checks.length + " checks: " + checks.join("; ");
 })().catch((e) => { document.getElementById("r").textContent = "BAZU_SMOKE_FAIL " + (e && e.stack || e); });
