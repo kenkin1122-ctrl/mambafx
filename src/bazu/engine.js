@@ -30,6 +30,7 @@ import { createLogger } from './siglogRuntime3m.js?v=20';
 import { CRT_CONFIG } from './crtConfig3m.js?v=6';
 import { createCrtTracker, crtExecutionAllowed } from './crt3m.js?v=6';
 import { createCrtJournal } from './crtJournal3m.js?v=6';
+import { mapCrtScan, createCrtSwitches } from './crtBazu3m.js?v=1';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;
@@ -42,6 +43,7 @@ export const state = {
   selected: null, signals: new Map(), manualKey: null, records: [], vetoStats: {}, backfill: null,
   contra: { directional: 0, opposing: 0, tradable: 0, tradableOpposing: 0, byPlaybook: {} },
   crtByMarket: new Map(),
+  crtSignals: new Map(),
   crtCollection: { status: 'waiting_for_demo_account', signalsLogged: 0, sampleSize: CRT_CONFIG.report_sample_size, baseRate: null, lookahead: null, error: null },
 };
 
@@ -278,6 +280,7 @@ export function crtDiagnostics(records) {
   const a = accountInfo();
   return !a.connected ? 'none' : a.isReal === false ? 'demo' : a.isReal === true ? 'real' : 'unknown';
 }
+export const crtSwitches = createCrtSwitches({ storage: typeof localStorage !== 'undefined' ? localStorage : null });
 async function refreshCrt(m) {
   if (!CRT_CONFIG.strategy_enabled || CRT_CONFIG.shadow_collection_only !== true) return;
   const decisionEpoch = m.epochs[m.epochs.length - 1];
@@ -294,6 +297,7 @@ async function refreshCrt(m) {
     minTick: Number(m.pip),
   });
   state.crtByMarket.set(m.symbol, { status: 'shadow', scannedAt: decisionEpoch, ...result });
+  try { state.crtSignals.set(m.symbol, mapCrtScan(result.records, { symbol: m.symbol, prices: m.prices, epochs: m.epochs, allowed: allowedFor(m), cfg: configFor(m.symbol) }, crtSwitches)); } catch (e) { log(`CRT mapping ${m.symbol}: ${e.message}`, 'warn'); }
   try {
     const journal = await openCrtJournal();
     await journal.addQualified(result.records, {
@@ -334,6 +338,8 @@ export function crtStatus(symbol) {
     demoConnected: account.connected && account.isReal === false,
     executionEligible: crtExecutionAllowed({ account }),
     latest: state.crtByMarket.get(symbol) || null,
+    signals: state.crtSignals.get(symbol) || [],
+    switches: crtSwitches.snapshot(),
     collection: state.crtCollection,
   };
 }
