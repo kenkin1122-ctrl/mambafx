@@ -35,7 +35,7 @@ const smokePage = `<!doctype html><html><head><meta charset="utf-8"></head><body
   const scripts = [...doc.querySelectorAll("script[type=module]")].map((s) => s.src + s.textContent);
   const page = scripts.join(" ").match(/bazu\\/page\\.js\\?v=\\d+/);
   check(page, "BAZU page module is referenced");
-  const engine = await app.eval("import('/src/bazu/engine.js?v=30')");
+  const engine = await app.eval("import('/src/bazu/engine.js?v=31')");
   const st = engine.crtStatus("R_75");
   check(st.switches.crt_enabled === true, "crt_enabled defaults to true");
   check(st.switches.crt_trade_enabled === false, "crt_trade_enabled defaults to false");

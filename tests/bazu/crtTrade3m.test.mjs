@@ -66,3 +66,18 @@ test("golden: protected modules contain no CRT code and the gate never buys", ()
   }
   assert.doesNotMatch(readFileSync(new URL("../../src/bazu/crtTrade3m.js", import.meta.url), "utf8"), /buyRiseFall|import /);
 });
+
+test("live checklist follows state and never changes switches", async () => {
+  const { crtChecklist } = await import("../../src/bazu/crtTrade3m.js");
+  const s = createCrtSwitches();
+  let c = crtChecklist({ switches: s, account: { connected: false }, running: false });
+  assert.equal(c.next, "demo"); assert.equal(c.complete, false);
+  c = crtChecklist({ switches: s, account: { connected: true, isReal: true }, running: true });
+  assert.equal(c.steps.find((x) => x.id === "demo").done, false);
+  c = crtChecklist({ switches: s, account: { connected: true, isReal: false }, running: true, signalCount: 1 });
+  assert.equal(c.next, "trade_on");
+  assert.equal(s.snapshot().crt_trade_enabled, false);
+  s.setTradeEnabled(true);
+  c = crtChecklist({ switches: s, account: { connected: true, isReal: false }, running: true, signalCount: 1, tradeLog: [{ ok: true }], executedCrtTrades: 1 });
+  assert.equal(c.complete, true);
+});
