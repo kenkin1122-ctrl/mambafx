@@ -30,8 +30,9 @@ import { createLogger } from './siglogRuntime3m.js?v=20';
 import { CRT_CONFIG } from './crtConfig3m.js?v=6';
 import { createCrtTracker, crtExecutionAllowed } from './crt3m.js?v=7';
 import { createCrtJournal } from './crtJournal3m.js?v=6';
-import { mapCrtScan, createCrtSwitches } from './crtBazu3m.js?v=2';
+import { mapCrtScan, createCrtSwitches } from './crtBazu3m.js?v=3';
 import { scanCrtLtf } from './crtLtf3m.js?v=1';
+import { crtTradeGate, CRT_TRADE_CONFIG } from './crtTrade3m.js?v=1';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;
@@ -284,7 +285,36 @@ export function crtDiagnostics(records) {
   return !a.connected ? 'none' : a.isReal === false ? 'demo' : a.isReal === true ? 'real' : 'unknown';
 }
 export const crtSwitches = createCrtSwitches({ storage: typeof localStorage !== 'undefined' ? localStorage : null });
-const crtLtfKeys = new Map(), crtLtfSeen = new Set();
+// ---------- CRT trade path (demo only, off by default): every order goes through the existing choke point ----------
+const crtGateSeen = new Set(), crtTradedIds = new Set(), crtLastOrder = {}, crtInFlight = new Set();
+export const crtTradeLog = [];
+function crtTradeNote(pkg, ok, reason) {
+  crtTradeLog.push({ at: Date.now(), crtId: pkg.crtId, symbol: pkg.symbol, variant: pkg.variant, direction: pkg.direction, ok, reason });
+  if (crtTradeLog.length > 100) crtTradeLog.splice(0, crtTradeLog.length - 100);
+}
+async function maybeTradeCrt(m, pkg) {
+  if (!crtSwitches.isTradeEnabled(m.symbol) || pkg.state !== 'TRIGGERED' || crtTradedIds.has(pkg.crtId) || crtInFlight.has(pkg.crtId)) return;
+  const nowEpoch = m.epochs[m.epochs.length - 1];
+  const gate = crtTradeGate({
+    pkg, nowEpoch, lastPrice: m.prices[m.prices.length - 1], account: accountInfo(), running: state.running, switches: crtSwitches,
+    openCrtTrades: state.trades.filter((t) => t.source === 'crt' && t.status === 'open'), lastOrderEpoch: crtLastOrder, tradedIds: crtTradedIds,
+  });
+  if (!gate.ok) { const k = pkg.crtId + gate.reason.replace(/\d+/g, '#'); if (!crtGateSeen.has(k)) { crtGateSeen.add(k); crtTradeNote(pkg, false, gate.reason); } return; }
+  const duration = allowedFor(m).find((d) => durationLabel(d) === pkg.lifetime.duration);
+  if (!duration) return;
+  crtInFlight.add(pkg.crtId);
+  try {
+    const stake = nextStake();
+    const r = await choke.manual({ symbol: m.symbol, contractType: pkg.direction === 'Rise' ? 'CALL' : 'PUT', duration, stake, confirmed: true });
+    crtTradedIds.add(pkg.crtId);
+    if (!r.ok) { crtTradeNote(pkg, false, `choke: ${r.reason}`); log(`CRT ${m.symbol} not executed (${r.stage}): ${r.reason}`, 'warn'); return; }
+    crtLastOrder[m.symbol] = nowEpoch;
+    const t = recordTrade({ res: r.res, symbol: m.symbol, contractType: pkg.direction === 'Rise' ? 'CALL' : 'PUT', duration, stake, source: 'crt', signal: null, m });
+    t.playbook = 'CRT'; t.crt = { crtId: pkg.crtId, variant: pkg.variant, parentTimeframe: pkg.parentTimeframe, score: pkg.score, entry: pkg.entry, target: pkg.target, secondTarget: pkg.secondTarget, invalidation: pkg.invalidation, lifetime: pkg.lifetime, configVersion: pkg.configVersion, crtConfigVersion: pkg.crtConfigVersion, label: pkg.label };
+    saveTrades(); crtTradeNote(pkg, true, 'executed');
+  } catch (e) { crtTradeNote(pkg, false, `error: ${e.message}`); log(`CRT trade error ${m.symbol}: ${e.message}`, 'warn'); } finally { crtInFlight.delete(pkg.crtId); }
+}
+function crtTradeAll(m, pkgs) { for (const p of pkgs) maybeTradeCrt(m, p).catch(() => {}); }const crtLtfKeys = new Map(), crtLtfSeen = new Set();
 const CRT_LTF_LOG_CAP = 200;
 // Lower-timeframe CRT variants: detect and log only (in memory, not persisted); never touches the journal or any order path.
 function refreshCrtLtf(m) {
@@ -297,6 +327,7 @@ function refreshCrtLtf(m) {
   const records = scanCrtLtf({ symbol: m.symbol, candles: r, decisionEpoch, minTick: Number(m.pip), isVariantEnabled: (v) => crtSwitches.isVariantEnabled(v) });
   const mapped = mapCrtScan(records, { symbol: m.symbol, prices: m.prices, epochs: m.epochs, allowed: allowedFor(m), cfg: configFor(m.symbol) }, crtSwitches);
   state.crtLtfSignals.set(m.symbol, mapped);
+  crtTradeAll(m, mapped);
   for (const s of mapped) {
     if (s.state !== 'TRIGGERED' || crtLtfSeen.has(s.crtId)) continue;
     crtLtfSeen.add(s.crtId);
@@ -320,7 +351,7 @@ function refreshCrtLtf(m) {
     minTick: Number(m.pip),
   });
   state.crtByMarket.set(m.symbol, { status: 'shadow', scannedAt: decisionEpoch, ...result });
-  try { state.crtSignals.set(m.symbol, mapCrtScan(result.records, { symbol: m.symbol, prices: m.prices, epochs: m.epochs, allowed: allowedFor(m), cfg: configFor(m.symbol) }, crtSwitches)); } catch (e) { log(`CRT mapping ${m.symbol}: ${e.message}`, 'warn'); }
+  try { state.crtSignals.set(m.symbol, mapCrtScan(result.records, { symbol: m.symbol, prices: m.prices, epochs: m.epochs, allowed: allowedFor(m), cfg: configFor(m.symbol) }, crtSwitches)); crtTradeAll(m, state.crtSignals.get(m.symbol)); } catch (e) { log(`CRT mapping ${m.symbol}: ${e.message}`, 'warn'); }
   try {
     const journal = await openCrtJournal();
     await journal.addQualified(result.records, {
@@ -363,6 +394,8 @@ export function crtStatus(symbol) {
     latest: state.crtByMarket.get(symbol) || null,
     signals: state.crtSignals.get(symbol) || [],
     ltfSignals: state.crtLtfSignals.get(symbol) || [],
+    tradeLog: crtTradeLog.filter((x) => x.symbol === symbol).slice(-10),
+    tradeConfig: CRT_TRADE_CONFIG,
     ltfLog: state.crtLtfLog.filter((x) => x.symbol === symbol).slice(-20),
     switches: crtSwitches.snapshot(),
     collection: state.crtCollection,
