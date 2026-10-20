@@ -221,3 +221,24 @@ test("CRT shadow analysis is enabled but execution remains fail-closed until off
   assert.equal(crtExecutionAllowed({ account: { connected: true, isReal: false } }), false);
   assert.equal(crtExecutionAllowed({ account: { connected: true, isReal: false }, validationStatus: "passed" }), true);
 });
+
+test("a WATCH setup that triggers later still passes the Risk Router geometry check", () => {
+  const watch = (extra) => ({
+    crtId: "w1", instrument: "R_100", timeframe: "1H", signalStatus: "WATCH", riskStatus: "PENDING", sweepSide: "LOW",
+    rangeHigh: 120, rangeLow: 90, c2CloseTimestamp: 1500, compressionThresholdUsed: 0.5, watchExpiresAtEpoch: 99999,
+    confluenceScore: 1, ...extra,
+  });
+  const run = (extra) => {
+    let calls = 0;
+    const tracker = createCrtTracker({ scanner: () => (calls++ ? [] : [watch(extra)]) });
+    tracker.scan({ decisionEpoch: 1600, ltfCandles: [], symbol: "R_100" });
+    return tracker.scan({ decisionEpoch: 2700, ltfCandles: mssFixture(), symbol: "R_100" }).records.find((r) => r.crtId === "w1");
+  };
+  const bad = run({ crt50: 105, sweptExtreme: 85 });
+  assert.equal(bad.signalStatus, "REJECTED");
+  assert.equal(bad.rejectionReason, "risk_router_rr_below_minimum");
+  assert.match(bad.rejectionDetail, /RR=/);
+  const good = run({ crt50: 130, sweptExtreme: 100 });
+  assert.equal(good.signalStatus, "QUALIFIED");
+  assert.ok(good.rrRatio >= CRT_CONFIG.min_rr_ratio);
+});

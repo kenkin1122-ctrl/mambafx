@@ -1,4 +1,5 @@
 export const CRT_CONFIG = Object.freeze({
+  config_version: "crt-3m-3",
   strategy_enabled: true,
   demo_only: true,
   shadow_collection_only: true,

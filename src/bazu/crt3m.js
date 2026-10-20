@@ -1,4 +1,5 @@
 import { CRT_CONFIG } from "./crtConfig3m.js";
+import { crtConfigStamp } from "./crtOutcome3m.js";
 
 const DAY_S = 86400;
 const WEEK_S = 604800;
@@ -234,6 +235,25 @@ export function htfBiasAllows(side, h4Bias, dailyBias, strict = CRT_CONFIG.stric
   return h4Bias === wanted && (dailyBias === wanted || dailyBias === "neutral");
 }
 
+// Risk geometry shared by the first-scan trigger path and the WATCH-to-triggered path, so both obey min_rr_ratio.
+export function applyRiskGeometry(record) {
+  const entry = record.breakCandle?.close, stop = record.sweptExtreme, mid = record.crt50;
+  const rise = record.sweepSide === "LOW";
+  const tpDistance = rise ? mid - entry : entry - mid;
+  const riskDistance = rise ? entry - stop : stop - entry;
+  const rr = finite(tpDistance) && finite(riskDistance) && riskDistance > 0 ? tpDistance / riskDistance : null;
+  record.rrRatio = rr;
+  record.tpDistance = tpDistance;
+  record.riskDistance = riskDistance;
+  if (!finite(rr) || rr < CRT_CONFIG.min_rr_ratio) {
+    record.signalStatus = "REJECTED";
+    record.rejectionReason = "risk_router_rr_below_minimum";
+    record.riskStatus = "REJECTED";
+    record.riskRejectionReason = "rr_below_minimum";
+    record.rejectionDetail = `passed POI gate (confluence_score=${record.confluenceScore}) but failed Risk Router: RR=${finite(rr) ? rr.toFixed(3) : "n/a"} < min ${CRT_CONFIG.min_rr_ratio}; TP distance=${finite(tpDistance) ? tpDistance.toFixed(5) : "n/a"} (entry ${entry} to crt50 ${mid}); risk distance=${finite(riskDistance) ? riskDistance.toFixed(5) : "n/a"}`;
+  }
+  return record;
+}
 function rejectedRecord(base, reason) {
   return { ...base, signalStatus: "REJECTED", rejectionReason: reason, riskStatus: "REJECTED", riskRejectionReason: null };
 }
@@ -282,6 +302,8 @@ export function scanCrt({ symbol, h1Candles, ltfCandles, decisionEpoch, minTick,
         rangeHigh: range.rangeHigh,
         rangeLow: range.rangeLow,
         crt50: (range.rangeHigh + range.rangeLow) / 2,
+        sweptExtreme: side === "HIGH" ? c2.high : side === "LOW" ? c2.low : null,
+        configVersion: crtConfigStamp(),
         rangeMode: variant === "CRT_MODE_A" ? "A" : "B",
         epsilonUsed: epsilon,
         bufferMultiplier,
@@ -342,21 +364,7 @@ export function scanCrt({ symbol, h1Candles, ltfCandles, decisionEpoch, minTick,
         record.rejectionReason = null;
         record.riskStatus = "PENDING";
         record.riskRejectionReason = null;
-        const entry = trigger.breakCandle.close;
-        const stop = side === "LOW" ? c2.low : c2.high;
-        const tpDistance = side === "LOW" ? common.crt50 - entry : entry - common.crt50;
-        const riskDistance = side === "LOW" ? entry - stop : stop - entry;
-        const rr = riskDistance > 0 ? tpDistance / riskDistance : null;
-        record.rrRatio = rr;
-        record.tpDistance = tpDistance;
-        record.riskDistance = riskDistance;
-        if (!finite(rr) || rr < CRT_CONFIG.min_rr_ratio) {
-          record.signalStatus = "REJECTED";
-          record.rejectionReason = "risk_router_rr_below_minimum";
-          record.riskStatus = "REJECTED";
-          record.riskRejectionReason = "rr_below_minimum";
-          record.rejectionDetail = `passed POI gate (confluence_score=${common.confluenceScore}) but failed Risk Router: RR=${finite(rr) ? rr.toFixed(3) : "n/a"} < min ${CRT_CONFIG.min_rr_ratio}; TP distance=${tpDistance.toFixed(5)} (entry ${entry} to crt50 ${common.crt50}); risk distance=${riskDistance.toFixed(5)}`;
-        }
+        applyRiskGeometry(record);
       } else if (trigger.status === "WAITING") {
         record.signalStatus = "WATCH";
         record.rejectionReason = trigger.reason;
@@ -526,6 +534,7 @@ export function createCrtTracker({ toleranceMultiplier = CRT_CONFIG.fractal_rout
       next.signalStatus = "QUALIFIED";
       next.rejectionReason = null;
       next.riskStatus = "PENDING";
+      applyRiskGeometry(next);
     } else if (trigger.status === "WAITING" && input.decisionEpoch < record.watchExpiresAtEpoch) {
       next.signalStatus = "WATCH";
       next.rejectionReason = trigger.reason;

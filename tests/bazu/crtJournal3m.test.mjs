@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildCrtBaseRateReport, createCrtJournal, runCrtLookaheadTest } from "../../src/bazu/crtJournal3m.js";
+import { resolveTickOutcome, crtConfigFingerprint } from "../../src/bazu/crtOutcome3m.js";
 import { installFakeIndexedDB } from "../support/fakeIndexedDB.js";
 
 function signal(crtId, overrides = {}) {
@@ -62,37 +63,57 @@ test("journal enforces the sample cap, deduplicates signals, and persists across
   }
 });
 
-test("outcome resolver uses the exact five-minute close and reports wins and ties separately", async () => {
+test("outcome clock starts at the first tick after the break candle closes; ties, thesis and controls are recorded", async () => {
   const { indexedDB, teardown } = installFakeIndexedDB();
   const journal = createCrtJournal({ idb: indexedDB, sampleSize: 3 });
   try {
     await journal.ready;
+    const geometry = { crt50: 10.8, sweptExtreme: 9.5 };
     await journal.addQualified([
-      signal("rise"),
-      signal("fall", { direction: "Fall", breakCandle: { close: 10 } }),
-      signal("tie", { direction: "Fall", breakCandle: { close: 11 } }),
-    ], { symbol: "R_100", decisionEpoch: 1000, minTick: 0.01, h1Candles: [], ltfCandles: [] });
-    const resolved = await journal.resolveOutcomes("R_100", [
-      { epoch: 1000, open: 10, high: 11, low: 9, close: 10 },
-    ], 1300);
-    assert.equal(resolved.filter((record) => record.outcome.result === "win").length, 1);
-    assert.equal(resolved.filter((record) => record.outcome.result === "tie").length, 2);
+      signal("rise", geometry),
+      signal("fall", { ...geometry, direction: "Fall", crt50: 9.6, sweptExtreme: 10.5 }),
+      signal("tie", { ...geometry, direction: "Fall", c3Timestamp: 1050, crt50: 9.6, sweptExtreme: 12 }),
+    ], { symbol: "R_100", decisionEpoch: 1000, minTick: 0.01, h1Candles: [], ltfCandles: [], accountType: "demo" });
+    const ticks = { epochs: [990, 1001, 1100, 1301, 1400], prices: [9, 10, 10.5, 11, 10.5] };
+    assert.deepEqual(await journal.resolveOutcomes("R_100", ticks, 1200), []);
+    const resolved = await journal.resolveOutcomes("R_100", ticks, 1400);
+    const by = Object.fromEntries(resolved.map((record) => [record.crtId, record.outcome]));
+    assert.equal(by.rise.result, "win");
+    assert.equal(by.rise.entryEpoch, 1001);
+    assert.equal(by.rise.entryPrice, 10);
+    assert.equal(by.rise.exitEpoch, 1301);
+    assert.equal(by.rise.thesis.first, "midpoint_first");
+    assert.equal(by.rise.controls.opposite.result, "loss");
+    assert.equal(by.fall.result, "loss");
+    assert.equal(by.fall.thesis.first, "swept_extreme_first");
+    assert.equal(by.tie.result, "tie");
+    assert.equal(by.tie.entryEpoch, 1100);
 
     const report = await journal.reports();
-    assert.equal(report.baseRate.status, "READY");
-    assert.equal(report.baseRate.signalsLogged, 3);
     assert.equal(report.baseRate.outcomesResolved, 3);
     assert.equal(report.baseRate.wins, 1);
-    assert.equal(report.baseRate.losses, 0);
-    assert.equal(report.baseRate.ties, 2);
-    assert.equal(report.baseRate.hitRate, 1 / 3);
-    assert.equal(report.lookahead.status, "FAIL");
+    assert.equal(report.baseRate.losses, 1);
+    assert.equal(report.baseRate.ties, 1);
+    assert.equal(report.baseRate.thesis.midpointFirst, 1);
+    assert.equal(report.baseRate.controls.opposite.n, 3);
+    assert.match(report.baseRate.configVersion, /^crt-3m-3#[0-9a-f]{8}$/);
+    assert.equal((await journal.all())[0].accountType, "demo");
   } finally {
     journal.close();
     teardown();
   }
 });
 
+test("outcome is unavailable when the tick buffer does not reach back to the signal", () => {
+  const out = resolveTickOutcome(signal("late"), [2000, 2001], [1, 1]);
+  assert.equal(out.status, "unavailable");
+});
+
+test("config fingerprint is stable and changes with any threshold", () => {
+  const a = crtConfigFingerprint({ x: { b: 1, a: 2 } }), b = crtConfigFingerprint({ x: { a: 2, b: 1 } });
+  assert.equal(a, b);
+  assert.notEqual(a, crtConfigFingerprint({ x: { a: 2, b: 2 } }));
+});
 test("base-rate report separates ties, unresolved outcomes, and sample readiness", () => {
   const records = Array.from({ length: 10 }, (_, index) => ({
     instrument: index % 2 ? "R_100" : "R_200",
