@@ -259,7 +259,22 @@ export function ensureRemote(m) {
       .finally(() => { remoteBusy.delete(key); remoteSlots++; });
   }
 }
-function accountTypeLabel() {
+export const TICK_BUFFER = Object.freeze({ cap: MAX_TICKS, trimTo: MAX_TICKS - 1500, historyTicks: HISTORY_PAGES * 1000 });
+// Outcome statuses plus per-market tick-buffer size and span, so "unavailable" outcomes can be explained from data.
+export function crtDiagnostics(records) {
+  const outcomes = { pending: 0, resolved: 0, unavailable: 0 }, reasons = {};
+  for (const r of records) {
+    const s = r.outcome?.status || 'pending';
+    outcomes[s] = (outcomes[s] || 0) + 1;
+    if (s === 'unavailable') reasons[r.outcome.reason] = (reasons[r.outcome.reason] || 0) + 1;
+  }
+  const markets = [];
+  for (const m of state.markets.values()) {
+    const n = m.epochs.length;
+    markets.push({ symbol: m.symbol, ticks: n, spanSeconds: n > 1 ? m.epochs[n - 1] - m.epochs[0] : 0, historyLoaded: !!m.historyLoaded });
+  }
+  return { outcomes, unavailableReasons: reasons, tickBuffer: { ...TICK_BUFFER, markets } };
+}function accountTypeLabel() {
   const a = accountInfo();
   return !a.connected ? 'none' : a.isReal === false ? 'demo' : a.isReal === true ? 'real' : 'unknown';
 }
@@ -299,6 +314,7 @@ async function refreshCrt(m) {
       sampleSize: CRT_CONFIG.report_sample_size,
       baseRate: reports.baseRate,
       lookahead: reports.lookahead,
+      diagnostics: crtDiagnostics(all),
       error: null,
     };
     emit();

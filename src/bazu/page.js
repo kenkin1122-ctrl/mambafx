@@ -3,7 +3,7 @@
  * BAZU page view. Sends commands to engine.js and renders its state — NO trading rules here.
  */
 import { start as perfStart } from './perf3m.js?v=15';
-import * as E from './engine.js?v=26';
+import * as E from './engine.js?v=27';
 import { clusterZones } from './structure.js?v=15';
 import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=15';
 import { findSwingPoints } from '../../mtf/src/analysis/swingPoints.js';
@@ -394,8 +394,13 @@ function crtHtml(m) {
     ? `<div class="note"><b>Base-rate report</b> · ${base.outcomesResolved}/${base.signalsLogged} five-minute outcomes resolved · wins ${base.wins}, losses ${base.losses}, ties ${base.ties} · hit rate ${pct(base.hitRate)} · 95% Wilson interval ${pct(base.confidence95.low)}–${pct(base.confidence95.high)}. ${esc(base.limitation)}</div>
        <div class="note"><b>Lookahead audit</b> · ${esc(audit?.status || 'not run')} · ${audit?.checked || 0}/${audit?.required || status.collection.sampleSize} replay checks · ${audit?.failureCount || 0} failures. ${esc(audit?.method || '')}</div>`
     : `<div class="note">Demo shadow signals logged: ${status.collection.signalsLogged}/${status.collection.sampleSize}. Base-rate report and lookahead audit will run automatically when the 10-signal sample is complete.</div>`;
+  const dg = status.collection.diagnostics;
+  const diagNote = dg
+    ? `<div class="note" id="bzCrtDiag"><b>CRT diagnostics</b> · outcomes: ${dg.outcomes.resolved} resolved, ${dg.outcomes.pending} pending, ${dg.outcomes.unavailable} unavailable${Object.keys(dg.unavailableReasons).length ? ` (${esc(JSON.stringify(dg.unavailableReasons))})` : ''} · tick buffer cap ${dg.tickBuffer.cap} (trims to ${dg.tickBuffer.trimTo}; history preload ${dg.tickBuffer.historyTicks}) · ${dg.tickBuffer.markets.map((x) => `${esc(x.symbol)} ${x.ticks} ticks/${x.spanSeconds}s`).join(', ')}</div>`
+    : '';
   return `<div class="note" id="bzCrtStatus"><b>CRT demo strategy</b> · ${state} · ${status.demoOnly ? 'demo-only' : 'execution disabled'} · offline validation: ${esc(status.validationStatus)} · CRT order routing is disabled; no orders are sent.
     ${report}
+    ${diagNote}
     ${rows ? `<table class="bz-table"><thead><tr><th>Frame</th><th>Range</th><th>Sweep</th><th>Status</th><th>Reason</th><th>MSS level</th><th>Transitions</th></tr></thead><tbody>${rows}</tbody></table>` : ''}</div>`;
 }
 
