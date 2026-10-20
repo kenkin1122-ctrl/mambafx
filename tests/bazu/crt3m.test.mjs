@@ -77,7 +77,7 @@ test("MSS compression failure and close outside the swept range reject the setup
   assert.equal(failedCompression.R_pivot, 10);
   assert.match(failedCompression.rejectionDetail, /R_t5=6 R_pivot=10/);
   assert.equal(CRT_CONFIG.compression_gate.default_threshold, 0.85);
-  assert.equal(CRT_CONFIG.min_rr_ratio, 0.5);
+  assert.equal(CRT_CONFIG.min_rr_ratio, 0.2);
   assert.equal(CRT_CONFIG.shadow_collection_only, true);
   assert.equal(CRT_CONFIG.live_execution_enabled, false);
   assert.equal(CRT_CONFIG.crt_order_routing, "disabled");
@@ -192,17 +192,17 @@ test("CRT tracker retains WATCH setups and emits bounded, structured state trans
   assert.equal(tracker.activeSetups().length, 0);
 });
 
-test("demo-validation RR minimum is 0.5 and must be reverted to 1.0 before live execution", () => {
-  assert.equal(CRT_CONFIG.min_rr_ratio, 0.5);
+test("demo-validation RR minimum is 0.2 and must be reverted to 1.5 before live execution", () => {
+  assert.equal(CRT_CONFIG.min_rr_ratio, 0.2);
   assert.equal(CRT_CONFIG.validation_status, "not-run");
 });
 
-test("loosened filters: POI limit 1.0 ATR, minimum confluence 1, non-strict HTF alignment", () => {
-  assert.equal(CRT_CONFIG.poi_proximity.default_value, 1.0);
+test("loosened filters: POI limit 2.5 ATR, minimum confluence 1, non-strict HTF alignment", () => {
+  assert.equal(CRT_CONFIG.poi_proximity.default_value, 2.5);
   assert.equal(CRT_CONFIG.min_confluence_score, 1);
   assert.equal(CRT_CONFIG.strict_htf_alignment, false);
-  assert.equal(scorePoiConfluence([{ type: "PDL", level: 100, epoch: 1 }], 100.9, 1, 1.0).poiOk, true);
-  assert.equal(scorePoiConfluence([{ type: "PDL", level: 100, epoch: 1 }], 101.1, 1, 1.0).poiOk, false);
+  assert.equal(scorePoiConfluence([{ type: "PDL", level: 100, epoch: 1 }], 102.4, 1, 2.5).poiOk, true);
+  assert.equal(scorePoiConfluence([{ type: "PDL", level: 100, epoch: 1 }], 102.6, 1, 2.5).poiOk, false);
   assert.equal(htfBiasAllows("LOW", "bullish", "neutral", false), true);
   assert.equal(htfBiasAllows("LOW", "bullish", "bullish", false), true);
   assert.equal(htfBiasAllows("LOW", "bullish", "bearish", false), false);
