@@ -1,5 +1,6 @@
 import { CRT_CONFIG } from "./crtConfig3m.js";
 import { scanCrt } from "./crt3m.js";
+import { resolveTickOutcome, crtConfigStamp } from "./crtOutcome3m.js";
 import { wilson } from "./stats.js?v=15";
 
 export const CRT_JOURNAL_DB = "bazu_crt_shadow";
@@ -87,6 +88,22 @@ export function runCrtLookaheadTest(records, scanner = scanCrt, requiredSignals 
   };
 }
 
+function thesisSummary(results) {
+  const count = (key) => results.filter((record) => record.outcome.thesis?.first === key).length;
+  return { midpointFirst: count("midpoint_first"), sweptExtremeFirst: count("swept_extreme_first"), neither: count("neither"), n: results.length };
+}
+
+function controlSummary(results) {
+  const tally = (pick) => {
+    const rows = results.map(pick).filter(Boolean);
+    const wins = rows.filter((r) => r.result === "win").length;
+    const losses = rows.filter((r) => r.result === "loss").length;
+    const ties = rows.filter((r) => r.result === "tie").length;
+    const ci = wilson(wins, rows.length);
+    return { n: rows.length, wins, losses, ties, hitRate: ci.p, confidence95: { low: ci.lo, high: ci.hi } };
+  };
+  return { opposite: tally((r) => r.outcome.controls?.opposite), random: tally((r) => r.outcome.controls?.random) };
+}
 export function buildCrtBaseRateReport(records, requiredSignals = CRT_CONFIG.report_sample_size) {
   if (!Array.isArray(records)) throw new TypeError("Base-rate report requires a record array.");
   if (!Number.isInteger(requiredSignals) || requiredSignals < 1) throw new RangeError("Base-rate report requires a positive sample size.");
@@ -121,6 +138,10 @@ export function buildCrtBaseRateReport(records, requiredSignals = CRT_CONFIG.rep
     hitRate: interval.p,
     confidence95: { low: interval.lo, high: interval.hi },
     horizonSeconds: CRT_OUTCOME_HORIZON_SECONDS,
+    configVersion: crtConfigStamp(),
+    configVersionsInSample: [...new Set(records.map((record) => record.configVersion).filter(Boolean))],
+    thesis: thesisSummary(results),
+    controls: controlSummary(results),
     tieRule: "A tie is reported separately and is not counted as a win, consistent with Deriv Rise/Fall settlement.",
     groups: [...grouped.values()].sort((a, b) => a.instrument.localeCompare(b.instrument) || a.direction.localeCompare(b.direction)),
     limitation: "Observed CRT directional outcome rate at the configured five-minute horizon; this is not an unconditional market base rate or evidence of profitability.",
@@ -194,7 +215,8 @@ export function createCrtJournal({ idb = globalThis.indexedDB, sampleSize = CRT_
           ...clone(record),
           loggedAt: Date.now(),
           decisionEpoch: auditInput.decisionEpoch,
-          outcome: { status: "pending", targetEpoch: record.c3Timestamp + CRT_OUTCOME_HORIZON_SECONDS },
+          outcome: { status: "pending", signalEpoch: record.c3Timestamp },
+          accountType: auditInput.accountType ?? "unknown",
           auditInput: clone(auditInput),
         };
         await new Promise((resolve, reject) => {
@@ -230,38 +252,23 @@ export function createCrtJournal({ idb = globalThis.indexedDB, sampleSize = CRT_
       }
       return added;
     },
-    async resolveOutcomes(symbol, ltfCandles, decisionEpoch) {
+    async resolveOutcomes(symbol, ticks, decisionEpoch) {
       await ready;
-      if (!Array.isArray(ltfCandles) || !finite(decisionEpoch)) throw new TypeError("CRT outcome resolution requires LTF candles and a finite point-in-time timestamp.");
+      if (!ticks || !Array.isArray(ticks.epochs) || !Array.isArray(ticks.prices) || !finite(decisionEpoch)) throw new TypeError("CRT outcome resolution requires ticks and a finite point-in-time timestamp.");
       const completed = [];
-      const closed = ltfCandles.filter((bar) => bar.epoch + 300 <= decisionEpoch);
+      const limit = ticks.epochs.findIndex((epoch) => epoch > decisionEpoch);
+      const epochs = limit < 0 ? ticks.epochs : ticks.epochs.slice(0, limit);
+      const prices = limit < 0 ? ticks.prices : ticks.prices.slice(0, limit);
       for (const record of records.values()) {
         if (record.instrument !== symbol || record.outcome?.status !== "pending") continue;
-        const targetEpoch = record.outcome.targetEpoch;
-        if (!finite(targetEpoch)) throw new TypeError(`CRT signal ${record.crtId} has an invalid outcome target.`);
-        const target = closed.find((bar) => bar.epoch + 300 === targetEpoch);
-        if (!target) {
-          if (decisionEpoch >= targetEpoch && closed.some((bar) => bar.epoch + 300 > targetEpoch)) {
-            const unavailable = { ...record, outcome: { ...record.outcome, status: "unavailable", reason: "missing_exact_five_minute_outcome_candle" } };
-            await put(unavailable);
-          }
-          continue;
-        }
-        const entry = record.breakCandle?.close;
-        if (!finite(entry)) throw new TypeError(`CRT signal ${record.crtId} is missing its trigger close price.`);
-        const outcomePrice = target.close;
-        const won = record.direction === "Rise" ? outcomePrice > entry : outcomePrice < entry;
-        const tied = outcomePrice === entry;
-        const resolved = {
-          ...record,
-          outcome: { status: "resolved", result: tied ? "tie" : won ? "win" : "loss", entryPrice: entry, outcomePrice, resolvedAtEpoch: target.epoch + 300 },
-        };
-        await put(resolved);
-        completed.push(resolved);
+        const outcome = resolveTickOutcome(record, epochs, prices);
+        if (outcome.status === "pending") continue;
+        const updated = { ...record, outcome };
+        await put(updated);
+        completed.push(updated);
       }
       return completed;
-    },
-    async all() {
+    },    async all() {
       await ready;
       return [...records.values()].sort((a, b) => a.loggedAt - b.loggedAt).slice(0, sampleSize);
     },

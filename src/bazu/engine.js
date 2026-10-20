@@ -27,9 +27,9 @@ import { createSupervisor } from './reconnect3m.js?v=15';
 import { wilson } from './stats.js?v=15';
 import { expiryProbBaseline, sigmaPerTick, reliabilityCurve, brier } from './expiry3m.js?v=15';
 import { createLogger } from './siglogRuntime3m.js?v=20';
-import { CRT_CONFIG } from './crtConfig3m.js?v=5';
-import { createCrtTracker, crtExecutionAllowed } from './crt3m.js?v=5';
-import { createCrtJournal } from './crtJournal3m.js?v=5';
+import { CRT_CONFIG } from './crtConfig3m.js?v=6';
+import { createCrtTracker, crtExecutionAllowed } from './crt3m.js?v=6';
+import { createCrtJournal } from './crtJournal3m.js?v=6';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;
@@ -259,16 +259,12 @@ export function ensureRemote(m) {
       .finally(() => { remoteBusy.delete(key); remoteSlots++; });
   }
 }
+function accountTypeLabel() {
+  const a = accountInfo();
+  return !a.connected ? 'none' : a.isReal === false ? 'demo' : a.isReal === true ? 'real' : 'unknown';
+}
 async function refreshCrt(m) {
   if (!CRT_CONFIG.strategy_enabled || CRT_CONFIG.shadow_collection_only !== true) return;
-  const account = accountInfo();
-  if (!account.connected || account.isReal !== false) {
-    state.crtCollection = {
-      ...state.crtCollection,
-      status: account.isReal ? (account.connected ? 'demo_account_required' : 'waiting_for_demo_account') : 'waiting_for_demo_account',
-    };
-    return;
-  }
   const decisionEpoch = m.epochs[m.epochs.length - 1];
   if (!Number.isFinite(decisionEpoch) || !m.remote?.H1?.length || !m.remote?.M5?.length) return;
   const scanKey = `${m.remote.H1[m.remote.H1.length - 1].epoch}:${m.remote.M5[m.remote.M5.length - 1].epoch}`;
@@ -285,21 +281,20 @@ async function refreshCrt(m) {
   state.crtByMarket.set(m.symbol, { status: 'shadow', scannedAt: decisionEpoch, ...result });
   try {
     const journal = await openCrtJournal();
-    const currentAccount = accountInfo();
-    if (!currentAccount.connected || currentAccount.isReal !== false) return;
     await journal.addQualified(result.records, {
       symbol: m.symbol,
       h1Candles: m.remote.H1,
       ltfCandles: m.remote.M5,
       decisionEpoch,
       minTick: Number(m.pip),
+      accountType: accountTypeLabel(),
     });
     crtScanKeys.set(m.symbol, scanKey);
-    await journal.resolveOutcomes(m.symbol, m.remote.M5, decisionEpoch);
+    await journal.resolveOutcomes(m.symbol, { epochs: m.epochs, prices: m.prices }, decisionEpoch);
     const reports = await journal.reports();
     const all = await journal.all();
     state.crtCollection = {
-      status: 'collecting_demo_shadow',
+      status: 'collecting_shadow',
       signalsLogged: all.length,
       sampleSize: CRT_CONFIG.report_sample_size,
       baseRate: reports.baseRate,
@@ -316,7 +311,7 @@ async function refreshCrt(m) {
 export function crtStatus(symbol) {
   const account = accountInfo();
   return {
-    enabled: CRT_CONFIG.strategy_enabled && CRT_CONFIG.shadow_collection_only === true && account.connected && account.isReal === false,
+    enabled: CRT_CONFIG.strategy_enabled && CRT_CONFIG.shadow_collection_only === true,
     configured: CRT_CONFIG.strategy_enabled && CRT_CONFIG.shadow_collection_only === true,
     validationStatus: CRT_CONFIG.validation_status,
     demoOnly: CRT_CONFIG.demo_only,
