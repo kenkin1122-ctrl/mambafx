@@ -32,7 +32,7 @@ import { createCrtTracker, crtExecutionAllowed } from './crt3m.js?v=7';
 import { createCrtJournal } from './crtJournal3m.js?v=6';
 import { mapCrtScan, createCrtSwitches } from './crtBazu3m.js?v=3';
 import { scanCrtLtf } from './crtLtf3m.js?v=1';
-import { crtTradeGate, CRT_TRADE_CONFIG } from './crtTrade3m.js?v=1';
+import { crtTradeGate, crtChecklist, CRT_TRADE_CONFIG } from './crtTrade3m.js?v=2';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;
@@ -396,6 +396,7 @@ export function crtStatus(symbol) {
     ltfSignals: state.crtLtfSignals.get(symbol) || [],
     tradeLog: crtTradeLog.filter((x) => x.symbol === symbol).slice(-10),
     tradeConfig: CRT_TRADE_CONFIG,
+    checklist: crtChecklist({ switches: crtSwitches, account: accountInfo(), running: state.running, signalCount: [...state.crtSignals.values(), ...state.crtLtfSignals.values()].flat().filter((s) => s.state === 'TRIGGERED').length, tradeLog: crtTradeLog, executedCrtTrades: state.trades.filter((t) => t.source === 'crt').length }),
     ltfLog: state.crtLtfLog.filter((x) => x.symbol === symbol).slice(-20),
     switches: crtSwitches.snapshot(),
     collection: state.crtCollection,

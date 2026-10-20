@@ -48,3 +48,21 @@ export function crtTradeGate(ctx) {
   if (finite(last) && nowEpoch - last < cfg.cooldown_s) return no(`cooldown: ${Math.round(cfg.cooldown_s - (nowEpoch - last))}s left on ${pkg.symbol}`);
   return { ok: true };
 }
+
+/** Live version of the manual checklist: each step is derived from real state. Never changes any switch. */
+export function crtChecklist({ switches, account, running, signalCount = 0, tradeLog = [], executedCrtTrades = 0 }) {
+  const snap = switches.snapshot();
+  const demo = !!account?.connected && account.isReal === false;
+  const refused = tradeLog.filter((x) => !x.ok);
+  const steps = [
+    { id: "default_off", label: "Trading is OFF until you enable it", done: !snap.crt_trade_enabled || executedCrtTrades > 0 || tradeLog.length > 0, hint: "crt_trade_enabled starts OFF on every load" },
+    { id: "demo", label: "Demo account connected", done: demo, hint: account?.connected ? "connected account is not demo" : "connect a Demo account" },
+    { id: "running", label: "Engine started", done: !!running, hint: "press Start" },
+    { id: "signals", label: "CRT signals detected", done: signalCount > 0, hint: "waiting for a scan to find a triggered setup" },
+    { id: "trade_on", label: "crt_trade_enabled turned on (demo only)", done: !!snap.crt_trade_enabled, hint: "your decision; the app never enables it" },
+    { id: "attempts", label: "Trade attempts logged", done: tradeLog.length > 0, hint: refused[0] ? `last refusal: ${refused[refused.length - 1].reason}` : "none yet" },
+    { id: "executed", label: "A CRT trade executed and shows in Performance log", done: executedCrtTrades > 0, hint: "needs a fresh signal inside the age limit" },
+  ];
+  const next = steps.find((s) => !s.done);
+  return { steps, next: next ? next.id : null, complete: !next };
+}
