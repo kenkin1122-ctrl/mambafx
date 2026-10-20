@@ -32,15 +32,15 @@ export const CRT_CONFIG = Object.freeze({
   }),
   poi_proximity: Object.freeze({
     unit: "ATR_multiplier",
-    default_value: 1.0,
+    default_value: 2.5,
     min_value: 0.05,
-    max_value: 1.0,
+    max_value: 2.5,
   }),
   atr_sanity: Object.freeze({ min_atr_ratio: 0.25, max_atr_ratio: 3, enforce_bounds: true }),
   min_confluence_score: 1,
   strict_htf_alignment: false,
-  // DEMO VALIDATION ONLY: revert to 1.0 before any live execution.
-  min_rr_ratio: 0.5,
+  // DEMO VALIDATION ONLY: this MUST be reverted to 1.5 before live trading.
+  min_rr_ratio: 0.2,
   fvg_enabled: false,
   order_block_enabled: false,
   fractal_router: Object.freeze({

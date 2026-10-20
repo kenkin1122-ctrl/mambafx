@@ -27,9 +27,9 @@ import { createSupervisor } from './reconnect3m.js?v=15';
 import { wilson } from './stats.js?v=15';
 import { expiryProbBaseline, sigmaPerTick, reliabilityCurve, brier } from './expiry3m.js?v=15';
 import { createLogger } from './siglogRuntime3m.js?v=20';
-import { CRT_CONFIG } from './crtConfig3m.js?v=4';
-import { createCrtTracker, crtExecutionAllowed } from './crt3m.js?v=4';
-import { createCrtJournal } from './crtJournal3m.js?v=4';
+import { CRT_CONFIG } from './crtConfig3m.js?v=5';
+import { createCrtTracker, crtExecutionAllowed } from './crt3m.js?v=5';
+import { createCrtJournal } from './crtJournal3m.js?v=5';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;
