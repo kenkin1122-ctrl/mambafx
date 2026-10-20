@@ -1,9 +1,9 @@
 /**
  * src/bazu/page.js
- * BAZU page view. Sends commands to engine.js and renders its state — NO trading rules here.
+ * BAZU page view. Sends commands to engine.js and renders its state â€” NO trading rules here.
  */
 import { start as perfStart } from './perf3m.js?v=15';
-import * as E from './engine.js?v=29';
+import * as E from './engine.js?v=30';
 import { clusterZones } from './structure.js?v=15';
 import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=15';
 import { findSwingPoints } from '../../mtf/src/analysis/swingPoints.js';
@@ -19,9 +19,9 @@ import { distributionRows, distributionCsv } from './distribution3m.js?v=17';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const pct = (x, d = 1) => (x == null || !Number.isFinite(x) ? '—' : (x * 100).toFixed(d) + '%');
-const ci = (w) => (w && w.n ? `${pct(w.p)} <span class="mu">[${pct(w.lo)}–${pct(w.hi)}] n=${w.n}</span>` : '<span class="mu">no data</span>');
-const money = (x) => (x == null || !Number.isFinite(x) ? '—' : (x >= 0 ? '+' : '') + Number(x).toFixed(2));
+const pct = (x, d = 1) => (x == null || !Number.isFinite(x) ? 'â€”' : (x * 100).toFixed(d) + '%');
+const ci = (w) => (w && w.n ? `${pct(w.p)} <span class="mu">[${pct(w.lo)}â€“${pct(w.hi)}] n=${w.n}</span>` : '<span class="mu">no data</span>');
+const money = (x) => (x == null || !Number.isFinite(x) ? 'â€”' : (x >= 0 ? '+' : '') + Number(x).toFixed(2));
 let tab = 'live', ready = false, tfKey = '10t';
 const reportFilters = {
   perf: { view: 'market', sort: 'rate', marketClass: 'all', durationBucket: 'all', playbook: 'all', accountType: 'all', outcomeType: 'all', minN: BASE_CONFIG.MIN_N_FOR_RANK, from: '', to: '' },
@@ -88,9 +88,9 @@ function openRealDialog({ title, phrase, onOk }) {
   const acc = accountInfo(), L = E.realMode.view().limits;
   let dlg = $('bzRealDlg');
   if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'bzRealDlg'; document.body.appendChild(dlg); }
-  const suffix = acc.loginId ? '••••' + esc(String(acc.loginId).slice(-4)) : 'unknown';
+  const suffix = acc.loginId ? 'â€¢â€¢â€¢â€¢' + esc(String(acc.loginId).slice(-4)) : 'unknown';
   dlg.innerHTML = `<h3 style="margin-top:0">${esc(title)}</h3>
-    <div>Account type: <b>${acc.connected ? (acc.isReal ? 'REAL' : 'DEMO') : 'not connected'}</b> · login ${suffix}</div>
+    <div>Account type: <b>${acc.connected ? (acc.isReal ? 'REAL' : 'DEMO') : 'not connected'}</b> Â· login ${suffix}</div>
     <ul class="mu" style="font-size:12px;padding-left:18px">
       <li>Max stake ${L.REAL_MAX_STAKE}</li><li>Max open contracts ${L.REAL_MAX_OPEN_CONTRACTS}</li><li>Max exposure ${L.REAL_MAX_EXPOSURE_PCT}% of balance</li>
       <li>Session loss cap ${L.REAL_SESSION_LOSS_CAP}</li><li>Daily loss cap ${L.REAL_DAILY_LOSS_CAP}</li><li>Max trades per day ${L.REAL_MAX_TRADES_PER_DAY}</li>
@@ -107,13 +107,29 @@ function openRealDialog({ title, phrase, onOk }) {
   if (!dlg.open) dlg.showModal();
 }
 
+function onCrtSwitch(e) {
+  const b = e.target.closest('[data-crtsw]'); if (!b) return false;
+  const k = b.dataset.crtsw, sym = b.dataset.sym, sw = E.crtSwitches, snap = sw.snapshot(), [kind, v] = k.split(':');
+  if ((kind === 'trade' && !snap.crt_trade_enabled) || (kind === 'variantTrade' && !snap.variants[v].trade)) {
+    const a = accountInfo();
+    if (!a.connected || a.isReal !== false) { alert('CRT trading can only be enabled while a DEMO account is connected. Real trading stays off.'); return true; }
+  }
+  if (kind === 'enabled') sw.setEnabled(!snap.crt_enabled);
+  else if (kind === 'market') sw.setMarket(sym, snap.markets[sym] === false);
+  else if (kind === 'trade') sw.setTradeEnabled(!snap.crt_trade_enabled);
+  else if (kind === 'tradeMarket') sw.setTradeMarket(sym, snap.tradeMarkets?.[sym] === false);
+  else if (kind === 'variant') sw.setVariant(v, !snap.variants[v].enabled);
+  else if (kind === 'variantTrade') sw.setVariantTrade(v, !snap.variants[v].trade);
+  render(); return true;
+}
 function onAction(e) {
+  if (onCrtSwitch(e)) return;
   const b = e.target.closest('[data-act]'); if (!b) return;
   const sym = b.dataset.sym, m = E.state.markets.get(sym);
   if (b.dataset.act === 'buy') {
     const d = m.durations.find((x) => `${x.n}${x.unit}` === (document.getElementById('bzTkDur')?.value || ''));
     const acc = accountInfo(), rv = E.realMode.view();
-    const ticketConfirmed = !acc.isReal || rv.auto || confirm(`REAL ACCOUNT - LIVE MONEY (login ••••${String(acc.loginId || '').slice(-4)})\n${b.dataset.type === 'CALL' ? 'Rise' : 'Fall'} ${sym} ${d ? d.n + d.unit : ''}\nStake ${E.state.curStake || E.state.stake} (cap ${rv.limits.REAL_MAX_STAKE}); loss caps: session ${rv.limits.REAL_SESSION_LOSS_CAP}, daily ${rv.limits.REAL_DAILY_LOSS_CAP}\n\nPlace this order?`);
+    const ticketConfirmed = !acc.isReal || rv.auto || confirm(`REAL ACCOUNT - LIVE MONEY (login â€¢â€¢â€¢â€¢${String(acc.loginId || '').slice(-4)})\n${b.dataset.type === 'CALL' ? 'Rise' : 'Fall'} ${sym} ${d ? d.n + d.unit : ''}\nStake ${E.state.curStake || E.state.stake} (cap ${rv.limits.REAL_MAX_STAKE}); loss caps: session ${rv.limits.REAL_SESSION_LOSS_CAP}, daily ${rv.limits.REAL_DAILY_LOSS_CAP}\n\nPlace this order?`);
     if (!ticketConfirmed) return;
     const base = { symbol: sym, contractType: b.dataset.type, duration: d || m.durations[0], source: 'manual', ticketConfirmed };
     E.placeOrder(base).then((r) => {
@@ -138,19 +154,19 @@ function syncAccounts() {
   const sig = accts.map((a) => a.account_id).join(',');
   if (sel.dataset.sig !== sig) {
     sel.dataset.sig = sig;
-    sel.innerHTML = accts.map((a) => `<option value="${esc(a.account_id)}">${a.is_virtual ? '🟢 DEMO' : '🔴 REAL'} · ${esc(a.account_id)}</option>`).join('') || '<option value="">(login first)</option>';
+    sel.innerHTML = accts.map((a) => `<option value="${esc(a.account_id)}">${a.is_virtual ? 'ðŸŸ¢ DEMO' : 'ðŸ”´ REAL'} Â· ${esc(a.account_id)}</option>`).join('') || '<option value="">(login first)</option>';
   }
 }
 
 function whyNoTrade(S, acc) {
-  if (!acc.connected) return '⚠ No Deriv account connected - log in, pick an account and press Connect. Trades cannot be placed until then.';
+  if (!acc.connected) return 'âš  No Deriv account connected - log in, pick an account and press Connect. Trades cannot be placed until then.';
   if (!S.running) return 'Bot stopped - press Start to trade automatically (Auto mode).';
   if (S.mode !== 'auto') return 'Mode is ' + S.mode + ' - choose Auto for automatic trades.';
-  if (acc.isReal && !E.realMode.isEnabledFor(acc)) return '⚠ REAL account in demo-only mode: press "Enable real trading" (per session) to allow real orders.';
-  if (acc.isReal && !E.realMode.isAutoEnabledFor(acc)) return '⚠ REAL account: Auto/Semi-auto needs its own opt-in ("Enable real Auto")' + (E.realMode.view().reason ? ' · ' + E.realMode.view().reason : '') + '.';
+  if (acc.isReal && !E.realMode.isEnabledFor(acc)) return 'âš  REAL account in demo-only mode: press "Enable real trading" (per session) to allow real orders.';
+  if (acc.isReal && !E.realMode.isAutoEnabledFor(acc)) return 'âš  REAL account: Auto/Semi-auto needs its own opt-in ("Enable real Auto")' + (E.realMode.view().reason ? ' Â· ' + E.realMode.view().reason : '') + '.';
   const last = S.log.find((l) => /blocked|failed/.test(l.msg));
   const open = S.trades.filter((t) => t.status === 'open').length;
-  return 'Auto trading ON (' + (acc.isDemo ? 'DEMO' : 'REAL') + ') - waiting for a signal with strength >= 20%. Open: ' + open + (last ? ' · last issue: ' + last.msg : '');
+  return 'Auto trading ON (' + (acc.isDemo ? 'DEMO' : 'REAL') + ') - waiting for a signal with strength >= 20%. Open: ' + open + (last ? ' Â· last issue: ' + last.msg : '');
 }
 
 function render() {
@@ -160,16 +176,16 @@ function renderNow() {
   if (!ready || document.hidden || !document.getElementById('page-bazu')?.classList.contains('active')) return;
   const S = E.state; let M; try { M = E.metrics(); } catch (e) { console.error('BAZU metrics', e); M = { account: accountInfo(), openStake: 0, potentialPayout: 0, sessionPnl: 0, closed: 0, win: {}, exposure: 'ok', markets: S.markets.size, tradable: 0, failed: 0 }; }
   const acc = M.account;
-  $('bzStatus').textContent = S.status + (S.scan.active ? ` · ${S.scan.phase} ${S.scan.done}/${S.scan.total}` : '');
+  $('bzStatus').textContent = S.status + (S.scan.active ? ` Â· ${S.scan.phase} ${S.scan.done}/${S.scan.total}` : '');
   $('bzDot').className = 'dot' + (S.status === 'live' ? ' live' : '');
   const pill = $('bzAcctPill');
-  const rv = E.realMode.view(), realOn = acc.connected && acc.isReal && E.realMode.isEnabledFor(acc), sfx = acc.loginId ? '••••' + String(acc.loginId).slice(-4) : '';
-  pill.textContent = acc.connected ? (acc.isReal ? '🔴 REAL' : '🟢 DEMO') + (sfx ? ' ' + sfx : '') : 'NOT CONNECTED';
+  const rv = E.realMode.view(), realOn = acc.connected && acc.isReal && E.realMode.isEnabledFor(acc), sfx = acc.loginId ? 'â€¢â€¢â€¢â€¢' + String(acc.loginId).slice(-4) : '';
+  pill.textContent = acc.connected ? (acc.isReal ? 'ðŸ”´ REAL' : 'ðŸŸ¢ DEMO') + (sfx ? ' ' + sfx : '') : 'NOT CONNECTED';
   pill.className = 'pill ' + (acc.connected ? (acc.isReal ? 'real' : 'demo') : '');
   const banner = $('bzRealBanner');
   banner.style.display = acc.connected && acc.isReal ? '' : 'none';
   banner.className = 'bz-real-banner' + (realOn ? '' : ' off');
-  banner.textContent = realOn ? `REAL ACCOUNT - LIVE MONEY (${sfx})${rv.auto ? ' · AUTO ON' : ''}` : `Real account ${sfx} connected - demo-only mode: real orders are refused until you enable real trading`;
+  banner.textContent = realOn ? `REAL ACCOUNT - LIVE MONEY (${sfx})${rv.auto ? ' Â· AUTO ON' : ''}` : `Real account ${sfx} connected - demo-only mode: real orders are refused until you enable real trading`;
   $('bzRealOn').style.display = acc.connected && acc.isReal && !realOn ? '' : 'none';
   $('bzRealOff').style.display = realOn ? '' : 'none';
   $('bzRealAutoOn').style.display = realOn && !rv.auto ? '' : 'none';
@@ -179,13 +195,13 @@ function renderNow() {
   $('bzStart').disabled = S.running; $('bzStop').disabled = !S.running;
   const mk = (l, v, c = '') => `<div class="m ${c}"><div class="l">${l}</div><div class="v num">${v}</div></div>`;
   try { $('bzMetrics').innerHTML = [
-    mk('Balance', acc.connected ? `${Number(acc.balance).toFixed(2)} ${esc(acc.currency)}` : '—'),
+    mk('Balance', acc.connected ? `${Number(acc.balance).toFixed(2)} ${esc(acc.currency)}` : 'â€”'),
     mk('Open stake', Number(M.openStake).toFixed(2)),
-    mk('If settled now', M.settleNow == null ? '—' : Number(M.settleNow).toFixed(2)),
+    mk('If settled now', M.settleNow == null ? 'â€”' : Number(M.settleNow).toFixed(2)),
     mk('Potential payout', Number(M.potentialPayout).toFixed(2)),
-    mk('🟢 Demo P/L <button data-bzreset=\"demo\" title=\"Reset demo P/L to zero\">reset</button>', money(M.demoPnl || 0), M.demoPnl > 0 ? 'ok' : M.demoPnl < 0 ? 'bad' : ''),
-    mk('🔴 Real P/L <button data-bzreset=\"real\" title=\"Reset real P/L to zero\">reset</button>', money(M.realPnl || 0), M.realPnl > 0 ? 'ok' : M.realPnl < 0 ? 'bad' : ''),
-    mk('Win rate', M.closed ? `${pct(M.win.p, 0)} <span class="mu" style="font-size:11px">n=${M.closed}</span>` : '—'),
+    mk('ðŸŸ¢ Demo P/L <button data-bzreset=\"demo\" title=\"Reset demo P/L to zero\">reset</button>', money(M.demoPnl || 0), M.demoPnl > 0 ? 'ok' : M.demoPnl < 0 ? 'bad' : ''),
+    mk('ðŸ”´ Real P/L <button data-bzreset=\"real\" title=\"Reset real P/L to zero\">reset</button>', money(M.realPnl || 0), M.realPnl > 0 ? 'ok' : M.realPnl < 0 ? 'bad' : ''),
+    mk('Win rate', M.closed ? `${pct(M.win.p, 0)} <span class="mu" style="font-size:11px">n=${M.closed}</span>` : 'â€”'),
     mk('Capital exposure', M.exposure.toUpperCase(), M.exposure),
     mk('Markets', M.markets), mk('Strong signals', M.tradable), mk('Completed', M.closed), mk('Failed', M.failed),
   ].join(''); } catch (e) { console.error('BAZU metrics', e); }
@@ -197,16 +213,16 @@ function renderNow() {
 const secFmt = (s) => (s == null || !Number.isFinite(s) ? 'n/a' : s >= 120 ? (s / 60).toFixed(1) + 'm' : s.toFixed(0) + 's');
 function lifetimeHtml(sig) {
   const L = sig.lifetime; if (!L) return '';
-  const est = Object.entries(L.estimators || {}).map(([k, v]) => `${k} ${v == null ? '<span class="mu">not applicable</span>' : secFmt(v)}`).join(' · ');
-  return `<div class="note num">Expected lifetime ${secFmt(L.lifetime)}${L.cappedBy ? ` (capped by ${esc(L.cappedBy)})` : ''} → duration ${esc(sig.duration || 'WAIT')}${sig.manual ? ' (manual duration)' : ''} · break-even ${sig.breakEven == null ? '—' : pct(sig.breakEven, 1)} · ${est}</div>`;
+  const est = Object.entries(L.estimators || {}).map(([k, v]) => `${k} ${v == null ? '<span class="mu">not applicable</span>' : secFmt(v)}`).join(' Â· ');
+  return `<div class="note num">Expected lifetime ${secFmt(L.lifetime)}${L.cappedBy ? ` (capped by ${esc(L.cappedBy)})` : ''} â†’ duration ${esc(sig.duration || 'WAIT')}${sig.manual ? ' (manual duration)' : ''} Â· break-even ${sig.breakEven == null ? 'â€”' : pct(sig.breakEven, 1)} Â· ${est}</div>`;
 }
 function reasoningHtml(sig) {
   if (!sig.families && !sig.momentum) return '';
   const mo = sig.momentum, fa = sig.familyAgreement, st = sig.signalState;
   const fam = Object.entries(sig.families || {}).map(([k, f]) => `${esc(k)} ${f.available === false ? 'n/a' : (f.vote > 0 ? '+' : f.vote < 0 ? '-' : '0')}`).join(', ');
   const ver = (sig.verdicts || []).map((v) => `${esc(v.kind)}: ${esc(v.reason)}`).join('; ');
-  return `<div class="note"><b>Momentum</b> ${mo ? esc(mo.state) + (mo.available === false ? ' (unavailable)' : '') : 'n/a'}${mo?.opposes60s ? ' · opposes the last 60 s' : ''} · <b>Regime</b> ${esc(sig.regime || 'n/a')} · <b>State</b> ${esc(st || 'none')}${sig.entry?.trigger ? ' · trigger ' + esc(sig.entry.trigger) : ''}${sig.provisional ? ' (provisional)' : ''}</div>`
-    + `<div class="note">Families: ${fam || 'n/a'}${fa ? ` · ${fa.agree}/${fa.available} agree, ${fa.oppose} oppose` : ''}</div>${ver ? `<div class="note">${ver}</div>` : ''}`;
+  return `<div class="note"><b>Momentum</b> ${mo ? esc(mo.state) + (mo.available === false ? ' (unavailable)' : '') : 'n/a'}${mo?.opposes60s ? ' Â· opposes the last 60 s' : ''} Â· <b>Regime</b> ${esc(sig.regime || 'n/a')} Â· <b>State</b> ${esc(st || 'none')}${sig.entry?.trigger ? ' Â· trigger ' + esc(sig.entry.trigger) : ''}${sig.provisional ? ' (provisional)' : ''}</div>`
+    + `<div class="note">Families: ${fam || 'n/a'}${fa ? ` Â· ${fa.agree}/${fa.available} agree, ${fa.oppose} oppose` : ''}</div>${ver ? `<div class="note">${ver}</div>` : ''}`;
 }
 function syncDur(S) {
   const sel = $('bzDur'); if (!sel) return;
@@ -216,7 +232,7 @@ function syncDur(S) {
 }
 function vetoHtml(S) {
   const C = S.contra, T0 = E.vetoSummary();
-  const contra = C && C.directional ? `<div class="note num">Momentum contradictions: ${C.opposing}/${C.directional} directional evaluations opposed the last 60 s (${pct(C.opposing / C.directional, 1)}) · among tradable: ${C.tradableOpposing}/${C.tradable}${Object.keys(C.byPlaybook).length ? ' · by playbook: ' + Object.entries(C.byPlaybook).map(([k, v]) => esc(k) + ' ' + v).join(', ') : ''}</div>` : '';
+  const contra = C && C.directional ? `<div class="note num">Momentum contradictions: ${C.opposing}/${C.directional} directional evaluations opposed the last 60 s (${pct(C.opposing / C.directional, 1)}) Â· among tradable: ${C.tradableOpposing}/${C.tradable}${Object.keys(C.byPlaybook).length ? ' Â· by playbook: ' + Object.entries(C.byPlaybook).map(([k, v]) => esc(k) + ' ' + v).join(', ') : ''}</div>` : '';
   return vetoHtml0(S, T0) + contra;
 }
 function vetoHtml0(S, T) {
@@ -224,7 +240,7 @@ function vetoHtml0(S, T) {
   const top = Object.entries(T.vetoes).sort((a, b) => b[1] - a[1]);
   const perMarket = Object.entries(S.vetoStats).map(([sym, s]) => ({ sym, ...s, top: Object.entries(s.vetoes).sort((a, b) => b[1] - a[1]).slice(0, 3) })).sort((a, b) => b.evals - a.evals);
   return `<div class="panel"><h3>Veto analysis <span class="mu">(live evaluations this session)</span></h3>
-    <div class="note num">Evaluations ${T.evals} · tradable ${T.tradable} · tradable rate ${pct(rate, 1)}${top[0] ? ` · most common veto: <b>${esc(top[0][0])}</b> (${top[0][1]})` : ''}${S.backfill ? ` · backfill ${S.backfill.requests} requests, ${(S.backfill.ms / 1000).toFixed(0)}s` : ''}</div>
+    <div class="note num">Evaluations ${T.evals} Â· tradable ${T.tradable} Â· tradable rate ${pct(rate, 1)}${top[0] ? ` Â· most common veto: <b>${esc(top[0][0])}</b> (${top[0][1]})` : ''}${S.backfill ? ` Â· backfill ${S.backfill.requests} requests, ${(S.backfill.ms / 1000).toFixed(0)}s` : ''}</div>
     <table><tr><th>Veto reason</th><th>Count</th><th>Share of evaluations</th></tr>${top.slice(0, 12).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${v}</td><td class="num">${pct(v / T.evals, 1)}</td></tr>`).join('') || '<tr><td colspan="3" class="mu">no evaluations yet</td></tr>'}</table>
     <div class="scroll" style="max-height:220px"><table><tr><th>Market</th><th>Evals</th><th>Tradable rate</th><th>Top vetoes</th></tr>${perMarket.map((m) => `<tr><td>${esc(m.sym)}</td><td class="num">${m.evals}</td><td class="num">${pct(m.tradable / m.evals, 1)}</td><td class="mu">${m.top.map(([k, v]) => `${esc(k)} (${v})`).join('; ')}</td></tr>`).join('')}</table></div></div>`;
 }
@@ -244,11 +260,11 @@ function renderDist(S) {
 function renderCalib(S) {
   const range = reportFilters.calib, inRange = (ts) => withinDateRange(ts * 1000, range);
   const recs = S.records.filter((r) => inRange(r.at)), sum = calibrationSummary(recs), acc = accuracyByDuration(recs);
-  const dist = (e) => e.dist.map((d) => `${d.label}: ${d.count}`).join(' · ');
-  const rows = (o) => Object.entries(o).map(([k, e]) => `<tr><td>${esc(k)}</td><td class="num">${e.n}</td><td class="num">${secFmt(e.medianErrorS)}</td><td class="num">${e.medianRatio == null ? '—' : e.medianRatio.toFixed(2) + 'x'}</td><td class="mu">${dist(e)}</td></tr>`).join('') || '<tr><td colspan="5" class="mu">no resolved records yet</td></tr>';
-  const head = '<tr><th></th><th>N</th><th>Median error (pred − real)</th><th>Median pred/real</th><th>Error distribution</th></tr>';
+  const dist = (e) => e.dist.map((d) => `${d.label}: ${d.count}`).join(' Â· ');
+  const rows = (o) => Object.entries(o).map(([k, e]) => `<tr><td>${esc(k)}</td><td class="num">${e.n}</td><td class="num">${secFmt(e.medianErrorS)}</td><td class="num">${e.medianRatio == null ? 'â€”' : e.medianRatio.toFixed(2) + 'x'}</td><td class="mu">${dist(e)}</td></tr>`).join('') || '<tr><td colspan="5" class="mu">no resolved records yet</td></tr>';
+  const head = '<tr><th></th><th>N</th><th>Median error (pred âˆ’ real)</th><th>Median pred/real</th><th>Error distribution</th></tr>';
   $('bzCalib').innerHTML = `${dateControls('calib')}<div class="report-actions"><button data-report-export="calib" data-format="csv">Download CSV</button><button data-report-export="calib" data-format="json">Download JSON</button><button data-report-export="calib" data-format="html">Print HTML / PDF</button><span id="calibExportStatus" class="mu"></span></div>` + vetoHtml(S) + calibCurveHtml(range) + `<div class="panel" style="margin-top:10px"><h3>Lifetime calibration <span class="mu">(a record, not a gate)</span></h3>
-    <div class="note num">Signals logged ${recs.length} · resolved ${sum.resolved} · target first ${sum.targetFirst} · invalidation first ${sum.invalidFirst} · neither within max ${sum.neither} · target touched within chosen duration but contract lost ${sum.touchedButLost} of ${sum.targetTouchedInDur}</div>
+    <div class="note num">Signals logged ${recs.length} Â· resolved ${sum.resolved} Â· target first ${sum.targetFirst} Â· invalidation first ${sum.invalidFirst} Â· neither within max ${sum.neither} Â· target touched within chosen duration but contract lost ${sum.touchedButLost} of ${sum.targetTouchedInDur}</div>
     <h4>By playbook</h4><table>${head}${rows(sum.byPlaybook)}</table><h4>By estimator</h4><table>${head}${rows(sum.byEstimator)}</table></div>
     <div class="panel" style="margin-top:10px"><h3>Accuracy by chosen duration <span class="mu">(shadow outcomes, ties lose)</span></h3>
     <table><tr><th>Duration</th><th>Hit rate (95% CI)</th><th>Mean break-even</th></tr>${acc.map((a) => `<tr><td>${esc(a.key)}</td><td>${ci(a.ci)}</td><td class="num">${pct(a.breakEven, 1)}</td></tr>`).join('') || '<tr><td colspan="3" class="mu">no resolved records yet</td></tr>'}</table></div>`;
@@ -256,15 +272,15 @@ function renderCalib(S) {
 function renderPerf(S) {
   const f = reportFilters.perf, signals = E.signalLogRecords(), options = (items, value) => [...new Set(items.filter(Boolean))].sort().map((x) => `<option value="${esc(x)}" ${x === value ? 'selected' : ''}>${esc(x)}</option>`).join('');
   const rows = performanceRows({ trades: S.trades, signals, view: f.view, filters: f, minN: f.minN, sort: f.sort });
-  const tableRows = rows.map((r) => `<tr class="${r.lowSample ? 'low-sample' : ''}"><td>${r.rank ?? '—'}</td><td>${esc(r.accountType)}</td><td>${esc(r.market ?? (f.view === 'playbook' ? '—' : r.key))}</td><td>${esc(r.playbook ?? (f.view === 'playbook' ? r.key : '—'))}</td><td class="num">${r.n}</td><td class="num">${r.wins}</td><td class="num">${r.losses}</td><td class="num">${r.ties}</td><td class="num">${pct(r.rate)} <span class="mu">[${pct(r.ci95[0])}–${pct(r.ci95[1])}]</span></td><td>${esc(r.commonDuration || '—')}</td><td>${r.lowSample ? '<span class="mu">low sample</span>' : ''}</td></tr>`).join('');
+  const tableRows = rows.map((r) => `<tr class="${r.lowSample ? 'low-sample' : ''}"><td>${r.rank ?? 'â€”'}</td><td>${esc(r.accountType)}</td><td>${esc(r.market ?? (f.view === 'playbook' ? 'â€”' : r.key))}</td><td>${esc(r.playbook ?? (f.view === 'playbook' ? r.key : 'â€”'))}</td><td class="num">${r.n}</td><td class="num">${r.wins}</td><td class="num">${r.losses}</td><td class="num">${r.ties}</td><td class="num">${pct(r.rate)} <span class="mu">[${pct(r.ci95[0])}â€“${pct(r.ci95[1])}]</span></td><td>${esc(r.commonDuration || 'â€”')}</td><td>${r.lowSample ? '<span class="mu">low sample</span>' : ''}</td></tr>`).join('');
   const markets = [...S.markets.keys(), ...signals.map((r) => r.market)];
   const playbooks = [...signals.map((r) => r.A?.playbook), ...S.trades.map((t) => t.playbook)];
   $('bzPerf').innerHTML = `${dateControls('perf')}<div class="report-filters">
-    <label>View <select data-report-filter="perf" data-key="view"><option value="market" ${f.view === 'market' ? 'selected' : ''}>By market</option><option value="playbook" ${f.view === 'playbook' ? 'selected' : ''}>By playbook</option><option value="market-playbook" ${f.view === 'market-playbook' ? 'selected' : ''}>Market × playbook</option></select></label>
+    <label>View <select data-report-filter="perf" data-key="view"><option value="market" ${f.view === 'market' ? 'selected' : ''}>By market</option><option value="playbook" ${f.view === 'playbook' ? 'selected' : ''}>By playbook</option><option value="market-playbook" ${f.view === 'market-playbook' ? 'selected' : ''}>Market Ã— playbook</option></select></label>
     <label>Sort <select data-report-filter="perf" data-key="sort"><option value="rate" ${f.sort === 'rate' ? 'selected' : ''}>Win rate</option><option value="lower" ${f.sort === 'lower' ? 'selected' : ''}>Wilson lower bound</option></select></label>
     <label>Minimum N to rank <input type="number" min="1" max="100000" step="1" data-report-filter="perf" data-key="minN" value="${f.minN}"></label>
     <label>Market class <select data-report-filter="perf" data-key="marketClass">${options(['all','volatility','boomcrash','jump','step','rangebreak','bullbear'], f.marketClass)}</select></label>
-    <label>Duration <select data-report-filter="perf" data-key="durationBucket">${options(['all','<1m','1–5m','5–15m','15–60m','>=1h','tick-duration','unknown'], f.durationBucket)}</select></label>
+    <label>Duration <select data-report-filter="perf" data-key="durationBucket">${options(['all','<1m','1â€“5m','5â€“15m','15â€“60m','>=1h','tick-duration','unknown'], f.durationBucket)}</select></label>
     <label>Playbook <select data-report-filter="perf" data-key="playbook">${options(['all', ...playbooks], f.playbook)}</select></label>
     <label>Account type <select data-report-filter="perf" data-key="accountType">${options(['all','demo','real','shadow'], f.accountType)}</select></label>
     <label>Outcomes <select data-report-filter="perf" data-key="outcomeType">${options(['all','traded','shadow'], f.outcomeType)}</select></label>
@@ -277,10 +293,10 @@ function renderPerf(S) {
 function renderSignalLog() {
   const all = E.signalLogRecords(), range = reportFilters.signal;
   const records = all.filter((r) => withinDateRange(r.decision_time_epoch_ms, range)).sort((a, b) => b.decision_time_epoch_ms - a.decision_time_epoch_ms), status = E.signalLogStatus();
-  const rows = records.slice(0, 50).map((r) => `<tr><td>${esc(r.decision_time_iso)}</td><td>${esc(r.market)}</td><td>${esc(r.A?.playbook)}</td><td>${esc(r.A?.direction)}</td><td>${esc(r.A?.duration?.key)}</td><td>${r.traded ? 'traded' : 'shadow'}</td><td>${esc(r.F?.result || (r.F?.pending ? 'pending' : '—'))}</td><td>${esc(r.signal_id)}</td></tr>`).join('');
+  const rows = records.slice(0, 50).map((r) => `<tr><td>${esc(r.decision_time_iso)}</td><td>${esc(r.market)}</td><td>${esc(r.A?.playbook)}</td><td>${esc(r.A?.direction)}</td><td>${esc(r.A?.duration?.key)}</td><td>${r.traded ? 'traded' : 'shadow'}</td><td>${esc(r.F?.result || (r.F?.pending ? 'pending' : 'â€”'))}</td><td>${esc(r.signal_id)}</td></tr>`).join('');
   $('bzSignalLog').innerHTML = `${dateControls('signal')}<div class="report-actions"><button data-report-export="signal" data-format="zip">Download ZIP package</button><button data-report-export="signal" data-format="ndjson">Download NDJSON</button><button data-report-export="signal" data-format="folder">Save to folder</button><span id="signalExportStatus" class="mu"></span></div>
     <div class="panel"><h3>Signal log <span class="mu">(decision-time record plus append-only settlement and post-trade context)</span></h3>
-    <div class="note">Showing ${records.length} of ${all.length} stored · pending ${status.pending} · store ${esc(status.mode)} · write errors ${status.writeErrors || 0} · logger errors ${status.errors || 0}. A-E are point-in-time; F-G are hindsight.${status.storageLastError ? `<br>Storage error: ${esc(status.storageLastError)}` : ''}${status.loggerLastError ? `<br>Logger error: ${esc(status.loggerLastError)}` : ''}</div>
+    <div class="note">Showing ${records.length} of ${all.length} stored Â· pending ${status.pending} Â· store ${esc(status.mode)} Â· write errors ${status.writeErrors || 0} Â· logger errors ${status.errors || 0}. A-E are point-in-time; F-G are hindsight.${status.storageLastError ? `<br>Storage error: ${esc(status.storageLastError)}` : ''}${status.loggerLastError ? `<br>Logger error: ${esc(status.loggerLastError)}` : ''}</div>
     <div class="scroll"><table><tr><th>Decision UTC</th><th>Market</th><th>Playbook</th><th>Direction</th><th>Duration</th><th>Type</th><th>Outcome</th><th>Signal UUID</th></tr>${rows || '<tr><td colspan="8" class="mu">No signal-log records yet. Untraded triggered signals are excluded by default.</td></tr>'}</table></div></div>`;
 }
 
@@ -306,7 +322,7 @@ async function reportDownload(type, format) {
   const statusId = type === 'perf' ? 'perfExportStatus' : type === 'calib' ? 'calibExportStatus' : 'signalExportStatus';
   const status = document.getElementById(statusId); let skippedNote = '';
   const range = reportFilters[type];
-  if (status) status.textContent = 'Preparing export…';
+  if (status) status.textContent = 'Preparing exportâ€¦';
   try {
     if (type === 'perf') {
       const rows = performanceRows({ trades: E.state.trades, signals: E.signalLogRecords(), view: reportFilters.perf.view, filters: range, minN: reportFilters.perf.minN, sort: reportFilters.perf.sort });
@@ -364,16 +380,16 @@ function renderLive(S) {
     const sig = m.signal, has = sig && sig.direction;
     return `<div class="card ${S.selected === m.symbol ? 'sel' : ''}" data-sym="${esc(m.symbol)}"><div class="t"><span>${esc(m.symbol)}</span><span class="num">${fmtPrice(m.last, m.dp)}</span></div>
       <div class="s">${esc(m.name)}</div><div class="s"><span class="pill ${has && sig.gate === GATE.OK ? (sig.direction === 'Rise' ? 'ok' : 'bad') : ''}">${has ? esc(sig.direction + ' ' + sig.duration) : esc(E.marketGate(m).label)}</span> ${has ? `<span class="mu">${pct(sig.strength, 0)}</span>` : ''}</div></div>`;
-  }).join('') || '<div class="note">Discovering markets from Deriv…</div>';
+  }).join('') || '<div class="note">Discovering markets from Derivâ€¦</div>';
   const m = S.markets.get(S.selected);
   if (!m) return;
-  $('bzSelTitle').textContent = `${m.symbol} · ${m.name}`;
+  $('bzSelTitle').textContent = `${m.symbol} Â· ${m.name}`;
   drawChart(m);
   const sig = m.signal;
   $('bzSignal').innerHTML = sig && sig.direction ? `<div class="sig ${sig.gate === GATE.OK ? (sig.direction === 'Rise' ? 'ok' : 'bad') : ''}">
-      <div class="row"><b class="${sig.direction === 'Rise' ? 'up' : 'dn'}" style="font-size:18px">${esc(sig.direction)}</b><span class="pill">${esc(sig.duration)}${sig.manual ? ' · manual duration' : ''}</span><span class="pill ${sig.gate === GATE.OK ? (sig.direction === 'Rise' ? 'ok' : 'bad') : 'warn'}">${esc(sig.gate)}</span>${sig.proxy ? '<span class="pill proxy">uses proxy</span>' : ''}</div>
-      <div class="note num">Signal strength ${pct(sig.strength, 0)} · ${sig.agree}/${sig.total} analysis features agree${sig.quote ? ` · Deriv quote: stake ${sig.quote.ask}, payout ${sig.quote.payout}` : ''}</div>
-      ${lifetimeHtml(sig)}${reasoningHtml(sig)}${roomHtml(sig)}<div class="note"><b>${esc(sig.playbook || 'analysis')}</b>${sig.provisional ? ' (provisional trigger)' : ''} · ${esc(sig.reason || '')}</div>${(sig.reasons || []).length ? `<div class="note">${sig.reasons.map(esc).join('; ')}</div>` : ''}<div class="note">Drivers: ${(sig.drivers || []).map(esc).join(', ') || '-'}. Decided ${sig.decisionTs ? new Date(sig.decisionTs * 1000).toLocaleTimeString() : ''} for a ${esc(sig.duration)} Rise/Fall (exit vs entry; a tie loses). Score is a rule-based confluence, not a win probability.</div></div>`
+      <div class="row"><b class="${sig.direction === 'Rise' ? 'up' : 'dn'}" style="font-size:18px">${esc(sig.direction)}</b><span class="pill">${esc(sig.duration)}${sig.manual ? ' Â· manual duration' : ''}</span><span class="pill ${sig.gate === GATE.OK ? (sig.direction === 'Rise' ? 'ok' : 'bad') : 'warn'}">${esc(sig.gate)}</span>${sig.proxy ? '<span class="pill proxy">uses proxy</span>' : ''}</div>
+      <div class="note num">Signal strength ${pct(sig.strength, 0)} Â· ${sig.agree}/${sig.total} analysis features agree${sig.quote ? ` Â· Deriv quote: stake ${sig.quote.ask}, payout ${sig.quote.payout}` : ''}</div>
+      ${lifetimeHtml(sig)}${reasoningHtml(sig)}${roomHtml(sig)}<div class="note"><b>${esc(sig.playbook || 'analysis')}</b>${sig.provisional ? ' (provisional trigger)' : ''} Â· ${esc(sig.reason || '')}</div>${(sig.reasons || []).length ? `<div class="note">${sig.reasons.map(esc).join('; ')}</div>` : ''}<div class="note">Drivers: ${(sig.drivers || []).map(esc).join(', ') || '-'}. Decided ${sig.decisionTs ? new Date(sig.decisionTs * 1000).toLocaleTimeString() : ''} for a ${esc(sig.duration)} Rise/Fall (exit vs entry; a tie loses). Score is a rule-based confluence, not a win probability.</div></div>`
     : `<div class="sig"><b>${esc(E.marketGate(m).label)}</b><div class="note">Collecting ticks to analyse this market.</div></div>`;
   $('bzSignal').insertAdjacentHTML('beforeend', mtfHtml(m, sig) + crtHtml(m));
 }
@@ -386,25 +402,32 @@ function crtHtml(m) {
       ? `collection error: ${esc(status.collection.error)}`
       : status.latest ? 'shadow analysis active (collection does not depend on account type)' : 'waiting for candle data';
   const rows = (status.latest?.records || []).map((r) =>
-    `<tr><td>${esc(r.timeframe)}</td><td>${esc(r.rangeMode)}</td><td>${esc(r.sweepSide || '—')}</td><td>${esc(r.signalStatus)}</td><td>${esc(r.rejectionDetail || r.rejectionReason || r.reason || '—')}</td><td>${Number.isFinite(r.swingLevel) ? fmtPrice(r.swingLevel, m.dp) : '—'}</td><td>${(r.stateTransitions || []).slice(-3).map((t) => `${esc(t.from || 'START')} -&gt; ${esc(t.to)}: ${esc(t.reason || '—')}`).join('<br>')}</td></tr>`
+    `<tr><td>${esc(r.timeframe)}</td><td>${esc(r.rangeMode)}</td><td>${esc(r.sweepSide || 'â€”')}</td><td>${esc(r.signalStatus)}</td><td>${esc(r.rejectionDetail || r.rejectionReason || r.reason || 'â€”')}</td><td>${Number.isFinite(r.swingLevel) ? fmtPrice(r.swingLevel, m.dp) : 'â€”'}</td><td>${(r.stateTransitions || []).slice(-3).map((t) => `${esc(t.from || 'START')} -&gt; ${esc(t.to)}: ${esc(t.reason || 'â€”')}`).join('<br>')}</td></tr>`
   ).join('');
   const base = status.collection.baseRate;
   const audit = status.collection.lookahead;
   const report = base?.status === 'READY'
-    ? `<div class="note"><b>Base-rate report</b> · ${base.outcomesResolved}/${base.signalsLogged} five-minute outcomes resolved · wins ${base.wins}, losses ${base.losses}, ties ${base.ties} · hit rate ${pct(base.hitRate)} · 95% Wilson interval ${pct(base.confidence95.low)}–${pct(base.confidence95.high)}. ${esc(base.limitation)}</div>
-       <div class="note"><b>Lookahead audit</b> · ${esc(audit?.status || 'not run')} · ${audit?.checked || 0}/${audit?.required || status.collection.sampleSize} replay checks · ${audit?.failureCount || 0} failures. ${esc(audit?.method || '')}</div>`
+    ? `<div class="note"><b>Base-rate report</b> Â· ${base.outcomesResolved}/${base.signalsLogged} five-minute outcomes resolved Â· wins ${base.wins}, losses ${base.losses}, ties ${base.ties} Â· hit rate ${pct(base.hitRate)} Â· 95% Wilson interval ${pct(base.confidence95.low)}â€“${pct(base.confidence95.high)}. ${esc(base.limitation)}</div>
+       <div class="note"><b>Lookahead audit</b> Â· ${esc(audit?.status || 'not run')} Â· ${audit?.checked || 0}/${audit?.required || status.collection.sampleSize} replay checks Â· ${audit?.failureCount || 0} failures. ${esc(audit?.method || '')}</div>`
     : `<div class="note">Demo shadow signals logged: ${status.collection.signalsLogged}/${status.collection.sampleSize}. Base-rate report and lookahead audit will run automatically when the 10-signal sample is complete.</div>`;
   const dg = status.collection.diagnostics;
   const diagNote = dg
-    ? `<div class="note" id="bzCrtDiag"><b>CRT diagnostics</b> · outcomes: ${dg.outcomes.resolved} resolved, ${dg.outcomes.pending} pending, ${dg.outcomes.unavailable} unavailable${Object.keys(dg.unavailableReasons).length ? ` (${esc(JSON.stringify(dg.unavailableReasons))})` : ''} · tick buffer cap ${dg.tickBuffer.cap} (trims to ${dg.tickBuffer.trimTo}; history preload ${dg.tickBuffer.historyTicks}) · ${dg.tickBuffer.markets.map((x) => `${esc(x.symbol)} ${x.ticks} ticks/${x.spanSeconds}s`).join(', ')}</div>`
+    ? `<div class="note" id="bzCrtDiag"><b>CRT diagnostics</b> Â· outcomes: ${dg.outcomes.resolved} resolved, ${dg.outcomes.pending} pending, ${dg.outcomes.unavailable} unavailable${Object.keys(dg.unavailableReasons).length ? ` (${esc(JSON.stringify(dg.unavailableReasons))})` : ''} Â· tick buffer cap ${dg.tickBuffer.cap} (trims to ${dg.tickBuffer.trimTo}; history preload ${dg.tickBuffer.historyTicks}) Â· ${dg.tickBuffer.markets.map((x) => `${esc(x.symbol)} ${x.ticks} ticks/${x.spanSeconds}s`).join(', ')}</div>`
     : '';
   const sigs = [...(status.signals || []), ...(status.ltfSignals || [])];
-  const sigNote = `<div class="note" id="bzCrtSignals"><b>CRT playbook</b> <span class="tag">shadow</span> · ${esc(status.switches.crt_enabled ? 'rule-based, unvalidated playbook' : 'CRT mapping switched off')} · crt_trade_enabled: ${status.switches.crt_trade_enabled ? 'on' : 'off'} · variants M5/M15/M30 detect-and-log only (not persisted)
-    ${sigs.length ? `<table class="bz-table"><thead><tr><th>Frame</th><th>Dir</th><th>State</th><th>Score</th><th>Entry</th><th>Target</th><th>Invalidation</th><th>Decision</th></tr></thead><tbody>${sigs.map((s) => `<tr><td>${esc(s.parentTimeframe)}</td><td>${esc(s.direction)}</td><td>${esc(s.state)}</td><td>${s.score}</td><td>${s.entry ?? '-'}</td><td>${s.target}</td><td>${s.invalidation}</td><td>${esc(s.decision)}${s.waitReason ? ' · ' + esc(s.waitReason) : ''}</td></tr>`).join('')}</tbody></table>` : ' · no mapped signals'}</div>`;
-  return `<div class="note" id="bzCrtStatus"><b>CRT demo strategy</b> · ${state} · ${status.demoOnly ? 'demo-only' : 'execution disabled'} · offline validation: ${esc(status.validationStatus)} · CRT order routing is disabled; no orders are sent.
+  const sw = status.switches, onOff = (v) => (v ? 'ON' : 'OFF');
+  const swBtn = (k, label, v, extra = '') => `<button class="btn" data-crtsw="${k}" ${extra} data-sym="${esc(m.symbol)}">${esc(label)}: ${onOff(v)}</button>`;
+  const controls = `<div class="row" id="bzCrtSwitches">${swBtn('enabled', 'crt_enabled', sw.crt_enabled)} ${swBtn('market', 'this market', sw.markets[m.symbol] !== false)} ${swBtn('trade', 'crt_trade_enabled (demo only)', sw.crt_trade_enabled)} ${swBtn('tradeMarket', 'trade this market', sw.tradeMarkets?.[m.symbol] !== false)} ${['M5', 'M15', 'M30'].map((v) => swBtn('variant:' + v, v, sw.variants[v].enabled) + ' ' + swBtn('variantTrade:' + v, v + ' trade', sw.variants[v].trade)).join(' ')}</div>`;
+  const tl = status.tradeLog || [];
+  const tradeNote = `<div class="note" id="bzCrtTradeLog"><b>CRT trade path</b> Â· demo-only Â· orders go through the standard purchase gate Â· stake and risk limits apply${tl.length ? '<br>' + tl.map((x) => `${new Date(x.at).toISOString().slice(11, 19)} ${esc(x.variant)} ${esc(x.direction)}: ${x.ok ? 'EXECUTED' : 'refused'} (${esc(x.reason)})`).join('<br>') : ' Â· no attempts yet'}</div>`;
+  const sigNote = `<div class="note" id="bzCrtSignals"><b>CRT playbook</b> <span class="tag">shadow</span> Â· ${esc(status.switches.crt_enabled ? 'rule-based, unvalidated playbook' : 'CRT mapping switched off')} Â· crt_trade_enabled: ${status.switches.crt_trade_enabled ? 'on' : 'off'} Â· variants M5/M15/M30 detect-and-log only (not persisted)
+    ${sigs.length ? `<table class="bz-table"><thead><tr><th>Frame</th><th>Dir</th><th>State</th><th>Score</th><th>Entry</th><th>Target</th><th>Invalidation</th><th>Decision</th></tr></thead><tbody>${sigs.map((s) => `<tr><td>${esc(s.parentTimeframe)}</td><td>${esc(s.direction)}</td><td>${esc(s.state)}</td><td>${s.score}</td><td>${s.entry ?? '-'}</td><td>${s.target}</td><td>${s.invalidation}</td><td>${esc(s.decision)}${s.waitReason ? ' Â· ' + esc(s.waitReason) : ''}</td></tr>`).join('')}</tbody></table>` : ' Â· no mapped signals'}</div>`;
+  return `<div class="note" id="bzCrtStatus"><b>CRT demo strategy</b> Â· ${state} Â· ${status.demoOnly ? 'demo-only' : 'execution disabled'} Â· offline validation: ${esc(status.validationStatus)} Â· CRT order routing is disabled; no orders are sent.
     ${report}
     ${diagNote}
+    ${controls}
     ${sigNote}
+    ${tradeNote}
     ${rows ? `<table class="bz-table"><thead><tr><th>Frame</th><th>Range</th><th>Sweep</th><th>Status</th><th>Reason</th><th>MSS level</th><th>Transitions</th></tr></thead><tbody>${rows}</tbody></table>` : ''}</div>`;
 }
 
@@ -417,7 +440,7 @@ function mtfHtml(m, sig) {
   if (!r) { try { r = analyseMtf({ remote: m.remote || {}, prices: m.prices, epochs: m.epochs, decisionEpoch: m.epochs[m.epochs.length - 1], cfg, signalDir: dir }); } catch { return ''; } mtfCache.set(key, { at: now, r }); }
   const f = (v) => (Number.isFinite(v) ? v.toFixed(2) : '-');
   const rows = Object.entries(r.frames).map(([k, g]) => `<tr><td>${k}</td><td>${g.n}</td><td>${esc(g.regime)}</td><td>${esc(g.playbook)}</td><td>${g.direction > 0 ? 'up' : g.direction < 0 ? 'down' : '-'}</td><td>${f(g.varianceRatio)}</td><td>${f(g.hurst)}</td><td>${dir && g.regime !== 'insufficient' ? (g.aligned ? 'yes' : 'no') : '-'}</td></tr>`).join('');
-  return `<div class="note" id="bzMtfGrid"><b>Multi-timeframe (shadow, logged only; does not affect the signal)</b>${dir ? ` · ${r.alignedCount}/${r.usedCount} frames aligned` : ''}<table class="bz-table"><thead><tr><th>Frame</th><th>N</th><th>Regime</th><th>Playbook</th><th>Slope</th><th>VR(5)</th><th>Hurst</th><th>Aligned</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  return `<div class="note" id="bzMtfGrid"><b>Multi-timeframe (shadow, logged only; does not affect the signal)</b>${dir ? ` Â· ${r.alignedCount}/${r.usedCount} frames aligned` : ''}<table class="bz-table"><thead><tr><th>Frame</th><th>N</th><th>Regime</th><th>Playbook</th><th>Slope</th><th>VR(5)</th><th>Hurst</th><th>Aligned</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 function drawChart(m) {
   const cv = $('bzChart'), ctx = cv.getContext('2d'), W = cv.width, H = cv.height, tf = timeframe(tfKey);
@@ -428,7 +451,7 @@ function drawChart(m) {
     const c = m.candleCache?.[tf.key];
     candles = c ? mergeLive(c.candles, m.prices.slice(-600), m.epochs.slice(-600), tf.secs).slice(-120) : [];
   } else candles = localCandles(m.prices, m.epochs, tf, 120);
-  if (candles.length < 5) { ctx.fillStyle = '#848E9C'; ctx.fillText(tf.remote ? 'Loading candles…' : 'Waiting for ticks…', 20, 30); $('bzChartNote').textContent = ''; return; }
+  if (candles.length < 5) { ctx.fillStyle = '#848E9C'; ctx.fillText(tf.remote ? 'Loading candlesâ€¦' : 'Waiting for ticksâ€¦', 20, 30); $('bzChartNote').textContent = ''; return; }
   const lo = Math.min(...candles.map((c) => c.low)), hi = Math.max(...candles.map((c) => c.high)), pad = (hi - lo) * 0.05 || 1;
   const y = (v) => H - 14 - ((v - (lo - pad)) / (hi - lo + 2 * pad)) * (H - 28), cw = (W - 60) / candles.length;
   const swings = findSwingPoints(candles, 2);
@@ -443,6 +466,16 @@ function drawChart(m) {
     ctx.fillRect(x + 1, Math.min(y(c.open), y(c.close)), Math.max(1, cw - 2), Math.max(1, Math.abs(y(c.open) - y(c.close))));
   });
   const lastPx = m.last ?? candles[candles.length - 1].close;
+  try {
+    const cs = E.crtStatus(m.symbol);
+    for (const s of [...cs.signals, ...cs.ltfSignals].filter((x) => x.state === 'TRIGGERED' || x.state === 'ARMED')) {
+      for (const [v, col, tag] of [[s.target, '#2EBD85', 'CRT target'], [s.invalidation, '#F6465D', 'CRT invalid']]) {
+        if (!Number.isFinite(v) || v < lo - pad || v > hi + pad) continue;
+        ctx.strokeStyle = col; ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(0, y(v)); ctx.lineTo(W - 52, y(v)); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = col; ctx.font = '10px ui-monospace,Consolas,monospace'; ctx.fillText(`${tag} ${s.variant} ${s.direction}`, 6, y(v) - 2);
+      }
+    }
+  } catch { /* overlay is optional */ }
   const ri = m.signal?.roomInfo;
   if (ri && Number.isFinite(ri.sigmaT)) {
     ctx.fillStyle = 'rgba(76,141,255,.12)'; ctx.fillRect(0, y(ri.price + ri.sigmaT), W - 52, Math.max(1, y(ri.price - ri.sigmaT) - y(ri.price + ri.sigmaT)));
@@ -453,7 +486,7 @@ function drawChart(m) {
   ctx.fillStyle = '#EAECEF'; ctx.font = '11px ui-monospace,Consolas,monospace';
   ctx.fillText(fmtPrice(lastPx, m.dp), W - 56, y(lastPx) + 4);
   ctx.fillStyle = '#848E9C'; ctx.fillText(fmtPrice(hi, m.dp), W - 56, 12); ctx.fillText(fmtPrice(lo, m.dp), W - 56, H - 2);
-  $('bzChartNote').textContent = `${tf.label} candles from real Deriv data (${candles.length} candles). Dashed lines: S/R zones with ≥2 touches.`;
+  $('bzChartNote').textContent = `${tf.label} candles from real Deriv data (${candles.length} candles). Dashed lines: S/R zones with â‰¥2 touches.`;
 }
 
 function renderAccuracy(S) {
@@ -463,13 +496,13 @@ function renderAccuracy(S) {
   $('bzAccuracy').innerHTML = `<div class="panel"><h3>Live accuracy <span class="mu">(real Deriv settlements only)</span></h3>
     <div class="kpis"><div class="m"><div class="l">Completed</div><div class="v num">${closed.length}</div></div><div class="m"><div class="l">Hit rate (95% CI)</div><div class="v num" style="font-size:13px">${ci(wilson(closed.filter((t) => t.profit > 0).length, closed.length))}</div></div></div>
     <div class="note">Signal strength vs realised hit rate (signal-driven trades):</div>
-    <table><tr><th>Signal strength</th><th>Hit rate (n, 95% CI)</th></tr>${bins.map((b) => `<tr><td>${pct(b.lo, 0)}–${pct(Math.min(b.hi, 1), 0)}</td><td>${ci(b.w)}</td></tr>`).join('')}</table></div>
+    <table><tr><th>Signal strength</th><th>Hit rate (n, 95% CI)</th></tr>${bins.map((b) => `<tr><td>${pct(b.lo, 0)}â€“${pct(Math.min(b.hi, 1), 0)}</td><td>${ci(b.w)}</td></tr>`).join('')}</table></div>
     <div class="panel" style="margin-top:10px"><h3>Trade log</h3><div class="scroll">${tradesTable(S.trades.filter((t) => t.status === 'closed'))}</div></div>`;
 }
 
 function roomHtml(sig) {
   const r = sig.roomInfo; if (!r) return '';
-  return `<div class="note"><b>Room</b> ${esc(r.text)}${r.lifetimeDerived ? ' · in lifetime mode the duration is derived from the same distances' : ''}${r.fired ? ' · fired: ' + esc(r.fired) : ''}</div>`;
+  return `<div class="note"><b>Room</b> ${esc(r.text)}${r.lifetimeDerived ? ' Â· in lifetime mode the duration is derived from the same distances' : ''}${r.fired ? ' Â· fired: ' + esc(r.fired) : ''}</div>`;
 }
 function liveContractsHtml(S) {
   const open = S.trades.filter((t) => t.status === 'open'); if (!open.length) return '';
@@ -484,7 +517,7 @@ function calibCurveHtml(range = {}) {
 }
 function tradesTable(list) {
   if (!list.length) return '<div class="note">No trades yet.</div>';
-  return `<table><tr><th>Time</th><th>Market</th><th>Side</th><th>Dur</th><th>Stake</th><th>Entry</th><th>Exit</th><th>P/L</th><th>Acct</th><th>Src</th></tr>${list.map((t) => `<tr><td class="num">${new Date(t.ts).toLocaleTimeString()}</td><td>${esc(t.market)}</td><td class="${t.direction === 'Rise' ? 'up' : 'dn'}">${esc(t.direction)}</td><td>${esc(t.duration)}</td><td class="num">${t.stake}</td><td class="num">${fmtPrice(t.entry, E.state.markets.get(t.market)?.dp)}</td><td class="num">${fmtPrice(t.exit, E.state.markets.get(t.market)?.dp)}</td><td class="num ${t.profit > 0 ? 'up' : t.profit < 0 ? 'dn' : ''}">${t.profit == null ? t.status : money(t.profit)}</td><td>${t.isReal ? '🔴' : '🟢'}</td><td>${esc(t.source)}</td></tr>`).join('')}</table>`;
+  return `<table><tr><th>Time</th><th>Market</th><th>Side</th><th>Dur</th><th>Stake</th><th>Entry</th><th>Exit</th><th>P/L</th><th>Acct</th><th>Src</th></tr>${list.map((t) => `<tr><td class="num">${new Date(t.ts).toLocaleTimeString()}</td><td>${esc(t.market)}</td><td class="${t.direction === 'Rise' ? 'up' : 'dn'}">${esc(t.direction)}</td><td>${esc(t.duration)}</td><td class="num">${t.stake}</td><td class="num">${fmtPrice(t.entry, E.state.markets.get(t.market)?.dp)}</td><td class="num">${fmtPrice(t.exit, E.state.markets.get(t.market)?.dp)}</td><td class="num ${t.profit > 0 ? 'up' : t.profit < 0 ? 'dn' : ''}">${t.profit == null ? t.status : money(t.profit)}</td><td>${t.isReal ? 'ðŸ”´' : 'ðŸŸ¢'}</td><td>${esc(t.source)}</td></tr>`).join('')}</table>`;
 }
 
 function renderExec(S, acc) {
@@ -496,9 +529,9 @@ function renderExec(S, acc) {
     <div class="panel"><h3>Quick routing <span class="mu">(strong signals)</span></h3>${tiles.length ? tiles.map((x) => `<div class="sig ok"><div class="row"><b>${esc(x.symbol)}</b><b class="${x.signal.direction === 'Rise' ? 'up' : 'dn'}">${esc(x.signal.direction)}</b><span class="pill">${esc(x.signal.duration)}</span><span class="num">strength ${pct(x.signal.strength, 0)}</span>${S.mode === 'semi' ? `<button class="btn primary" data-act="confirm" data-sym="${esc(x.symbol)}">Confirm trade</button>` : ''}</div></div>`).join('') : '<div class="note">No strong signals right now. Semi-auto/Auto act only on signals above the minimum strength.</div>'}</div>
     <div class="panel" style="margin-top:10px"><h3>Order ticket</h3>${m ? `<div class="row"><b>${esc(m.symbol)}</b><select id="bzTkDur">${m.durations.map((d) => `<option>${d.n}${d.unit}</option>`).join('')}</select>
       <button class="btn buy" data-act="buy" data-type="CALL" data-sym="${esc(m.symbol)}" ${acc.connected ? '' : 'disabled'}>Rise</button><button class="btn sell" data-act="buy" data-type="PUT" data-sym="${esc(m.symbol)}" ${acc.connected ? '' : 'disabled'}>Fall</button></div>
-      <div class="note">Stake ${S.curStake || S.stake}${S.martingale > 1 ? ' (martingale x' + S.martingale + ')' : ''} · ${acc.connected ? (acc.isReal ? `🔴 REAL ACCOUNT - LIVE MONEY (${acc.loginId ? '••••' + esc(String(acc.loginId).slice(-4)) : '?'}): needs "Enable real trading", an extra confirm click, and stays within the REAL_* limits` : '🟢 DEMO account') : 'connect an account to trade'}. Orders go through Deriv proposal → buy; entry, payout, exit and P/L are Deriv's.</div>` : '<div class="note">Select a market on the Live tab.</div>'}</div>
+      <div class="note">Stake ${S.curStake || S.stake}${S.martingale > 1 ? ' (martingale x' + S.martingale + ')' : ''} Â· ${acc.connected ? (acc.isReal ? `ðŸ”´ REAL ACCOUNT - LIVE MONEY (${acc.loginId ? 'â€¢â€¢â€¢â€¢' + esc(String(acc.loginId).slice(-4)) : '?'}): needs "Enable real trading", an extra confirm click, and stays within the REAL_* limits` : 'ðŸŸ¢ DEMO account') : 'connect an account to trade'}. Orders go through Deriv proposal â†’ buy; entry, payout, exit and P/L are Deriv's.</div>` : '<div class="note">Select a market on the Live tab.</div>'}</div>
     </div><div>
     <div class="panel"><h3>Open positions</h3>${tradesTable(S.trades.filter((t) => t.status === 'open'))}${liveContractsHtml(S)}</div>
-    <div class="panel" style="margin-top:10px"><h3>Event log</h3><div class="log">${S.log.map((l) => `<div class="${l.kind === 'bad' ? 'dn' : l.kind === 'ok' ? 'up' : l.kind === 'warn' ? '' : 'mu'}">${new Date(l.t).toLocaleTimeString()} · ${esc(l.msg)}</div>`).join('')}</div></div>
+    <div class="panel" style="margin-top:10px"><h3>Event log</h3><div class="log">${S.log.map((l) => `<div class="${l.kind === 'bad' ? 'dn' : l.kind === 'ok' ? 'up' : l.kind === 'warn' ? '' : 'mu'}">${new Date(l.t).toLocaleTimeString()} Â· ${esc(l.msg)}</div>`).join('')}</div></div>
     <div class="panel note" style="margin-top:10px">Demo: no stake or trade-count limits. REAL accounts: per-session opt-in, extra confirm click and the REAL_* limits (see Enable real trading).</div></div></div>`;
 }

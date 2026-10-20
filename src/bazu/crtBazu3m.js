@@ -90,7 +90,7 @@ export function mapCrtRecord(record, { prices, epochs, allowed, cfg, bazuCfg = C
     playbook: "CRT", variant: record.playbookVariant || "H1+", symbol: record.instrument, crtId: record.crtId, parentTimeframe: record.timeframe,
     direction: rise ? "Rise" : "Fall", state, shadow: true, tradeEligible: false,
     label: bazuCfg.label, configVersion: bazuCfg.config_version, crtConfigVersion: record.configVersion ?? null,
-    entry: finite(entry) ? entry : null, target, secondTarget, invalidation,
+    triggeredAt: finite(record.c3Timestamp) ? record.c3Timestamp : null, entry: finite(entry) ? entry : null, target, secondTarget, invalidation,
     reason: record.rejectionReason || null, rejectionDetail: record.rejectionDetail || null,
     ...crtScore(record, bazuCfg),
     lifetime: null, decision: state === "TRIGGERED" ? "WAIT" : "NONE",
@@ -135,6 +135,6 @@ export function createCrtSwitches({ storage = null, key = "bazu_crt_switches" } 
     isVariantTradeEnabled: (variant) => trade && variantTrade.get(variant) === true,
     setVariant(variant, v) { variants.set(variant, !!v); save(); },
     setVariantTrade(variant, v) { variantTrade.set(variant, !!v); },
-    snapshot: () => ({ crt_enabled: enabled, crt_trade_enabled: trade, markets: Object.fromEntries(perMarket), variants: Object.fromEntries(["M5", "M15", "M30"].map((k) => [k, { enabled: enabled && variants.get(k) !== false, trade: trade && variantTrade.get(k) === true }])) }),
+    snapshot: () => ({ crt_enabled: enabled, crt_trade_enabled: trade, tradeMarkets: Object.fromEntries(tradePerMarket), markets: Object.fromEntries(perMarket), variants: Object.fromEntries(["M5", "M15", "M30"].map((k) => [k, { enabled: enabled && variants.get(k) !== false, trade: trade && variantTrade.get(k) === true }])) }),
   };
 }
