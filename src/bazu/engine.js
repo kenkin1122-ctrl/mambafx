@@ -28,9 +28,10 @@ import { wilson } from './stats.js?v=15';
 import { expiryProbBaseline, sigmaPerTick, reliabilityCurve, brier } from './expiry3m.js?v=15';
 import { createLogger } from './siglogRuntime3m.js?v=20';
 import { CRT_CONFIG } from './crtConfig3m.js?v=6';
-import { createCrtTracker, crtExecutionAllowed } from './crt3m.js?v=6';
+import { createCrtTracker, crtExecutionAllowed } from './crt3m.js?v=7';
 import { createCrtJournal } from './crtJournal3m.js?v=6';
-import { mapCrtScan, createCrtSwitches } from './crtBazu3m.js?v=1';
+import { mapCrtScan, createCrtSwitches } from './crtBazu3m.js?v=2';
+import { scanCrtLtf } from './crtLtf3m.js?v=1';
 
 const WS_URL = 'wss://api.derivws.com/trading/v1/options/ws/public';
 const HISTORY_PAGES = 2;
@@ -44,6 +45,8 @@ export const state = {
   contra: { directional: 0, opposing: 0, tradable: 0, tradableOpposing: 0, byPlaybook: {} },
   crtByMarket: new Map(),
   crtSignals: new Map(),
+  crtLtfSignals: new Map(),
+  crtLtfLog: [],
   crtCollection: { status: 'waiting_for_demo_account', signalsLogged: 0, sampleSize: CRT_CONFIG.report_sample_size, baseRate: null, lookahead: null, error: null },
 };
 
@@ -281,7 +284,27 @@ export function crtDiagnostics(records) {
   return !a.connected ? 'none' : a.isReal === false ? 'demo' : a.isReal === true ? 'real' : 'unknown';
 }
 export const crtSwitches = createCrtSwitches({ storage: typeof localStorage !== 'undefined' ? localStorage : null });
-async function refreshCrt(m) {
+const crtLtfKeys = new Map(), crtLtfSeen = new Set();
+const CRT_LTF_LOG_CAP = 200;
+// Lower-timeframe CRT variants: detect and log only (in memory, not persisted); never touches the journal or any order path.
+function refreshCrtLtf(m) {
+  if (!CRT_CONFIG.strategy_enabled || CRT_CONFIG.shadow_collection_only !== true || !crtSwitches.isEnabled(m.symbol)) { state.crtLtfSignals.delete(m.symbol); return; }
+  const r = m.remote || {}, last = (k) => (r[k]?.length ? r[k][r[k].length - 1].epoch : 0);
+  const decisionEpoch = m.epochs[m.epochs.length - 1];
+  const key = `${last('M1')}:${last('M3')}:${last('M5')}:${last('M15')}:${last('H1')}`;
+  if (!Number.isFinite(decisionEpoch) || !last('M15') || !last('H1') || crtLtfKeys.get(m.symbol) === key) return;
+  crtLtfKeys.set(m.symbol, key);
+  const records = scanCrtLtf({ symbol: m.symbol, candles: r, decisionEpoch, minTick: Number(m.pip), isVariantEnabled: (v) => crtSwitches.isVariantEnabled(v) });
+  const mapped = mapCrtScan(records, { symbol: m.symbol, prices: m.prices, epochs: m.epochs, allowed: allowedFor(m), cfg: configFor(m.symbol) }, crtSwitches);
+  state.crtLtfSignals.set(m.symbol, mapped);
+  for (const s of mapped) {
+    if (s.state !== 'TRIGGERED' || crtLtfSeen.has(s.crtId)) continue;
+    crtLtfSeen.add(s.crtId);
+    state.crtLtfLog.push({ at: decisionEpoch, symbol: s.symbol, variant: s.variant, direction: s.direction, score: s.score, decision: s.decision, entry: s.entry, target: s.target, invalidation: s.invalidation, configVersion: s.configVersion });
+    if (state.crtLtfLog.length > CRT_LTF_LOG_CAP) state.crtLtfLog.splice(0, state.crtLtfLog.length - CRT_LTF_LOG_CAP);
+    log(`CRT ${s.variant} ${s.symbol} ${s.direction} shadow signal (score ${s.score}, ${s.decision})`, 'info');
+  }
+}async function refreshCrt(m) {
   if (!CRT_CONFIG.strategy_enabled || CRT_CONFIG.shadow_collection_only !== true) return;
   const decisionEpoch = m.epochs[m.epochs.length - 1];
   if (!Number.isFinite(decisionEpoch) || !m.remote?.H1?.length || !m.remote?.M5?.length) return;
@@ -339,6 +362,8 @@ export function crtStatus(symbol) {
     executionEligible: crtExecutionAllowed({ account }),
     latest: state.crtByMarket.get(symbol) || null,
     signals: state.crtSignals.get(symbol) || [],
+    ltfSignals: state.crtLtfSignals.get(symbol) || [],
+    ltfLog: state.crtLtfLog.filter((x) => x.symbol === symbol).slice(-20),
     switches: crtSwitches.snapshot(),
     collection: state.crtCollection,
   };
@@ -484,6 +509,7 @@ export async function signalTick() {
       if (m.prices.length < 300) continue;
       ensureRemote(m);
       refreshCrt(m).catch((e) => log(`CRT analysis ${m.symbol}: ${e.message}`, 'warn'));
+      try { refreshCrtLtf(m); } catch (e) { log(`CRT variants ${m.symbol}: ${e.message}`, 'warn'); }
       const allowed = allowedFor(m);
       let r;
       const endP = perfStart('predict3m'); try { r = predictFor(m); } catch (e) { endP(); log('predict ' + m.symbol + ': ' + e.message, 'warn'); continue; } endP();
