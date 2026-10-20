@@ -4,7 +4,7 @@ import { crtConfigStamp } from "./crtOutcome3m.js";
 const DAY_S = 86400;
 const WEEK_S = 604800;
 const MONDAY_OFFSET_S = 3 * DAY_S;
-const LTF_S = Object.freeze({ "1m": 60, "5m": 300 });
+const LTF_S = Object.freeze({ "1m": 60, "3m": 3 * 60, "5m": 300 });
 const ROUTER_RANK = Object.freeze({ "8H": 1, "4H": 2, "2H": 3, "1H": 4 });
 
 const finite = Number.isFinite;

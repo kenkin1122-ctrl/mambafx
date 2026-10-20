@@ -3,7 +3,7 @@
  * BAZU page view. Sends commands to engine.js and renders its state — NO trading rules here.
  */
 import { start as perfStart } from './perf3m.js?v=15';
-import * as E from './engine.js?v=28';
+import * as E from './engine.js?v=29';
 import { clusterZones } from './structure.js?v=15';
 import { TIMEFRAMES, timeframe, fmtPrice, localCandles, mergeLive } from './timeframes.js?v=15';
 import { findSwingPoints } from '../../mtf/src/analysis/swingPoints.js';
@@ -398,8 +398,8 @@ function crtHtml(m) {
   const diagNote = dg
     ? `<div class="note" id="bzCrtDiag"><b>CRT diagnostics</b> · outcomes: ${dg.outcomes.resolved} resolved, ${dg.outcomes.pending} pending, ${dg.outcomes.unavailable} unavailable${Object.keys(dg.unavailableReasons).length ? ` (${esc(JSON.stringify(dg.unavailableReasons))})` : ''} · tick buffer cap ${dg.tickBuffer.cap} (trims to ${dg.tickBuffer.trimTo}; history preload ${dg.tickBuffer.historyTicks}) · ${dg.tickBuffer.markets.map((x) => `${esc(x.symbol)} ${x.ticks} ticks/${x.spanSeconds}s`).join(', ')}</div>`
     : '';
-  const sigs = status.signals || [];
-  const sigNote = `<div class="note" id="bzCrtSignals"><b>CRT playbook</b> <span class="tag">shadow</span> · ${esc(status.switches.crt_enabled ? 'rule-based, unvalidated playbook' : 'CRT mapping switched off')} · crt_trade_enabled: ${status.switches.crt_trade_enabled ? 'on' : 'off'}
+  const sigs = [...(status.signals || []), ...(status.ltfSignals || [])];
+  const sigNote = `<div class="note" id="bzCrtSignals"><b>CRT playbook</b> <span class="tag">shadow</span> · ${esc(status.switches.crt_enabled ? 'rule-based, unvalidated playbook' : 'CRT mapping switched off')} · crt_trade_enabled: ${status.switches.crt_trade_enabled ? 'on' : 'off'} · variants M5/M15/M30 detect-and-log only (not persisted)
     ${sigs.length ? `<table class="bz-table"><thead><tr><th>Frame</th><th>Dir</th><th>State</th><th>Score</th><th>Entry</th><th>Target</th><th>Invalidation</th><th>Decision</th></tr></thead><tbody>${sigs.map((s) => `<tr><td>${esc(s.parentTimeframe)}</td><td>${esc(s.direction)}</td><td>${esc(s.state)}</td><td>${s.score}</td><td>${s.entry ?? '-'}</td><td>${s.target}</td><td>${s.invalidation}</td><td>${esc(s.decision)}${s.waitReason ? ' · ' + esc(s.waitReason) : ''}</td></tr>`).join('')}</tbody></table>` : ' · no mapped signals'}</div>`;
   return `<div class="note" id="bzCrtStatus"><b>CRT demo strategy</b> · ${state} · ${status.demoOnly ? 'demo-only' : 'execution disabled'} · offline validation: ${esc(status.validationStatus)} · CRT order routing is disabled; no orders are sent.
     ${report}

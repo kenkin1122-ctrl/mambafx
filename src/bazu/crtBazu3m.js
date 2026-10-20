@@ -67,7 +67,7 @@ export function crtLifetime({ record, entry, target, invalidation, prices, epoch
   const a = Math.abs(target - entry), b = Math.abs(entry - invalidation);
   const { s2, drift } = pathSpeed(prices || [], epochs || []);
   const towards = finite(drift) && (rise ? drift > 0 : drift < 0) ? Math.abs(drift) : null;
-  const estimators = { E1: e1(a, b, s2), E3: e3(a, towards, towards != null), E5: e5(bazuCfg.e5_multiple, bazuCfg.trigger_secs) };
+  const estimators = { E1: e1(a, b, s2), E3: e3(a, towards, towards != null), E5: e5(bazuCfg.e5_multiple, record.triggerSecs ?? bazuCfg.trigger_secs) };
   const life = combine([estimators.E1, estimators.E3, estimators.E5], cfg.COMBINE || "median");
   if (life == null) return { estimators, lifetime: null, duration: null, decision: "WAIT", reason: "no lifetime estimator applies" };
   if (life > cfg.MAX_DURATION_S) {
@@ -87,7 +87,7 @@ export function mapCrtRecord(record, { prices, epochs, allowed, cfg, bazuCfg = C
   const target = record.crt50, secondTarget = rise ? record.rangeHigh : record.rangeLow;
   const entry = record.breakCandle?.close;
   const pkg = {
-    playbook: "CRT", symbol: record.instrument, crtId: record.crtId, parentTimeframe: record.timeframe,
+    playbook: "CRT", variant: record.playbookVariant || "H1+", symbol: record.instrument, crtId: record.crtId, parentTimeframe: record.timeframe,
     direction: rise ? "Rise" : "Fall", state, shadow: true, tradeEligible: false,
     label: bazuCfg.label, configVersion: bazuCfg.config_version, crtConfigVersion: record.configVersion ?? null,
     entry: finite(entry) ? entry : null, target, secondTarget, invalidation,
@@ -118,11 +118,12 @@ export function createCrtSwitches({ storage = null, key = "bazu_crt_switches" } 
   let enabled = CRT_BAZU_CONFIG.crt_enabled;
   const perMarket = new Map(), tradePerMarket = new Map();
   let trade = false;
+  const variants = new Map(), variantTrade = new Map();
   try {
     const saved = storage ? JSON.parse(storage.getItem(key) || "null") : null;
-    if (saved) { if (typeof saved.enabled === "boolean") enabled = saved.enabled; for (const [k, v] of Object.entries(saved.markets || {})) if (typeof v === "boolean") perMarket.set(k, v); }
+    if (saved) { if (typeof saved.enabled === "boolean") enabled = saved.enabled; for (const [k, v] of Object.entries(saved.markets || {})) if (typeof v === "boolean") perMarket.set(k, v); for (const [k, v] of Object.entries(saved.variants || {})) if (typeof v === "boolean") variants.set(k, v); }
   } catch { /* ignore corrupt storage */ }
-  const save = () => { try { storage?.setItem(key, JSON.stringify({ enabled, markets: Object.fromEntries(perMarket) })); } catch { /* quota */ } };
+  const save = () => { try { storage?.setItem(key, JSON.stringify({ enabled, markets: Object.fromEntries(perMarket), variants: Object.fromEntries(variants) })); } catch { /* quota */ } };
   return {
     isEnabled: (symbol) => enabled && perMarket.get(symbol) !== false,
     isTradeEnabled: (symbol) => trade && tradePerMarket.get(symbol) !== false,
@@ -130,6 +131,10 @@ export function createCrtSwitches({ storage = null, key = "bazu_crt_switches" } 
     setMarket(symbol, v) { perMarket.set(symbol, !!v); save(); },
     setTradeEnabled(v) { trade = !!v; },
     setTradeMarket(symbol, v) { tradePerMarket.set(symbol, !!v); },
-    snapshot: () => ({ crt_enabled: enabled, crt_trade_enabled: trade, markets: Object.fromEntries(perMarket) }),
+    isVariantEnabled: (variant) => enabled && variants.get(variant) !== false,
+    isVariantTradeEnabled: (variant) => trade && variantTrade.get(variant) === true,
+    setVariant(variant, v) { variants.set(variant, !!v); save(); },
+    setVariantTrade(variant, v) { variantTrade.set(variant, !!v); },
+    snapshot: () => ({ crt_enabled: enabled, crt_trade_enabled: trade, markets: Object.fromEntries(perMarket), variants: Object.fromEntries(["M5", "M15", "M30"].map((k) => [k, { enabled: enabled && variants.get(k) !== false, trade: trade && variantTrade.get(k) === true }])) }),
   };
 }
